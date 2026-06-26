@@ -1,0 +1,51 @@
+﻿{
+  "ok": true,
+  "mode": "write",
+  "dryRun": false,
+  "writeModeRequiresExplicitFlag": true,
+  "batchSize": 500,
+  "limit": null,
+  "report": {
+    "reservationsScanned": 144,
+    "operationTaskTableAccessible": true,
+    "operationTaskTableError": null,
+    "alreadyExistingOperationTaskCount": 288,
+    "derivedTaskCount": 288,
+    "wouldCreateCount": 0,
+    "wouldSkipExistingCount": 288,
+    "tasksByKind": {
+      "DECORATION": 0,
+      "NEUTRALIZATION": 0,
+      "REDECORATION": 0,
+      "MAINTENANCE": 0
+    },
+    "tasksByStatus": {
+      "NEW": 0,
+      "IN_PROGRESS": 0,
+      "DONE": 0,
+      "ARCHIVED": 0,
+      "CANCELLED": 0
+    },
+    "duplicateDedupeKeysFound": 0,
+    "corruptedProductionNotesCount": 0,
+    "ambiguousLegacyTaskCount": 0,
+    "missingDateCount": 0,
+    "missingReservationLinkCount": 0,
+    "missingClientLinkCount": 3,
+    "missingCampaignLinkCount": 113,
+    "missingLocationLinkCount": 0,
+    "warnings": [],
+    "comparison": {
+      "legacyDerivedActiveTaskCount": 156,
+      "operationTaskDraftActiveTaskCount": 156,
+      "activeCountDifferenceAfterDedupe": 0,
+      "potentialDoubleCountRiskCount": 288,
+      "disagreementReservationIds": []
+    }
+  },
+  "writeResult": {
+    "attempted": 0,
+    "created": 0,
+    "skipped": 0
+  }
+}

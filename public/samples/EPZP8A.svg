@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">EPZP8A airport advertising placement preview</title>
+  <desc id="desc">Professional Focus Media preview graphic for entrance doors E.</desc>
+  <rect width="1600" height="900" fill="#061524"/>
+  <rect x="80" y="78" width="1440" height="744" rx="26" fill="#091827" stroke="#f7b500" stroke-width="4"/>
+  <text x="140" y="155" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="900">HENRI COANDA INTERNATIONAL AIRPORT</text>
+  <text x="140" y="207" fill="#f7b500" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="900">DEPARTURES E - PUBLIC AREA - ENTRANCE DOORS E</text>
+  <text x="140" y="274" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="900">MAXIMUM VISIBILITY. <tspan fill="#f7b500">GUARANTEED IMPACT.</tspan></text>
+  <rect x="155" y="340" width="830" height="360" rx="16" fill="#111d2b" stroke="#eef5fb"/>
+  <rect x="220" y="400" width="205" height="235" fill="#202c39"/>
+  <rect x="465" y="400" width="205" height="235" fill="#e7edf4" opacity="0.52"/>
+  <rect x="710" y="400" width="205" height="235" fill="#202c39"/>
+  <path d="M255 600 334 452 392 600Z" fill="#b56d52"/>
+  <path d="M745 600 824 452 882 600Z" fill="#db824d"/>
+  <rect x="315" y="305" width="510" height="78" rx="24" fill="#f7f7f7"/>
+  <text x="570" y="355" fill="#07111f" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="900" text-anchor="middle">AVAILABLE FOR SUMMER CAMPAIGNS</text>
+  <g fill="#f7b500">
+    <circle cx="1110" cy="150" r="35"/>
+    <circle cx="1235" cy="150" r="35"/>
+    <circle cx="1360" cy="150" r="35"/>
+  </g>
+  <rect x="1040" y="340" width="380" height="162" rx="14" fill="#17293a" stroke="#dbe7ef"/>
+  <rect x="1040" y="530" width="380" height="170" rx="14" fill="#17293a" stroke="#dbe7ef"/>
+  <text x="155" y="760" fill="#f7b500" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="900">CODE: EPZP8A</text>
+  <text x="350" y="760" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="24">Dual door-panel advertising placement</text>
+  <rect x="1050" y="742" width="350" height="60" rx="12" fill="#f7b500"/>
+  <text x="1225" y="781" fill="#061524" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="900" text-anchor="middle">REQUEST THIS SPACE</text>
+</svg>

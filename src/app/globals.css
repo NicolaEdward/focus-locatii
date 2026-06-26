@@ -1,0 +1,319 @@
+@import "leaflet/dist/leaflet.css";
+@import "leaflet.markercluster/dist/MarkerCluster.css";
+@import "leaflet.markercluster/dist/MarkerCluster.Default.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Inter", Arial, sans-serif;
+  --font-display: "Arial Narrow", "Roboto Condensed", Arial, sans-serif;
+  color-scheme: dark;
+}
+
+.admin-nav .focus-button {
+  flex: none;
+  white-space: nowrap;
+  min-height: 40px;
+  padding: 8px 11px;
+  gap: 7px;
+  font-size: 13px;
+}
+
+.admin-nav {
+  scrollbar-width: none;
+}
+
+.admin-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.admin-export-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.hero-actions .focus-button {
+  width: 100%;
+  justify-content: center;
+}
+
+@media (min-width: 640px) {
+  .hero-actions .focus-button {
+    width: auto;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: #031322;
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  overflow-x: hidden;
+  color: #f8fafc;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255, 184, 0, 0.13), transparent 30%),
+    linear-gradient(135deg, #020814 0%, #031322 42%, #061b2d 100%);
+  font-family: var(--font-sans);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.focus-shell {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(3, 19, 34, 0.86), rgba(3, 19, 34, 0.96)),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 140px);
+}
+
+.focus-container {
+  width: min(1440px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.focus-card {
+  border: 1px solid rgba(255, 184, 0, 0.34);
+  background: linear-gradient(180deg, rgba(8, 34, 55, 0.88), rgba(3, 19, 34, 0.88));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.focus-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 184, 0, 0.5);
+  padding: 10px 16px;
+  background: linear-gradient(180deg, #ffc83d, #ffb800);
+  color: #07131f;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.focus-button.secondary {
+  background: rgba(3, 19, 34, 0.82);
+  color: #f8fafc;
+}
+
+.focus-input {
+  min-height: 42px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 184, 0, 0.25);
+  background: rgba(2, 8, 20, 0.72);
+  color: #f8fafc;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.focus-input:focus {
+  border-color: rgba(255, 184, 0, 0.72);
+  box-shadow: 0 0 0 3px rgba(255, 184, 0, 0.14);
+}
+
+.map-marker {
+  display: grid;
+  place-items: center;
+  min-width: 38px;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1.5px solid #fff;
+  color: #07131f;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 7px 16px rgba(0, 0, 0, 0.42);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.map-marker:hover {
+  transform: scale(1.08);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+}
+
+.map-marker.selected {
+  transform: scale(1.14);
+  outline: 3px solid rgba(255, 255, 255, 0.92);
+  outline-offset: 2px;
+  z-index: 2;
+}
+
+.map-marker.available {
+  background: #18c964;
+}
+
+.map-marker.available_from {
+  background: #ffb800;
+}
+
+.map-marker.booked,
+.map-marker.reserved {
+  background: #ff453a;
+  color: #fff;
+}
+
+.map-marker.unknown {
+  background: #94a3b8;
+}
+
+.map-cluster {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffc83d, #ffb800);
+  color: #07131f;
+  font-size: 12px;
+  font-weight: 950;
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.42),
+    0 0 0 6px rgba(255, 184, 0, 0.16);
+}
+
+.map-cluster.available {
+  background: linear-gradient(180deg, #39e583, #18c964);
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.42),
+    0 0 0 6px rgba(24, 201, 100, 0.16);
+}
+
+.map-cluster.available_from {
+  background: linear-gradient(180deg, #ffc83d, #ffb800);
+}
+
+.map-cluster.booked,
+.map-cluster.reserved {
+  background: linear-gradient(180deg, #ff6b62, #ff453a);
+  color: #fff;
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.42),
+    0 0 0 6px rgba(255, 69, 58, 0.16);
+}
+
+.map-cluster.unknown {
+  background: linear-gradient(180deg, #cbd5e1, #94a3b8);
+}
+
+.leaflet-container {
+  background: #dce6ed !important;
+  z-index: 0 !important;
+}
+
+.leaflet-container .leaflet-pane {
+  z-index: 0 !important;
+}
+
+.leaflet-container .leaflet-tile-pane {
+  z-index: 1 !important;
+}
+
+.leaflet-container .leaflet-overlay-pane,
+.leaflet-container .leaflet-shadow-pane {
+  z-index: 2 !important;
+}
+
+.leaflet-container .leaflet-marker-pane {
+  z-index: 3 !important;
+}
+
+.leaflet-top,
+.leaflet-bottom,
+.leaflet-control {
+  z-index: 10 !important;
+}
+
+.leaflet-container .leaflet-popup-pane {
+  z-index: 20 !important;
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #061b2d;
+  color: #f8fafc;
+}
+
+.leaflet-popup-content {
+  margin: 0;
+  min-width: 250px;
+}
+
+.focus-popup img {
+  width: 100%;
+  height: 130px;
+  object-fit: cover;
+  border-radius: 8px 8px 0 0;
+}
+
+.focus-popup-body {
+  padding: 12px;
+}
+
+.focus-popup-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.focus-popup-actions a,
+.focus-popup-actions button {
+  border-radius: 6px;
+  border: 1px solid rgba(255, 184, 0, 0.4);
+  padding: 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media print {
+  body {
+    background: #fff;
+    color: #111827;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-surface {
+    background: #fff !important;
+    color: #111827 !important;
+    box-shadow: none !important;
+  }
+
+  .focus-card {
+    border-color: #d1d5db;
+    background: #fff;
+    color: #111827;
+    box-shadow: none;
+  }
+}

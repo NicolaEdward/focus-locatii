@@ -1,0 +1,15 @@
+node_modules
+.next
+out
+dist
+.env
+.env.local
+.env.*.local
+*.log
+coverage
+.vercel
+public/samples/*.png
+tsconfig.tsbuildinfo
+backups/
+
+.vercel

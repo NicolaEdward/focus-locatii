@@ -1,0 +1,77 @@
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { requireAnyPermission } from "@/lib/auth";
+import { recordAudit } from "@/lib/audit";
+import { prisma } from "@/lib/prisma";
+
+type Context = {
+  params: Promise<{ id: string }>;
+};
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+const noStoreHeaders = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"
+};
+
+const bodySchema = z.object({
+  blocked: z.boolean(),
+  blockedReason: z.string().trim().max(1000).nullable().optional(),
+  blockedFrom: z.string().trim().nullable().optional(),
+  blockedUntil: z.string().trim().nullable().optional(),
+  blockedNotes: z.string().trim().max(2000).nullable().optional()
+});
+
+export async function PATCH(request: NextRequest, context: Context) {
+  const { session, response } = await requireAnyPermission(request, ["inventory.manage", "reservations.manage"]);
+  if (response || !session) return response;
+  const { id } = await context.params;
+
+  try {
+    const input = bodySchema.parse(await request.json());
+    const location = await prisma.location.update({
+      where: { id },
+      data: input.blocked
+        ? {
+            blockedReason: input.blockedReason || "Blocat operational",
+            blockedByUserId: session.id,
+            blockedFrom: parseDate(input.blockedFrom) || new Date(),
+            blockedUntil: parseDate(input.blockedUntil),
+            blockedNotes: input.blockedNotes || null,
+            status: "UNKNOWN"
+          }
+        : {
+            blockedReason: null,
+            blockedByUserId: null,
+            blockedFrom: null,
+            blockedUntil: null,
+            blockedNotes: null,
+            status: "AVAILABLE"
+          },
+      select: { id: true, code: true, blockedReason: true, blockedUntil: true, status: true }
+    });
+
+    await recordAudit({
+      actor: session,
+      action: input.blocked ? "location.block" : "location.unblock",
+      entityType: "location",
+      entityId: id,
+      metadata: { input, location },
+      request
+    });
+
+    return NextResponse.json({ location }, { headers: noStoreHeaders });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Locatia nu a putut fi actualizata." },
+      { status: 400, headers: noStoreHeaders }
+    );
+  }
+}
+
+function parseDate(value?: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}

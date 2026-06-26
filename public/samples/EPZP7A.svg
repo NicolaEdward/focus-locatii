@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">EPZP7A airport advertising placement preview</title>
+  <desc id="desc">Professional Focus Media preview graphic for a departure entrance advertising location.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071827"/>
+      <stop offset="0.52" stop-color="#0a2740"/>
+      <stop offset="1" stop-color="#020913"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffc82f"/>
+      <stop offset="1" stop-color="#f0a800"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dbe7ef" stop-opacity="0.88"/>
+      <stop offset="1" stop-color="#536170" stop-opacity="0.42"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#sky)"/>
+  <rect x="90" y="90" width="1420" height="720" rx="26" fill="#08121f" stroke="#f6b816" stroke-width="4"/>
+  <rect x="130" y="130" width="1340" height="132" rx="18" fill="#0e2133"/>
+  <text x="165" y="188" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="900">HENRI COANDA INTERNATIONAL AIRPORT</text>
+  <text x="165" y="236" fill="#ffc21f" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="900">DEPARTURES EXTENSION - ENTRANCE DOORS D</text>
+  <g transform="translate(1010 142)" fill="#ffc21f">
+    <circle cx="40" cy="40" r="28"/>
+    <circle cx="128" cy="40" r="28"/>
+    <circle cx="216" cy="40" r="28"/>
+    <circle cx="304" cy="40" r="28"/>
+  </g>
+  <rect x="190" y="325" width="770" height="398" rx="12" fill="#182637"/>
+  <rect x="205" y="345" width="740" height="44" fill="#182e9a"/>
+  <text x="525" y="377" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" text-anchor="middle">Plecari / Departures</text>
+  <g transform="translate(250 410)">
+    <rect width="190" height="270" fill="url(#glass)" stroke="#d6e1ea"/>
+    <rect x="210" width="190" height="270" fill="url(#glass)" stroke="#d6e1ea"/>
+    <rect x="420" width="190" height="270" fill="url(#glass)" stroke="#d6e1ea"/>
+    <rect x="28" y="42" width="128" height="196" fill="#1b2530"/>
+    <rect x="448" y="42" width="128" height="196" fill="#1b2530"/>
+    <path d="M42 213 105 95 152 213Z" fill="#c77e4f"/>
+    <path d="M462 213 525 95 572 213Z" fill="#d88a4e"/>
+    <text x="92" y="244" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="700" text-anchor="middle">BRAND PANEL</text>
+    <text x="512" y="244" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="700" text-anchor="middle">BRAND PANEL</text>
+  </g>
+  <rect x="1010" y="325" width="350" height="174" rx="12" fill="#132234" stroke="#dbe7ef"/>
+  <rect x="1010" y="526" width="350" height="197" rx="12" fill="#132234" stroke="#dbe7ef"/>
+  <rect x="1060" y="362" width="250" height="96" fill="#25364a"/>
+  <rect x="1050" y="566" width="270" height="118" fill="#25364a"/>
+  <text x="190" y="790" fill="#ffc21f" font-family="Arial, Helvetica, sans-serif" font-size="38" font-weight="900">MAXIMUM VISIBILITY. GUARANTEED IMPACT.</text>
+  <text x="190" y="835" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="24">Code EPZP7A - vinyl sticker placement preview</text>
+  <rect x="1040" y="760" width="325" height="58" rx="12" fill="url(#gold)"/>
+  <text x="1202" y="798" fill="#07111d" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="900" text-anchor="middle">REQUEST THIS SPACE</text>
+</svg>

@@ -1,0 +1,9 @@
+<svg width="220" height="72" viewBox="0 0 220 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="72" height="72" rx="8" fill="#FFB800"/>
+  <path d="M22 52V20H52V29H33V34H50V43H33V52H22Z" fill="#031322"/>
+  <path d="M88 23H124V32H99V38H122V47H99V63H88V23Z" fill="white"/>
+  <path d="M130 23H143V63H130V23Z" fill="white"/>
+  <path d="M151 23H164L178 45V23H189V63H176L162 41V63H151V23Z" fill="white"/>
+  <path d="M88 9H188V15H88V9Z" fill="#FFB800"/>
+  <text x="88" y="18" fill="#FFB800" font-family="Arial, sans-serif" font-size="10" font-weight="800" letter-spacing="4">MEDIA</text>
+</svg>

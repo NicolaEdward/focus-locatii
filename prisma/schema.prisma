@@ -1,0 +1,1006 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum LocationStatus {
+  AVAILABLE
+  AVAILABLE_FROM
+  BOOKED
+  RESERVED
+  UNKNOWN
+}
+
+enum GpsAuditStatus {
+  OK
+  CORRECTED
+  MISSING
+  NEEDS_CONFIRMATION
+  SUSPECT
+}
+
+enum ReservationStatus {
+  HOLD
+  RESERVED
+  BOOKED
+  CANCELLED
+  EXPIRED
+}
+
+enum OfferRequestStatus {
+  NEW
+  CONTACTED
+  QUOTED
+  WON
+  LOST
+  ARCHIVED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  COO
+  SALES_DIRECTOR
+  SALES_AGENT
+  FINANCE_OPERATOR
+}
+
+enum OperationTaskKind {
+  DECORATION
+  NEUTRALIZATION
+  REDECORATION
+  MAINTENANCE
+}
+
+enum OperationTaskStatus {
+  NEW
+  IN_PROGRESS
+  DONE
+  ARCHIVED
+  CANCELLED
+}
+
+enum OperationTaskSource {
+  SYSTEM_DERIVED
+  LEGACY_PRODUCTION_NOTES
+  MANUAL
+}
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  slug        String     @unique
+  description String?    @db.Text
+  sortOrder   Int        @default(0)
+  locations   Location[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("portfolio_categories")
+}
+
+model Location {
+  id                         String          @id @default(cuid())
+  nr                         String?
+  code                       String          @unique
+  categoryId                 String
+  city                       String?
+  county                     String?
+  address                    String?         @db.Text
+  type                       String?
+  size                       String?
+  sqm                        Float?
+  illum                      Boolean?
+  rateCard                   String?
+  rateCardValue              Float?
+  installationRemoval        String?
+  installationRemovalValue   Float?
+  availabilityText           String?
+  availableFrom              DateTime?
+  availableUntil             DateTime?
+  bookedFrom                 DateTime?
+  bookedUntil                DateTime?
+  status                     LocationStatus  @default(UNKNOWN)
+  latReal                    Float?
+  lngReal                    Float?
+  latDisplay                 Float?
+  lngDisplay                 Float?
+  mapsUrl                    String?         @db.Text
+  mainPhotoUrl               String?         @db.Text
+  photoOriginalUrl           String?         @db.Text
+  showPricePublic            Boolean         @default(false)
+  showInstallationCostPublic Boolean         @default(false)
+  showInPublic               Boolean         @default(true)
+  isPremium                  Boolean         @default(false)
+  isFeatured                 Boolean         @default(false)
+  normalizedLocationName     String?
+  reportingGroupName         String?
+  displayOrder               Int?
+  locationGroupOrder         Int?
+  faceOrder                  Int?
+  directionOrder             Int?
+  monthlyCost                Float?
+  costCurrency               String?         @db.VarChar(3)
+  costType                   String?
+  costSupplier               String?
+  costNotes                  String?         @db.Text
+  blockedReason              String?         @db.Text
+  blockedByUserId            String?
+  blockedFrom                DateTime?
+  blockedUntil               DateTime?
+  blockedNotes               String?         @db.Text
+  coordinateSource           String?
+  gpsAuditStatus             GpsAuditStatus  @default(NEEDS_CONFIRMATION)
+  benefits                   Json?
+  mediaDetails               Json?
+  campaignDetails            Json?
+  internalNotes              String?         @db.Text
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
+
+  category Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  blockedBy User?        @relation("LocationBlockedBy", fields: [blockedByUserId], references: [id], onDelete: SetNull)
+  images   Image[]
+  audits   GpsAuditLog[]
+  reservations Reservation[]
+  operationTasks OperationTask[]
+
+  @@index([categoryId])
+  @@index([status])
+  @@index([city])
+  @@index([showInPublic])
+  @@index([gpsAuditStatus])
+  @@index([reportingGroupName])
+  @@index([displayOrder])
+  @@index([locationGroupOrder])
+  @@index([blockedByUserId])
+  @@map("portfolio_locations")
+}
+
+model Reservation {
+  id              String            @id @default(cuid())
+  locationId      String
+  clientId        String?
+  campaignId      String?
+  status          ReservationStatus @default(RESERVED)
+  clientName      String
+  clientCompany   String?
+  contractCompany String?
+  clientEmail     String?
+  clientPhone     String?
+  campaignName    String?
+  contractNumber  String?
+  salesperson     String?
+  notes           String?           @db.Text
+  productionNotes String?           @db.Text
+  amount          Float?
+  monthlyRentTotal Float?
+  monthlyRentShare Float?
+  contractGroupId String?
+  periodStart     DateTime
+  periodEnd       DateTime
+  installationDate DateTime?
+  neutralizationDate DateTime?
+  externalSource  String?
+  externalId      String?           @unique
+  bookedAt        DateTime?
+  holdExpiresAt   DateTime?
+  ownerId         String?
+  sellerUserId    String?
+  currency        String?           @db.VarChar(3)
+  paymentTermType String?
+  paymentTermDays Int?
+  customPaymentTermNote String?     @db.Text
+  billingRule     String?
+  billingDayOfMonth Int?
+  customBillingDate DateTime?
+  billingFrequency String?
+  invoiceGenerationMode String?
+  nextInvoiceDate DateTime?
+  billingNotes    String?           @db.Text
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  client   ClientAccount? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  owner    User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  sellerUser User?  @relation("ReservationSeller", fields: [sellerUserId], references: [id], onDelete: SetNull)
+  billingItems BillingItem[]
+  documents ClientDocument[] @relation("ReservationDocuments")
+  priceSegments RentalPriceSegment[]
+  changeLogs RentalChangeLog[]
+  operationTasks OperationTask[]
+
+  @@index([locationId])
+  @@index([clientId])
+  @@index([campaignId])
+  @@index([status])
+  @@index([periodStart])
+  @@index([periodEnd])
+  @@index([clientName])
+  @@index([contractGroupId])
+  @@index([installationDate])
+  @@index([neutralizationDate])
+  @@index([bookedAt])
+  @@index([holdExpiresAt])
+  @@index([ownerId])
+  @@index([sellerUserId])
+  @@index([nextInvoiceDate])
+  @@map("portfolio_reservations")
+}
+
+model OfferRequest {
+  id                  String             @id @default(cuid())
+  status              OfferRequestStatus @default(NEW)
+  clientName          String
+  company             String?
+  email               String?
+  phone               String?
+  message             String?            @db.Text
+  selectedLocationIds Json
+  selectedCodes       String?            @db.Text
+  source              String?            @db.Text
+  ownerId             String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  owner User? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([ownerId])
+  @@map("portfolio_offer_requests")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         UserRole @default(SALES_AGENT)
+  active       Boolean  @default(true)
+  tokenVersion Int      @default(0)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reservations  Reservation[]
+  soldReservations Reservation[] @relation("ReservationSeller")
+  offerRequests OfferRequest[]
+  auditLogs     AuditLog[]
+  blockedLocations Location[] @relation("LocationBlockedBy")
+  financialUploads FinancialReportUpload[]
+  resolvedFinancialIssues FinancialImportIssue[] @relation("FinancialIssueResolver")
+  reviewedFinancialPayables FinancialPayable[] @relation("FinancialPayableReviewer")
+  reviewedFinancialReceivables FinancialReceivable[] @relation("FinancialReceivableReviewer")
+  assignedCrmLeads CrmLead[] @relation("CrmLeadAssignee")
+  createdCrmLeads CrmLead[] @relation("CrmLeadCreator")
+  crmActivities CrmActivity[]
+  ownedClients ClientAccount[] @relation("ClientAccountOwner")
+  createdClients ClientAccount[] @relation("ClientAccountCreator")
+  notifications AppNotification[]
+  reviewedNotifications AppNotification[] @relation("NotificationResolver")
+  uploadedDocuments ClientDocument[] @relation("DocumentUploader")
+  ownedCampaigns Campaign[] @relation("CampaignAccountOwner")
+  soldCampaigns Campaign[] @relation("CampaignSeller")
+  createdCampaigns Campaign[] @relation("CampaignCreator")
+  createdRentalPriceSegments RentalPriceSegment[]
+  createdRentalChangeLogs RentalChangeLog[]
+  createdSuppliers Supplier[] @relation("SupplierCreator")
+  assignedOperationTasks OperationTask[] @relation("OperationTaskAssignee")
+  createdOperationTasks OperationTask[] @relation("OperationTaskCreator")
+
+  @@index([role])
+  @@index([active])
+  @@map("portfolio_users")
+}
+
+model ClientAccount {
+  id                 String   @id @default(cuid())
+  companyName        String
+  normalizedName     String?
+  clientType         String   @default("direct_client")
+  taxId              String?
+  registryNumber     String?
+  billingAddress     String?  @db.Text
+  generalEmail       String?
+  generalPhone       String?
+  website            String?
+  accountOwnerUserId String?
+  status             String   @default("prospect")
+  notes              String?  @db.Text
+  mergedIntoClientId String?
+  mergedAt           DateTime?
+  aliases            Json?
+  createdByUserId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  accountOwner User? @relation("ClientAccountOwner", fields: [accountOwnerUserId], references: [id], onDelete: SetNull)
+  createdBy User? @relation("ClientAccountCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  contacts ClientContact[]
+  reservations Reservation[]
+  campaigns Campaign[]
+  crmLeads CrmLead[]
+  billingItems BillingItem[]
+  financialReceivables FinancialReceivable[]
+  documents ClientDocument[] @relation("ClientDocuments")
+
+  @@index([normalizedName])
+  @@index([clientType])
+  @@index([accountOwnerUserId])
+  @@index([status])
+  @@index([mergedIntoClientId])
+  @@map("portfolio_client_accounts")
+}
+
+model Campaign {
+  id                    String   @id @default(cuid())
+  clientId              String
+  campaignName          String
+  campaignCode          String?
+  status                String   @default("draft")
+  campaignType          String   @default("direct_client")
+  agencyClientId        String?
+  endClientId           String?
+  accountOwnerUserId    String?
+  sellerUserId          String?
+  createdByUserId       String?
+  companyEntity         String?
+  startDate             DateTime?
+  endDate               DateTime?
+  currency              String?  @db.VarChar(3)
+  totalContractValue    Decimal? @db.Decimal(14, 2)
+  paymentTermType       String?
+  paymentTermDays       Int?
+  customPaymentTermNote String?  @db.Text
+  billingRule           String?
+  billingFrequency      String?
+  billingNotes          String?  @db.Text
+  notes                 String?  @db.Text
+  archivedAt            DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  client ClientAccount @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  accountOwner User? @relation("CampaignAccountOwner", fields: [accountOwnerUserId], references: [id], onDelete: SetNull)
+  sellerUser User? @relation("CampaignSeller", fields: [sellerUserId], references: [id], onDelete: SetNull)
+  createdBy User? @relation("CampaignCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  reservations Reservation[]
+  receivables FinancialReceivable[]
+  documents ClientDocument[] @relation("CampaignDocuments")
+  operationTasks OperationTask[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([archivedAt])
+  @@index([accountOwnerUserId])
+  @@index([sellerUserId])
+  @@index([createdByUserId])
+  @@index([companyEntity])
+  @@index([startDate])
+  @@index([endDate])
+  @@map("portfolio_campaigns")
+}
+
+model RentalPriceSegment {
+  id              String   @id @default(cuid())
+  rentalId        String
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  monthlyRent     Decimal  @db.Decimal(14, 2)
+  currency        String   @db.VarChar(3)
+  reason          String?  @db.Text
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  rental Reservation @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  createdBy User? @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([rentalId])
+  @@index([effectiveFrom])
+  @@index([effectiveTo])
+  @@index([createdByUserId])
+  @@map("portfolio_rental_price_segments")
+}
+
+model RentalChangeLog {
+  id              String   @id @default(cuid())
+  rentalId        String
+  action          String
+  previousJson    Json?
+  nextJson        Json?
+  note            String?  @db.Text
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  rental Reservation @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  createdBy User? @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([rentalId])
+  @@index([action])
+  @@index([createdByUserId])
+  @@index([createdAt])
+  @@map("portfolio_rental_change_logs")
+}
+
+model ClientContact {
+  id        String   @id @default(cuid())
+  clientId  String
+  name      String
+  email     String?
+  phone     String?
+  role      String?
+  isPrimary Boolean  @default(false)
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client ClientAccount @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([email])
+  @@map("portfolio_client_contacts")
+}
+
+model FinancialReportUpload {
+  id               String   @id @default(cuid())
+  uploadedByUserId String?
+  uploadedAt       DateTime @default(now())
+  reportDate       DateTime?
+  originalFileName String
+  fileHash         String
+  status           String   @default("uploaded")
+  errorSummary     String?  @db.Text
+  activeVersion    Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  uploadedBy User? @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  companySnapshots FinancialReportCompanySnapshot[]
+  payables FinancialPayable[]
+  receivables FinancialReceivable[]
+  issues FinancialImportIssue[]
+
+  @@index([uploadedByUserId])
+  @@index([reportDate])
+  @@index([status])
+  @@index([activeVersion])
+  @@index([fileHash])
+  @@map("portfolio_financial_report_uploads")
+}
+
+model FinancialReportCompanySnapshot {
+  id                  String   @id @default(cuid())
+  uploadId            String
+  companyName         String
+  companyCode         String?
+  totalPayable        Decimal  @default(0) @db.Decimal(14, 2)
+  totalPaid           Decimal  @default(0) @db.Decimal(14, 2)
+  remainingPayable    Decimal  @default(0) @db.Decimal(14, 2)
+  totalReceivable     Decimal  @default(0) @db.Decimal(14, 2)
+  totalCollected      Decimal  @default(0) @db.Decimal(14, 2)
+  remainingReceivable Decimal  @default(0) @db.Decimal(14, 2)
+  totalPayableRon        Decimal @default(0) @db.Decimal(14, 2)
+  totalPayableEur        Decimal @default(0) @db.Decimal(14, 2)
+  totalPaidRon           Decimal @default(0) @db.Decimal(14, 2)
+  totalPaidEur           Decimal @default(0) @db.Decimal(14, 2)
+  remainingPayableRon    Decimal @default(0) @db.Decimal(14, 2)
+  remainingPayableEur    Decimal @default(0) @db.Decimal(14, 2)
+  totalReceivableRon     Decimal @default(0) @db.Decimal(14, 2)
+  totalReceivableEur     Decimal @default(0) @db.Decimal(14, 2)
+  totalCollectedRon      Decimal @default(0) @db.Decimal(14, 2)
+  totalCollectedEur      Decimal @default(0) @db.Decimal(14, 2)
+  remainingReceivableRon Decimal @default(0) @db.Decimal(14, 2)
+  remainingReceivableEur Decimal @default(0) @db.Decimal(14, 2)
+  payableRows         Int      @default(0)
+  receivableRows      Int      @default(0)
+  issueCount          Int      @default(0)
+  calculatedAt        DateTime @default(now())
+
+  upload FinancialReportUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+
+  @@index([uploadId])
+  @@index([companyCode])
+  @@map("portfolio_financial_company_snapshots")
+}
+
+model FinancialPayable {
+  id                  String   @id @default(cuid())
+  uploadId            String
+  supplierId          String?
+  companyName         String
+  companyCode         String?
+  supplierName        String?
+  invoiceNumber       String?
+  normalizedInvoiceNumber String?
+  invoiceDate         DateTime?
+  documentDescription String?  @db.Text
+  dueDate             DateTime?
+  amountToPay         Decimal? @db.Decimal(14, 2)
+  amountPaid          Decimal? @db.Decimal(14, 2)
+  remainingAmount     Decimal? @db.Decimal(14, 2)
+  paidAt              DateTime?
+  paymentMethod       String?
+  paymentNotes        String?  @db.Text
+  currency            String?  @db.VarChar(3)
+  status              String   @default("needs_review")
+  rawRowJson          Json?
+  needsReview         Boolean  @default(false)
+  includedInReport    Boolean  @default(true)
+  rowType             String?
+  reviewNote          String?  @db.Text
+  reviewedByUserId    String?
+  reviewedAt          DateTime?
+  excludeReason       String?  @db.Text
+  createdAt           DateTime @default(now())
+
+  upload FinancialReportUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  reviewedBy User? @relation("FinancialPayableReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  documents ClientDocument[] @relation("PayableDocuments")
+
+  @@index([uploadId])
+  @@index([supplierId])
+  @@index([companyCode])
+  @@index([supplierName])
+  @@index([normalizedInvoiceNumber])
+  @@index([invoiceDate])
+  @@index([dueDate])
+  @@index([status])
+  @@index([needsReview])
+  @@index([currency])
+  @@index([includedInReport])
+  @@index([reviewedByUserId])
+  @@map("portfolio_financial_payables")
+}
+
+model FinancialReceivable {
+  id              String   @id @default(cuid())
+  uploadId        String
+  clientId        String?
+  campaignId      String?
+  billingItemId   String?
+  accountOwnerUserId String?
+  companyName     String
+  companyCode     String?
+  invoiceNumber   String?
+  normalizedInvoiceNumber String?
+  invoiceDate     DateTime?
+  location        String?  @db.Text
+  campaignDetails String?  @db.Text
+  clientName      String?
+  dueDate         DateTime?
+  invoicedAmount  Decimal? @db.Decimal(14, 2)
+  collectedAmount Decimal? @db.Decimal(14, 2)
+  remainingAmount Decimal? @db.Decimal(14, 2)
+  collectedAt     DateTime?
+  paymentMethod   String?
+  collectionNotes String?  @db.Text
+  currency        String?  @db.VarChar(3)
+  status          String   @default("needs_review")
+  rawRowJson      Json?
+  needsReview     Boolean  @default(false)
+  includedInReport Boolean @default(true)
+  rowType         String?
+  reviewNote      String?  @db.Text
+  reviewedByUserId String?
+  reviewedAt      DateTime?
+  excludeReason   String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  upload FinancialReportUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  client ClientAccount? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  billingItem BillingItem? @relation(fields: [billingItemId], references: [id], onDelete: SetNull)
+  reviewedBy User? @relation("FinancialReceivableReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  documents ClientDocument[] @relation("ReceivableDocuments")
+
+  @@index([uploadId])
+  @@index([clientId])
+  @@index([campaignId])
+  @@index([billingItemId])
+  @@index([accountOwnerUserId])
+  @@index([companyCode])
+  @@index([normalizedInvoiceNumber])
+  @@index([invoiceDate])
+  @@index([clientName])
+  @@index([dueDate])
+  @@index([status])
+  @@index([needsReview])
+  @@index([currency])
+  @@index([includedInReport])
+  @@index([reviewedByUserId])
+  @@map("portfolio_financial_receivables")
+}
+
+model Supplier {
+  id                 String   @id @default(cuid())
+  supplierName       String
+  normalizedName     String?
+  taxId              String?
+  registryNumber     String?
+  billingAddress     String?  @db.Text
+  generalEmail       String?
+  generalPhone       String?
+  website            String?
+  status             String   @default("active")
+  notes              String?  @db.Text
+  createdByUserId    String?
+  archivedAt         DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  createdBy User? @relation("SupplierCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  contacts SupplierContact[]
+  payables FinancialPayable[]
+  documents ClientDocument[] @relation("SupplierDocuments")
+  operationTasks OperationTask[]
+
+  @@index([normalizedName])
+  @@index([status])
+  @@index([createdByUserId])
+  @@index([archivedAt])
+  @@map("portfolio_suppliers")
+}
+
+model SupplierContact {
+  id         String   @id @default(cuid())
+  supplierId String
+  name       String
+  email      String?
+  phone      String?
+  role       String?
+  isPrimary  Boolean  @default(false)
+  notes      String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+  @@index([email])
+  @@map("portfolio_supplier_contacts")
+}
+
+model CrmLead {
+  id                String   @id @default(cuid())
+  leadDate          DateTime?
+  companyName       String
+  clientType        String?
+  contactName       String?
+  phone             String?
+  email             String?
+  source            String?
+  clientId          String?
+  assignedToUserId  String?
+  createdByUserId   String?
+  status            String   @default("new")
+  estimatedValue    Float?
+  currency          String?  @db.VarChar(3)
+  probability       Int?
+  expectedCloseDate DateTime?
+  nextFollowUpDate  DateTime?
+  locationsInterested String? @db.Text
+  notes             String?  @db.Text
+  lostReason        String?  @db.Text
+  sourceOfferRequestId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  client ClientAccount? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  assignedTo User? @relation("CrmLeadAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  createdBy  User? @relation("CrmLeadCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  activities CrmActivity[]
+  contacts CrmContact[]
+
+  @@index([clientId])
+  @@index([assignedToUserId])
+  @@index([createdByUserId])
+  @@index([status])
+  @@index([nextFollowUpDate])
+  @@index([sourceOfferRequestId])
+  @@map("portfolio_crm_leads")
+}
+
+model CrmContact {
+  id        String   @id @default(cuid())
+  leadId    String
+  clientId  String?
+  name      String
+  role      String?
+  phone     String?
+  email     String?
+  isPrimary Boolean  @default(false)
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lead CrmLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([clientId])
+  @@index([email])
+  @@map("portfolio_crm_contacts")
+}
+
+model CrmActivity {
+  id           String   @id @default(cuid())
+  leadId       String
+  userId       String?
+  type         String
+  activityDate DateTime @default(now())
+  actionType   String?
+  statusAtTime String?
+  details      String?  @db.Text
+  locations    String?  @db.Text
+  nextFollowUpDate DateTime?
+  note         String?  @db.Text
+  nextStep     String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  lead CrmLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([leadId])
+  @@index([userId])
+  @@index([type])
+  @@index([activityDate])
+  @@map("portfolio_crm_activities")
+}
+
+model BillingItem {
+  id                 String   @id @default(cuid())
+  reservationId      String?
+  clientId           String?
+  companyEntity      String?
+  billingPeriodStart DateTime
+  billingPeriodEnd   DateTime
+  invoiceDate        DateTime
+  dueDate            DateTime
+  amount             Decimal  @default(0) @db.Decimal(14, 2)
+  currency           String   @db.VarChar(3)
+  billingRule        String
+  paymentTermDays    Int      @default(0)
+  status             String   @default("draft")
+  invoiceNumber      String?
+  normalizedInvoiceNumber String?
+  collectedAmount    Decimal  @default(0) @db.Decimal(14, 2)
+  remainingAmount    Decimal? @db.Decimal(14, 2)
+  collectedAt        DateTime?
+  paymentMethod      String?
+  collectionNotes    String?  @db.Text
+  notes              String?  @db.Text
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  reservation Reservation? @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  client ClientAccount? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  receivables FinancialReceivable[]
+  documents ClientDocument[] @relation("BillingDocuments")
+
+  @@index([reservationId])
+  @@index([clientId])
+  @@index([invoiceDate])
+  @@index([dueDate])
+  @@index([status])
+  @@index([currency])
+  @@index([normalizedInvoiceNumber])
+  @@map("portfolio_billing_items")
+}
+
+model ClientDocument {
+  id                    String   @id @default(cuid())
+  clientId              String?
+  campaignId            String?
+  reservationId         String?
+  billingItemId         String?
+  financialReceivableId String?
+  supplierId            String?
+  financialPayableId    String?
+  fileName              String
+  fileType              String?
+  fileSize              Int?
+  documentType          String   @default("other")
+  uploadedByUserId      String?
+  uploadedAt            DateTime @default(now())
+  expiryDate            DateTime?
+  notes                 String?  @db.Text
+  storageUrl            String   @db.LongText
+  status                String   @default("active")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  client ClientAccount? @relation("ClientDocuments", fields: [clientId], references: [id], onDelete: Cascade)
+  campaign Campaign? @relation("CampaignDocuments", fields: [campaignId], references: [id], onDelete: Cascade)
+  reservation Reservation? @relation("ReservationDocuments", fields: [reservationId], references: [id], onDelete: Cascade)
+  billingItem BillingItem? @relation("BillingDocuments", fields: [billingItemId], references: [id], onDelete: SetNull)
+  financialReceivable FinancialReceivable? @relation("ReceivableDocuments", fields: [financialReceivableId], references: [id], onDelete: SetNull)
+  supplier Supplier? @relation("SupplierDocuments", fields: [supplierId], references: [id], onDelete: Cascade)
+  financialPayable FinancialPayable? @relation("PayableDocuments", fields: [financialPayableId], references: [id], onDelete: SetNull)
+  uploadedBy User? @relation("DocumentUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([clientId])
+  @@index([campaignId])
+  @@index([reservationId])
+  @@index([billingItemId])
+  @@index([financialReceivableId])
+  @@index([supplierId])
+  @@index([financialPayableId])
+  @@index([documentType])
+  @@index([status])
+  @@index([uploadedByUserId])
+  @@map("portfolio_client_documents")
+}
+
+model AppNotification {
+  id              String   @id @default(cuid())
+  userId          String
+  type            String
+  title           String
+  message         String   @db.Text
+  entityType      String?
+  entityId        String?
+  severity        String   @default("medium")
+  status          String   @default("open")
+  dueDate         DateTime?
+  recommendedAction String? @db.Text
+  metadata        Json?
+  resolvedByUserId String?
+  resolvedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resolvedBy User? @relation("NotificationResolver", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([severity])
+  @@index([dueDate])
+  @@index([entityType, entityId])
+  @@map("portfolio_app_notifications")
+}
+
+model OperationTask {
+  id               String              @id @default(cuid())
+  reservationId    String?
+  campaignId       String?
+  locationId       String?
+  kind             OperationTaskKind
+  status           OperationTaskStatus @default(NEW)
+  source           OperationTaskSource @default(MANUAL)
+  dedupeKey        String?             @unique
+  legacyTaskId     String?
+  scheduledFor     DateTime?
+  completedAt      DateTime?
+  assignedToUserId String?
+  supplierId       String?
+  cost             Decimal?            @db.Decimal(14, 2)
+  currency         String?             @db.VarChar(3)
+  briefUrl         String?             @db.LongText
+  beforePhotoUrl   String?             @db.LongText
+  afterPhotoUrl    String?             @db.LongText
+  notes            String?             @db.Text
+  createdByUserId  String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  reservation Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  campaign    Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  location    Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  assignedTo  User?        @relation("OperationTaskAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  createdBy   User?        @relation("OperationTaskCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  supplier    Supplier?    @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@index([reservationId, kind])
+  @@index([campaignId])
+  @@index([locationId])
+  @@index([kind, status, scheduledFor])
+  @@index([status, scheduledFor])
+  @@index([assignedToUserId, status])
+  @@index([supplierId])
+  @@index([completedAt])
+  @@map("portfolio_operation_tasks")
+}
+
+model FinancialImportIssue {
+  id               String   @id @default(cuid())
+  uploadId         String
+  companyName      String?
+  companyCode      String?
+  sheetName        String?
+  rowNumber        Int?
+  issueType        String
+  issueMessage     String   @db.Text
+  severity         String   @default("warning")
+  rawRowJson       Json?
+  resolvedByUserId String?
+  resolvedAt       DateTime?
+  resolutionNote   String?  @db.Text
+  createdAt        DateTime @default(now())
+
+  upload FinancialReportUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  resolvedBy User? @relation("FinancialIssueResolver", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([uploadId])
+  @@index([companyCode])
+  @@index([severity])
+  @@index([resolvedByUserId])
+  @@map("portfolio_financial_import_issues")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([createdAt])
+  @@map("portfolio_audit_logs")
+}
+
+model Image {
+  id         String   @id @default(cuid())
+  locationId String
+  url        String   @db.Text
+  alt        String?
+  sortOrder  Int      @default(0)
+  isMain     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([locationId])
+  @@map("portfolio_images")
+}
+
+model ImportBatch {
+  id              String   @id @default(cuid())
+  fileName        String
+  importedAt      DateTime @default(now())
+  importedBy      String?
+  totalRows       Int      @default(0)
+  createdCount    Int      @default(0)
+  updatedCount    Int      @default(0)
+  missingGpsCount Int      @default(0)
+  suspectGpsCount Int      @default(0)
+  okGpsCount      Int      @default(0)
+  notes           String?  @db.Text
+
+  @@map("portfolio_import_batches")
+}
+
+model GpsAuditLog {
+  id         String         @id @default(cuid())
+  locationId String
+  status     GpsAuditStatus
+  message    String?        @db.Text
+  oldLat     Float?
+  oldLng     Float?
+  newLat     Float?
+  newLng     Float?
+  createdAt  DateTime       @default(now())
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([locationId])
+  @@index([status])
+  @@map("portfolio_gps_audit_logs")
+}

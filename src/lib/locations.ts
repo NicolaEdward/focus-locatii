@@ -58,7 +58,7 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
     }))
   });
 
-  return {
+  const dto: LocationDTO = {
     id: location.id,
     nr: location.nr,
     code: location.code,
@@ -180,6 +180,61 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
     createdAt: location.createdAt.toISOString(),
     updatedAt: location.updatedAt.toISOString()
   };
+
+  if (!exposePrice) {
+    deleteLocationKeys(dto, ["rateCard", "rateCardValue"]);
+  }
+
+  if (!exposeInstallationCost) {
+    deleteLocationKeys(dto, ["installationRemoval", "installationRemovalValue"]);
+  }
+
+  if (!exposePrivateFields) {
+    deletePublicPrivateKeys(dto);
+  }
+
+  return dto;
+}
+
+const PUBLIC_PRIVATE_LOCATION_KEYS: Array<keyof LocationDTO> = [
+  "latReal",
+  "lngReal",
+  "mapsUrl",
+  "photoOriginalUrl",
+  "showPricePublic",
+  "showInstallationCostPublic",
+  "showInPublic",
+  "normalizedLocationName",
+  "reportingGroupName",
+  "displayOrder",
+  "locationGroupOrder",
+  "faceOrder",
+  "directionOrder",
+  "monthlyCost",
+  "costCurrency",
+  "costType",
+  "costSupplier",
+  "costNotes",
+  "blockedReason",
+  "blockedByUserId",
+  "blockedFrom",
+  "blockedUntil",
+  "blockedNotes",
+  "coordinateSource",
+  "gpsAuditStatus",
+  "internalNotes",
+  "reservations"
+];
+
+function deletePublicPrivateKeys(dto: LocationDTO) {
+  deleteLocationKeys(dto, PUBLIC_PRIVATE_LOCATION_KEYS);
+}
+
+function deleteLocationKeys(dto: LocationDTO, keys: Array<keyof LocationDTO>) {
+  const mutable = dto as Partial<LocationDTO>;
+  for (const key of keys) {
+    delete mutable[key];
+  }
 }
 
 function toIso(value?: Date | null) {

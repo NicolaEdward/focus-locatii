@@ -28,8 +28,8 @@ export function LocationPresentation({
 }) {
   const images = imageSet(location);
   const mapsUrl = mapsHref(location.mapsUrl, location.latDisplay, location.lngDisplay);
-  const showRateCard = location.showPricePublic && Boolean(location.rateCard || location.rateCardValue);
-  const showInstallationCost = location.showInstallationCostPublic && Boolean(location.installationRemoval || location.installationRemovalValue);
+  const showRateCard = Boolean(location.rateCard || location.rateCardValue);
+  const showInstallationCost = Boolean(location.installationRemoval || location.installationRemovalValue);
   const message = `Buna ziua, sunt interesat de locatia ${location.address || location.code} (${location.code}) - ${location.categoryName}.`;
   const subject = `Cerere locatie ${location.code}`;
 

@@ -23,8 +23,8 @@ export function LocationMiniPreview({
 }) {
   const image = location.mainPhotoUrl || location.images[0]?.url || "/samples/location-placeholder.svg";
   const mapsUrl = mapsHref(location.mapsUrl, location.latDisplay, location.lngDisplay);
-  const showRateCard = location.showPricePublic && Boolean(location.rateCard || location.rateCardValue);
-  const showInstallationCost = location.showInstallationCostPublic && Boolean(location.installationRemoval || location.installationRemovalValue);
+  const showRateCard = Boolean(location.rateCard || location.rateCardValue);
+  const showInstallationCost = Boolean(location.installationRemoval || location.installationRemovalValue);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {

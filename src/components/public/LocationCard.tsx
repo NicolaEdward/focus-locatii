@@ -17,7 +17,7 @@ export function LocationCard({
   onShortlist: () => void;
   isShortlisted: boolean;
 }) {
-  const showRateCard = location.showPricePublic && Boolean(location.rateCard || location.rateCardValue);
+  const showRateCard = Boolean(location.rateCard || location.rateCardValue);
 
   return (
     <motion.article

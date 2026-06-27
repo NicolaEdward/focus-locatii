@@ -57,8 +57,8 @@ export async function POST(request: NextRequest) {
         location.size || "",
         location.sqm ?? "",
         location.illum ? "Yes" : location.illum === false ? "No" : "",
-        location.showPricePublic ? monthlyRate(location.rateCardValue, location.rateCard) : "",
-        location.showInstallationCostPublic ? oneTimeRate(location.installationRemovalValue, location.installationRemoval) : "",
+        location.rateCard || location.rateCardValue ? monthlyRate(location.rateCardValue, location.rateCard) : "",
+        location.installationRemoval || location.installationRemovalValue ? oneTimeRate(location.installationRemovalValue, location.installationRemoval) : "",
         formatAvailability({ label: location.availabilityLabel, detail: location.availabilityDetail })
       ])
     ];

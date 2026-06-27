@@ -31,7 +31,7 @@ export function ShortlistDrawer({
   const [sendingOffer, setSendingOffer] = useState(false);
   const [offerFeedback, setOfferFeedback] = useState<string | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
-  const publicRateLocations = locations.filter((location) => location.showPricePublic && (location.rateCard || location.rateCardValue));
+  const publicRateLocations = locations.filter((location) => location.rateCard || location.rateCardValue);
   const totalRate = publicRateLocations.reduce((sum, location) => sum + (location.rateCardValue || 0), 0);
   const showPublicRates = publicRateLocations.length > 0;
   const message = mediaPlanMessage(locations);
@@ -134,7 +134,7 @@ export function ShortlistDrawer({
                   <p className="text-sm text-slate-300">
                     {location.code} | {location.categoryName} | {sqm(location.sqm)}
                   </p>
-                  {location.showPricePublic && (location.rateCard || location.rateCardValue) ? (
+                  {location.rateCard || location.rateCardValue ? (
                     <p className="text-sm font-bold text-focus-yellow">
                       Rate card: {monthlyRate(location.rateCardValue, location.rateCard)}
                     </p>

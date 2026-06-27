@@ -16,21 +16,26 @@ assert.equal(visible.installationRemoval, "Montare 250 EUR", "Installation text 
 assert.equal(visible.installationRemovalValue, 250, "Installation value should be visible when enabled.");
 assert.equal(visible.latDisplay, 44.43, "Display latitude should be exposed.");
 assert.equal(visible.lngDisplay, 26.1, "Display longitude should be exposed.");
-assert.equal(visible.latReal, null, "Internal latitude must not be exposed publicly.");
-assert.equal(visible.lngReal, null, "Internal longitude must not be exposed publicly.");
-assert.equal(visible.mapsUrl, null, "Stored maps URL may contain private coordinates and must not be exposed publicly.");
+assert.equal("latReal" in visible, false, "Internal latitude key must not be exposed publicly.");
+assert.equal("lngReal" in visible, false, "Internal longitude key must not be exposed publicly.");
+assert.equal("mapsUrl" in visible, false, "Stored maps URL key may contain private coordinates and must not be exposed publicly.");
+assert.equal("reservations" in visible, false, "Reservation details key must not be exposed publicly.");
+assert.equal("internalNotes" in visible, false, "Internal notes key must not be exposed publicly.");
+assert.equal("monthlyCost" in visible, false, "Internal cost key must not be exposed publicly.");
+assert.equal("showPricePublic" in visible, false, "Internal price visibility flag must not be exposed publicly.");
+assert.equal("showInstallationCostPublic" in visible, false, "Internal installation visibility flag must not be exposed publicly.");
 
 const hidden = serializeLocation(location({
   showPricePublic: false,
   showInstallationCostPublic: false
 }));
-assert.equal(hidden.rateCard, null, "Public price text should be hidden when disabled.");
-assert.equal(hidden.rateCardValue, null, "Public price value should be hidden when disabled.");
-assert.equal(hidden.installationRemoval, null, "Installation text should be hidden when disabled.");
-assert.equal(hidden.installationRemovalValue, null, "Installation value should be hidden when disabled.");
+assert.equal("rateCard" in hidden, false, "Public price text key should be absent when disabled.");
+assert.equal("rateCardValue" in hidden, false, "Public price value key should be absent when disabled.");
+assert.equal("installationRemoval" in hidden, false, "Installation text key should be absent when disabled.");
+assert.equal("installationRemovalValue" in hidden, false, "Installation value key should be absent when disabled.");
 assert.equal(hidden.latDisplay, 44.43, "Display coordinates should remain public even when commercial fields are hidden.");
-assert.equal(hidden.latReal, null, "Hidden public DTO should not expose real latitude.");
-assert.equal(hidden.lngReal, null, "Hidden public DTO should not expose real longitude.");
+assert.equal("latReal" in hidden, false, "Hidden public DTO should not expose real latitude key.");
+assert.equal("lngReal" in hidden, false, "Hidden public DTO should not expose real longitude key.");
 
 const admin = serializeLocation(location({
   showPricePublic: false,

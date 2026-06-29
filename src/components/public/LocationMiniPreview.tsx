@@ -45,6 +45,9 @@ export function LocationMiniPreview({
   return (
     <motion.div
       className="fixed inset-0 z-50 grid place-items-center overflow-auto bg-black/72 p-4 backdrop-blur"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Prezentare rapida locatie"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}

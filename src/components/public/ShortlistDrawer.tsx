@@ -106,6 +106,9 @@ export function ShortlistDrawer({
       exit={{ x: "100%" }}
       transition={{ type: "spring", stiffness: 240, damping: 28 }}
       className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-2xl min-w-0 flex-col overflow-hidden border-l border-focus-line bg-focus-navy shadow-focus"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Media plan selectat"
     >
       <header className="flex items-center justify-between gap-3 border-b border-focus-line p-5">
         <div className="min-w-0">

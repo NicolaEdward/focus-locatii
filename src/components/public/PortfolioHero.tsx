@@ -38,8 +38,7 @@ export function PortfolioHero({
             Portofoliu Focus Media Outdoor
           </h1>
           <p className="mt-4 max-w-2xl text-base leading-7 text-slate-100 md:mt-5 md:text-xl md:leading-8">
-            Alege locatii dupa zona, format si disponibilitate. Creeaza rapid o selectie vizuala pentru
-            campania ta, cu harti, imagini si detalii comerciale pregatite pentru client.
+            Locatii outdoor vizibile. Alege rapid panourile potrivite pentru campania ta.
           </p>
 
           <div className="hero-actions mt-5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3 md:mt-7">

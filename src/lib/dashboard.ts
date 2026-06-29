@@ -10,6 +10,7 @@ import { getFinancialDashboardData } from "@/lib/financial-dashboard";
 import { sortOperationalLocations } from "@/lib/location-order";
 import { calculateLocationProfit } from "@/lib/profit";
 import { effectiveInstallationDate, hasMissingInstallationSchedule } from "@/lib/installation-date";
+import { effectiveNeutralizationDate, hasMissingNeutralizationSchedule } from "@/lib/neutralization-date";
 import {
   listOperationalTasksWithFallback,
   operationTaskReadsEnabled,
@@ -310,9 +311,7 @@ export async function getDashboardData(session: AuthSession) {
   const missingInstallations = campaigns.filter(
     (item) => item.status === "BOOKED" && item.periodStart <= inThirtyDays && hasMissingInstallationSchedule(item)
   );
-  const missingNeutralizations = campaigns.filter(
-    (item) => item.status === "BOOKED" && item.periodEnd >= operationWindowStart && item.periodEnd <= inThirtyDays && !item.neutralizationDate
-  );
+  const missingNeutralizations = campaigns.filter((item) => item.status === "BOOKED" && hasMissingNeutralizationSchedule(item));
   const monthlySales = campaigns.filter(
     (item) => item.status === "BOOKED" && item.periodStart <= monthEnd && item.periodEnd >= monthStart
   );
@@ -485,6 +484,10 @@ function serializeCampaign(item: CampaignRow) {
     reportEnd: monthEnd
   });
   const daysRemaining = Math.ceil((item.periodEnd.getTime() - new Date().getTime()) / (24 * 60 * 60 * 1000));
+  const installation = effectiveInstallationDate(item);
+  const neutralization = item.status === "BOOKED"
+    ? effectiveNeutralizationDate(item)
+    : { date: item.neutralizationDate, source: item.neutralizationDate ? "neutralizationDate" as const : null };
   return {
     id: item.id,
     campaignId: item.campaignId,
@@ -522,9 +525,10 @@ function serializeCampaign(item: CampaignRow) {
     contractGroupId: item.contractGroupId,
     periodStart: item.periodStart.toISOString(),
     periodEnd: item.periodEnd.toISOString(),
-    installationDate: effectiveInstallationDate(item).date?.toISOString() || null,
-    installationDateSource: effectiveInstallationDate(item).source,
-    neutralizationDate: (item.neutralizationDate || (item.status === "BOOKED" ? item.periodEnd : null))?.toISOString() || null,
+    installationDate: installation.date?.toISOString() || null,
+    installationDateSource: installation.source,
+    neutralizationDate: neutralization.date?.toISOString() || null,
+    neutralizationDateSource: neutralization.source,
     holdExpiresAt: item.holdExpiresAt?.toISOString() || null,
     bookedAt: item.bookedAt?.toISOString() || item.createdAt.toISOString(),
     daysRemaining
@@ -767,7 +771,7 @@ function buildProblemCenter(input: {
     severity: "critical",
     ownerUserId: first.sellerUserId || second.sellerUserId,
     dueDate: first.periodStart.toISOString(),
-    recommendedAction: "Verifica perioadele si modifica una dintre inchirieri sau aproba exceptia.",
+    recommendedAction: "Verifica perioadele si corecteaza manual una dintre inchirieri.",
     status: "open"
   }));
 
@@ -804,15 +808,15 @@ function buildProblemCenter(input: {
   input.missingNeutralizations.forEach((campaign) => problems.push({
     id: `missing-neutral-${campaign.id}`,
     module: "Operational",
-    type: "missing_neutralization_date",
-    title: `Campanie fara data neutralizare: ${campaign.clientName}`,
-    plainLanguageDescription: `Campania ${campaign.campaignName || campaign.location.code} nu are data de neutralizare.`,
+    type: "missing_neutralization_schedule",
+    title: `Campanie fara data valida de neutralizare: ${campaign.clientName}`,
+    plainLanguageDescription: `Campania ${campaign.campaignName || campaign.location.code} nu are nici data de neutralizare, nici data valida de final.`,
     entityType: "reservation",
     entityId: campaign.id,
     severity: "medium",
     ownerUserId: campaign.sellerUserId || campaign.ownerId,
-    dueDate: campaign.periodEnd.toISOString(),
-    recommendedAction: "Seteaza data de neutralizare pentru echipa operationala.",
+    dueDate: null,
+    recommendedAction: "Corecteaza data de final sau seteaza explicit data de neutralizare.",
     status: "open"
   }));
 
@@ -998,12 +1002,12 @@ function findConflicts(items: CampaignRow[]) {
   const conflicts: Array<[CampaignRow, CampaignRow]> = [];
   const byLocation = new Map<string, CampaignRow[]>();
   for (const item of active) {
-    const group = byLocation.get(item.location.code) || [];
+    const group = byLocation.get(item.location.id) || [];
     for (const existing of group) {
       if (existing.periodEnd >= item.periodStart) conflicts.push([existing, item]);
     }
     group.push(item);
-    byLocation.set(item.location.code, group);
+    byLocation.set(item.location.id, group);
   }
   return conflicts;
 }

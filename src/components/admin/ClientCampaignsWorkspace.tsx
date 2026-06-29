@@ -597,7 +597,7 @@ export function ClientCampaignsWorkspace({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs font-black uppercase text-focus-yellow">Clienti / Campanii / Facturi</p>
-            <h1 className="font-display text-3xl font-black uppercase text-white">Accounts OOH</h1>
+            <h1 className="font-display text-3xl font-black uppercase text-white">Clienti si campanii OOH</h1>
             <p className="mt-1 max-w-3xl text-sm text-slate-400">
               Clientul este firma, campania este proiectul, locatia este inventarul vandut, iar factura este partea financiara.
             </p>

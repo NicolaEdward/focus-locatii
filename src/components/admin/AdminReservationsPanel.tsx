@@ -221,7 +221,7 @@ export function AdminReservationsPanel({
   const canManageAllReservations = hasPermission(session.role, "reservations.manage");
   const canAssignOtherSeller = ["SALES_DIRECTOR", "COO", "SUPER_ADMIN"].includes(session.role);
   const canApproveReservations = hasPermission(session.role, "proposals.approve") || session.role === "COO" || session.role === "SUPER_ADMIN";
-  const canUpdateOperationStatus = hasAnyPermission(session.role, ["campaigns.operate", "reservations.manage", "reservations.manage.own"]);
+  const canUpdateOperationStatus = hasPermission(session.role, "campaigns.operate");
   const canViewSalesReport = hasPermission(session.role, "reports.view");
   const canManageLeads = hasAnyPermission(session.role, ["leads.manage", "leads.manage.own"]);
   const canEditReservations = hasAnyPermission(session.role, ["reservations.manage", "reservations.manage.own"]);
@@ -1409,8 +1409,8 @@ export function AdminReservationsPanel({
           kicker="Implementare"
           title="Decorari programate"
           description={canUpdateOperationStatus
-            ? "Vanzatorii pot inchide decorarile clientilor proprii, iar rolurile operationale pot gestiona toata lista."
-            : "Lista comuna pentru toti utilizatorii. Statusul este disponibil doar responsabililor si rolurilor operationale."}
+            ? "Rolurile operationale pot actualiza statusul decorarilor."
+            : "Lista comuna pentru toti utilizatorii. Statusul este disponibil doar rolurilor operationale."}
         >
           <OperationHistoryToggle checked={showOperationHistory} onChange={setShowOperationHistory} />
           <DecorationBillingSummary
@@ -1435,8 +1435,8 @@ export function AdminReservationsPanel({
           kicker="Implementare"
           title="Neutralizari programate"
           description={canUpdateOperationStatus
-            ? "Vanzatorii pot inchide neutralizarile clientilor proprii, iar rolurile operationale pot gestiona toata lista."
-            : "Lista comuna pentru toti utilizatorii. Statusul este disponibil doar responsabililor si rolurilor operationale."}
+            ? "Rolurile operationale pot actualiza statusul neutralizarilor."
+            : "Lista comuna pentru toti utilizatorii. Statusul este disponibil doar rolurilor operationale."}
         >
           <OperationHistoryToggle checked={showOperationHistory} onChange={setShowOperationHistory} />
           <OperationsTable
@@ -1755,12 +1755,8 @@ function extraOperationTask(reservation: ReservationDTO, task: OperationExtraTas
   };
 }
 
-function canEditOperationalReservation(reservation: ReservationDTO, session: AuthSession) {
-  if (hasAnyPermission(session.role, ["campaigns.operate", "reservations.manage"])) return true;
-  if (!hasPermission(session.role, "reservations.manage.own")) return false;
-
-  const legacyOwner = [session.name, session.email].includes(reservation.salesperson || "");
-  return reservation.sellerUserId === session.id || reservation.ownerId === session.id || (!reservation.ownerId && legacyOwner);
+function canEditOperationalReservation(_reservation: ReservationDTO, session: AuthSession) {
+  return hasPermission(session.role, "campaigns.operate");
 }
 
 function AdminTableShell({

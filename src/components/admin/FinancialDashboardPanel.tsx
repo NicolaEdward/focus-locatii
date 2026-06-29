@@ -385,7 +385,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
           {financialTab === "overdue" ? <MoneyTable title="Restante" rows={filterCurrency([...data.lists.overdueReceivables, ...data.lists.overduePayables], currencyFilter)} /> : null}
           {financialTab === "upcoming" ? <MoneyTable title="Scadente urmatoarele 7 zile" rows={filterCurrency([...data.lists.dueSoonReceivables, ...data.lists.dueSoonPayables], currencyFilter)} /> : null}
           {financialTab === "companies" ? <CompanyTable rows={data.companies} compact /> : null}
-          {financialTab === "review" ? <MoneyTable title="Needs Review" rows={filterCurrency([...data.lists.needsReviewReceivables, ...data.lists.needsReviewPayables], currencyFilter)} reviewMode onReviewed={refreshFinancial} /> : null}
+          {financialTab === "review" ? <MoneyTable title="Necesita verificare" rows={filterCurrency([...data.lists.needsReviewReceivables, ...data.lists.needsReviewPayables], currencyFilter)} reviewMode onReviewed={refreshFinancial} /> : null}
           {financialTab === "archive" ? <MoneyTable title="Arhiva / fara scadenta" rows={filterCurrency([...data.lists.missingDueReceivables, ...data.lists.missingDuePayables], currencyFilter)} /> : null}
           {financialTab === "uploads" ? <UploadHistory rows={data.uploads} /> : null}
         </div>
@@ -400,7 +400,7 @@ const financialTabs: Array<{ id: FinancialTab; label: string }> = [
   { id: "overdue", label: "Restante" },
   { id: "upcoming", label: "Scadente" },
   { id: "companies", label: "Pe firme" },
-  { id: "review", label: "Needs Review" },
+  { id: "review", label: "Necesita verificare" },
   { id: "archive", label: "Arhiva" },
   { id: "uploads", label: "Uploaduri" }
 ];

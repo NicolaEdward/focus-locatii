@@ -21,9 +21,11 @@ import {
 import type { DashboardData } from "@/lib/dashboard";
 import { FinancialDashboardPanel } from "@/components/admin/FinancialDashboardPanel";
 import { adminNewReservationHref, adminReservationHref, adminReservationsHref } from "@/lib/admin-routes";
+import { hasPermission } from "@/lib/rbac";
 
 type CooData = DashboardData["coo"];
 type CooTab = "overview" | "issues" | "sales" | "crm" | "operations" | "inventory" | "financial" | "exports" | "admin";
+type OperationTaskFilter = "all" | "decoration" | "neutralization" | "overdue";
 type ReservationRow = CooData["holds"][number];
 type CampaignListRow = CooData["activeCampaigns"][number] | CooData["holds"][number];
 type TaskRow = CooData["decorationTasks"][number];
@@ -32,12 +34,12 @@ type ProblemRow = CooData["problems"][number];
 type SellerUser = { id: string; name: string; email: string; role: string };
 
 const tabs: Array<{ id: CooTab; label: string }> = [
-  { id: "overview", label: "Overview" },
+  { id: "overview", label: "Prioritati" },
   { id: "issues", label: "Probleme" },
   { id: "sales", label: "Vanzari" },
   { id: "crm", label: "CRM" },
-  { id: "operations", label: "Operational" },
-  { id: "inventory", label: "Inventory" },
+  { id: "operations", label: "Operatiuni" },
+  { id: "inventory", label: "Inventar" },
   { id: "financial", label: "Financiar" },
   { id: "exports", label: "Exporturi" },
   { id: "admin", label: "Admin" }
@@ -60,7 +62,9 @@ const crmStatuses = [
 
 export function CooCommandCenter({ data }: { data: DashboardData }) {
   const coo = data.coo;
+  const canOperateCampaigns = hasPermission(data.role, "campaigns.operate");
   const [activeTab, setActiveTab] = useState<CooTab>("overview");
+  const [operationFilter, setOperationFilter] = useState<OperationTaskFilter>("all");
   const [query, setQuery] = useState("");
   const [hiddenReservations, setHiddenReservations] = useState<Set<string>>(new Set());
   const [hiddenTasks, setHiddenTasks] = useState<Set<string>>(new Set());
@@ -74,6 +78,12 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
   const visibleHolds = useMemo(() => coo.holds.filter((item) => !hiddenReservations.has(item.id) && rowMatches(item, filterText)), [coo.holds, filterText, hiddenReservations]);
   const visibleExpiredHolds = useMemo(() => coo.expiredHolds.filter((item) => !hiddenReservations.has(item.id) && rowMatches(item, filterText)), [coo.expiredHolds, filterText, hiddenReservations]);
   const visibleTasks = useMemo(() => [...coo.decorationTasks, ...coo.neutralizationTasks].filter((item) => !hiddenTasks.has(item.id) && taskMatches(item, filterText)), [coo.decorationTasks, coo.neutralizationTasks, filterText, hiddenTasks]);
+  const filteredOperationTasks = useMemo(() => visibleTasks.filter((item) => {
+    if (operationFilter === "decoration") return item.kind === "decoration";
+    if (operationFilter === "neutralization") return item.kind === "neutralization";
+    if (operationFilter === "overdue") return item.overdue;
+    return true;
+  }), [operationFilter, visibleTasks]);
   const visibleCrm = useMemo(() => crmLeads.filter((item) => crmMatches(item, filterText)), [crmLeads, filterText]);
   const visibleProblems = useMemo(() => coo.problems.filter((item) => problemMatches(item, filterText)).slice(0, 80), [coo.problems, filterText]);
 
@@ -169,10 +179,10 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
       <div className="focus-container grid gap-6">
         <section className="grid gap-4 border-b border-focus-line pb-5 xl:grid-cols-[1fr_auto]">
           <div>
-            <p className="text-xs font-black uppercase text-focus-yellow">COO Operational Command Center</p>
+            <p className="text-xs font-black uppercase text-focus-yellow">Centru operational COO</p>
             <h1 className="font-display text-4xl font-black uppercase text-white">Control operational OOH</h1>
             <p className="mt-2 max-w-4xl text-sm font-bold leading-6 text-slate-300">
-              Campanii, conflicte, hold-uri, taskuri, vanzari, CRM, inventar si actiuni admin intr-un singur dashboard.
+              Prioritati zilnice pentru suprapuneri, hold-uri, operatiuni, campanii si blocaje financiare.
             </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 xl:w-[460px]">
@@ -222,7 +232,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
 
             {activeTab === "overview" ? (
               <div className="grid gap-5">
-                <Panel title="Operational Health" icon={<ShieldAlert size={18} />} action={<Link className="text-xs font-black text-focus-yellow" href="/admin/locatii">Inventar</Link>}>
+                <Panel title="Stare operationala" icon={<ShieldAlert size={18} />} action={<Link className="text-xs font-black text-focus-yellow" href="/admin/locatii">Inventar</Link>}>
                   <div className="grid gap-3 md:grid-cols-4">
                     <Metric label="Ocupate" value={coo.health.occupiedLocations} />
                     <Metric label="Blocate" value={coo.health.blockedLocations} tone="red" />
@@ -244,7 +254,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
             {activeTab === "issues" ? (
               <div className="grid gap-5">
                 <ProblemCenterPanel rows={visibleProblems} />
-                <Panel title={`Conflict Center (${coo.conflicts.length})`} icon={<AlertTriangle size={18} />}>
+                <Panel title={`Suprapuneri contracte (${coo.conflicts.length})`} icon={<AlertTriangle size={18} />}>
                   <div className="grid gap-3">
                     {coo.conflicts.length ? coo.conflicts.map((conflict) => (
                       <article key={conflict.id} className="rounded-lg border border-red-300/30 bg-red-500/10 p-4">
@@ -272,7 +282,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                 </div>
                 <div className="grid gap-5 xl:grid-cols-2">
                   <CampaignList title="Montaj fara data valida" rows={coo.missingInstallations} />
-                  <CampaignList title="Fara data neutralizare" rows={coo.missingNeutralizations} />
+                  <CampaignList title="Neutralizare fara data valida" rows={coo.missingNeutralizations} />
                 </div>
               </div>
             ) : null}
@@ -293,11 +303,13 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
 
             {activeTab === "operations" ? (
               <div className="grid gap-5">
-                <TaskPanel title="Taskuri operationale active" rows={visibleTasks} busy={busy} onCommand={command} />
-                <div className="grid gap-5 xl:grid-cols-2">
-                  <TaskPanel title="Decorari" rows={coo.decorationTasks.filter((task) => !hiddenTasks.has(task.id))} busy={busy} onCommand={command} />
-                  <TaskPanel title="Neutralizari" rows={coo.neutralizationTasks.filter((task) => !hiddenTasks.has(task.id))} busy={busy} onCommand={command} />
+                <div className="flex flex-wrap gap-2">
+                  <TaskFilterButton active={operationFilter === "all"} onClick={() => setOperationFilter("all")}>Toate ({visibleTasks.length})</TaskFilterButton>
+                  <TaskFilterButton active={operationFilter === "decoration"} onClick={() => setOperationFilter("decoration")}>Decorari ({visibleTasks.filter((task) => task.kind === "decoration").length})</TaskFilterButton>
+                  <TaskFilterButton active={operationFilter === "neutralization"} onClick={() => setOperationFilter("neutralization")}>Neutralizari ({visibleTasks.filter((task) => task.kind === "neutralization").length})</TaskFilterButton>
+                  <TaskFilterButton active={operationFilter === "overdue"} onClick={() => setOperationFilter("overdue")}>Intarziate ({visibleTasks.filter((task) => task.overdue).length})</TaskFilterButton>
                 </div>
+                <TaskPanel title="Operatiuni de facut" rows={filteredOperationTasks} busy={busy} canOperate={canOperateCampaigns} onCommand={command} />
               </div>
             ) : null}
 
@@ -408,7 +420,31 @@ function ReservationMini({ row, busy, onCommand, expired = false }: { row: Reser
   </article>;
 }
 
-function TaskPanel({ title, rows, busy, onCommand }: { title: string; rows: TaskRow[]; busy: string | null; onCommand: (id: string, action: string, body?: Record<string, unknown>, success?: string) => void }) {
+function TaskFilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      className={`rounded-md px-3 py-2 text-xs font-black uppercase transition ${active ? "bg-focus-yellow text-focus-navy" : "bg-focus-navy/60 text-slate-200 hover:bg-focus-yellow/10"}`}
+      type="button"
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TaskPanel({
+  title,
+  rows,
+  busy,
+  canOperate,
+  onCommand
+}: {
+  title: string;
+  rows: TaskRow[];
+  busy: string | null;
+  canOperate: boolean;
+  onCommand: (id: string, action: string, body?: Record<string, unknown>, success?: string) => void;
+}) {
   return <Panel title={`${title} (${rows.length})`} icon={<Wrench size={18} />}>
     <div className="overflow-x-auto">
       <table className="w-full min-w-[820px] text-sm">
@@ -420,11 +456,20 @@ function TaskPanel({ title, rows, busy, onCommand }: { title: string; rows: Task
           <td className="px-3 py-3 font-black text-white">{row.code}<small className="block text-slate-400">{row.kind}</small></td>
           <td className="px-3 py-3">{row.clientName}<small className="block text-slate-400">{row.salesperson || "-"}</small></td>
           <td className="px-3 py-3"><Badge tone={row.overdue ? "red" : "yellow"}>{row.status}</Badge></td>
-          <td className="px-3 py-3"><div className="flex flex-wrap gap-2">
-            <button className="focus-button secondary" type="button" disabled={busy === `operationStatus-${row.reservationId}`} onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "IN_PROGRESS"), "Taskul este in lucru.")}>In lucru</button>
-            <button className="focus-button" type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "DONE"), "Taskul a fost finalizat.")}>Finalizat</button>
-            <ActionMenu><button type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "ARCHIVED"), "Taskul a fost arhivat.")}>Arhiveaza</button><Link href={adminReservationHref(row.reservationId)}>Vezi contract</Link></ActionMenu>
-          </div></td>
+          <td className="px-3 py-3">
+            {canOperate ? (
+              <div className="flex flex-wrap gap-2">
+                <button className="focus-button secondary" type="button" disabled={busy === `operationStatus-${row.reservationId}`} onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "IN_PROGRESS"), "Taskul este in lucru.")}>In lucru</button>
+                <button className="focus-button" type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "DONE"), "Taskul a fost finalizat.")}>Finalizat</button>
+                <ActionMenu><button type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "ARCHIVED"), "Taskul a fost arhivat.")}>Arhiveaza</button><Link href={adminReservationHref(row.reservationId)}>Vezi contract</Link></ActionMenu>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs font-bold text-slate-500">Doar vizualizare</span>
+                <Link className="text-xs font-black text-focus-yellow hover:text-white" href={adminReservationHref(row.reservationId)}>Vezi contract</Link>
+              </div>
+            )}
+          </td>
         </tr>) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={5}>Nu exista taskuri active.</td></tr>}</tbody>
       </table>
     </div>

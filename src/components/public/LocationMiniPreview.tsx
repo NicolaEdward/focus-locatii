@@ -70,7 +70,7 @@ export function LocationMiniPreview({
             src={image}
             alt={location.code}
             decoding="async"
-            className="absolute inset-0 h-full w-full object-cover"
+            className="pointer-events-none absolute inset-0 h-full w-full object-cover"
             onError={(event) => {
               event.currentTarget.src = "/samples/location-placeholder.svg";
             }}

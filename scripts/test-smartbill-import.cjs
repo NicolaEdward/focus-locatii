@@ -395,9 +395,53 @@ assert.equal(supplierPreview.summary.matchedCount, 1);
 assert.equal(supplierPreview.summary.createSupplierCount, 1);
 assert.equal(supplierPreview.summary.duplicateCount, 0);
 
+const realCustomerFile = path.join(process.env.USERPROFILE || "", "Downloads", "Facturi_29_06_2026.xls");
+const realSupplierFile = path.join(process.env.USERPROFILE || "", "Downloads", "Raport_document_furnizori_29_06_2026 (1) (1).xls");
+if (fs.existsSync(realCustomerFile)) {
+  const realCustomerParsed = smartbill.parseSmartBillCustomerInvoices(fs.readFileSync(realCustomerFile));
+  const wrongTypeCustomerParsed = smartbill.parseSmartBillSupplierDocuments(fs.readFileSync(realCustomerFile));
+  const realCustomerPreview = smartbill.buildSmartBillPreview({
+    parsed: realCustomerParsed,
+    fileName: "Facturi_29_06_2026.xls",
+    companyContext: focusCompany,
+    context: {},
+    includeToken: false
+  });
+  assert.equal(realCustomerParsed.rows.length, 12, "Real SmartBill customer file must keep 12 parsed rows.");
+  assert.equal(realCustomerParsed.rows.filter((row) => !row.issues.length).length, 11, "Real SmartBill customer file must keep 11 valid rows.");
+  assert.equal(realCustomerPreview.summary.invalidCount, 1, "Real SmartBill customer file must keep exactly one invalid footer/blank row.");
+  assert.equal(realCustomerPreview.rows.filter((row) => row.totalAmount < 0).length, 3, "Real SmartBill customer file must keep three negative adjustment rows.");
+  assert.equal(realCustomerPreview.summary.autoLinkedAdjustmentCount, 2, "Kepi negative rows must auto-link to the same-report open invoice.");
+  assert.equal(realCustomerPreview.summary.adjustmentNeedsReviewCount, 1, "Rentea negative row must stay in review.");
+  assert.equal(realCustomerPreview.rows.find((row) => row.documentNumber === "EMP0364").linkedDocumentNumber, "EMP0367");
+  assert.equal(realCustomerPreview.rows.find((row) => row.documentNumber === "EMP0368").linkedDocumentNumber, "EMP0367");
+  assert.equal(realCustomerPreview.rows.find((row) => row.documentNumber === "EMP0365").proposedAction, "ADJUSTMENT_NEEDS_REVIEW");
+  assert.equal(wrongTypeCustomerParsed.rows.length, 12, "Wrong report type still reads the customer file rows.");
+  assert.equal(wrongTypeCustomerParsed.rows.filter((row) => row.issues.length).length, 12, "Wrong report type reproduces the 12/12 invalid regression.");
+}
+
+if (fs.existsSync(realSupplierFile)) {
+  const realSupplierParsed = smartbill.parseSmartBillSupplierDocuments(fs.readFileSync(realSupplierFile));
+  const realSupplierPreview = smartbill.buildSmartBillPreview({
+    parsed: realSupplierParsed,
+    fileName: "Raport_document_furnizori_29_06_2026.xls",
+    companyContext: focusCompany,
+    context: {},
+    includeToken: false
+  });
+  assert.equal(realSupplierParsed.rows.length, 40, "Real SmartBill supplier file must keep 40 parsed rows.");
+  assert.equal(realSupplierParsed.rows.filter((row) => !row.issues.length).length, 40, "Real SmartBill supplier file must keep 40 valid rows.");
+  assert.equal(realSupplierPreview.summary.invalidCount, 0, "Real SmartBill supplier file must not produce invalid rows.");
+  assert.equal(realSupplierPreview.rows.filter((row) => row.totalAmount < 0).length, 1, "Real SmartBill supplier file must keep one negative supplier document.");
+  assert.equal(realSupplierPreview.summary.adjustmentNeedsReviewCount, 1, "Negative supplier document must stay review-only.");
+  assert.equal(realSupplierPreview.rows.find((row) => row.totalAmount < 0).proposedAction, "ADJUSTMENT_NEEDS_REVIEW");
+}
+
 const previewRouteSource = fs.readFileSync(path.join(repoRoot, "src/app/api/admin/financial/smartbill/preview/route.ts"), "utf8");
 assert.ok(previewRouteSource.includes("companyNameSchema"), "SmartBill preview route must require a company context.");
 assert.ok(previewRouteSource.includes("resolveSmartBillCompanyContext"), "SmartBill preview route must validate the selected company.");
+assert.ok(previewRouteSource.includes("parseSmartBillReportWithDetection"), "SmartBill preview route must auto-detect a clearly mismatched report type.");
+assert.ok(previewRouteSource.includes("report_type_auto_detected"), "SmartBill preview route must log report type auto-detection.");
 assert.equal(previewRouteSource.includes("recordAudit"), false, "SmartBill preview must not write audit rows because preview is read-only.");
 assert.equal(/\.create\s*\(/.test(previewRouteSource), false, "SmartBill preview route must not create DB rows.");
 assert.equal(/\.update\s*\(/.test(previewRouteSource), false, "SmartBill preview route must not update DB rows.");
@@ -429,6 +473,7 @@ const financePanelSource = fs.readFileSync(path.join(repoRoot, "src/components/a
 assert.ok(financePanelSource.includes("Firma import"), "SmartBill UI must show a required company selector.");
 assert.ok(financePanelSource.includes("Alege firma"), "SmartBill UI must not silently default the company.");
 assert.ok(financePanelSource.includes('form.set("companyName", smartBillCompanyName)'), "SmartBill preview request must include company context.");
+assert.ok(financePanelSource.includes("setSmartBillReportType(payload.preview.reportType)"), "SmartBill UI must sync the selector when the preview auto-detects report type.");
 assert.ok(financePanelSource.includes("smartBillPreview.companyName === smartBillCompanyName"), "SmartBill confirm must be disabled on company mismatch.");
 assert.ok(financePanelSource.includes("CIF/CUI original") && financePanelSource.includes("CIF/CUI normalizat"), "SmartBill preview must show original and normalized fiscal codes.");
 assert.ok(financePanelSource.includes("Firma selectata"), "SmartBill preview summary must show the selected company.");

@@ -9,6 +9,7 @@ import {
   type SmartBillCompanyContext,
   type SmartBillExistingFinancialRow,
   type SmartBillMatchEntity,
+  type SmartBillParsedReport,
   type SmartBillReportType
 } from "@/lib/smartbill-import";
 import { prisma } from "@/lib/prisma";
@@ -44,10 +45,8 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const parsed = reportType === "customer_invoices"
-      ? parseSmartBillCustomerInvoices(buffer)
-      : parseSmartBillSupplierDocuments(buffer);
-    const context = await loadSmartBillPreviewContext(reportType, companyContext);
+    const parsed = parseSmartBillReportWithDetection(buffer, reportType);
+    const context = await loadSmartBillPreviewContext(parsed.reportType, companyContext);
     const preview = buildSmartBillPreview({ parsed, fileName: file.name, companyContext, context });
     return NextResponse.json({ preview }, { headers: noStoreHeaders });
   } catch (error) {
@@ -56,6 +55,43 @@ export async function POST(request: NextRequest) {
       { status: 400, headers: noStoreHeaders }
     );
   }
+}
+
+function parseSmartBillReportWithDetection(buffer: Buffer, requestedType: SmartBillReportType): SmartBillParsedReport {
+  const requested = parseSmartBillReport(buffer, requestedType);
+  const requestedValidRows = countValidSmartBillRows(requested);
+  if (requested.rows.length && requestedValidRows > 0) return requested;
+
+  const alternateType: SmartBillReportType = requestedType === "customer_invoices" ? "supplier_documents" : "customer_invoices";
+  let alternate: SmartBillParsedReport | null = null;
+  try {
+    alternate = parseSmartBillReport(buffer, alternateType);
+  } catch {
+    return requested;
+  }
+  const alternateValidRows = countValidSmartBillRows(alternate);
+  if (alternate.rows.length && alternateValidRows > requestedValidRows) {
+    console.info("[smartbill-preview] report_type_auto_detected", {
+      requestedType,
+      detectedType: alternateType,
+      requestedRows: requested.rows.length,
+      requestedValidRows,
+      alternateRows: alternate.rows.length,
+      alternateValidRows
+    });
+    return alternate;
+  }
+  return requested;
+}
+
+function parseSmartBillReport(buffer: Buffer, reportType: SmartBillReportType) {
+  return reportType === "customer_invoices"
+    ? parseSmartBillCustomerInvoices(buffer)
+    : parseSmartBillSupplierDocuments(buffer);
+}
+
+function countValidSmartBillRows(report: SmartBillParsedReport) {
+  return report.rows.filter((row) => !row.issues.length).length;
 }
 
 async function loadSmartBillPreviewContext(reportType: SmartBillReportType, companyContext: SmartBillCompanyContext) {

@@ -367,9 +367,14 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Raportul SmartBill nu a putut fi previzualizat.");
       setSmartBillPreview(payload.preview);
+      if (payload.preview?.reportType && payload.preview.reportType !== smartBillReportType) {
+        setSmartBillReportType(payload.preview.reportType);
+      }
       setSmartBillManualActions({});
       setSmartBillConfirmOpen(false);
-      setMessage("Preview SmartBill generat. Verifica randurile inainte de confirmare.");
+      setMessage(payload.preview?.reportType && payload.preview.reportType !== smartBillReportType
+        ? `Preview SmartBill generat. Tipul raportului a fost detectat ca ${smartBillReportTypeLabel(payload.preview.reportType)}.`
+        : "Preview SmartBill generat. Verifica randurile inainte de confirmare.");
     } catch (previewError) {
       setError(previewError instanceof Error ? previewError.message : "Raportul SmartBill nu a putut fi previzualizat.");
     } finally {
@@ -533,7 +538,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
           </button>
         </div>
         {smartBillPreview ? (
-          <div className="mt-5 rounded-lg border border-focus-line bg-focus-navy/35 p-4">
+          <div className="mt-5 min-w-0 max-w-full rounded-lg border border-focus-line bg-focus-navy/35 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-black text-white">{smartBillPreview.fileName}</h3>
@@ -1059,7 +1064,7 @@ function SmartBillManualCorrections({
     .map((action) => ({ action, row: rows.find((item) => smartBillRowKey(item) === smartBillManualActionKey(action)) }))
     .filter((item): item is { action: SmartBillManualAction; row: SmartBillPreview["rows"][number] } => Boolean(item.row));
   if (!corrected.length) return null;
-  return <section className="mt-4 rounded-lg border border-focus-line bg-focus-ink/45 p-4">
+  return <section className="mt-4 min-w-0 max-w-full rounded-lg border border-focus-line bg-focus-ink/45 p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div>
         <h4 className="text-sm font-black uppercase text-focus-yellow">Corectate manual</h4>
@@ -1175,7 +1180,7 @@ function SmartBillBucketTable({
   manualActions: Record<string, SmartBillManualAction>;
   onManualActionChange: React.Dispatch<React.SetStateAction<Record<string, SmartBillManualAction>>>;
 }) {
-  return <section className="rounded-lg border border-focus-line bg-focus-ink/45 p-4">
+  return <section className="min-w-0 max-w-full rounded-lg border border-focus-line bg-focus-ink/45 p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div>
         <h4 className="text-sm font-black uppercase text-focus-yellow">{title}</h4>
@@ -1183,7 +1188,7 @@ function SmartBillBucketTable({
       </div>
       <Badge tone={rows.length ? smartBillActionTone(rows[0].proposedAction) : "neutral"}>{rows.length} randuri</Badge>
     </div>
-    <div className="mt-3 max-h-[420px] overflow-auto">
+    <div className="mt-3 max-h-[420px] max-w-full overflow-auto overflow-x-auto">
       <table className="w-full min-w-[1320px] text-sm">
         <thead className="sticky top-0 z-10 bg-focus-navy text-left text-xs uppercase text-slate-400">
           <tr>
@@ -1371,7 +1376,7 @@ function SmartBillConfirmDialog({
   const reviewRows = preview.summary.needsReviewCount + preview.summary.adjustmentNeedsReviewCount + preview.summary.invalidCount;
   const financialLabel = preview.reportType === "customer_invoices" ? "facturi clienti" : "documente furnizori";
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6">
-    <section className="w-full max-w-2xl rounded-lg border border-focus-line bg-focus-ink p-5 shadow-2xl">
+    <section className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-focus-line bg-focus-ink p-5 shadow-2xl">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-black uppercase text-focus-yellow">Confirmare SmartBill</p>

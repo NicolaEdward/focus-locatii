@@ -160,6 +160,25 @@ type ReservationEditForm = {
   applyToGroup: boolean;
 };
 
+type ReservationConflictPreview = {
+  key: string;
+  conflicts: Array<{
+    reservationId: string;
+    locationId: string;
+    locationCode: string | null;
+    clientName: string | null;
+    campaignName: string | null;
+    status: string;
+    periodStart: string;
+    periodEnd: string;
+  }>;
+  warnings: Array<{
+    locationId: string;
+    locationCode: string | null;
+    message: string;
+  }>;
+};
+
 const emptyForm: ReservationForm = {
   locationIds: [],
   clientId: "",
@@ -270,6 +289,7 @@ export function AdminReservationsPanel({
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -417,6 +437,9 @@ export function AdminReservationsPanel({
     return total / selectedLocations.length;
   }, [form.monthlyRentTotal, selectedLocations.length]);
 
+  const reservationFormDirty = useMemo(() => isReservationFormDirty(form, initialForm), [form, initialForm]);
+  const reservationFormPeriodError = useMemo(() => reservationPeriodError(form.periodStart, form.periodEnd), [form.periodEnd, form.periodStart]);
+
   const locationStats = useMemo(
     () => ({
       total: locations.length,
@@ -477,6 +500,20 @@ export function AdminReservationsPanel({
   const editingGroupCount = useMemo(() => {
     if (!editingReservation?.contractGroupId) return 1;
     return reservations.filter((reservation) => reservation.contractGroupId === editingReservation.contractGroupId).length;
+  }, [editingReservation, reservations]);
+
+  const editingGroupLocations = useMemo(() => {
+    if (!editingReservation?.contractGroupId) return [];
+    return reservations
+      .filter((reservation) => reservation.contractGroupId === editingReservation.contractGroupId)
+      .map((reservation) => reservation.locationCode || locationsById.get(reservation.locationId)?.code || reservation.locationId);
+  }, [editingReservation, locationsById, reservations]);
+
+  const editingGroupLocationIds = useMemo(() => {
+    if (!editingReservation?.contractGroupId) return [];
+    return reservations
+      .filter((reservation) => reservation.contractGroupId === editingReservation.contractGroupId)
+      .map((reservation) => reservation.locationId);
   }, [editingReservation, reservations]);
 
   const operationalReservations = operationReservations?.length ? operationReservations : reservations;
@@ -595,6 +632,20 @@ export function AdminReservationsPanel({
     setForm((current) => ({ ...current, locationIds: [] }));
   }, []);
 
+  function resetReservationForm() {
+    setForm(initialForm);
+    setAssignOtherSeller(false);
+    setResetConfirmOpen(false);
+  }
+
+  function requestReservationFormReset() {
+    if (reservationFormDirty) {
+      setResetConfirmOpen(true);
+      return;
+    }
+    resetReservationForm();
+  }
+
   async function createReservation() {
     setSaving(true);
     setError(null);
@@ -645,8 +696,7 @@ export function AdminReservationsPanel({
           : [];
 
       setReservations((current) => [...createdReservations, ...current]);
-      setForm(initialForm);
-      setAssignOtherSeller(false);
+      resetReservationForm();
       setLocationSearch("");
       setMessage(
         createdReservations.length > 1
@@ -850,7 +900,11 @@ export function AdminReservationsPanel({
   }
 
   async function deleteReservation(id: string) {
-    if (!confirm("Anulezi aceasta rezervare? Inregistrarea ramane in istoric.")) return;
+    const reservation = reservations.find((item) => item.id === id);
+    const label = reservation
+      ? `${reservation.locationCode || reservation.locationId} / ${reservation.clientName || "fara client"}`
+      : id;
+    if (!confirm(`Anulezi rezervarea ${label}? Inregistrarea ramane in istoric.`)) return;
     const response = await fetch(`/api/reservations/${id}`, { method: "DELETE" });
     if (!response.ok) {
       setError("Rezervarea nu a putut fi stearsa.");
@@ -1097,6 +1151,9 @@ export function AdminReservationsPanel({
                 <option value="RESERVED">Hold intern - 5 zile</option>
                 {canCreateBookedReservation ? <option value="BOOKED">Inchiriat / contract inchis</option> : null}
               </SelectField>
+              <p className="rounded-lg border border-focus-line bg-focus-navy/35 px-3 py-2 text-xs font-bold text-slate-400 md:col-span-2">
+                HOLD/RESERVED poate porni cu date de contact sau client estimat. BOOKED cere client si campanie reale din baza de date, ca facturarea si operatiunile sa fie legate corect.
+              </p>
               <SellerAssignmentField
                 canAssignOtherSeller={canAssignOtherSeller}
                 checked={assignOtherSeller}
@@ -1181,6 +1238,7 @@ export function AdminReservationsPanel({
               </SelectField>
               <InputField type="date" label="Start campanie" value={form.periodStart} onChange={(periodStart) => setForm({ ...form, periodStart })} />
               <InputField type="date" label="Final campanie" value={form.periodEnd} onChange={(periodEnd) => setForm({ ...form, periodEnd })} />
+              {reservationFormPeriodError ? <p className="text-xs font-bold text-red-100 md:col-span-2">{reservationFormPeriodError}</p> : null}
               {form.status === "BOOKED" ? (
                 <div className="grid gap-3 md:col-span-2">
                   <label className="flex items-center justify-between gap-3 rounded-lg border border-focus-line bg-focus-navy/35 px-3 py-2 text-sm font-bold text-slate-200">
@@ -1257,11 +1315,11 @@ export function AdminReservationsPanel({
             />
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button className="focus-button" type="button" onClick={createReservation} disabled={saving || (form.status === "BOOKED" && (!form.clientId || !form.campaignId))}>
+              <button className="focus-button" type="button" onClick={createReservation} disabled={saving || Boolean(reservationFormPeriodError) || (form.status === "BOOKED" && (!form.clientId || !form.campaignId))}>
                 <Save size={18} />
                 {saving ? "Se salveaza..." : selectedLocations.length > 1 ? "Salveaza contract grupat" : "Salveaza rezervarea"}
               </button>
-              <button className="focus-button secondary" type="button" onClick={() => { setForm(initialForm); setAssignOtherSeller(false); }}>
+              <button className="focus-button secondary" type="button" onClick={requestReservationFormReset}>
                 <RefreshCcw size={18} />
                 Curata
               </button>
@@ -1609,12 +1667,20 @@ export function AdminReservationsPanel({
           reservation={editingReservation}
           form={editForm}
           groupCount={editingGroupCount}
+          groupLocationLabels={editingGroupLocations}
+          groupLocationIds={editingGroupLocationIds}
           saving={editing}
           canEditSalesperson={session.role !== "SALES_AGENT"}
           sellers={sellers}
           onChange={setEditForm}
           onClose={closeReservationEditor}
           onSave={saveEditedReservation}
+        />
+      ) : null}
+      {resetConfirmOpen ? (
+        <ReservationResetConfirmDialog
+          onCancel={() => setResetConfirmOpen(false)}
+          onConfirm={resetReservationForm}
         />
       ) : null}
     </section>
@@ -1797,6 +1863,34 @@ function OperationHistoryToggle({
   );
 }
 
+function ReservationResetConfirmDialog({
+  onCancel,
+  onConfirm
+}: {
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="focus-card w-full max-w-lg rounded-lg p-5 shadow-2xl">
+        <p className="text-xs font-black uppercase text-focus-yellow">Curata formularul</p>
+        <h2 className="font-display mt-1 text-2xl font-black uppercase text-white">Ai modificari nesalvate</h2>
+        <p className="mt-2 text-sm font-bold leading-6 text-slate-300">
+          Daca stergi formularul acum, se pierd locatiile selectate, perioada, clientul si observatiile introduse.
+        </p>
+        <div className="mt-5 flex flex-wrap justify-end gap-3 border-t border-focus-line pt-4">
+          <button className="focus-button secondary" type="button" onClick={onCancel}>
+            Pastreaza formularul
+          </button>
+          <button className="focus-button" type="button" onClick={onConfirm}>
+            Curata formularul
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReservationSummary({
   selectedLocations,
   clientName,
@@ -1835,6 +1929,8 @@ function ReservationEditDialog({
   reservation,
   form,
   groupCount,
+  groupLocationLabels,
+  groupLocationIds,
   saving,
   canEditSalesperson,
   sellers,
@@ -1845,6 +1941,8 @@ function ReservationEditDialog({
   reservation: ReservationDTO;
   form: ReservationEditForm;
   groupCount: number;
+  groupLocationLabels: string[];
+  groupLocationIds: string[];
   saving: boolean;
   canEditSalesperson: boolean;
   sellers: SellerUser[];
@@ -1855,13 +1953,62 @@ function ReservationEditDialog({
   const canApplyToGroup = Boolean(reservation.contractGroupId) && groupCount > 1;
   const calculatedShare = form.applyToGroup ? rentShareInputValue(form.monthlyRentTotal, groupCount) : null;
   const isBookedRental = reservation.status === "BOOKED";
+  const [periodPreview, setPeriodPreview] = useState<ReservationConflictPreview | null>(null);
+  const [periodPreviewLoading, setPeriodPreviewLoading] = useState(false);
+  const [periodPreviewError, setPeriodPreviewError] = useState<string | null>(null);
+  const periodError = reservationPeriodError(form.periodStart, form.periodEnd);
+  const periodChanged = form.periodStart !== dateInputValue(reservation.periodStart) || form.periodEnd !== dateInputValue(reservation.periodEnd);
+  const periodPreviewKey = `${reservation.id}|${form.applyToGroup ? "group" : "single"}|${form.periodStart}|${form.periodEnd}`;
+  const currentPeriodPreview = periodPreview?.key === periodPreviewKey ? periodPreview : null;
+  const mustPreviewPeriod = periodChanged;
+  const saveDisabled =
+    saving ||
+    Boolean(periodError) ||
+    (mustPreviewPeriod && (!currentPeriodPreview || currentPeriodPreview.conflicts.length > 0));
   const updateField = (field: keyof ReservationEditForm, value: string | boolean) => {
+    if (field === "periodStart" || field === "periodEnd" || field === "applyToGroup") {
+      setPeriodPreview(null);
+      setPeriodPreviewError(null);
+    }
     onChange({
       ...form,
       [field]: value,
       ...(isBookedRental && field === "periodEnd" && typeof value === "string" ? { neutralizationDate: value } : {})
     });
   };
+
+  async function runPeriodPreview() {
+    setPeriodPreviewError(null);
+    if (periodError) {
+      setPeriodPreviewError(periodError);
+      return;
+    }
+    setPeriodPreviewLoading(true);
+    try {
+      const response = await fetch("/api/admin/reservations/conflict-preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          reservationId: reservation.id,
+          locationIds: form.applyToGroup && groupLocationIds.length ? groupLocationIds : [reservation.locationId],
+          periodStart: form.periodStart,
+          periodEnd: form.periodEnd
+        })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || "Disponibilitatea nu a putut fi verificata.");
+      setPeriodPreview({
+        key: periodPreviewKey,
+        conflicts: Array.isArray(payload?.conflicts) ? payload.conflicts : [],
+        warnings: Array.isArray(payload?.warnings) ? payload.warnings : []
+      });
+    } catch (error) {
+      setPeriodPreview(null);
+      setPeriodPreviewError(error instanceof Error ? error.message : "Disponibilitatea nu a putut fi verificata.");
+    } finally {
+      setPeriodPreviewLoading(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
@@ -1882,14 +2029,22 @@ function ReservationEditDialog({
         </div>
 
         {canApplyToGroup ? (
-          <label className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-focus-line bg-focus-ink/45 px-3 py-2 text-sm font-bold text-slate-200">
-            Aplica modificarile comerciale pe toate cele {groupCount} locatii din grup
-            <input
-              type="checkbox"
-              checked={form.applyToGroup}
-              onChange={(event) => updateField("applyToGroup", event.target.checked)}
-            />
-          </label>
+          <div className="mt-4 rounded-lg border border-focus-line bg-focus-ink/45 p-3">
+            <label className="flex items-center justify-between gap-3 text-sm font-bold text-slate-200">
+              Aplica modificarile pe toate cele {groupCount} locatii din grup
+              <input
+                type="checkbox"
+                checked={form.applyToGroup}
+                onChange={(event) => updateField("applyToGroup", event.target.checked)}
+              />
+            </label>
+            {form.applyToGroup ? (
+              <div className="mt-3 rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">
+                Schimbarile comerciale, perioada si datele operationale se aplica intregului grup: {groupLocationLabels.slice(0, 12).join(", ")}
+                {groupLocationLabels.length > 12 ? ` +${groupLocationLabels.length - 12} locatii` : ""}. Verifica atent intervalul si statusul inainte de salvare.
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -1943,6 +2098,23 @@ function ReservationEditDialog({
           )}
           <InputField type="date" label="Start campanie" value={form.periodStart} onChange={(value) => updateField("periodStart", value)} />
           <InputField type="date" label="Final campanie" value={form.periodEnd} onChange={(value) => updateField("periodEnd", value)} />
+          <div className="grid gap-2 rounded-lg border border-focus-line bg-focus-navy/35 p-3 md:col-span-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs font-bold text-slate-300">
+                {mustPreviewPeriod
+                  ? "Perioada a fost modificata. Verifica disponibilitatea inainte de salvare."
+                  : "Perioada este neschimbata; verificarea nu este necesara."}
+              </p>
+              {mustPreviewPeriod ? (
+                <button className="focus-button secondary" type="button" onClick={runPeriodPreview} disabled={periodPreviewLoading || Boolean(periodError)}>
+                  {periodPreviewLoading ? "Se verifica..." : "Verifica disponibilitatea"}
+                </button>
+              ) : null}
+            </div>
+            {periodError ? <p className="text-xs font-bold text-red-100">{periodError}</p> : null}
+            {periodPreviewError ? <p className="text-xs font-bold text-red-100">{periodPreviewError}</p> : null}
+            {currentPeriodPreview ? <EditPeriodPreviewResult preview={currentPeriodPreview} /> : null}
+          </div>
           <InputField type="date" label="Data montaj explicita" value={form.installationDate} onChange={(value) => updateField("installationDate", value)} />
           {!form.installationDate && form.periodStart ? (
             <p className="text-xs font-bold text-slate-400">Implicit: data de start {dateLabel(form.periodStart)}.</p>
@@ -2003,12 +2175,42 @@ function ReservationEditDialog({
           <button className="focus-button secondary" type="button" onClick={onClose} disabled={saving}>
             Renunta
           </button>
-          <button className="focus-button" type="button" onClick={onSave} disabled={saving}>
+          <button className="focus-button" type="button" onClick={onSave} disabled={saveDisabled}>
             <Save size={18} />
             {saving ? "Se salveaza..." : "Salveaza modificarile"}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function EditPeriodPreviewResult({ preview }: { preview: ReservationConflictPreview }) {
+  if (!preview.conflicts.length && !preview.warnings.length) {
+    return <p className="rounded-md border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-100">Nu exista suprapuneri pentru perioada aleasa.</p>;
+  }
+  return (
+    <div className="grid gap-2">
+      {preview.conflicts.length ? (
+        <div className="rounded-md border border-red-300/30 bg-red-500/10 px-3 py-2">
+          <p className="text-xs font-black uppercase text-red-100">Suprapuneri active</p>
+          {preview.conflicts.map((conflict) => (
+            <p className="mt-1 text-xs font-bold text-red-50" key={`${conflict.reservationId}-${conflict.locationId}`}>
+              {conflict.locationCode || conflict.locationId}: {conflict.clientName || "Client necunoscut"} / {conflict.campaignName || "Fara campanie"} ({dateLabel(conflict.periodStart)} - {dateLabel(conflict.periodEnd)})
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {preview.warnings.length ? (
+        <div className="rounded-md border border-amber-300/40 bg-amber-400/10 px-3 py-2">
+          <p className="text-xs font-black uppercase text-amber-100">Atentionari</p>
+          {preview.warnings.map((warning) => (
+            <p className="mt-1 text-xs font-bold text-amber-50" key={`${warning.locationId}-${warning.message}`}>
+              {warning.locationCode || warning.locationId}: {warning.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2053,6 +2255,7 @@ function ReservationsTable({
         <tbody>
           {reservations.map((reservation) => {
             const location = locationsById.get(reservation.locationId);
+            const canCancelReservation = canDelete && activeReservationStatuses.includes(reservation.status);
             return (
               <tr
                 key={reservation.id}
@@ -2119,13 +2322,13 @@ function ReservationsTable({
                         Editeaza
                       </button>
                     ) : null}
-                    {canDelete ? (
+                    {canCancelReservation ? (
                       <button className="focus-button secondary" type="button" onClick={() => onDelete(reservation.id)}>
                         <Trash2 size={16} />
                         Anuleaza
                       </button>
                     ) : null}
-                    {!canEdit && !canDelete ? <span className="text-xs text-slate-500">Istoric protejat</span> : null}
+                    {!canEdit && !canCancelReservation ? <span className="text-xs text-slate-500">Istoric protejat</span> : null}
                   </div>
                 </Td>
               </tr>
@@ -2592,6 +2795,19 @@ function defaultBillingFrequency(rule: string, current: string) {
   if (["month_start", "month_end", "monthly_in_advance", "monthly_after_service"].includes(rule)) return "monthly";
   if (["campaign_start", "campaign_end", "upfront_on_contract", "upfront_before_campaign_start", "fixed_custom_date"].includes(rule)) return "once";
   return current || "monthly";
+}
+
+function isReservationFormDirty(form: ReservationForm, initialForm: ReservationForm) {
+  return JSON.stringify(form) !== JSON.stringify(initialForm);
+}
+
+function reservationPeriodError(periodStart: string, periodEnd: string) {
+  if (!periodStart || !periodEnd) return "Completeaza startul si finalul campaniei.";
+  const start = Date.parse(`${periodStart}T00:00:00.000Z`);
+  const end = Date.parse(`${periodEnd}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return "Perioada campaniei nu este valida.";
+  if (end <= start) return "Data de final trebuie sa fie dupa data de start.";
+  return null;
 }
 
 function dateInputValue(value: string | null | undefined) {

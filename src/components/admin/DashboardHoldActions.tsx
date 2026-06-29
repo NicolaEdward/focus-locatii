@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, XCircle } from 
 import type { AuthSession } from "@/lib/auth";
 import type { DashboardData } from "@/lib/dashboard";
 import { adminReservationHref, adminReservationsHref } from "@/lib/admin-routes";
+import { ReservationPeriodChangeDialog, type ReservationPeriodChangeTarget } from "@/components/admin/ReservationPeriodChangeDialog";
 
 type HoldRow = DashboardData["coo"]["holds"][number];
 type HoldAction = "confirmBooking" | "extendHold" | "releaseHold" | "markLost" | "changePeriod";
@@ -23,6 +24,7 @@ export function DashboardHoldActions({
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [periodTarget, setPeriodTarget] = useState<HoldRow | null>(null);
 
   const rows = useMemo(
     () => [
@@ -58,14 +60,6 @@ export function DashboardHoldActions({
     }
   }
 
-  function changePeriod(row: HoldRow) {
-    const periodStart = window.prompt("Data noua de start campanie (YYYY-MM-DD)", row.periodStart.slice(0, 10));
-    if (!periodStart) return;
-    const periodEnd = window.prompt("Data noua de final campanie (YYYY-MM-DD)", row.periodEnd.slice(0, 10));
-    if (!periodEnd) return;
-    command(row, "changePeriod", { periodStart, periodEnd }, "Perioada holdului a fost schimbata.");
-  }
-
   return (
     <section className="overflow-hidden rounded-lg border border-focus-line bg-focus-ink/70">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-focus-line px-5 py-4">
@@ -88,8 +82,10 @@ export function DashboardHoldActions({
         {message ? <Feedback tone="green">{message}</Feedback> : null}
         {error ? <Feedback tone="red">{error}</Feedback> : null}
 
-        {rows.length ? rows.map(({ row, expired }) => (
-          <article className="rounded-lg border border-focus-line bg-focus-navy/40 p-4" key={row.id}>
+        {rows.length ? rows.map(({ row, expired }) => {
+          const isActiveHold = ["HOLD", "RESERVED"].includes(row.status) && !expired;
+          const canChangePeriod = ["HOLD", "RESERVED", "BOOKED"].includes(row.status) && !expired;
+          return <article className="rounded-lg border border-focus-line bg-focus-navy/40 p-4" key={row.id}>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-black uppercase text-focus-yellow">{row.code} {row.city ? `- ${row.city}` : ""}</p>
@@ -104,39 +100,66 @@ export function DashboardHoldActions({
             </p>
 
             <div className="mt-3 flex flex-wrap gap-2">
-              {canConfirmBooking ? (
+              {canConfirmBooking && isActiveHold ? (
                 <button className="focus-button" type="button" disabled={busy === `confirmBooking-${row.id}`} onClick={() => command(row, "confirmBooking", {}, "Hold-ul a fost confirmat ca inchiriere.")}>
                   Confirma
                 </button>
               ) : null}
-              <button className="focus-button secondary" type="button" disabled={busy === `extendHold-${row.id}`} onClick={() => command(row, "extendHold", { days: 5 }, "Hold-ul a fost prelungit cu 5 zile.")}>
-                Prelungeste
-              </button>
-              {!expired ? (
-                <button className="focus-button secondary" type="button" disabled={busy === `changePeriod-${row.id}`} onClick={() => changePeriod(row)}>
+              {isActiveHold ? (
+                <button className="focus-button secondary" type="button" disabled={busy === `extendHold-${row.id}`} onClick={() => command(row, "extendHold", { days: 5 }, "Hold-ul a fost prelungit cu 5 zile.")}>
+                  Prelungeste
+                </button>
+              ) : null}
+              {canChangePeriod ? (
+                <button className="focus-button secondary" type="button" disabled={busy === `changePeriod-${row.id}`} onClick={() => setPeriodTarget(row)}>
                   Schimba perioada
                 </button>
               ) : null}
-              <button className="focus-button secondary" type="button" disabled={busy === `releaseHold-${row.id}`} onClick={() => command(row, "releaseHold", {}, "Locatia a fost eliberata.")}>
-                Elibereaza
-              </button>
-              <button className="focus-button secondary" type="button" disabled={busy === `markLost-${row.id}`} onClick={() => command(row, "markLost", {}, "Hold-ul a fost marcat ca pierdut.")}>
-                Pierdut
-              </button>
+              {isActiveHold ? (
+                <>
+                  <button className="focus-button secondary" type="button" disabled={busy === `releaseHold-${row.id}`} onClick={() => command(row, "releaseHold", {}, "Locatia a fost eliberata.")}>
+                    Elibereaza
+                  </button>
+                  <button className="focus-button secondary" type="button" disabled={busy === `markLost-${row.id}`} onClick={() => command(row, "markLost", {}, "Hold-ul a fost marcat ca pierdut.")}>
+                    Pierdut
+                  </button>
+                </>
+              ) : (
+                <span className="rounded border border-focus-line px-3 py-2 text-xs font-black text-slate-400">Fara actiuni de hold pentru statusul curent</span>
+              )}
               <Link className="focus-button secondary" href={adminReservationHref(row.id)}>
                 Detalii
               </Link>
             </div>
-          </article>
-        )) : (
+          </article>;
+        }) : (
           <div className="flex items-center gap-3 rounded-lg border border-focus-line bg-focus-navy/40 px-4 py-5 text-sm text-slate-300">
             <AlertTriangle className="h-5 w-5 shrink-0 text-focus-yellow" />
             Nu exista holduri pentru acest dashboard.
           </div>
         )}
       </div>
+      {periodTarget ? (
+        <ReservationPeriodChangeDialog
+          target={periodTargetFromHold(periodTarget)}
+          onClose={() => setPeriodTarget(null)}
+          onConfirm={(periodStart, periodEnd) => command(periodTarget, "changePeriod", { periodStart, periodEnd }, "Perioada holdului a fost schimbata.")}
+        />
+      ) : null}
     </section>
   );
+}
+
+function periodTargetFromHold(row: HoldRow): ReservationPeriodChangeTarget {
+  return {
+    id: row.id,
+    locationId: row.locationId,
+    locationLabel: [row.code, row.city].filter(Boolean).join(" / "),
+    clientName: row.clientName,
+    campaignName: row.campaignName,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd
+  };
 }
 
 function Badge({ children, tone }: { children: ReactNode; tone: "yellow" | "red" }) {

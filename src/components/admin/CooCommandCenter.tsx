@@ -22,6 +22,7 @@ import type { DashboardData } from "@/lib/dashboard";
 import { FinancialDashboardPanel } from "@/components/admin/FinancialDashboardPanel";
 import { adminNewReservationHref, adminReservationHref, adminReservationsHref } from "@/lib/admin-routes";
 import { hasPermission } from "@/lib/rbac";
+import { ReservationPeriodChangeDialog, type ReservationPeriodChangeTarget } from "@/components/admin/ReservationPeriodChangeDialog";
 
 type CooData = DashboardData["coo"];
 type CooTab = "overview" | "issues" | "sales" | "crm" | "operations" | "inventory" | "financial" | "exports" | "admin";
@@ -73,6 +74,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [periodTarget, setPeriodTarget] = useState<ReservationRow | null>(null);
 
   const filterText = query.toLowerCase();
   const visibleHolds = useMemo(() => coo.holds.filter((item) => !hiddenReservations.has(item.id) && rowMatches(item, filterText)), [coo.holds, filterText, hiddenReservations]);
@@ -265,11 +267,11 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                           </div>
                           <ActionMenu>
                             <span className="px-3 py-2 text-xs font-bold text-slate-300">Rezolvare manuala necesara</span>
-                            <button type="button" onClick={() => command(conflict.reservations[0].id, "createTask", { kind: "decoration", status: "NEW", note: "Verificare conflict operational." })}>Creeaza task</button>
+                            {canOperateCampaigns ? <button type="button" onClick={() => command(conflict.reservations[0].id, "createTask", { kind: "decoration", status: "NEW", note: "Verificare conflict operational." })}>Creeaza task</button> : null}
                           </ActionMenu>
                         </div>
                         <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                          {conflict.reservations.map((reservation) => <ReservationMini key={reservation.id} row={reservation} busy={busy} onCommand={command} />)}
+                          {conflict.reservations.map((reservation) => <ReservationMini key={reservation.id} row={reservation} busy={busy} canOperate={canOperateCampaigns} onCommand={command} onChangePeriod={setPeriodTarget} />)}
                         </div>
                       </article>
                     )) : <Empty text="Nu exista suprapuneri active." />}
@@ -277,8 +279,8 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                 </Panel>
 
                 <div className="grid gap-5 xl:grid-cols-2">
-                  <HoldPanel title="Hold-uri active" rows={visibleHolds} busy={busy} onCommand={command} />
-                  <HoldPanel title="Hold-uri expirate" rows={visibleExpiredHolds} busy={busy} onCommand={command} expired />
+                  <HoldPanel title="Hold-uri active" rows={visibleHolds} busy={busy} canOperate={canOperateCampaigns} onCommand={command} onChangePeriod={setPeriodTarget} />
+                  <HoldPanel title="Hold-uri expirate" rows={visibleExpiredHolds} busy={busy} canOperate={canOperateCampaigns} onCommand={command} onChangePeriod={setPeriodTarget} expired />
                 </div>
                 <div className="grid gap-5 xl:grid-cols-2">
                   <CampaignList title="Montaj fara data valida" rows={coo.missingInstallations} />
@@ -291,7 +293,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
               <div className="grid gap-5">
                 <SellerTable rows={coo.sellers} />
                 <div className="grid gap-5 xl:grid-cols-2">
-                  <HoldPanel title="Rezervari neconfirmate" rows={visibleHolds} busy={busy} onCommand={command} />
+                  <HoldPanel title="Rezervari neconfirmate" rows={visibleHolds} busy={busy} canOperate={canOperateCampaigns} onCommand={command} onChangePeriod={setPeriodTarget} />
                   <CampaignList title="Campanii confirmate" rows={coo.activeCampaigns} />
                 </div>
               </div>
@@ -357,6 +359,13 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
             ) : null}
           </div>
         </section>
+        {periodTarget ? (
+          <ReservationPeriodChangeDialog
+            target={periodTargetFromReservation(periodTarget)}
+            onClose={() => setPeriodTarget(null)}
+            onConfirm={(periodStart, periodEnd) => command(periodTarget.id, "changePeriod", { periodStart, periodEnd }, "Perioada a fost schimbata.")}
+          />
+        ) : null}
       </div>
     </main>
   );
@@ -387,15 +396,47 @@ function Feedback({ tone, text }: { tone: "green" | "red"; text: string }) {
   </p>;
 }
 
-function HoldPanel({ title, rows, busy, onCommand, expired = false }: { title: string; rows: ReservationRow[]; busy: string | null; onCommand: (id: string, action: string, body?: Record<string, unknown>, success?: string) => void; expired?: boolean }) {
+function HoldPanel({
+  title,
+  rows,
+  busy,
+  canOperate,
+  onCommand,
+  onChangePeriod,
+  expired = false
+}: {
+  title: string;
+  rows: ReservationRow[];
+  busy: string | null;
+  canOperate: boolean;
+  onCommand: (id: string, action: string, body?: Record<string, unknown>, success?: string) => void;
+  onChangePeriod: (row: ReservationRow) => void;
+  expired?: boolean;
+}) {
   return <Panel title={`${title} (${rows.length})`} icon={<CalendarClock size={18} />}>
     <div className="grid gap-3">
-      {rows.length ? rows.map((row) => <ReservationMini key={row.id} row={row} busy={busy} onCommand={onCommand} expired={expired} />) : <Empty text="Nu exista inregistrari." />}
+      {rows.length ? rows.map((row) => <ReservationMini key={row.id} row={row} busy={busy} canOperate={canOperate} onCommand={onCommand} onChangePeriod={onChangePeriod} expired={expired} />) : <Empty text="Nu exista inregistrari." />}
     </div>
   </Panel>;
 }
 
-function ReservationMini({ row, busy, onCommand, expired = false }: { row: ReservationRow; busy: string | null; onCommand: (id: string, action: string, body?: Record<string, unknown>, success?: string) => void; expired?: boolean }) {
+function ReservationMini({
+  row,
+  busy,
+  canOperate,
+  onCommand,
+  onChangePeriod,
+  expired = false
+}: {
+  row: ReservationRow;
+  busy: string | null;
+  canOperate: boolean;
+  onCommand: (id: string, action: string, body?: Record<string, unknown>, success?: string) => void;
+  onChangePeriod: (row: ReservationRow) => void;
+  expired?: boolean;
+}) {
+  const isActiveHold = ["HOLD", "RESERVED"].includes(row.status) && !expired;
+  const canChangePeriod = ["HOLD", "RESERVED", "BOOKED"].includes(row.status) && !expired;
   return <article className="rounded-lg border border-focus-line bg-focus-navy/40 p-3">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -407,14 +448,19 @@ function ReservationMini({ row, busy, onCommand, expired = false }: { row: Reser
     </div>
     <p className="mt-2 text-xs font-bold text-slate-300">{date(row.periodStart)} - {date(row.periodEnd)}{row.holdExpiresAt ? ` / expira ${dateTime(row.holdExpiresAt)}` : ""}</p>
     <div className="mt-3 flex flex-wrap gap-2">
-      <button className="focus-button" type="button" disabled={busy === `confirmBooking-${row.id}`} onClick={() => onCommand(row.id, "confirmBooking", {}, "Hold-ul a fost confirmat ca inchiriere.")}>Confirma</button>
-      <button className="focus-button secondary" type="button" onClick={() => onCommand(row.id, "extendHold", { days: 5 }, "Hold-ul a fost prelungit cu 5 zile.")}>Prelungeste</button>
-      <button className="focus-button secondary" type="button" onClick={() => onCommand(row.id, "releaseHold", {}, "Locatia a fost eliberata.")}>Elibereaza</button>
+      {isActiveHold ? (
+        <>
+          <button className="focus-button" type="button" disabled={busy === `confirmBooking-${row.id}`} onClick={() => onCommand(row.id, "confirmBooking", {}, "Hold-ul a fost confirmat ca inchiriere.")}>Confirma</button>
+          <button className="focus-button secondary" type="button" disabled={busy === `extendHold-${row.id}`} onClick={() => onCommand(row.id, "extendHold", { days: 5 }, "Hold-ul a fost prelungit cu 5 zile.")}>Prelungeste</button>
+          <button className="focus-button secondary" type="button" disabled={busy === `releaseHold-${row.id}`} onClick={() => onCommand(row.id, "releaseHold", {}, "Locatia a fost eliberata.")}>Elibereaza</button>
+        </>
+      ) : null}
       <ActionMenu>
         <Link href={adminReservationHref(row.id)}>Vezi detalii</Link>
-        <button type="button" onClick={() => changePeriod(row, onCommand)}>Schimba perioada</button>
-        <button type="button" onClick={() => onCommand(row.id, "markLost", {}, "Hold-ul a fost marcat ca pierdut.")}>Marcheaza pierdut</button>
-        <button type="button" onClick={() => onCommand(row.id, "createTask", { kind: "decoration", status: "NEW", note: "Follow-up operational pentru hold." })}>Creeaza task</button>
+        {canChangePeriod ? <button type="button" onClick={() => onChangePeriod(row)}>Schimba perioada</button> : null}
+        {isActiveHold ? <button type="button" onClick={() => onCommand(row.id, "markLost", {}, "Hold-ul a fost marcat ca pierdut.")}>Marcheaza pierdut</button> : null}
+        {canOperate ? <button type="button" onClick={() => onCommand(row.id, "createTask", { kind: "decoration", status: "NEW", note: "Follow-up operational pentru hold." })}>Creeaza task</button> : null}
+        {!isActiveHold && !canChangePeriod ? <span className="px-3 py-2 text-xs font-bold text-slate-400">Nu exista actiuni rapide pentru acest status.</span> : null}
       </ActionMenu>
     </div>
   </article>;
@@ -703,18 +749,22 @@ function severityTone(severity: ProblemRow["severity"]) {
   return "neutral" as const;
 }
 
-function changePeriod(row: ReservationRow, onCommand: (id: string, action: string, body?: Record<string, unknown>, success?: string) => void) {
-  const periodStart = window.prompt("Data noua de start campanie (YYYY-MM-DD)", row.periodStart.slice(0, 10));
-  if (!periodStart) return;
-  const periodEnd = window.prompt("Data noua de final campanie (YYYY-MM-DD)", row.periodEnd.slice(0, 10));
-  if (!periodEnd) return;
-  onCommand(row.id, "changePeriod", { periodStart, periodEnd }, "Perioada a fost schimbata.");
-}
-
 function setCrmEstimate(row: CrmLead, onUpdate: (id: string, patch: Record<string, unknown>) => void) {
   const estimatedValue = window.prompt("Valoare estimata EUR", row.estimatedValue ? String(row.estimatedValue) : "");
   if (estimatedValue == null) return;
   onUpdate(row.id, { estimatedValue });
+}
+
+function periodTargetFromReservation(row: ReservationRow): ReservationPeriodChangeTarget {
+  return {
+    id: row.id,
+    locationId: row.locationId,
+    locationLabel: [row.code, row.city].filter(Boolean).join(" / "),
+    clientName: row.clientName,
+    campaignName: row.campaignName,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd
+  };
 }
 
 function setCrmFollowUp(row: CrmLead, onUpdate: (id: string, patch: Record<string, unknown>) => void) {

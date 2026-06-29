@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { BriefcaseBusiness, Building2, Download, FileSpreadsheet, Gauge, Map, MapPin, Shield, Truck, UserRoundCheck, Users } from "lucide-react";
+import { BriefcaseBusiness, Building2, Download, FileSpreadsheet, Gauge, ListChecks, Map, MapPin, Shield, Truck, UserRoundCheck, Users } from "lucide-react";
 import { FocusLogo } from "@/components/brand/FocusLogo";
 import { LogoutButton } from "@/components/admin/LogoutButton";
 import { NotificationBell } from "@/components/admin/NotificationBell";
@@ -32,6 +32,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           <AdminNavLink href="/admin/dashboard" active={isActiveAdminPath(pathname, "/admin/dashboard")}><Gauge size={18} />Dashboard</AdminNavLink>
           <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Vezi portal public</AdminNavLink>
           {hasPermission(session.role, "inventory.view") ? <AdminNavLink href="/admin/locatii" active={isActiveAdminPath(pathname, "/admin/locatii")}><Shield size={18} />Locatii</AdminNavLink> : null}
+          {hasPermission(session.role, "inventory.view") ? <AdminNavLink href="/admin/selectie-locatii" active={isActiveAdminPath(pathname, "/admin/selectie-locatii")}><ListChecks size={18} />Selector oferta</AdminNavLink> : null}
           {hasAnyPermission(session.role, ["leads.view", "leads.view.own"]) ? <AdminNavLink href="/admin/crm" active={isActiveAdminPath(pathname, "/admin/crm")}><UserRoundCheck size={18} />CRM</AdminNavLink> : null}
           {hasAnyPermission(session.role, ["clients.view", "clients.view.own", "campaigns.view", "campaigns.view.own", "finance.view"]) ? <AdminNavLink href="/admin/clienti" active={isActiveAdminPath(pathname, "/admin/clienti")}><Building2 size={18} />Clienti</AdminNavLink> : null}
           {hasAnyPermission(session.role, ["campaigns.view", "campaigns.view.own", "finance.view"]) ? <AdminNavLink href="/admin/campanii" active={isActiveAdminPath(pathname, "/admin/campanii")}><BriefcaseBusiness size={18} />Campanii</AdminNavLink> : null}

@@ -51,6 +51,7 @@
     "test:dashboard-noise-cleanup": "node scripts/test-dashboard-noise-cleanup.cjs",
     "test:locations-panel-cleanup": "node scripts/test-locations-panel-cleanup.cjs",
     "test:location-detail-drawer": "node scripts/test-location-detail-drawer.cjs",
+    "test:location-selection": "node scripts/test-location-selection.cjs",
     "test:reservation-workflow-cleanup": "node scripts/test-reservation-workflow-cleanup.cjs",
     "test:admin-route-links": "node scripts/test-admin-route-links.cjs",
     "test:financial-import": "node scripts/test-financial-import.cjs",

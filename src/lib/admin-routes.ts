@@ -33,6 +33,10 @@ export function adminOperationalHref(params: AdminRouteParams = {}) {
   return adminReservationsHref({ panel: "decorations", ...params });
 }
 
+export function adminLocationSelectorHref(params: AdminRouteParams = {}) {
+  return adminHref("/admin/selectie-locatii", params);
+}
+
 function adminHref(path: string, params: AdminRouteParams = {}, anchor?: string) {
   const suffix = Object.entries(params)
     .filter(([, value]) => value !== undefined && value !== null && value !== false && value !== "")

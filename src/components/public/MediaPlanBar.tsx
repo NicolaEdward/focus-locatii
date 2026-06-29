@@ -1,9 +1,9 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { FileSpreadsheet, ShoppingBag } from "lucide-react";
+import { FileSpreadsheet, Lock, ShoppingBag } from "lucide-react";
 import { useState } from "react";
-import { sqm } from "@/lib/format";
+import { monthlyRate, sqm } from "@/lib/format";
 import { downloadMediaPlanExcel } from "@/lib/media-plan-download";
 import { selectedSqm } from "@/lib/media-plan";
 import type { LocationDTO } from "@/types/location";
@@ -17,6 +17,8 @@ export function MediaPlanBar({
 }) {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const publicRateLocations = locations.filter((location) => location.rateCard || location.rateCardValue);
+  const totalRate = publicRateLocations.reduce((sum, location) => sum + (location.rateCardValue || 0), 0);
 
   if (!locations.length) return null;
 
@@ -59,13 +61,20 @@ export function MediaPlanBar({
             <span className="block truncate font-display text-2xl font-black uppercase text-white">
               {locations.length} {locations.length === 1 ? "locatie selectata" : "locatii selectate"}
             </span>
-            <span className="block text-sm font-bold text-slate-300">Total suprafata: {sqm(selectedSqm(locations))}</span>
+            <span className="block text-sm font-bold text-slate-300">
+              Total suprafata: {sqm(selectedSqm(locations))}
+              {publicRateLocations.length ? ` / rate publice: ${totalRate ? monthlyRate(totalRate) : `${publicRateLocations.length} locatii`}` : ""}
+            </span>
           </span>
         </button>
 
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2 sm:grid-cols-3">
           <button type="button" className="focus-button secondary" onClick={onOpen}>
             Vezi selectia
+          </button>
+          <button type="button" className="focus-button secondary" disabled>
+            <Lock size={18} />
+            Salvare in curand
           </button>
           <button type="button" className="focus-button" onClick={exportExcel} disabled={exporting}>
             <FileSpreadsheet size={20} />

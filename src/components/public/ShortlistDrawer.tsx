@@ -1,8 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { FileSpreadsheet, Printer, Send, ShoppingBag, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { CalendarDays, FileSpreadsheet, Lock, Printer, Send, ShoppingBag, Sparkles, Trash2, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import { monthlyRate, sqm } from "@/lib/format";
 import { downloadMediaPlanExcel } from "@/lib/media-plan-download";
 import { mediaPlanMessage, selectedSqm } from "@/lib/media-plan";
@@ -28,13 +28,20 @@ export function ShortlistDrawer({
   const [offerEmail, setOfferEmail] = useState("");
   const [offerPhone, setOfferPhone] = useState("");
   const [offerMessage, setOfferMessage] = useState("");
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
   const [sendingOffer, setSendingOffer] = useState(false);
   const [offerFeedback, setOfferFeedback] = useState<string | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
   const publicRateLocations = locations.filter((location) => location.rateCard || location.rateCardValue);
   const totalRate = publicRateLocations.reduce((sum, location) => sum + (location.rateCardValue || 0), 0);
   const showPublicRates = publicRateLocations.length > 0;
-  const message = mediaPlanMessage(locations);
+  const periodSummary = useMemo(() => {
+    if (!periodStart && !periodEnd) return "";
+    if (periodStart && periodEnd) return `Perioada dorita: ${periodStart} - ${periodEnd}`;
+    return `Perioada dorita: ${periodStart || periodEnd}`;
+  }, [periodEnd, periodStart]);
+  const message = [mediaPlanMessage(locations), periodSummary].filter(Boolean).join("\n\n");
   const subject = "Cerere media plan Focus Media";
 
   if (!open) return null;
@@ -68,7 +75,7 @@ export function ShortlistDrawer({
           company: offerCompany,
           email: offerEmail,
           phone: offerPhone,
-          message: offerMessage,
+          message: [offerMessage, periodSummary].filter(Boolean).join("\n\n"),
           selectedLocationIds: locations.map((location) => location.id),
           source: "portal-client"
         })
@@ -98,49 +105,85 @@ export function ShortlistDrawer({
       animate={{ x: 0 }}
       exit={{ x: "100%" }}
       transition={{ type: "spring", stiffness: 240, damping: 28 }}
-      className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-xl flex-col border-l border-focus-line bg-focus-navy shadow-focus"
+      className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-2xl min-w-0 flex-col overflow-hidden border-l border-focus-line bg-focus-navy shadow-focus"
     >
-      <header className="flex items-center justify-between border-b border-focus-line p-5">
-        <div>
+      <header className="flex items-center justify-between gap-3 border-b border-focus-line p-5">
+        <div className="min-w-0">
           <p className="text-xs font-black uppercase text-focus-yellow">Media plan client</p>
-          <h2 className="font-display text-3xl font-black uppercase">Selectia ta</h2>
+          <h2 className="font-display text-3xl font-black uppercase leading-none text-white">Selectia ta</h2>
+          <p className="mt-1 text-sm font-bold text-slate-300">Locatii salvate pentru oferta si export.</p>
         </div>
-        <button className="focus-button secondary" type="button" onClick={onClose} aria-label="Inchide media plan">
+        <button className="focus-button secondary shrink-0" type="button" onClick={onClose} aria-label="Inchide media plan">
           <X size={18} />
         </button>
       </header>
 
-      <div className={showPublicRates ? "grid grid-cols-3 gap-3 p-5" : "grid grid-cols-2 gap-3 p-5"}>
-        <Stat label="Locatii" value={locations.length.toString()} />
-        <Stat label="Total SQM" value={sqm(totalSqm)} />
-        {showPublicRates ? <Stat label="Rate public" value={totalRate ? monthlyRate(totalRate) : "N/A"} /> : null}
-      </div>
+      <section className="grid gap-3 border-b border-focus-line p-5">
+        <div className={showPublicRates ? "grid grid-cols-3 gap-3" : "grid grid-cols-2 gap-3"}>
+          <Stat label="Locatii" value={locations.length.toString()} />
+          <Stat label="Suprafata" value={sqm(totalSqm)} />
+          {showPublicRates ? <Stat label="Rate public" value={totalRate ? monthlyRate(totalRate) : `${publicRateLocations.length} locatii`} /> : null}
+        </div>
 
-      <div className="flex-1 overflow-auto px-5">
+        <div className="grid gap-3 rounded-lg border border-focus-line bg-focus-ink/45 p-3">
+          <div className="flex items-center gap-2 text-xs font-black uppercase text-focus-yellow">
+            <CalendarDays size={16} />
+            Perioada dorita
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              className="focus-input"
+              type="date"
+              aria-label="Data inceput campanie"
+              value={periodStart}
+              onChange={(event) => setPeriodStart(event.target.value)}
+            />
+            <input
+              className="focus-input"
+              type="date"
+              aria-label="Data final campanie"
+              value={periodEnd}
+              onChange={(event) => setPeriodEnd(event.target.value)}
+            />
+          </div>
+        </div>
+      </section>
+
+      <div className="flex-1 overflow-auto px-5 py-4">
         {locations.length ? (
           <div className="grid gap-3">
             {locations.map((location) => (
-              <article key={location.id} className="focus-card grid grid-cols-[92px_1fr_auto] gap-3 rounded-lg p-3">
+              <article key={location.id} className="focus-card grid min-w-0 grid-cols-[92px_1fr_auto] gap-3 rounded-lg p-3">
                 <img
-                  src={location.mainPhotoUrl || "/samples/location-placeholder.svg"}
+                  src={location.mainPhotoUrl || location.images[0]?.url || "/samples/location-placeholder.svg"}
                   alt={location.code}
-                  className="h-20 w-full rounded-md object-cover"
+                  loading="lazy"
+                  decoding="async"
+                  className="h-24 w-full rounded-md object-cover"
                   onError={(event) => {
                     event.currentTarget.src = "/samples/location-placeholder.svg";
                   }}
                 />
-                <div>
-                  <p className="font-black text-white">{location.address || location.code}</p>
-                  <p className="text-sm text-slate-300">
-                    {location.code} | {location.categoryName} | {sqm(location.sqm)}
+                <div className="min-w-0">
+                  <p className="font-display text-xl font-black uppercase leading-none text-white">{location.code}</p>
+                  <p className="mt-1 line-clamp-2 text-sm font-bold text-slate-200">{location.address || location.city || location.categoryName}</p>
+                  <p className="mt-2 text-xs font-black uppercase text-slate-400">
+                    {[location.city, location.type, location.size, sqm(location.sqm)].filter(Boolean).join(" / ")}
                   </p>
                   {location.rateCard || location.rateCardValue ? (
-                    <p className="text-sm font-bold text-focus-yellow">
-                      Rate card: {monthlyRate(location.rateCardValue, location.rateCard)}
+                    <p className="mt-2 text-sm font-black text-focus-yellow">
+                      {monthlyRate(location.rateCardValue, location.rateCard)}
                     </p>
-                  ) : null}
+                  ) : (
+                    <p className="mt-2 text-xs font-bold text-slate-400">Pret la cerere</p>
+                  )}
                 </div>
-                <button className="text-slate-300 hover:text-red-200" type="button" onClick={() => onRemove(location.id)}>
+                <button
+                  className="rounded-md p-2 text-slate-300 transition hover:bg-red-500/15 hover:text-red-100"
+                  type="button"
+                  onClick={() => onRemove(location.id)}
+                  aria-label={`Elimina ${location.code} din media plan`}
+                >
                   <Trash2 size={18} />
                 </button>
               </article>
@@ -159,18 +202,20 @@ export function ShortlistDrawer({
             </div>
           </div>
         )}
-      </div>
 
-      <footer className="grid gap-3 border-t border-focus-line p-5">
-        <button className="focus-button" type="button" onClick={exportExcel} disabled={!locations.length || exporting}>
-          <FileSpreadsheet size={20} />
-          {exporting ? "Se exporta..." : "Exporta Excel media plan"}
-        </button>
-        {exportError ? <p className="text-sm font-bold text-red-200">{exportError}</p> : null}
-
-        <div className="rounded-lg border border-focus-line bg-focus-ink/45 p-3">
-          <p className="text-xs font-black uppercase text-focus-yellow">Solicitare oferta</p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <section className="mt-4 grid gap-3 rounded-lg border border-focus-line bg-focus-ink/45 p-4">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-focus-yellow text-focus-navy">
+              <Send size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-black uppercase text-focus-yellow">Cere oferta pentru selectie</p>
+              <p className="mt-1 text-sm font-bold text-slate-300">
+                Trimite selectia catre Focus Media. Echipa verifica disponibilitatea finala inainte de oferta.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
             <input
               className="focus-input"
               aria-label="Nume"
@@ -208,7 +253,7 @@ export function ShortlistDrawer({
             />
           </div>
           <button
-            className="focus-button mt-3 w-full"
+            className="focus-button w-full"
             type="button"
             onClick={submitOfferRequest}
             disabled={!locations.length || sendingOffer}
@@ -216,11 +261,22 @@ export function ShortlistDrawer({
             <Send size={18} />
             {sendingOffer ? "Se trimite..." : "Trimite cerere"}
           </button>
-          {offerFeedback ? <p className="mt-2 text-sm font-bold text-emerald-200">{offerFeedback}</p> : null}
-          {offerError ? <p className="mt-2 text-sm font-bold text-red-200">{offerError}</p> : null}
-        </div>
+          {offerFeedback ? <p className="text-sm font-bold text-emerald-200">{offerFeedback}</p> : null}
+          {offerError ? <p className="text-sm font-bold text-red-200">{offerError}</p> : null}
+        </section>
+      </div>
 
-        <ContactButtons message={message} subject={subject} className="grid gap-2" buttonClassName="focus-button" />
+      <footer className="grid gap-3 border-t border-focus-line p-5">
+        <button className="focus-button" type="button" onClick={exportExcel} disabled={!locations.length || exporting}>
+          <FileSpreadsheet size={20} />
+          {exporting ? "Se exporta..." : "Exporta Excel media plan"}
+        </button>
+        {exportError ? <p className="text-sm font-bold text-red-200">{exportError}</p> : null}
+        <button className="focus-button secondary" type="button" disabled>
+          <Lock size={18} />
+          Salveaza ca media plan - in curand
+        </button>
+        <ContactButtons message={message} subject={subject} className="grid gap-2" buttonClassName="focus-button secondary" />
         <button className="focus-button secondary" type="button" onClick={() => window.print()}>
           <Printer size={20} />
           Printeaza / salveaza PDF
@@ -234,7 +290,9 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="focus-card rounded-lg p-3">
       <p className="text-xs font-black uppercase text-focus-yellow">{label}</p>
-      <p className="mt-1 font-display text-2xl font-black uppercase">{value}</p>
+      <p className="mt-1 flex items-center gap-2 font-display text-2xl font-black uppercase text-white">
+        <Sparkles size={18} /> {value}
+      </p>
     </div>
   );
 }

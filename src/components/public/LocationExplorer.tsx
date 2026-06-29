@@ -195,8 +195,8 @@ export function LocationExplorer({
                 <SlidersHorizontal size={22} />
               </span>
               <div>
-                <p className="text-xs font-black uppercase text-focus-yellow">Filtre portofoliu</p>
-                <h1 className="font-display text-3xl font-black uppercase leading-none text-white">Selectie locatii</h1>
+                <p className="text-xs font-black uppercase text-focus-yellow">Catalog outdoor media</p>
+                <h1 className="font-display text-3xl font-black uppercase leading-none text-white">Gaseste locatii</h1>
               </div>
             </div>
 
@@ -265,9 +265,9 @@ export function LocationExplorer({
 
           <section className="grid gap-5">
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Stat label="Total locatii" value={stats.total.toString()} />
+              <Stat label="In catalog" value={stats.total.toString()} />
               <Stat label="Disponibile" value={stats.available.toString()} />
-              <Stat label="Inchiriate" value={stats.rented.toString()} />
+              <Stat label="In campanii" value={stats.rented.toString()} />
               <button type="button" className="focus-card rounded-lg p-4 text-left" onClick={() => setDrawerOpen(true)}>
                 <p className="text-xs font-black uppercase text-focus-yellow">Media plan</p>
                 <p className="mt-1 flex items-center gap-2 font-display text-3xl font-black uppercase">
@@ -289,6 +289,9 @@ export function LocationExplorer({
             <div>
               <p className="text-sm font-black uppercase text-focus-yellow">Selectie comerciala</p>
               <h2 className="font-display text-4xl font-black uppercase">Locatii pentru campanie</h2>
+              <p className="mt-2 max-w-2xl text-sm font-bold leading-6 text-slate-300">
+                Deschide prezentarea, verifica imaginile si adauga pozitiile potrivite in media planul tau.
+              </p>
             </div>
             <button className="focus-button no-print" type="button" onClick={() => setDrawerOpen(true)}>
               <ShoppingBag size={20} />

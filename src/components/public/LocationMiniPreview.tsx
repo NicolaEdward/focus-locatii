@@ -7,6 +7,7 @@ import { monthlyRate, oneTimeRate, sqm } from "@/lib/format";
 import { mapsHref } from "@/lib/gps";
 import type { LocationDTO } from "@/types/location";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { ContactButtons } from "@/components/public/ContactButtons";
 
 export function LocationMiniPreview({
   location,
@@ -22,9 +23,13 @@ export function LocationMiniPreview({
   onOpenPresentation: () => void;
 }) {
   const image = location.mainPhotoUrl || location.images[0]?.url || "/samples/location-placeholder.svg";
-  const mapsUrl = mapsHref(location.mapsUrl, location.latDisplay, location.lngDisplay);
+  const mapsUrl = mapsHref(null, location.latDisplay, location.lngDisplay);
+  const hasMap = mapsUrl !== "#";
   const showRateCard = Boolean(location.rateCard || location.rateCardValue);
   const showInstallationCost = Boolean(location.installationRemoval || location.installationRemovalValue);
+  const area = [location.city, location.county].filter(Boolean).join(", ") || "Romania";
+  const subject = `Cerere locatie ${location.code}`;
+  const message = `Buna ziua, sunt interesat de locatia ${location.address || location.code} (${location.code}) - ${location.categoryName}.`;
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -65,7 +70,7 @@ export function LocationMiniPreview({
             src={image}
             alt={location.code}
             decoding="async"
-            className="absolute inset-0 h-full w-full object-contain p-2"
+            className="absolute inset-0 h-full w-full object-cover"
             onError={(event) => {
               event.currentTarget.src = "/samples/location-placeholder.svg";
             }}
@@ -85,13 +90,13 @@ export function LocationMiniPreview({
         <div className="grid content-between gap-5 p-5 md:p-7">
           <div className="grid gap-4">
             <div>
-              <p className="text-xs font-black uppercase text-focus-yellow">{location.categoryName}</p>
+              <p className="text-xs font-black uppercase text-focus-yellow">Prezentare rapida / {location.categoryName}</p>
               <h2 className="mt-2 font-display text-4xl font-black uppercase leading-none text-white">
                 {location.address || location.code}
               </h2>
               <p className="mt-3 flex items-center gap-2 text-sm font-bold text-slate-300">
                 <MapPin size={16} />
-                {location.city || "Romania"} {location.county ? `, ${location.county}` : ""}
+                {area}
               </p>
             </div>
 
@@ -107,7 +112,11 @@ export function LocationMiniPreview({
                 <span className="rounded-full border border-focus-line px-3 py-1 text-xs font-black uppercase text-focus-yellow">
                   Rate card: {monthlyRate(location.rateCardValue, location.rateCard)}
                 </span>
-              ) : null}
+              ) : (
+                <span className="rounded-full border border-focus-line px-3 py-1 text-xs font-black uppercase text-slate-300">
+                  Pret la cerere
+                </span>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-sm text-slate-100">
@@ -129,10 +138,19 @@ export function LocationMiniPreview({
               <Star size={20} />
               {isShortlisted ? "In media plan" : "Adauga in media plan"}
             </button>
-            <a className="focus-button secondary sm:col-span-2" href={mapsUrl} target="_blank" rel="noreferrer">
-              <ExternalLink size={20} />
-              Deschide in Google Maps
-            </a>
+            {hasMap ? (
+              <a className="focus-button secondary sm:col-span-2" href={mapsUrl} target="_blank" rel="noreferrer">
+                <ExternalLink size={20} />
+                Deschide zona in Google Maps
+              </a>
+            ) : null}
+            <ContactButtons
+              message={message}
+              subject={subject}
+              emailLabel="Cere oferta"
+              className="grid gap-2 sm:col-span-2 sm:grid-cols-3"
+              buttonClassName="focus-button secondary"
+            />
           </div>
         </div>
       </motion.article>

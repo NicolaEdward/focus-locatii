@@ -151,6 +151,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
   const [smartBillReportType, setSmartBillReportType] = useState<SmartBillReportType>("customer_invoices");
   const [smartBillCompanyName, setSmartBillCompanyName] = useState("");
   const [smartBillPreview, setSmartBillPreview] = useState<SmartBillPreview | null>(null);
+  const [smartBillConfirmOpen, setSmartBillConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +168,20 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
   const previewHasReviewRows = useMemo(
     () => Boolean(preview && (preview.preview.summary.criticalIssueCount > 0 || preview.preview.summary.needsReviewCount > 0)),
     [preview]
+  );
+  const smartBillImportableRows = useMemo(
+    () => smartBillPreview ? smartBillPreview.rows.filter((row) => smartBillImportableAction(row.proposedAction)).length : 0,
+    [smartBillPreview]
+  );
+  const smartBillSkippedRows = smartBillPreview
+    ? smartBillPreview.summary.duplicateCount + smartBillPreview.summary.needsReviewCount + smartBillPreview.summary.invalidCount + smartBillPreview.summary.ignoredCount
+    : 0;
+  const smartBillHasReviewWarning = Boolean(smartBillPreview && (smartBillPreview.summary.invalidCount || smartBillPreview.summary.needsReviewCount));
+  const smartBillCanConfirm = Boolean(
+    smartBillPreview?.importToken &&
+    smartBillCompanyName &&
+    smartBillPreview.companyName === smartBillCompanyName &&
+    smartBillImportableRows > 0
   );
 
   async function refreshFinancial() {
@@ -289,6 +304,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
   function clearSmartBillFile() {
     setSmartBillFile(null);
     setSmartBillPreview(null);
+    setSmartBillConfirmOpen(false);
     setSmartBillFileInputKey((current) => current + 1);
   }
 
@@ -313,6 +329,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Raportul SmartBill nu a putut fi previzualizat.");
       setSmartBillPreview(payload.preview);
+      setSmartBillConfirmOpen(false);
       setMessage("Preview SmartBill generat. Verifica randurile inainte de confirmare.");
     } catch (previewError) {
       setError(previewError instanceof Error ? previewError.message : "Raportul SmartBill nu a putut fi previzualizat.");
@@ -322,7 +339,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
   }
 
   async function confirmSmartBillImport() {
-    if (!smartBillPreview || !smartBillCompanyName || smartBillPreview.companyName !== smartBillCompanyName) return;
+    if (!smartBillPreview || !smartBillCanConfirm) return;
     setBusy(true);
     setError(null);
     setMessage(null);
@@ -341,6 +358,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
       const summary = payload.summary;
       setMessage(`Import SmartBill confirmat: ${summary.createdReceivables + summary.createdPayables} randuri create, ${summary.updatedReceivables + summary.updatedPayables} actualizate, ${summary.skippedDuplicates + summary.skippedNeedsReview + summary.skippedInvalid + summary.skippedIgnored + summary.skippedUnsafe} sarite.`);
       setSmartBillPreview(null);
+      setSmartBillConfirmOpen(false);
       clearSmartBillFile();
       await refreshFinancial();
     } catch (confirmError) {
@@ -438,6 +456,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
             <select className="focus-input" value={smartBillReportType} onChange={(event) => {
               setSmartBillReportType(event.target.value as SmartBillReportType);
               setSmartBillPreview(null);
+              setSmartBillConfirmOpen(false);
             }}>
               <option value="customer_invoices">Facturi clienti</option>
               <option value="supplier_documents">Documente furnizori</option>
@@ -448,6 +467,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
             <select className="focus-input" required value={smartBillCompanyName} onChange={(event) => {
               setSmartBillCompanyName(event.target.value);
               setSmartBillPreview(null);
+              setSmartBillConfirmOpen(false);
             }}>
               <option value="">Alege firma</option>
               {companyEntities.map((entity) => <option key={entity.value} value={entity.value}>{entity.label}</option>)}
@@ -458,6 +478,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
             <input key={smartBillFileInputKey} className="focus-input" type="file" accept=".xlsx,.xls,.xlsm" onChange={(event) => {
               setSmartBillFile(event.target.files?.[0] || null);
               setSmartBillPreview(null);
+              setSmartBillConfirmOpen(false);
             }} />
           </label>
           <button className="focus-button secondary self-end" type="button" onClick={clearSmartBillFile} disabled={busy || (!smartBillFile && !smartBillPreview)}>
@@ -477,26 +498,46 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
                   Coloane detectate: {smartBillPreview.detectedColumns.join(", ")}
                 </p>
               </div>
-              <button className="focus-button" type="button" onClick={confirmSmartBillImport} disabled={busy || !smartBillPreview.importToken || !smartBillCompanyName || smartBillPreview.companyName !== smartBillCompanyName}>
+              <button className="focus-button" type="button" onClick={() => setSmartBillConfirmOpen(true)} disabled={busy || !smartBillCanConfirm}>
                 <CheckCircle2 size={18} /> Confirma randurile sigure
               </button>
             </div>
+            {smartBillHasReviewWarning ? (
+              <div className="mt-4">
+                <Feedback tone="yellow" text={`${smartBillPreview.summary.invalidCount + smartBillPreview.summary.needsReviewCount} randuri sunt invalide sau necesita verificare si nu vor fi importate automat.`} />
+              </div>
+            ) : null}
             <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+              <FinanceMetric label="Firma" value={smartBillPreview.companyName} detail={smartBillPreview.companyCode} />
+              <FinanceMetric label="Tip raport" value={smartBillReportTypeLabel(smartBillPreview.reportType)} detail="contextul preview-ului" />
               <FinanceMetric label="Randuri" value={smartBillPreview.summary.rowCount} detail="citite din SmartBill" />
+              <FinanceMetric label="Valide" value={smartBillPreview.summary.rowCount - smartBillPreview.summary.invalidCount} detail="cu structura citibila" tone="green" />
               <FinanceMetric label="Potrivite" value={smartBillPreview.summary.matchedCount} detail="client/furnizor existent" tone="green" />
               <FinanceMetric label="De creat" value={smartBillPreview.summary.createClientCount + smartBillPreview.summary.createSupplierCount} detail="clienti/furnizori noi" tone="yellow" />
               <FinanceMetric label="Duplicate" value={smartBillPreview.summary.duplicateCount} detail="nu se vor dubla" tone={smartBillPreview.summary.duplicateCount ? "yellow" : "green"} />
               <FinanceMetric label="Review" value={smartBillPreview.summary.needsReviewCount} detail="raman neimportate" tone={smartBillPreview.summary.needsReviewCount ? "red" : "green"} />
               <FinanceMetric label="Invalid" value={smartBillPreview.summary.invalidCount} detail="raman neimportate" tone={smartBillPreview.summary.invalidCount ? "red" : "green"} />
+              <FinanceMetric label="Ignorate" value={smartBillPreview.summary.ignoredCount} detail="status neimportabil" tone={smartBillPreview.summary.ignoredCount ? "yellow" : "green"} />
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <FinanceMetric label="Total clienti importabil" value={currencyTotals(smartBillPreview.summary.totalReceivableByCurrency)} detail="fara review/duplicate" />
-              <FinanceMetric label="Total furnizori importabil" value={currencyTotals(smartBillPreview.summary.totalPayableByCurrency)} detail="fara review/duplicate" />
+              <FinanceMetric label="Total clienti importabil pe moneda" value={currencyTotals(smartBillPreview.summary.totalReceivableByCurrency)} detail="fara review/duplicate/invalid" />
+              <FinanceMetric label="Total furnizori importabil pe moneda" value={currencyTotals(smartBillPreview.summary.totalPayableByCurrency)} detail="fara review/duplicate/invalid" />
             </div>
-            <SmartBillPreviewTable rows={smartBillPreview.rows} />
+            <SmartBillPreviewBuckets rows={smartBillPreview.rows} />
           </div>
         ) : null}
       </section>
+      {smartBillConfirmOpen && smartBillPreview ? (
+        <SmartBillConfirmDialog
+          preview={smartBillPreview}
+          busy={busy}
+          importableRows={smartBillImportableRows}
+          skippedRows={smartBillSkippedRows}
+          canConfirm={smartBillCanConfirm}
+          onCancel={() => setSmartBillConfirmOpen(false)}
+          onConfirm={confirmSmartBillImport}
+        />
+      ) : null}
 
       <section className="rounded-lg border border-focus-line bg-focus-ink/70 p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -940,14 +981,67 @@ function IssuesTable({ issues }: { issues: FinancialPreview["preview"]["issues"]
   </section>;
 }
 
-function SmartBillPreviewTable({ rows }: { rows: SmartBillPreview["rows"] }) {
-  return <section className="mt-4 rounded-lg border border-focus-line bg-focus-ink/45 p-4">
-    <h4 className="text-sm font-black uppercase text-focus-yellow">Randuri SmartBill</h4>
-    <div className="mt-3 max-h-[520px] overflow-auto">
-      <table className="w-full min-w-[980px] text-sm">
+function SmartBillPreviewBuckets({ rows }: { rows: SmartBillPreview["rows"] }) {
+  const buckets = [
+    {
+      title: "Se vor asocia automat",
+      description: "Clientul sau furnizorul exista deja; se creeaza sau actualizeaza randul financiar sigur.",
+      actions: ["AUTO_MATCHED"]
+    },
+    {
+      title: "Se vor crea clienti/furnizori noi",
+      description: "Nu exista potrivire sigura, dar randul este valid si poate crea entitatea lipsa la confirmare.",
+      actions: ["PROPOSE_CREATE_CLIENT", "PROPOSE_CREATE_SUPPLIER"]
+    },
+    {
+      title: "Duplicate detectate",
+      description: "Aceste randuri par deja introduse si nu se vor importa inca o data.",
+      actions: ["DUPLICATE"]
+    },
+    {
+      title: "Necesita verificare",
+      description: "Aceste randuri nu se importa automat. Corecteaza cauza si genereaza un preview nou.",
+      actions: ["NEEDS_REVIEW"]
+    },
+    {
+      title: "Randuri invalide",
+      description: "Aceste randuri au date lipsa sau inconsistente si sunt excluse din confirmare.",
+      actions: ["INVALID"]
+    },
+    {
+      title: "Ignorate",
+      description: "Randuri cu status neimportabil, de exemplu anulat sau ciorna.",
+      actions: ["IGNORED"]
+    }
+  ];
+
+  return <div className="mt-4 grid gap-4">
+    {buckets.map((bucket) => {
+      const bucketRows = rows.filter((row) => bucket.actions.includes(row.proposedAction));
+      return <SmartBillBucketTable
+        key={bucket.title}
+        title={bucket.title}
+        description={bucket.description}
+        rows={bucketRows}
+      />;
+    })}
+  </div>;
+}
+
+function SmartBillBucketTable({ title, description, rows }: { title: string; description: string; rows: SmartBillPreview["rows"] }) {
+  return <section className="rounded-lg border border-focus-line bg-focus-ink/45 p-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h4 className="text-sm font-black uppercase text-focus-yellow">{title}</h4>
+        <p className="mt-1 text-xs font-bold text-slate-400">{description}</p>
+      </div>
+      <Badge tone={rows.length ? smartBillActionTone(rows[0].proposedAction) : "neutral"}>{rows.length} randuri</Badge>
+    </div>
+    <div className="mt-3 max-h-[420px] overflow-auto">
+      <table className="w-full min-w-[1320px] text-sm">
         <thead className="sticky top-0 z-10 bg-focus-navy text-left text-xs uppercase text-slate-400">
           <tr>
-            <th className="px-3 py-2">Actiune</th>
+            <th className="px-3 py-2">Rand</th>
             <th className="px-3 py-2">Client / furnizor</th>
             <th className="px-3 py-2">CIF/CUI original</th>
             <th className="px-3 py-2">CIF/CUI normalizat</th>
@@ -955,34 +1049,97 @@ function SmartBillPreviewTable({ rows }: { rows: SmartBillPreview["rows"] }) {
             <th className="px-3 py-2">Emitere</th>
             <th className="px-3 py-2">Scadenta</th>
             <th className="px-3 py-2">Status</th>
+            <th className="px-3 py-2 text-right">Net</th>
+            <th className="px-3 py-2 text-right">TVA</th>
             <th className="px-3 py-2 text-right">Total</th>
+            <th className="px-3 py-2">Moneda</th>
+            <th className="px-3 py-2">Actiune propusa</th>
             <th className="px-3 py-2">Potrivire / avertizare</th>
           </tr>
         </thead>
         <tbody>
           {rows.length ? rows.slice(0, 120).map((row) => (
             <tr className="border-t border-focus-line" key={`${row.dedupeKey}-${row.rowNumber}`}>
-              <td className="px-3 py-3"><Badge tone={smartBillActionTone(row.proposedAction)}>{smartBillActionLabel(row.proposedAction)}</Badge></td>
+              <td className="px-3 py-3 font-black text-slate-200">#{row.rowNumber}</td>
               <td className="px-3 py-3 font-black text-white">{row.entityName}<small className="block text-slate-400">{row.entityKind === "client" ? "client" : "furnizor"}</small></td>
               <td className="px-3 py-3">{row.fiscalCode || "-"}</td>
               <td className="px-3 py-3">{row.normalizedFiscalCode || "-"}</td>
-              <td className="px-3 py-3">{row.documentNumber}</td>
+              <td className="px-3 py-3">{row.documentNumber || "-"}</td>
               <td className="px-3 py-3">{row.issueDate ? date(row.issueDate) : "-"}</td>
               <td className="px-3 py-3">{row.dueDate ? date(row.dueDate) : "-"}</td>
               <td className="px-3 py-3"><span className="text-slate-200">{statusLabel(row.mappedStatus)}</span><small className="block text-slate-500">{row.sourceStatus || "-"}</small></td>
+              <td className="px-3 py-3 text-right">{money(row.netAmount, row.currency)}</td>
+              <td className="px-3 py-3 text-right">{money(row.vatAmount, row.currency)}</td>
               <td className="px-3 py-3 text-right font-black">{money(row.totalAmount, row.currency)}</td>
+              <td className="px-3 py-3">{row.currency || "-"}</td>
+              <td className="px-3 py-3"><Badge tone={smartBillActionTone(row.proposedAction)}>{smartBillActionLabel(row.proposedAction)}</Badge></td>
               <td className="px-3 py-3">
                 <span className="text-slate-200">{row.matchedEntityName || (row.duplicateId ? "Document existent" : "-")}</span>
                 {row.warning ? <small className="block text-focus-yellow">{row.warning}</small> : null}
                 {row.errors.length ? <small className="block text-red-100">{row.errors.join(" ")}</small> : null}
               </td>
             </tr>
-          )) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={10}>Nu exista randuri SmartBill in preview.</td></tr>}
+          )) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={14}>Nu exista randuri in aceasta categorie.</td></tr>}
         </tbody>
       </table>
     </div>
-    {rows.length > 120 ? <p className="mt-3 text-xs font-bold text-slate-400">Se afiseaza primele 120 de randuri. Confirmarea foloseste toate randurile sigure din preview.</p> : null}
+    {rows.length > 120 ? <p className="mt-3 text-xs font-bold text-slate-400">Se afiseaza primele 120 de randuri din aceasta categorie. Confirmarea foloseste toate randurile sigure din preview.</p> : null}
   </section>;
+}
+
+function SmartBillConfirmDialog({
+  preview,
+  busy,
+  importableRows,
+  skippedRows,
+  canConfirm,
+  onCancel,
+  onConfirm
+}: {
+  preview: SmartBillPreview;
+  busy: boolean;
+  importableRows: number;
+  skippedRows: number;
+  canConfirm: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const createEntities = preview.summary.createClientCount + preview.summary.createSupplierCount;
+  const reviewRows = preview.summary.needsReviewCount + preview.summary.invalidCount;
+  const financialLabel = preview.reportType === "customer_invoices" ? "facturi clienti" : "documente furnizori";
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6">
+    <section className="w-full max-w-2xl rounded-lg border border-focus-line bg-focus-ink p-5 shadow-2xl">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-focus-yellow">Confirmare SmartBill</p>
+          <h3 className="font-display text-2xl font-black uppercase text-white">Confirma importul SmartBill</h3>
+          <p className="mt-1 text-sm font-bold text-slate-400">
+            Verifica ultima data ce se importa pentru {preview.companyName}. Randurile invalide sau de review nu se importa automat.
+          </p>
+        </div>
+        <button className="focus-button secondary" type="button" onClick={onCancel} disabled={busy}>Inchide</button>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <FinanceMetric label="Firma selectata" value={preview.companyName} detail={preview.companyCode} />
+        <FinanceMetric label="Tip raport" value={smartBillReportTypeLabel(preview.reportType)} detail={preview.fileName} />
+        <FinanceMetric label="Clienti/furnizori noi" value={createEntities} detail="create la confirmare" tone={createEntities ? "yellow" : "green"} />
+        <FinanceMetric label={`Randuri ${financialLabel} create/actualizate`} value={importableRows} detail="doar actiuni sigure" tone="green" />
+        <FinanceMetric label="Randuri sarite" value={skippedRows} detail="duplicate, review, invalid sau ignorate" tone={skippedRows ? "yellow" : "green"} />
+        <FinanceMetric label="Necesita verificare" value={reviewRows} detail="nu intra in import automat" tone={reviewRows ? "red" : "green"} />
+      </div>
+      {reviewRows ? (
+        <div className="mt-4">
+          <Feedback tone="yellow" text={`${reviewRows} randuri raman pentru corectie manuala. Ele nu vor crea clienti, furnizori, incasari sau plati la confirmare.`} />
+        </div>
+      ) : null}
+      <div className="mt-5 flex flex-wrap justify-end gap-2">
+        <button className="focus-button secondary" type="button" onClick={onCancel} disabled={busy}>Anuleaza</button>
+        <button className="focus-button" type="button" onClick={onConfirm} disabled={busy || !canConfirm}>
+          <CheckCircle2 size={18} /> {busy ? "Se confirma..." : "Confirma doar randurile sigure"}
+        </button>
+      </div>
+    </section>
+  </div>;
 }
 
 function Feedback({ tone, text }: { tone: "green" | "red" | "yellow"; text: string }) {
@@ -1006,6 +1163,14 @@ function smartBillActionLabel(action: string) {
     IGNORED: "Ignorat"
   };
   return labels[action] || action;
+}
+
+function smartBillReportTypeLabel(reportType: SmartBillReportType) {
+  return reportType === "customer_invoices" ? "Facturi clienti" : "Documente furnizori";
+}
+
+function smartBillImportableAction(action: string) {
+  return action === "AUTO_MATCHED" || action === "PROPOSE_CREATE_CLIENT" || action === "PROPOSE_CREATE_SUPPLIER";
 }
 
 function smartBillActionTone(action: string): "neutral" | "green" | "yellow" | "red" {

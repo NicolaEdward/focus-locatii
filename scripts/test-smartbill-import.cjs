@@ -291,13 +291,26 @@ assert.ok(confirmRouteSource.includes("companyName: z.string()"), "SmartBill con
 assert.ok(confirmRouteSource.includes("body.reportType !== payload.reportType"), "SmartBill confirm must reject report type mismatch.");
 assert.ok(confirmRouteSource.includes("Firma aleasa nu corespunde"), "SmartBill confirm must reject company mismatch.");
 assert.ok(confirmRouteSource.includes("smartbill-${companyContext.companyCode}-${payload.fileHash}"), "SmartBill upload metadata must include selected company context.");
+assert.ok(confirmRouteSource.includes("!importableAction(previewRow.proposedAction)"), "SmartBill confirm must skip invalid, review, duplicate and ignored rows.");
 
 const financePanelSource = fs.readFileSync(path.join(repoRoot, "src/components/admin/FinancialDashboardPanel.tsx"), "utf8");
 assert.ok(financePanelSource.includes("Firma import"), "SmartBill UI must show a required company selector.");
 assert.ok(financePanelSource.includes("Alege firma"), "SmartBill UI must not silently default the company.");
 assert.ok(financePanelSource.includes('form.set("companyName", smartBillCompanyName)'), "SmartBill preview request must include company context.");
-assert.ok(financePanelSource.includes("smartBillPreview.companyName !== smartBillCompanyName"), "SmartBill confirm must be disabled on company mismatch.");
+assert.ok(financePanelSource.includes("smartBillPreview.companyName === smartBillCompanyName"), "SmartBill confirm must be disabled on company mismatch.");
 assert.ok(financePanelSource.includes("CIF/CUI original") && financePanelSource.includes("CIF/CUI normalizat"), "SmartBill preview must show original and normalized fiscal codes.");
+assert.ok(financePanelSource.includes("Firma selectata"), "SmartBill preview summary must show the selected company.");
+assert.ok(financePanelSource.includes("Tip raport"), "SmartBill preview summary must show the report type.");
+assert.ok(financePanelSource.includes("Total clienti importabil pe moneda") && financePanelSource.includes("Total furnizori importabil pe moneda"), "SmartBill preview must show total value by currency.");
+assert.ok(financePanelSource.includes("Se vor asocia automat"), "SmartBill preview must group auto-matched rows.");
+assert.ok(financePanelSource.includes("Se vor crea clienti/furnizori noi"), "SmartBill preview must group create-new rows.");
+assert.ok(financePanelSource.includes("Duplicate detectate"), "SmartBill preview must group duplicates.");
+assert.ok(financePanelSource.includes("Necesita verificare"), "SmartBill preview must group review rows.");
+assert.ok(financePanelSource.includes("Randuri invalide"), "SmartBill preview must group invalid rows.");
+assert.ok(financePanelSource.includes("Ignorate"), "SmartBill preview must group ignored rows.");
+assert.ok(financePanelSource.includes("Confirma importul SmartBill"), "SmartBill confirm must use a final confirmation modal.");
+assert.ok(financePanelSource.includes("Randurile invalide sau de review nu se importa automat"), "SmartBill confirm modal must explain review/invalid exclusion.");
+assert.ok(financePanelSource.includes("disabled={busy || !canConfirm}"), "SmartBill final confirm button must be disabled without a valid token/company preview.");
 
 const dashboardSource = fs.readFileSync(path.join(repoRoot, "src/lib/financial-dashboard.ts"), "utf8");
 assert.ok(dashboardSource.includes('fileHash: { startsWith: "smartbill-" }'), "Finance dashboard should include confirmed SmartBill uploads.");

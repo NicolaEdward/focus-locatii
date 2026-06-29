@@ -70,6 +70,8 @@ type SmartBillPreview = {
     needsReviewCount: number;
     invalidCount: number;
     ignoredCount: number;
+    autoLinkedAdjustmentCount: number;
+    adjustmentNeedsReviewCount: number;
     totalReceivable: number;
     totalPayable: number;
     totalReceivableByCurrency: Record<string, number>;
@@ -96,6 +98,11 @@ type SmartBillPreview = {
     matchedEntityId: string | null;
     matchedEntityName: string | null;
     duplicateId: string | null;
+    adjustmentKind: string | null;
+    linkedFinancialRowId: string | null;
+    linkedDocumentNumber: string | null;
+    matchConfidence: "high" | "medium" | "low" | null;
+    adjustmentReason: string | null;
     proposedAction: string;
     warning: string | null;
     errors: string[];
@@ -174,9 +181,9 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
     [smartBillPreview]
   );
   const smartBillSkippedRows = smartBillPreview
-    ? smartBillPreview.summary.duplicateCount + smartBillPreview.summary.needsReviewCount + smartBillPreview.summary.invalidCount + smartBillPreview.summary.ignoredCount
+    ? smartBillPreview.summary.duplicateCount + smartBillPreview.summary.needsReviewCount + smartBillPreview.summary.adjustmentNeedsReviewCount + smartBillPreview.summary.invalidCount + smartBillPreview.summary.ignoredCount
     : 0;
-  const smartBillHasReviewWarning = Boolean(smartBillPreview && (smartBillPreview.summary.invalidCount || smartBillPreview.summary.needsReviewCount));
+  const smartBillHasReviewWarning = Boolean(smartBillPreview && (smartBillPreview.summary.invalidCount || smartBillPreview.summary.needsReviewCount || smartBillPreview.summary.adjustmentNeedsReviewCount));
   const smartBillCanConfirm = Boolean(
     smartBillPreview?.importToken &&
     smartBillCompanyName &&
@@ -504,7 +511,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
             </div>
             {smartBillHasReviewWarning ? (
               <div className="mt-4">
-                <Feedback tone="yellow" text={`${smartBillPreview.summary.invalidCount + smartBillPreview.summary.needsReviewCount} randuri sunt invalide sau necesita verificare si nu vor fi importate automat.`} />
+                <Feedback tone="yellow" text={`${smartBillPreview.summary.invalidCount + smartBillPreview.summary.needsReviewCount + smartBillPreview.summary.adjustmentNeedsReviewCount} randuri sunt invalide sau necesita verificare si nu vor fi importate automat.`} />
               </div>
             ) : null}
             <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -515,6 +522,8 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
               <FinanceMetric label="Potrivite" value={smartBillPreview.summary.matchedCount} detail="client/furnizor existent" tone="green" />
               <FinanceMetric label="De creat" value={smartBillPreview.summary.createClientCount + smartBillPreview.summary.createSupplierCount} detail="clienti/furnizori noi" tone="yellow" />
               <FinanceMetric label="Duplicate" value={smartBillPreview.summary.duplicateCount} detail="nu se vor dubla" tone={smartBillPreview.summary.duplicateCount ? "yellow" : "green"} />
+              <FinanceMetric label="Storno auto" value={smartBillPreview.summary.autoLinkedAdjustmentCount} detail="legate la facturi deschise" tone={smartBillPreview.summary.autoLinkedAdjustmentCount ? "yellow" : "green"} />
+              <FinanceMetric label="Storno review" value={smartBillPreview.summary.adjustmentNeedsReviewCount} detail="necesita verificare" tone={smartBillPreview.summary.adjustmentNeedsReviewCount ? "red" : "green"} />
               <FinanceMetric label="Review" value={smartBillPreview.summary.needsReviewCount} detail="raman neimportate" tone={smartBillPreview.summary.needsReviewCount ? "red" : "green"} />
               <FinanceMetric label="Invalid" value={smartBillPreview.summary.invalidCount} detail="raman neimportate" tone={smartBillPreview.summary.invalidCount ? "red" : "green"} />
               <FinanceMetric label="Ignorate" value={smartBillPreview.summary.ignoredCount} detail="status neimportabil" tone={smartBillPreview.summary.ignoredCount ? "yellow" : "green"} />
@@ -994,6 +1003,16 @@ function SmartBillPreviewBuckets({ rows }: { rows: SmartBillPreview["rows"] }) {
       actions: ["PROPOSE_CREATE_CLIENT", "PROPOSE_CREATE_SUPPLIER"]
     },
     {
+      title: "Storno / discounturi legate automat",
+      description: "Documente negative legate sigur la o factura pozitiva deschisa; se aplica doar soldului ramas.",
+      actions: ["AUTO_LINK_ADJUSTMENT"]
+    },
+    {
+      title: "Storno / discounturi necesita verificare",
+      description: "Documente negative fara legatura suficient de clara; nu se importa automat.",
+      actions: ["ADJUSTMENT_NEEDS_REVIEW"]
+    },
+    {
       title: "Duplicate detectate",
       description: "Aceste randuri par deja introduse si nu se vor importa inca o data.",
       actions: ["DUPLICATE"]
@@ -1075,6 +1094,10 @@ function SmartBillBucketTable({ title, description, rows }: { title: string; des
               <td className="px-3 py-3"><Badge tone={smartBillActionTone(row.proposedAction)}>{smartBillActionLabel(row.proposedAction)}</Badge></td>
               <td className="px-3 py-3">
                 <span className="text-slate-200">{row.matchedEntityName || (row.duplicateId ? "Document existent" : "-")}</span>
+                {row.linkedDocumentNumber ? <small className="block text-emerald-100">Factura legata: {row.linkedDocumentNumber}</small> : null}
+                {row.matchConfidence ? <small className="block text-slate-400">Incredere: {smartBillConfidenceLabel(row.matchConfidence)}</small> : null}
+                {row.adjustmentKind ? <small className="block text-slate-400">Tip ajustare: {smartBillAdjustmentLabel(row.adjustmentKind)}</small> : null}
+                {row.adjustmentReason ? <small className="block text-focus-yellow">{row.adjustmentReason}</small> : null}
                 {row.warning ? <small className="block text-focus-yellow">{row.warning}</small> : null}
                 {row.errors.length ? <small className="block text-red-100">{row.errors.join(" ")}</small> : null}
               </td>
@@ -1105,7 +1128,7 @@ function SmartBillConfirmDialog({
   onConfirm: () => void;
 }) {
   const createEntities = preview.summary.createClientCount + preview.summary.createSupplierCount;
-  const reviewRows = preview.summary.needsReviewCount + preview.summary.invalidCount;
+  const reviewRows = preview.summary.needsReviewCount + preview.summary.adjustmentNeedsReviewCount + preview.summary.invalidCount;
   const financialLabel = preview.reportType === "customer_invoices" ? "facturi clienti" : "documente furnizori";
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6">
     <section className="w-full max-w-2xl rounded-lg border border-focus-line bg-focus-ink p-5 shadow-2xl">
@@ -1157,6 +1180,8 @@ function smartBillActionLabel(action: string) {
     AUTO_MATCHED: "Potrivit",
     PROPOSE_CREATE_CLIENT: "Creeaza client",
     PROPOSE_CREATE_SUPPLIER: "Creeaza furnizor",
+    AUTO_LINK_ADJUSTMENT: "Storno legat",
+    ADJUSTMENT_NEEDS_REVIEW: "Storno review",
     DUPLICATE: "Duplicat",
     NEEDS_REVIEW: "Review",
     INVALID: "Invalid",
@@ -1170,14 +1195,32 @@ function smartBillReportTypeLabel(reportType: SmartBillReportType) {
 }
 
 function smartBillImportableAction(action: string) {
-  return action === "AUTO_MATCHED" || action === "PROPOSE_CREATE_CLIENT" || action === "PROPOSE_CREATE_SUPPLIER";
+  return action === "AUTO_MATCHED" || action === "PROPOSE_CREATE_CLIENT" || action === "PROPOSE_CREATE_SUPPLIER" || action === "AUTO_LINK_ADJUSTMENT";
 }
 
 function smartBillActionTone(action: string): "neutral" | "green" | "yellow" | "red" {
-  if (action === "AUTO_MATCHED") return "green";
+  if (action === "AUTO_MATCHED" || action === "AUTO_LINK_ADJUSTMENT") return "green";
   if (action === "PROPOSE_CREATE_CLIENT" || action === "PROPOSE_CREATE_SUPPLIER" || action === "DUPLICATE" || action === "IGNORED") return "yellow";
-  if (action === "NEEDS_REVIEW" || action === "INVALID") return "red";
+  if (action === "NEEDS_REVIEW" || action === "ADJUSTMENT_NEEDS_REVIEW" || action === "INVALID") return "red";
   return "neutral";
+}
+
+function smartBillAdjustmentLabel(kind: string) {
+  const labels: Record<string, string> = {
+    CREDIT_NOTE: "Credit note",
+    STORNO: "Storno",
+    DISCOUNT_ADJUSTMENT: "Discount"
+  };
+  return labels[kind] || kind;
+}
+
+function smartBillConfidenceLabel(value: string) {
+  const labels: Record<string, string> = {
+    high: "mare",
+    medium: "medie",
+    low: "scazuta"
+  };
+  return labels[value] || value;
 }
 
 function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "green" | "yellow" | "red" }) {
@@ -1197,6 +1240,8 @@ function statusLabel(status: string) {
     collected: "Incasat",
     collected_full: "Incasat integral",
     collected_partial: "Incasat partial",
+    adjustment: "Ajustare",
+    supplier_adjustment: "Ajustare furnizor",
     needs_review: "Needs review"
   };
   return labels[status] || status;

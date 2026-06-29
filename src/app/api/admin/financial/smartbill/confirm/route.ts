@@ -9,12 +9,15 @@ import { prisma } from "@/lib/prisma";
 import {
   buildSmartBillPreview,
   findSmartBillDuplicate,
+  findSmartBillAdjustmentMatch,
   importableAction,
   isSmartBillSourceDuplicate,
   matchSmartBillEntity,
   normalizeCompanyName,
   normalizeFiscalCode,
   resolveSmartBillCompanyContext,
+  calculateSmartBillReceivableAdjustment,
+  smartBillCustomerAdjustmentReceivableData,
   smartBillCustomerReceivableData,
   smartBillSupplierPayableData,
   verifySmartBillImportToken,
@@ -113,8 +116,8 @@ export async function POST(request: NextRequest) {
             fileHash: `smartbill-${companyContext.companyCode}-${payload.fileHash}`,
             status: "confirmed",
           activeVersion: !existingActiveUpload,
-          errorSummary: preview.summary.needsReviewCount || preview.summary.invalidCount
-            ? `${preview.summary.needsReviewCount + preview.summary.invalidCount} randuri SmartBill au ramas pentru verificare.`
+          errorSummary: preview.summary.needsReviewCount || preview.summary.adjustmentNeedsReviewCount || preview.summary.invalidCount
+            ? `${preview.summary.needsReviewCount + preview.summary.adjustmentNeedsReviewCount + preview.summary.invalidCount} randuri SmartBill au ramas pentru verificare.`
             : null
         }
       });
@@ -152,7 +155,13 @@ export async function POST(request: NextRequest) {
       [...suppliers.values()].forEach((supplier) => setIdentityCache(supplierByIdentity, supplier));
       const seenDedupeKeys = new Set<string>();
 
-      for (const row of payload.rows) {
+      const orderedRows = [...payload.rows].sort((left, right) => {
+        const leftPreview = preview.rows.find((item) => item.dedupeKey === left.dedupeKey && item.rowNumber === left.rowNumber);
+        const rightPreview = preview.rows.find((item) => item.dedupeKey === right.dedupeKey && item.rowNumber === right.rowNumber);
+        return Number(leftPreview?.proposedAction === "AUTO_LINK_ADJUSTMENT") - Number(rightPreview?.proposedAction === "AUTO_LINK_ADJUSTMENT");
+      });
+
+      for (const row of orderedRows) {
         const previewRow = preview.rows.find((item) => item.dedupeKey === row.dedupeKey && item.rowNumber === row.rowNumber);
         if (!previewRow || !importableAction(previewRow.proposedAction)) {
           countSkipped(summary, previewRow?.proposedAction || "INVALID");
@@ -169,6 +178,23 @@ export async function POST(request: NextRequest) {
           const duplicate = findSmartBillDuplicate(row, latestReceivables, companyContext);
           if (duplicate && !isSmartBillSourceDuplicate(duplicate, row.dedupeKey)) {
             summary.skippedDuplicates += 1;
+            continue;
+          }
+          if (previewRow.proposedAction === "AUTO_LINK_ADJUSTMENT") {
+            if (duplicate) {
+              summary.skippedDuplicates += 1;
+              continue;
+            }
+            const applied = await applySmartBillCustomerAdjustment(tx, row, upload.id, companyContext, session.id);
+            if (!applied) {
+              summary.skippedUnsafe += 1;
+              continue;
+            }
+            latestReceivables.unshift(applied.adjustmentRow);
+            summary.createdReceivables += 1;
+            summary.updatedReceivables += 1;
+            summary.createdReceivableIds.push(applied.adjustmentId);
+            summary.updatedReceivableIds.push(applied.linkedReceivableId);
             continue;
           }
           const client = await ensureClientForSmartBillRow(tx, row, clients, clientByIdentity, session.id);
@@ -321,11 +347,15 @@ async function loadSmartBillConfirmContext(reportType: SmartBillReportType, comp
           invoiceDate: true,
           clientId: true,
           clientName: true,
+          dueDate: true,
           currency: true,
           invoicedAmount: true,
+          collectedAmount: true,
+          remainingAmount: true,
           rawRowJson: true,
           includedInReport: true,
-          status: true
+          status: true,
+          client: { select: { taxId: true, normalizedName: true } }
         },
         take: 10000,
         orderBy: { createdAt: "desc" }
@@ -339,7 +369,13 @@ async function loadSmartBillConfirmContext(reportType: SmartBillReportType, comp
         taxId: client.taxId,
         accountOwnerUserId: client.accountOwnerUserId
       })) satisfies SmartBillMatchEntity[],
-      receivables: receivables.map((row) => ({ ...row, amount: row.invoicedAmount })) satisfies SmartBillExistingFinancialRow[]
+      receivables: receivables.map((row) => ({
+        ...row,
+        amount: row.invoicedAmount,
+        paidOrCollectedAmount: row.collectedAmount,
+        entityTaxId: row.client?.taxId || null,
+        entityNormalizedName: row.client?.normalizedName || null
+      })) satisfies SmartBillExistingFinancialRow[]
     };
   }
 
@@ -358,13 +394,17 @@ async function loadSmartBillConfirmContext(reportType: SmartBillReportType, comp
         invoiceNumber: true,
         invoiceDate: true,
         supplierId: true,
-        supplierName: true,
-        currency: true,
-        amountToPay: true,
-        rawRowJson: true,
-        includedInReport: true,
-        status: true
-      },
+          supplierName: true,
+          dueDate: true,
+          currency: true,
+          amountToPay: true,
+          amountPaid: true,
+          remainingAmount: true,
+          rawRowJson: true,
+          includedInReport: true,
+          status: true,
+          supplier: { select: { taxId: true, normalizedName: true } }
+        },
       take: 10000,
       orderBy: { createdAt: "desc" }
     })
@@ -376,7 +416,13 @@ async function loadSmartBillConfirmContext(reportType: SmartBillReportType, comp
       normalizedName: supplier.normalizedName,
       taxId: supplier.taxId
     })) satisfies SmartBillMatchEntity[],
-    payables: payables.map((row) => ({ ...row, amount: row.amountToPay })) satisfies SmartBillExistingFinancialRow[]
+    payables: payables.map((row) => ({
+      ...row,
+      amount: row.amountToPay,
+      paidOrCollectedAmount: row.amountPaid,
+      entityTaxId: row.supplier?.taxId || null,
+      entityNormalizedName: row.supplier?.normalizedName || null
+    })) satisfies SmartBillExistingFinancialRow[]
   };
 }
 
@@ -413,6 +459,106 @@ async function ensureClientForSmartBillRow(
   } satisfies SmartBillMatchEntity;
   setIdentityCache(identityCache, entity);
   return entity;
+}
+
+async function applySmartBillCustomerAdjustment(
+  tx: Prisma.TransactionClient,
+  row: SmartBillCustomerInvoiceRow,
+  uploadId: string,
+  companyContext: SmartBillCompanyContext,
+  actorId: string
+) {
+  const companyWhere = {
+    OR: [
+      { companyCode: companyContext.companyCode },
+      { companyName: companyContext.companyName }
+    ]
+  };
+  const receivables = await tx.financialReceivable.findMany({
+    where: { ...companyWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
+    select: {
+      id: true,
+      companyName: true,
+      companyCode: true,
+      normalizedInvoiceNumber: true,
+      invoiceNumber: true,
+      invoiceDate: true,
+      dueDate: true,
+      clientId: true,
+      clientName: true,
+      currency: true,
+      invoicedAmount: true,
+      collectedAmount: true,
+      remainingAmount: true,
+      rawRowJson: true,
+      includedInReport: true,
+      status: true,
+      client: { select: { taxId: true, normalizedName: true } }
+    },
+    take: 10000,
+    orderBy: { createdAt: "desc" }
+  });
+  const existingRows = receivables.map((receivable) => ({
+    ...receivable,
+    amount: receivable.invoicedAmount,
+    paidOrCollectedAmount: receivable.collectedAmount,
+    entityTaxId: receivable.client?.taxId || null,
+    entityNormalizedName: receivable.client?.normalizedName || null
+  })) satisfies SmartBillExistingFinancialRow[];
+  const match = findSmartBillAdjustmentMatch(row, existingRows, companyContext);
+  if (!match || match.kind !== "auto" || !match.linkedRow) return null;
+  const linked = receivables.find((receivable) => receivable.id === match.linkedRow?.id);
+  const linkedRow = existingRows.find((receivable) => receivable.id === match.linkedRow?.id);
+  if (!linked || !linkedRow) return null;
+  let application: ReturnType<typeof calculateSmartBillReceivableAdjustment>;
+  try {
+    application = calculateSmartBillReceivableAdjustment({ row, receivable: linkedRow });
+  } catch {
+    return null;
+  }
+  const adjustmentData = smartBillCustomerAdjustmentReceivableData({
+    row,
+    uploadId,
+    companyContext,
+    linkedReceivable: linkedRow,
+    reviewedByUserId: actorId
+  });
+  const adjustment = await tx.financialReceivable.create({
+    data: { ...adjustmentData, rawRowJson: adjustmentData.rawRowJson as Prisma.InputJsonValue }
+  });
+  const updatedRaw = appendSmartBillAdjustmentMetadata(linked.rawRowJson, row, adjustment.id, application.adjustmentAmount, application.remainingAmount);
+  const updated = await tx.financialReceivable.update({
+    where: { id: linked.id },
+    data: {
+      remainingAmount: application.remainingAmount,
+      status: application.status,
+      rawRowJson: updatedRaw as Prisma.InputJsonValue,
+      reviewedByUserId: actorId,
+      reviewedAt: new Date()
+    }
+  });
+  return {
+    adjustmentId: adjustment.id,
+    linkedReceivableId: updated.id,
+    adjustmentRow: {
+      id: adjustment.id,
+      companyName: adjustment.companyName,
+      companyCode: adjustment.companyCode,
+      normalizedInvoiceNumber: adjustment.normalizedInvoiceNumber,
+      invoiceNumber: adjustment.invoiceNumber,
+      invoiceDate: adjustment.invoiceDate,
+      dueDate: adjustment.dueDate,
+      clientId: adjustment.clientId,
+      clientName: adjustment.clientName,
+      currency: adjustment.currency,
+      amount: adjustment.invoicedAmount,
+      remainingAmount: adjustment.remainingAmount,
+      paidOrCollectedAmount: adjustment.collectedAmount,
+      rawRowJson: adjustment.rawRowJson,
+      includedInReport: adjustment.includedInReport,
+      status: adjustment.status
+    } satisfies SmartBillExistingFinancialRow
+  };
 }
 
 async function ensureSupplierForSmartBillRow(
@@ -459,9 +605,34 @@ function identityKey(fiscalCode: string | null | undefined, name: string) {
 
 function countSkipped(summary: SmartBillConfirmSummary, action: string) {
   if (action === "DUPLICATE") summary.skippedDuplicates += 1;
-  else if (action === "NEEDS_REVIEW") summary.skippedNeedsReview += 1;
+  else if (action === "NEEDS_REVIEW" || action === "ADJUSTMENT_NEEDS_REVIEW") summary.skippedNeedsReview += 1;
   else if (action === "IGNORED") summary.skippedIgnored += 1;
   else summary.skippedInvalid += 1;
+}
+
+function appendSmartBillAdjustmentMetadata(
+  raw: unknown,
+  row: SmartBillCustomerInvoiceRow,
+  adjustmentReceivableId: string,
+  adjustmentAmount: number,
+  remainingAmount: number
+) {
+  const base = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as Record<string, unknown>) } : {};
+  const previous = Array.isArray(base.smartBillAdjustments) ? base.smartBillAdjustments : [];
+  return {
+    ...base,
+    smartBillAdjustments: [
+      ...previous,
+      {
+        smartBillDedupeKey: row.dedupeKey,
+        adjustmentReceivableId,
+        adjustmentInvoiceNumber: row.invoiceNumber,
+        adjustmentAmount,
+        remainingAmountAfterAdjustment: remainingAmount,
+        appliedAt: new Date().toISOString()
+      }
+    ]
+  };
 }
 
 function smartBillReceivableUpdateData(data: ReturnType<typeof smartBillCustomerReceivableData>) {

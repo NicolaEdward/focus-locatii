@@ -11,11 +11,14 @@ export type SmartBillPreviewAction =
   | "AUTO_MATCHED"
   | "PROPOSE_CREATE_CLIENT"
   | "PROPOSE_CREATE_SUPPLIER"
+  | "AUTO_LINK_ADJUSTMENT"
+  | "ADJUSTMENT_NEEDS_REVIEW"
   | "DUPLICATE"
   | "NEEDS_REVIEW"
   | "INVALID"
   | "IGNORED";
 export type SmartBillEntityKind = "client" | "supplier";
+export type SmartBillAdjustmentKind = "CREDIT_NOTE" | "STORNO" | "DISCOUNT_ADJUSTMENT";
 
 export type SmartBillCompanyContext = {
   companyName: CompanyEntity;
@@ -99,12 +102,17 @@ export type SmartBillExistingFinancialRow = {
   normalizedInvoiceNumber?: string | null;
   invoiceNumber?: string | null;
   invoiceDate?: Date | string | null;
+  dueDate?: Date | string | null;
   clientId?: string | null;
   supplierId?: string | null;
   clientName?: string | null;
   supplierName?: string | null;
+  entityTaxId?: string | null;
+  entityNormalizedName?: string | null;
   currency?: string | null;
   amount?: number | string | Prisma.Decimal | null;
+  remainingAmount?: number | string | Prisma.Decimal | null;
+  paidOrCollectedAmount?: number | string | Prisma.Decimal | null;
   rawRowJson?: unknown;
   includedInReport?: boolean | null;
   status?: string | null;
@@ -132,6 +140,11 @@ export type SmartBillPreviewRow = {
   matchedEntityId: string | null;
   matchedEntityName: string | null;
   duplicateId: string | null;
+  adjustmentKind: SmartBillAdjustmentKind | null;
+  linkedFinancialRowId: string | null;
+  linkedDocumentNumber: string | null;
+  matchConfidence: "high" | "medium" | "low" | null;
+  adjustmentReason: string | null;
   proposedAction: SmartBillPreviewAction;
   warning: string | null;
   errors: string[];
@@ -148,6 +161,8 @@ export type SmartBillPreviewSummary = {
   needsReviewCount: number;
   invalidCount: number;
   ignoredCount: number;
+  autoLinkedAdjustmentCount: number;
+  adjustmentNeedsReviewCount: number;
   totalReceivable: number;
   totalPayable: number;
   totalReceivableByCurrency: Record<string, number>;
@@ -328,6 +343,9 @@ export function normalizeSmartBillMoney(value: unknown) {
 export function mapSmartBillCustomerInvoiceStatus(value: unknown, input?: { totalAmount?: number; dueDate?: Date | null; now?: Date }) {
   const normalized = normalizeText(value);
   const total = input?.totalAmount ?? 0;
+  if (total < 0) {
+    return { status: "adjustment", collectedAmount: 0, remainingAmount: 0, ignored: false, needsReview: false };
+  }
   if (["incasata", "incasat", "platita", "achitata"].includes(normalized)) {
     return { status: "collected", collectedAmount: total, remainingAmount: 0, ignored: false, needsReview: false };
   }
@@ -353,6 +371,9 @@ export function mapSmartBillCustomerInvoiceStatus(value: unknown, input?: { tota
 export function mapSmartBillSupplierDocumentStatus(value: unknown, input?: { totalAmount?: number; dueDate?: Date | null; now?: Date }) {
   const normalized = normalizeText(value);
   const total = input?.totalAmount ?? 0;
+  if (total < 0) {
+    return { status: "supplier_adjustment", paidAmount: 0, remainingAmount: 0, ignored: false, needsReview: true };
+  }
   if (["platita", "achitata", "paid"].includes(normalized)) {
     return { status: "paid", paidAmount: total, remainingAmount: 0, ignored: false, needsReview: false };
   }
@@ -379,7 +400,7 @@ export function buildSmartBillPreview(input: {
   context?: SmartBillPreviewContext;
   includeToken?: boolean;
 }) {
-  const rows = input.parsed.rows.map((row) => previewRow(row, input.context || {}, input.companyContext));
+  const rows = input.parsed.rows.map((row) => previewRow(row, input.context || {}, input.companyContext, input.parsed.rows));
   const summary = summarizePreviewRows(input.parsed.reportType, rows);
   const generatedAt = new Date().toISOString();
   const payload: SmartBillTokenPayload = {
@@ -521,6 +542,51 @@ export function smartBillSupplierPayableData(input: {
   };
 }
 
+export function smartBillCustomerAdjustmentReceivableData(input: {
+  row: SmartBillCustomerInvoiceRow;
+  uploadId: string;
+  companyContext: SmartBillCompanyContext;
+  linkedReceivable: SmartBillExistingFinancialRow;
+  reviewedByUserId?: string | null;
+}) {
+  const rawRowJson = {
+    ...(smartBillRawJson(input.row, input.companyContext) as Record<string, Prisma.InputJsonValue>),
+    smartBillAdjustment: {
+    kind: classifySmartBillAdjustment(input.row) || "CREDIT_NOTE",
+    linkedReceivableId: input.linkedReceivable.id,
+    linkedInvoiceNumber: input.linkedReceivable.invoiceNumber || input.linkedReceivable.normalizedInvoiceNumber || null,
+    adjustmentAmount: Math.abs(input.row.totalAmount),
+    appliedToRemainingAmount: true
+    }
+  } satisfies Prisma.InputJsonObject;
+  return {
+    uploadId: input.uploadId,
+    clientId: input.linkedReceivable.clientId || null,
+    campaignId: null,
+    accountOwnerUserId: null,
+    companyName: input.companyContext.companyName,
+    companyCode: input.companyContext.companyCode,
+    invoiceNumber: input.row.invoiceNumber,
+    normalizedInvoiceNumber: input.row.normalizedInvoiceNumber,
+    invoiceDate: input.row.issueDate,
+    clientName: input.row.clientName,
+    dueDate: input.row.dueDate,
+    invoicedAmount: input.row.totalAmount,
+    collectedAmount: 0,
+    remainingAmount: 0,
+    collectedAt: input.row.issueDate,
+    currency: normalizedCurrency(input.row.currency),
+    status: "collected",
+    rawRowJson,
+    needsReview: false,
+    includedInReport: true,
+    rowType: "smartbill_customer_adjustment",
+    reviewNote: `Ajustare SmartBill aplicata la factura ${input.linkedReceivable.invoiceNumber || input.linkedReceivable.normalizedInvoiceNumber || input.linkedReceivable.id}.`,
+    reviewedByUserId: input.reviewedByUserId || null,
+    reviewedAt: new Date()
+  };
+}
+
 export function smartBillDedupeKey(row: SmartBillParsedRow) {
   const entity = row.normalizedFiscalCode || normalizeCompanyName(row.kind === "customer_invoice" ? row.clientName : row.supplierName);
   const number = row.kind === "customer_invoice" ? row.normalizedInvoiceNumber : row.normalizedInvoiceNumber;
@@ -648,7 +714,7 @@ function parseSupplierDocumentRow(
   return row;
 }
 
-function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, companyContext: SmartBillCompanyContext): SmartBillPreviewRow {
+function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, companyContext: SmartBillCompanyContext, reportRows: SmartBillParsedRow[] = []): SmartBillPreviewRow {
   const entityKind = row.kind === "customer_invoice" ? "client" : "supplier";
   const entityName = row.kind === "customer_invoice" ? row.clientName : row.supplierName;
   const documentNumber = row.kind === "customer_invoice" ? row.invoiceNumber : row.documentNumber;
@@ -658,6 +724,9 @@ function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, c
   const duplicate = findSmartBillDuplicate(row, financialRows, companyContext);
   const conflictingDocument = findSmartBillDocumentConflict(row, financialRows, companyContext);
   const errors = [...row.issues];
+  const adjustmentKind = classifySmartBillAdjustment(row);
+  const adjustmentRows = adjustmentKind ? [...financialRows, ...sameReportAdjustmentCandidates(row, reportRows, companyContext)] : financialRows;
+  const adjustmentMatch = adjustmentKind ? findSmartBillAdjustmentMatch(row, adjustmentRows, companyContext) : null;
   let proposedAction: SmartBillPreviewAction = "AUTO_MATCHED";
   let warning: string | null = null;
 
@@ -666,12 +735,23 @@ function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, c
     warning = "Rand ignorat din cauza statusului SmartBill.";
   } else if (errors.length) {
     proposedAction = "INVALID";
-  } else if (row.status === "needs_review") {
-    proposedAction = "NEEDS_REVIEW";
-    warning = "Status SmartBill necunoscut sau insuficient pentru import automat.";
+  } else if (adjustmentKind && duplicate) {
+    proposedAction = "DUPLICATE";
+    warning = "Ajustarea SmartBill pare deja introdusa si nu va fi aplicata din nou.";
   } else if (duplicate && !isSmartBillSourceDuplicate(duplicate, row.dedupeKey)) {
     proposedAction = "DUPLICATE";
     warning = "Factura/documentul pare deja introdus si nu va fi duplicat.";
+  } else if (adjustmentKind) {
+    if (row.kind === "customer_invoice" && adjustmentMatch?.kind === "auto") {
+      proposedAction = "AUTO_LINK_ADJUSTMENT";
+      warning = adjustmentMatch.reason;
+    } else {
+      proposedAction = "ADJUSTMENT_NEEDS_REVIEW";
+      warning = adjustmentMatch?.reason || "Document negativ SmartBill; necesita legare manuala inainte de aplicare.";
+    }
+  } else if (row.status === "needs_review") {
+    proposedAction = "NEEDS_REVIEW";
+    warning = "Status SmartBill necunoscut sau insuficient pentru import automat.";
   } else if (conflictingDocument && !duplicate) {
     proposedAction = "NEEDS_REVIEW";
     warning = "Exista acelasi numar de document si aceeasi data, dar suma difera.";
@@ -704,6 +784,11 @@ function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, c
     matchedEntityId: match.entity?.id || null,
     matchedEntityName: match.entity?.name || null,
     duplicateId: duplicate?.id || null,
+    adjustmentKind,
+    linkedFinancialRowId: adjustmentMatch?.linkedRow?.id || null,
+    linkedDocumentNumber: adjustmentMatch?.linkedRow?.invoiceNumber || adjustmentMatch?.linkedRow?.normalizedInvoiceNumber || null,
+    matchConfidence: adjustmentMatch?.matchConfidence || null,
+    adjustmentReason: adjustmentMatch?.reason || null,
     proposedAction,
     warning,
     errors,
@@ -753,11 +838,161 @@ export function isSmartBillSourceDuplicate(existing: SmartBillExistingFinancialR
   return rawSmartBillDedupeKey(existing.rawRowJson) === dedupeKey;
 }
 
+export function classifySmartBillAdjustment(row: SmartBillParsedRow): SmartBillAdjustmentKind | null {
+  if (!Number.isFinite(row.totalAmount) || row.totalAmount >= 0) return null;
+  const text = normalizeText([
+    row.kind === "customer_invoice" ? row.invoiceNumber : row.documentNumber,
+    row.notes,
+    row.sourceStatus,
+    JSON.stringify(row.raw || {})
+  ].filter(Boolean).join(" "));
+  if (/\b(storno|stornare|stornat)\b/.test(text)) return "STORNO";
+  if (/\b(discount|discounturi|reducere|reduceri|rabart|rabat)\b/.test(text)) return "DISCOUNT_ADJUSTMENT";
+  return "CREDIT_NOTE";
+}
+
+export function findSmartBillAdjustmentMatch(
+  row: SmartBillParsedRow,
+  existingRows: SmartBillExistingFinancialRow[],
+  companyContext?: SmartBillCompanyContext
+) {
+  const adjustmentKind = classifySmartBillAdjustment(row);
+  if (!adjustmentKind) return null;
+  if (row.kind !== "customer_invoice") {
+    return {
+      kind: "review" as const,
+      adjustmentKind,
+      matchConfidence: "low" as const,
+      reason: "Document negativ de furnizor; MVP-ul nu il aplica automat pe plati furnizori."
+    };
+  }
+
+  const adjustmentAmount = Math.abs(row.totalAmount);
+  const candidates = existingRows.filter((existing) =>
+    sameFinancialCompany(existing, companyContext) &&
+    sameSmartBillEntity(row, existing) &&
+    normalizedCurrency(existing.currency) === normalizedCurrency(row.currency) &&
+    existingAmount(existing) > 0 &&
+    existingRemainingAmount(existing) > 0 &&
+    existing.includedInReport !== false &&
+    !["cancelled", "archived", "lost", "collected", "paid"].includes(String(existing.status || ""))
+  );
+
+  if (!candidates.length) {
+    return {
+      kind: "review" as const,
+      adjustmentKind,
+      matchConfidence: "low" as const,
+      reason: "Nu exista factura pozitiva deschisa pentru acelasi client, firma si moneda."
+    };
+  }
+
+  const referenced = candidates.filter((candidate) => smartBillAdjustmentReferencesInvoice(row, candidate));
+  if (referenced.length > 1) {
+    return {
+      kind: "review" as const,
+      adjustmentKind,
+      matchConfidence: "low" as const,
+      reason: "Observatiile par sa indice mai multe facturi posibile."
+    };
+  }
+
+  const linkedRow = referenced[0] || (candidates.length === 1 ? candidates[0] : null);
+  if (!linkedRow) {
+    return {
+      kind: "review" as const,
+      adjustmentKind,
+      matchConfidence: "low" as const,
+      reason: "Exista mai multe facturi deschise si documentul negativ nu indica factura originala."
+    };
+  }
+
+  const remaining = existingRemainingAmount(linkedRow);
+  if (adjustmentAmount > remaining + 0.01) {
+    return {
+      kind: "review" as const,
+      adjustmentKind,
+      linkedRow,
+      matchConfidence: referenced[0] ? "high" as const : "medium" as const,
+      reason: "Valoarea negativa depaseste soldul deschis al facturii gasite; poate necesita impartire."
+    };
+  }
+
+  return {
+    kind: "auto" as const,
+    adjustmentKind,
+    linkedRow,
+    matchConfidence: referenced[0] ? "high" as const : "medium" as const,
+    reason: referenced[0]
+      ? "Factura originala este mentionata clar in observatiile SmartBill."
+      : "Exista exact o singura factura pozitiva deschisa pentru client si moneda."
+  };
+}
+
+function sameReportAdjustmentCandidates(row: SmartBillParsedRow, reportRows: SmartBillParsedRow[], companyContext: SmartBillCompanyContext): SmartBillExistingFinancialRow[] {
+  if (row.kind !== "customer_invoice") return [];
+  return reportRows
+    .filter((candidate): candidate is SmartBillCustomerInvoiceRow =>
+      candidate.kind === "customer_invoice" &&
+      candidate.dedupeKey !== row.dedupeKey &&
+      candidate.totalAmount > 0 &&
+      !candidate.ignored &&
+      !candidate.issues.length &&
+      !["collected", "cancelled", "needs_review"].includes(candidate.status)
+    )
+    .map((candidate) => ({
+      id: `preview:${candidate.dedupeKey}`,
+      companyName: companyContext.companyName,
+      companyCode: companyContext.companyCode,
+      normalizedInvoiceNumber: candidate.normalizedInvoiceNumber,
+      invoiceNumber: candidate.invoiceNumber,
+      invoiceDate: candidate.issueDate,
+      dueDate: candidate.dueDate,
+      clientName: candidate.clientName,
+      entityTaxId: candidate.normalizedFiscalCode,
+      entityNormalizedName: normalizeCompanyName(candidate.clientName),
+      currency: candidate.currency,
+      amount: candidate.totalAmount,
+      remainingAmount: candidate.totalAmount,
+      paidOrCollectedAmount: 0,
+      rawRowJson: { normalizedFiscalCode: candidate.normalizedFiscalCode, smartBillDedupeKey: candidate.dedupeKey },
+      includedInReport: true,
+      status: candidate.status
+    }));
+}
+
+export function calculateSmartBillReceivableAdjustment(input: {
+  row: SmartBillCustomerInvoiceRow;
+  receivable: SmartBillExistingFinancialRow;
+  now?: Date;
+}) {
+  const adjustmentAmount = roundMoney(Math.abs(input.row.totalAmount));
+  const currentRemaining = existingRemainingAmount(input.receivable);
+  if (adjustmentAmount > currentRemaining + 0.01) {
+    throw new Error("Ajustarea SmartBill depaseste soldul facturii legate.");
+  }
+  const remainingAmount = roundMoney(Math.max(0, currentRemaining - adjustmentAmount));
+  return {
+    adjustmentAmount,
+    remainingAmount,
+    originalInvoicedAmount: existingAmount(input.receivable),
+    status: financialStatus({
+      kind: "receivable",
+      remainingAmount,
+      paidOrCollected: input.receivable.paidOrCollectedAmount,
+      dueDate: parseExistingDate(input.receivable.dueDate),
+      now: input.now
+    })
+  };
+}
+
 function summarizePreviewRows(reportType: SmartBillReportType, rows: SmartBillPreviewRow[]): SmartBillPreviewSummary {
   const buckets = {
     AUTO_MATCHED: 0,
     PROPOSE_CREATE_CLIENT: 0,
     PROPOSE_CREATE_SUPPLIER: 0,
+    AUTO_LINK_ADJUSTMENT: 0,
+    ADJUSTMENT_NEEDS_REVIEW: 0,
     DUPLICATE: 0,
     NEEDS_REVIEW: 0,
     INVALID: 0,
@@ -777,6 +1012,8 @@ function summarizePreviewRows(reportType: SmartBillReportType, rows: SmartBillPr
     needsReviewCount: buckets.NEEDS_REVIEW,
     invalidCount: buckets.INVALID,
     ignoredCount: buckets.IGNORED,
+    autoLinkedAdjustmentCount: buckets.AUTO_LINK_ADJUSTMENT,
+    adjustmentNeedsReviewCount: buckets.ADJUSTMENT_NEEDS_REVIEW,
     totalReceivable: roundMoney(importableRows.filter((row) => row.kind === "customer_invoice").reduce((sum, row) => sum + row.totalAmount, 0)),
     totalPayable: roundMoney(importableRows.filter((row) => row.kind === "supplier_document").reduce((sum, row) => sum + row.totalAmount, 0)),
     totalReceivableByCurrency: sumByCurrency(importableRows.filter((row) => row.kind === "customer_invoice")),
@@ -786,7 +1023,7 @@ function summarizePreviewRows(reportType: SmartBillReportType, rows: SmartBillPr
 }
 
 export function importableAction(action: SmartBillPreviewAction) {
-  return action === "AUTO_MATCHED" || action === "PROPOSE_CREATE_CLIENT" || action === "PROPOSE_CREATE_SUPPLIER";
+  return action === "AUTO_MATCHED" || action === "PROPOSE_CREATE_CLIENT" || action === "PROPOSE_CREATE_SUPPLIER" || action === "AUTO_LINK_ADJUSTMENT";
 }
 
 function validateParsedRow(row: SmartBillParsedRow) {
@@ -798,7 +1035,6 @@ function validateParsedRow(row: SmartBillParsedRow) {
   if (!row.issueDate) issues.push("Lipseste data documentului.");
   if (!row.currency || !isSupportedCurrency(row.currency)) issues.push("Moneda trebuie sa fie RON sau EUR.");
   if (!Number.isFinite(row.totalAmount) || row.totalAmount === 0) issues.push("Valoarea totala lipseste sau este zero.");
-  if (Number.isFinite(row.totalAmount) && row.totalAmount < 0) issues.push("Valoarea totala este negativa si necesita verificare manuala.");
   return issues;
 }
 
@@ -884,6 +1120,45 @@ function existingAmount(existing: SmartBillExistingFinancialRow) {
   }
   const parsed = Number(String(existing.amount ?? 0).replace(",", "."));
   return Number.isFinite(parsed) ? roundMoney(parsed) : 0;
+}
+
+function existingRemainingAmount(existing: SmartBillExistingFinancialRow) {
+  if (existing.remainingAmount && typeof existing.remainingAmount === "object" && "toNumber" in existing.remainingAmount) {
+    return roundMoney((existing.remainingAmount as Prisma.Decimal).toNumber());
+  }
+  const parsed = Number(String(existing.remainingAmount ?? existing.amount ?? 0).replace(",", "."));
+  return Number.isFinite(parsed) ? roundMoney(parsed) : 0;
+}
+
+function sameSmartBillEntity(row: SmartBillParsedRow, existing: SmartBillExistingFinancialRow) {
+  const rowName = row.kind === "customer_invoice" ? row.clientName : row.supplierName;
+  if (row.normalizedFiscalCode) {
+    return normalizeFiscalCode(existing.entityTaxId) === row.normalizedFiscalCode || normalizeFiscalCode(rawFiscalCode(existing.rawRowJson)) === row.normalizedFiscalCode;
+  }
+  const existingName = existing.entityNormalizedName || normalizeCompanyName(row.kind === "customer_invoice" ? existing.clientName : existing.supplierName);
+  return Boolean(rowName && existingName && existingName === normalizeCompanyName(rowName));
+}
+
+function smartBillAdjustmentReferencesInvoice(row: SmartBillParsedRow, existing: SmartBillExistingFinancialRow) {
+  const invoiceNumber = normalizeInvoiceNumber(existing.normalizedInvoiceNumber || existing.invoiceNumber);
+  if (!invoiceNumber) return false;
+  const text = normalizeInvoiceNumber([
+    row.kind === "customer_invoice" ? row.invoiceNumber : row.documentNumber,
+    row.notes,
+    JSON.stringify(row.raw || {})
+  ].filter(Boolean).join(" "));
+  return text.includes(invoiceNumber);
+}
+
+function rawFiscalCode(raw: unknown) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = (raw as Record<string, unknown>).normalizedFiscalCode || (raw as Record<string, unknown>).fiscalCode;
+  return typeof value === "string" ? value : null;
+}
+
+function parseExistingDate(date: Date | string | null | undefined) {
+  const parsed = typeof date === "string" ? new Date(date) : date;
+  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
 }
 
 function rawSmartBillDedupeKey(raw: unknown) {

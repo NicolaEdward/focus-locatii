@@ -82,11 +82,15 @@ async function loadSmartBillPreviewContext(reportType: SmartBillReportType, comp
           invoiceDate: true,
           clientId: true,
           clientName: true,
+          dueDate: true,
           currency: true,
           invoicedAmount: true,
+          collectedAmount: true,
+          remainingAmount: true,
           rawRowJson: true,
           includedInReport: true,
-          status: true
+          status: true,
+          client: { select: { taxId: true, normalizedName: true } }
         },
         take: 10000,
         orderBy: { createdAt: "desc" }
@@ -102,7 +106,10 @@ async function loadSmartBillPreviewContext(reportType: SmartBillReportType, comp
       })) satisfies SmartBillMatchEntity[],
       receivables: receivables.map((row) => ({
         ...row,
-        amount: row.invoicedAmount
+        amount: row.invoicedAmount,
+        paidOrCollectedAmount: row.collectedAmount,
+        entityTaxId: row.client?.taxId || null,
+        entityNormalizedName: row.client?.normalizedName || null
       })) satisfies SmartBillExistingFinancialRow[]
     };
   }
@@ -122,13 +129,17 @@ async function loadSmartBillPreviewContext(reportType: SmartBillReportType, comp
         invoiceNumber: true,
         invoiceDate: true,
         supplierId: true,
-        supplierName: true,
-        currency: true,
-        amountToPay: true,
-        rawRowJson: true,
-        includedInReport: true,
-        status: true
-      },
+          supplierName: true,
+          dueDate: true,
+          currency: true,
+          amountToPay: true,
+          amountPaid: true,
+          remainingAmount: true,
+          rawRowJson: true,
+          includedInReport: true,
+          status: true,
+          supplier: { select: { taxId: true, normalizedName: true } }
+        },
       take: 10000,
       orderBy: { createdAt: "desc" }
     })
@@ -142,7 +153,10 @@ async function loadSmartBillPreviewContext(reportType: SmartBillReportType, comp
     })) satisfies SmartBillMatchEntity[],
     payables: payables.map((row) => ({
       ...row,
-      amount: row.amountToPay
+      amount: row.amountToPay,
+      paidOrCollectedAmount: row.amountPaid,
+      entityTaxId: row.supplier?.taxId || null,
+      entityNormalizedName: row.supplier?.normalizedName || null
     })) satisfies SmartBillExistingFinancialRow[]
   };
 }

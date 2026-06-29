@@ -95,7 +95,22 @@ function customerWorkbook() {
 function negativeCustomerWorkbook() {
   return workbookBuffer([
     ["Nr. crt.", "Client", "CIF", "Adresa", "Factura", "Data emiterii", "Data scadentei", "Status", "Moneda", "Valoare fara TVA", "Valoare TVA", "Valoare Totala", "Aviz insotire", "Observatii", "Index SPV"],
-    [1, "CLIENT STORNO SRL", "RO111", "Bucuresti", "STORNO1", "01/05/2026", "16/05/2026", "emisa", "RON", "-100,00", "-19,00", "-119,00", "", "Storno", ""]
+    [1, "BEST ADVERTISING & CONSULT SRL", "RO15116098", "Bucuresti", "STORNO1", "20/05/2026", "20/05/2026", "emisa", "RON", "-100,00", "-19,00", "-119,00", "", "Storno factura EMP0361", ""]
+  ]);
+}
+
+function negativeSupplierWorkbook() {
+  return workbookBuffer([
+    ["Document", "Denumire furnizor", "CIF", "Data doc", "Data scadentei", "Categoria", "Valoare fara TVA", "TVA", "Valoare totala", "Moneda", "Observatii", "Status"],
+    ["NC1", "ASOCIATIA DE PROPRIETARI TURN T3", "28993486", "25/05/2026", "10/06/2026", "Storno", "-100,00", "-19,00", "-119,00", "RON", "Storno document T3.564", "Nesalvata"]
+  ]);
+}
+
+function sameReportAdjustmentWorkbook() {
+  return workbookBuffer([
+    ["Nr. crt.", "Client", "CIF", "Adresa", "Factura", "Data emiterii", "Data scadentei", "Status", "Moneda", "Valoare fara TVA", "Valoare TVA", "Valoare Totala", "Aviz insotire", "Observatii", "Index SPV"],
+    [1, "KEPI CONSULT SRL", "RO16252985", "Bucuresti", "EMP0367", "20/05/2026", "04/06/2026", "depasita", "RON", "35221,61", "6692,11", "41913,72", "", "OOH", ""],
+    [2, "KEPI CONSULT SRL", "RO16252985", "Bucuresti", "EMP0368", "29/05/2026", "29/05/2026", "emisa", "RON", "-3201,97", "-608,37", "-3810,34", "", "Discount suplimentar", ""]
   ]);
 }
 
@@ -133,7 +148,8 @@ assert.equal(customerParsed.rows[0].totalAmount, 47283.07);
 assert.equal(customerParsed.rows[1].status, "collected");
 
 const negativeCustomerParsed = smartbill.parseSmartBillCustomerInvoices(negativeCustomerWorkbook());
-assert.equal(negativeCustomerParsed.rows[0].issues.some((issue) => issue.includes("negativa")), true);
+assert.equal(negativeCustomerParsed.rows[0].issues.some((issue) => issue.includes("negativa")), false);
+assert.equal(smartbill.classifySmartBillAdjustment(negativeCustomerParsed.rows[0]), "STORNO");
 const negativePreview = smartbill.buildSmartBillPreview({
   parsed: negativeCustomerParsed,
   fileName: "Facturi_negative.xls",
@@ -141,7 +157,8 @@ const negativePreview = smartbill.buildSmartBillPreview({
   context: {},
   includeToken: false
 });
-assert.equal(negativePreview.summary.invalidCount, 1);
+assert.equal(negativePreview.summary.invalidCount, 0);
+assert.equal(negativePreview.summary.adjustmentNeedsReviewCount, 1);
 
 const supplierParsed = smartbill.parseSmartBillSupplierDocuments(supplierWorkbook());
 assert.equal(supplierParsed.rows.length, 2);
@@ -150,6 +167,18 @@ assert.equal(supplierParsed.rows[0].supplierName, "ASOCIATIA DE PROPRIETARI TURN
 assert.equal(supplierParsed.rows[0].normalizedFiscalCode, "28993486");
 assert.equal(supplierParsed.rows[0].documentNumber, "T3.564");
 assert.equal(supplierParsed.rows[1].status, "paid");
+const negativeSupplierParsed = smartbill.parseSmartBillSupplierDocuments(negativeSupplierWorkbook());
+assert.equal(negativeSupplierParsed.rows[0].issues.some((issue) => issue.includes("negativa")), false);
+assert.equal(smartbill.classifySmartBillAdjustment(negativeSupplierParsed.rows[0]), "STORNO");
+const negativeSupplierPreview = smartbill.buildSmartBillPreview({
+  parsed: negativeSupplierParsed,
+  fileName: "Furnizori_negative.xls",
+  companyContext: focusCompany,
+  context: {},
+  includeToken: false
+});
+assert.equal(negativeSupplierPreview.summary.adjustmentNeedsReviewCount, 1);
+assert.equal(negativeSupplierPreview.rows[0].proposedAction, "ADJUSTMENT_NEEDS_REVIEW");
 
 const clients = [
   { id: "client-1", name: "Best Advertising Consult", normalizedName: "best advertising consult", taxId: "15116098" }
@@ -167,8 +196,16 @@ const existingReceivable = {
   companyName: "Focus Media",
   companyCode: "FOCUS_MEDIA",
   normalizedInvoiceNumber: customerParsed.rows[0].normalizedInvoiceNumber,
+  invoiceNumber: customerParsed.rows[0].invoiceNumber,
   invoiceDate: customerParsed.rows[0].issueDate,
+  dueDate: customerParsed.rows[0].dueDate,
+  clientId: "client-1",
   amount: customerParsed.rows[0].totalAmount,
+  remainingAmount: customerParsed.rows[0].totalAmount,
+  paidOrCollectedAmount: 0,
+  entityTaxId: "15116098",
+  entityNormalizedName: "best advertising consult",
+  currency: "RON",
   rawRowJson: { source: "manual" },
   includedInReport: true,
   status: "overdue"
@@ -179,6 +216,34 @@ const otherCompanyReceivable = { ...existingReceivable, id: "receivable-other-co
 assert.equal(smartbill.findSmartBillDuplicate(customerParsed.rows[0], [otherCompanyReceivable], focusCompany), null);
 const conflictingReceivable = { ...existingReceivable, id: "receivable-conflict", amount: 10 };
 assert.equal(smartbill.findSmartBillDocumentConflict(customerParsed.rows[0], [conflictingReceivable], focusCompany).id, "receivable-conflict");
+
+const adjustmentMatch = smartbill.findSmartBillAdjustmentMatch(negativeCustomerParsed.rows[0], [existingReceivable], focusCompany);
+assert.equal(adjustmentMatch.kind, "auto");
+assert.equal(adjustmentMatch.linkedRow.id, "receivable-1");
+assert.equal(adjustmentMatch.matchConfidence, "high");
+const adjustmentApplication = smartbill.calculateSmartBillReceivableAdjustment({
+  row: negativeCustomerParsed.rows[0],
+  receivable: existingReceivable,
+  now: new Date("2026-06-29T00:00:00.000Z")
+});
+assert.equal(adjustmentApplication.remainingAmount, 47164.07);
+assert.equal(adjustmentApplication.originalInvoicedAmount, 47283.07);
+assert.equal(existingReceivable.amount, 47283.07);
+
+const multipleAdjustmentMatch = smartbill.findSmartBillAdjustmentMatch(
+  { ...negativeCustomerParsed.rows[0], notes: "Storno discount fara referinta", raw: { Observatii: "Storno discount fara referinta" } },
+  [existingReceivable, { ...existingReceivable, id: "receivable-2", invoiceNumber: "EMP0999", normalizedInvoiceNumber: "emp0999" }],
+  focusCompany
+);
+assert.equal(multipleAdjustmentMatch.kind, "review");
+const tooLargeAdjustmentMatch = smartbill.findSmartBillAdjustmentMatch(
+  { ...negativeCustomerParsed.rows[0], totalAmount: -999999 },
+  [existingReceivable],
+  focusCompany
+);
+assert.equal(tooLargeAdjustmentMatch.kind, "review");
+const wrongCompanyAdjustmentMatch = smartbill.findSmartBillAdjustmentMatch(negativeCustomerParsed.rows[0], [{ ...existingReceivable, companyName: "Excellence Media", companyCode: "EXCELLENCE_MEDIA" }], focusCompany);
+assert.equal(wrongCompanyAdjustmentMatch.kind, "review");
 
 const preview = smartbill.buildSmartBillPreview({
   parsed: customerParsed,
@@ -195,6 +260,56 @@ assert.equal(preview.summary.createClientCount, 1);
 assert.equal(preview.summary.totalReceivable, 119);
 assert.equal(preview.rows.find((row) => row.documentNumber === "EMP0361").proposedAction, "DUPLICATE");
 assert.equal(preview.rows.find((row) => row.documentNumber === "EMP0362").proposedAction, "PROPOSE_CREATE_CLIENT");
+
+const autoAdjustmentPreview = smartbill.buildSmartBillPreview({
+  parsed: negativeCustomerParsed,
+  fileName: "Facturi_negative.xls",
+  companyContext: focusCompany,
+  context: { clients, receivables: [existingReceivable] },
+  includeToken: false
+});
+assert.equal(autoAdjustmentPreview.summary.autoLinkedAdjustmentCount, 1);
+assert.equal(autoAdjustmentPreview.rows[0].proposedAction, "AUTO_LINK_ADJUSTMENT");
+assert.equal(autoAdjustmentPreview.rows[0].linkedFinancialRowId, "receivable-1");
+
+const duplicateAdjustmentPreview = smartbill.buildSmartBillPreview({
+  parsed: negativeCustomerParsed,
+  fileName: "Facturi_negative.xls",
+  companyContext: focusCompany,
+  context: {
+    clients,
+    receivables: [
+      existingReceivable,
+      {
+        id: "adjustment-existing",
+        companyName: "Focus Media",
+        companyCode: "FOCUS_MEDIA",
+        normalizedInvoiceNumber: negativeCustomerParsed.rows[0].normalizedInvoiceNumber,
+        invoiceNumber: negativeCustomerParsed.rows[0].invoiceNumber,
+        invoiceDate: negativeCustomerParsed.rows[0].issueDate,
+        amount: negativeCustomerParsed.rows[0].totalAmount,
+        remainingAmount: 0,
+        currency: "RON",
+        rawRowJson: { smartBillDedupeKey: negativeCustomerParsed.rows[0].dedupeKey },
+        includedInReport: true,
+        status: "collected"
+      }
+    ]
+  },
+  includeToken: false
+});
+assert.equal(duplicateAdjustmentPreview.rows[0].proposedAction, "DUPLICATE");
+
+const sameReportAdjustmentParsed = smartbill.parseSmartBillCustomerInvoices(sameReportAdjustmentWorkbook());
+const sameReportAdjustmentPreview = smartbill.buildSmartBillPreview({
+  parsed: sameReportAdjustmentParsed,
+  fileName: "Facturi_same_report_negative.xls",
+  companyContext: focusCompany,
+  context: {},
+  includeToken: false
+});
+assert.equal(sameReportAdjustmentPreview.rows.find((row) => row.documentNumber === "EMP0368").proposedAction, "AUTO_LINK_ADJUSTMENT");
+assert.equal(sameReportAdjustmentPreview.rows.find((row) => row.documentNumber === "EMP0368").linkedDocumentNumber, "EMP0367");
 
 const conflictPreview = smartbill.buildSmartBillPreview({
   parsed: customerParsed,
@@ -292,6 +407,10 @@ assert.ok(confirmRouteSource.includes("body.reportType !== payload.reportType"),
 assert.ok(confirmRouteSource.includes("Firma aleasa nu corespunde"), "SmartBill confirm must reject company mismatch.");
 assert.ok(confirmRouteSource.includes("smartbill-${companyContext.companyCode}-${payload.fileHash}"), "SmartBill upload metadata must include selected company context.");
 assert.ok(confirmRouteSource.includes("!importableAction(previewRow.proposedAction)"), "SmartBill confirm must skip invalid, review, duplicate and ignored rows.");
+assert.ok(confirmRouteSource.includes('previewRow.proposedAction === "AUTO_LINK_ADJUSTMENT"'), "SmartBill confirm must apply only auto-linked negative adjustments.");
+assert.ok(confirmRouteSource.includes("applySmartBillCustomerAdjustment"), "SmartBill confirm must recheck adjustment links before writing.");
+assert.ok(confirmRouteSource.includes("remainingAmount: application.remainingAmount"), "SmartBill confirm must reduce only the linked remaining amount.");
+assert.ok(confirmRouteSource.includes("orderedRows"), "SmartBill confirm should process regular invoices before same-file adjustments.");
 
 const financePanelSource = fs.readFileSync(path.join(repoRoot, "src/components/admin/FinancialDashboardPanel.tsx"), "utf8");
 assert.ok(financePanelSource.includes("Firma import"), "SmartBill UI must show a required company selector.");
@@ -304,6 +423,9 @@ assert.ok(financePanelSource.includes("Tip raport"), "SmartBill preview summary 
 assert.ok(financePanelSource.includes("Total clienti importabil pe moneda") && financePanelSource.includes("Total furnizori importabil pe moneda"), "SmartBill preview must show total value by currency.");
 assert.ok(financePanelSource.includes("Se vor asocia automat"), "SmartBill preview must group auto-matched rows.");
 assert.ok(financePanelSource.includes("Se vor crea clienti/furnizori noi"), "SmartBill preview must group create-new rows.");
+assert.ok(financePanelSource.includes("Storno / discounturi legate automat"), "SmartBill preview must group auto-linked negative adjustments.");
+assert.ok(financePanelSource.includes("Storno / discounturi necesita verificare"), "SmartBill preview must group negative adjustments that need review.");
+assert.ok(financePanelSource.includes("Factura legata") && financePanelSource.includes("Incredere"), "SmartBill adjustment preview must show linked invoice and match confidence.");
 assert.ok(financePanelSource.includes("Duplicate detectate"), "SmartBill preview must group duplicates.");
 assert.ok(financePanelSource.includes("Necesita verificare"), "SmartBill preview must group review rows.");
 assert.ok(financePanelSource.includes("Randuri invalide"), "SmartBill preview must group invalid rows.");

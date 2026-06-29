@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { CalendarDays, FileSpreadsheet, Lock, Printer, Send, ShoppingBag, Sparkles, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { monthlyRate, sqm } from "@/lib/format";
@@ -33,8 +33,12 @@ export function ShortlistDrawer({
   const [sendingOffer, setSendingOffer] = useState(false);
   const [offerFeedback, setOfferFeedback] = useState<string | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
-  const publicRateLocations = locations.filter((location) => location.rateCard || location.rateCardValue);
-  const totalRate = publicRateLocations.reduce((sum, location) => sum + (location.rateCardValue || 0), 0);
+  const reduceMotion = useReducedMotion();
+  const publicRateLocations = useMemo(() => locations.filter((location) => location.rateCard || location.rateCardValue), [locations]);
+  const totalRate = useMemo(
+    () => publicRateLocations.reduce((sum, location) => sum + (location.rateCardValue || 0), 0),
+    [publicRateLocations]
+  );
   const showPublicRates = publicRateLocations.length > 0;
   const periodSummary = useMemo(() => {
     if (!periodStart && !periodEnd) return "";
@@ -101,11 +105,11 @@ export function ShortlistDrawer({
 
   return (
     <motion.aside
-      initial={{ x: "100%" }}
+      initial={reduceMotion ? false : { x: "100%" }}
       animate={{ x: 0 }}
       exit={{ x: "100%" }}
-      transition={{ type: "spring", stiffness: 240, damping: 28 }}
-      className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-2xl min-w-0 flex-col overflow-hidden border-l border-focus-line bg-focus-navy shadow-focus"
+      transition={{ duration: 0.18, ease: "easeOut" }}
+      className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-2xl min-w-0 transform-gpu flex-col overflow-hidden border-l border-focus-line bg-focus-navy shadow-2xl"
       role="dialog"
       aria-modal="true"
       aria-label="Media plan selectat"

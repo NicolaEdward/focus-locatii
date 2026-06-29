@@ -1,20 +1,20 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { ArrowRight, Eye, MapPin, Plus, Ruler, Sparkles, Star } from "lucide-react";
+import { memo } from "react";
 import { monthlyRate, sqm } from "@/lib/format";
 import type { LocationDTO } from "@/types/location";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 
-export function LocationCard({
+function LocationCardComponent({
   location,
   onOpen,
   onShortlist,
   isShortlisted
 }: {
   location: LocationDTO;
-  onOpen: () => void;
-  onShortlist: () => void;
+  onOpen: (location: LocationDTO) => void;
+  onShortlist: (id: string) => void;
   isShortlisted: boolean;
 }) {
   const showRateCard = Boolean(location.rateCard || location.rateCardValue);
@@ -23,19 +23,17 @@ export function LocationCard({
   const image = location.mainPhotoUrl || location.images[0]?.url || "/samples/location-placeholder.svg";
 
   return (
-    <motion.article
-      layout
-      whileHover={{ y: -4 }}
-      className="focus-card group flex min-w-0 flex-col overflow-hidden rounded-lg"
+    <article
+      className="focus-card group flex min-w-0 flex-col overflow-hidden rounded-lg transition-transform duration-150 ease-out hover:-translate-y-0.5 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
       data-location-id={location.id}
     >
-      <button type="button" className="relative block aspect-[4/3] w-full overflow-hidden bg-focus-ink text-left" onClick={onOpen}>
+      <button type="button" className="relative block aspect-[4/3] w-full overflow-hidden bg-focus-ink text-left" onClick={() => onOpen(location)}>
         <img
           src={image}
           alt={location.code}
           loading="lazy"
           decoding="async"
-          className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
+          className="h-full w-full object-cover transition-transform duration-200 ease-out group-hover:scale-[1.02] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
           onError={(event) => {
             event.currentTarget.src = "/samples/location-placeholder.svg";
           }}
@@ -45,7 +43,7 @@ export function LocationCard({
           <span className="rounded-md border border-focus-yellow bg-focus-navy/92 px-3 py-2 font-display text-lg font-black uppercase text-white shadow-focus">
             {location.code}
           </span>
-          <span className="rounded-md border border-white/25 bg-white/12 px-3 py-2 text-xs font-black uppercase text-white backdrop-blur">
+          <span className="rounded-md border border-white/25 bg-focus-navy/82 px-3 py-2 text-xs font-black uppercase text-white">
             {location.categoryName}
           </span>
         </div>
@@ -107,11 +105,11 @@ export function LocationCard({
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <button type="button" className="focus-button secondary" onClick={onOpen}>
+          <button type="button" className="focus-button secondary" onClick={() => onOpen(location)}>
             <Eye size={18} />
             Prezentare
           </button>
-          <button type="button" className="focus-button" onClick={onShortlist}>
+          <button type="button" className="focus-button" onClick={() => onShortlist(location.id)}>
             {isShortlisted ? <Star size={18} /> : <Plus size={18} />}
             {isShortlisted ? "In media plan" : "Adauga in media plan"}
           </button>
@@ -123,9 +121,11 @@ export function LocationCard({
           </p>
         ) : null}
       </div>
-    </motion.article>
+    </article>
   );
 }
+
+export const LocationCard = memo(LocationCardComponent);
 
 function Spec({ label, value }: { label: string; value: string }) {
   return (

@@ -1,12 +1,21 @@
 "use client";
 
 import { Maximize2, Minimize2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { LocationDTO } from "@/types/location";
 
 type LeafletModule = typeof import("leaflet");
+type MarkerClusterOptions = Parameters<NonNullable<LeafletModule["markerClusterGroup"]>>[0] & {
+  chunkedLoading?: boolean;
+  chunkInterval?: number;
+  chunkDelay?: number;
+};
 
-export function LocationMap({
+const CARTO_VOYAGER_TILES = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
+const CARTO_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+
+function LocationMapComponent({
   locations,
   onSelect,
   fitKey = "initial"
@@ -37,14 +46,18 @@ export function LocationMap({
 
       leafletRef.current = L;
       const map = L.map(containerRef.current, {
-        scrollWheelZoom: true,
-        zoomControl: false
+        preferCanvas: true,
+        scrollWheelZoom: false,
+        zoomControl: false,
+        zoomSnap: 0.25
       }).setView([44.45, 26.1], 10);
 
       L.control.zoom({ position: "bottomright" }).addTo(map);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "&copy; OpenStreetMap"
+      L.tileLayer(CARTO_VOYAGER_TILES, {
+        maxZoom: 20,
+        subdomains: "abcd",
+        detectRetina: true,
+        attribution: CARTO_ATTRIBUTION
       }).addTo(map);
 
       mapRef.current = map;
@@ -95,32 +108,37 @@ export function LocationMap({
       map.removeLayer(layerRef.current);
     }
 
+    const clusterOptions: MarkerClusterOptions = {
+      disableClusteringAtZoom: 18,
+      maxClusterRadius: (zoom) => {
+        if (zoom <= 8) return 28;
+        if (zoom <= 10) return 18;
+        if (zoom <= 12) return 10;
+        return 6;
+      },
+      showCoverageOnHover: false,
+      spiderfyOnEveryZoom: false,
+      spiderfyDistanceMultiplier: 1.35,
+      spiderfyOnMaxZoom: true,
+      zoomToBoundsOnClick: true,
+      chunkedLoading: true,
+      chunkInterval: 60,
+      chunkDelay: 20,
+      iconCreateFunction: (cluster) => {
+        const childMarkers = cluster.getAllChildMarkers?.() ?? [];
+        const statusClass = clusterStatusClass(childMarkers);
+        return L.divIcon({
+          className: "",
+          html: `<span class="map-cluster ${statusClass}" title="${clusterTitle(statusClass)}"><span>${cluster.getChildCount()}</span></span>`,
+          iconSize: [42, 42],
+          iconAnchor: [21, 21]
+        });
+      }
+    };
+
     const layer =
       typeof L.markerClusterGroup === "function"
-        ? L.markerClusterGroup({
-            disableClusteringAtZoom: 18,
-            maxClusterRadius: (zoom) => {
-              if (zoom <= 8) return 28;
-              if (zoom <= 10) return 18;
-              if (zoom <= 12) return 10;
-              return 6;
-            },
-            showCoverageOnHover: false,
-            spiderfyOnEveryZoom: true,
-            spiderfyDistanceMultiplier: 1.75,
-            spiderfyOnMaxZoom: true,
-            zoomToBoundsOnClick: false,
-            iconCreateFunction: (cluster) => {
-              const childMarkers = cluster.getAllChildMarkers?.() ?? [];
-              const statusClass = clusterStatusClass(childMarkers);
-              return L.divIcon({
-                className: "",
-                html: `<span class="map-cluster ${statusClass}" title="${clusterTitle(statusClass)}">${cluster.getChildCount()}</span>`,
-                iconSize: [38, 38],
-                iconAnchor: [19, 19]
-              });
-            }
-          })
+        ? L.markerClusterGroup(clusterOptions)
         : L.layerGroup();
 
     const bounds: [number, number][] = [];
@@ -134,7 +152,7 @@ export function LocationMap({
         riseOffset: 1200,
         icon: L.divIcon({
           className: "",
-          html: `<span class="map-marker ${statusClass}" title="${escapeHtml(location.code)}">${escapeHtml(location.code)}</span>`,
+          html: `<span class="map-marker ${statusClass}" title="${escapeHtml(location.code)}"><span class="map-marker-dot"></span><span>${escapeHtml(location.code)}</span></span>`,
           iconSize: [markerWidth, 28],
           iconAnchor: [markerWidth / 2, 14]
         })
@@ -166,13 +184,19 @@ export function LocationMap({
       className={
         isExpanded
           ? "fixed inset-0 z-[90] h-screen min-h-screen overflow-hidden bg-focus-navy"
-          : "relative z-0 h-full min-h-[480px] overflow-hidden rounded-lg border border-focus-line"
+          : "premium-map relative z-0 h-full min-h-[340px] overflow-hidden rounded-lg border border-focus-line md:min-h-[480px]"
       }
     >
-      <div ref={containerRef} className="h-full min-h-[480px] w-full" />
+      <div ref={containerRef} className="h-full min-h-[340px] w-full md:min-h-[480px]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-start justify-between gap-3 p-4">
+        <div className="rounded-lg border border-white/15 bg-focus-navy/92 px-3 py-2 shadow-lg">
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-focus-yellow">Harta portofoliu</p>
+          <p className="text-xs font-bold text-slate-200">Coordonate publice de prezentare</p>
+        </div>
+      </div>
       <button
         type="button"
-        className="focus-button secondary absolute left-4 top-4 z-20"
+        className="focus-button secondary absolute bottom-4 left-4 z-20 !min-h-0 px-3 py-2 text-xs"
         onClick={() => {
           const map = mapRef.current;
           const points = locations
@@ -185,7 +209,7 @@ export function LocationMap({
       </button>
       <button
         type="button"
-        className="focus-button secondary absolute right-4 top-4 z-20"
+        className="focus-button secondary absolute right-4 top-4 z-20 !min-h-0 px-3 py-2 text-xs"
         onClick={toggleExpanded}
         aria-label={isExpanded ? "Inchide harta fullscreen" : "Mareste harta fullscreen"}
         aria-pressed={isExpanded}
@@ -196,6 +220,8 @@ export function LocationMap({
     </div>
   );
 }
+
+export const LocationMap = memo(LocationMapComponent);
 
 function isEscapeKey(event: KeyboardEvent) {
   return event.key === "Escape" || event.key === "Esc" || event.code === "Escape";

@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { ExternalLink, MapPin, Presentation, Star, X } from "lucide-react";
 import { useEffect } from "react";
 import { monthlyRate, oneTimeRate, sqm } from "@/lib/format";
@@ -30,6 +30,7 @@ export function LocationMiniPreview({
   const area = [location.city, location.county].filter(Boolean).join(", ") || "Romania";
   const subject = `Cerere locatie ${location.code}`;
   const message = `Buna ziua, sunt interesat de locatia ${location.address || location.code} (${location.code}) - ${location.categoryName}.`;
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -44,20 +45,21 @@ export function LocationMiniPreview({
 
   return (
     <motion.div
-      className="fixed inset-0 z-50 grid place-items-center overflow-auto bg-black/72 p-4 backdrop-blur"
+      className="fixed inset-0 z-50 grid place-items-center overflow-auto bg-black/76 p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Prezentare rapida locatie"
-      initial={{ opacity: 0 }}
+      initial={reduceMotion ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      transition={{ duration: 0.14, ease: "easeOut" }}
     >
       <motion.article
         className="focus-card relative grid w-full max-w-5xl overflow-hidden rounded-lg md:grid-cols-[0.82fr_1.18fr]"
-        initial={{ opacity: 0, y: 18, scale: 0.98 }}
+        initial={reduceMotion ? false : { opacity: 0, y: 12, scale: 0.99 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 12, scale: 0.98 }}
-        transition={{ duration: 0.24 }}
+        exit={{ opacity: 0, y: 8, scale: 0.99 }}
+        transition={{ duration: 0.16, ease: "easeOut" }}
       >
         <button
           className="focus-button secondary absolute right-4 top-4 z-10 !min-h-0 px-3 py-2"

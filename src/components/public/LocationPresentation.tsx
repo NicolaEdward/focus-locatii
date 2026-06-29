@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import {
   CalendarDays,
   CheckCircle2,
@@ -38,12 +38,13 @@ export function LocationPresentation({
   const title = location.address || location.code;
   const message = `Buna ziua, sunt interesat de locatia ${title} (${location.code}) - ${location.categoryName}.`;
   const subject = `Cerere locatie ${location.code}`;
+  const reduceMotion = useReducedMotion();
 
   return (
     <motion.article
-      initial={{ opacity: 0, y: 24 }}
+      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
+      transition={{ duration: 0.16, ease: "easeOut" }}
       className="print-surface overflow-hidden rounded-lg bg-focus-navy text-white shadow-focus"
     >
       <section className="grid gap-0 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">

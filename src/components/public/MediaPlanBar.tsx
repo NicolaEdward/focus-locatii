@@ -41,8 +41,8 @@ export function MediaPlanBar({
       initial={{ opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 24 }}
-      transition={{ duration: 0.2 }}
-      className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-focus-yellow/40 bg-focus-ink/96 px-4 py-3 shadow-focus backdrop-blur"
+      transition={{ duration: 0.16, ease: "easeOut" }}
+      className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-focus-yellow/40 bg-focus-ink/98 px-4 py-3 shadow-lg"
       role="region"
       aria-label="Media plan selectat"
     >

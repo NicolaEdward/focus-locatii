@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
 import { Filter, MapPinned, Search, ShoppingBag, SlidersHorizontal } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CategoryDTO, LocationDTO } from "@/types/location";
 import { LocationCard } from "@/components/public/LocationCard";
 import { MediaPlanBar } from "@/components/public/MediaPlanBar";
@@ -53,6 +53,7 @@ export function LocationExplorer({
   const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const locationsSignatureRef = useRef(locationsSignature(initialLocations));
+  const deferredFilters = useDeferredValue(filters);
 
   useEffect(() => {
     setLocations(initialLocations);
@@ -126,6 +127,7 @@ export function LocationExplorer({
 
   const cities = useMemo(() => unique(locations.map((location) => location.city)), [locations]);
   const types = useMemo(() => unique(locations.map((location) => location.type)), [locations]);
+  const locationCodeById = useMemo(() => new Map(locations.map((location) => [location.id, location.code])), [locations]);
 
   const filtered = useMemo(() => {
     return locations.filter((location) => {
@@ -139,18 +141,18 @@ export function LocationExplorer({
       ]
         .join(" ")
         .toLowerCase();
-      const search = filters.search.toLowerCase();
+      const search = deferredFilters.search.toLowerCase();
       if (search && !text.includes(search)) return false;
-      if (filters.category && location.categorySlug !== filters.category) return false;
-      if (filters.city && location.city !== filters.city) return false;
-      if (filters.type && location.type !== filters.type) return false;
-      if (filters.status === "AVAILABLE" && location.publicStatus !== "AVAILABLE") return false;
-      if (filters.status === "RENTED" && location.publicStatus !== "BOOKED") return false;
-      if (filters.status === "RESERVED" && location.publicStatus !== "RESERVED") return false;
-      if (filters.premium && !location.isPremium) return false;
+      if (deferredFilters.category && location.categorySlug !== deferredFilters.category) return false;
+      if (deferredFilters.city && location.city !== deferredFilters.city) return false;
+      if (deferredFilters.type && location.type !== deferredFilters.type) return false;
+      if (deferredFilters.status === "AVAILABLE" && location.publicStatus !== "AVAILABLE") return false;
+      if (deferredFilters.status === "RENTED" && location.publicStatus !== "BOOKED") return false;
+      if (deferredFilters.status === "RESERVED" && location.publicStatus !== "RESERVED") return false;
+      if (deferredFilters.premium && !location.isPremium) return false;
       return true;
     });
-  }, [filters, locations]);
+  }, [deferredFilters, locations]);
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
@@ -159,20 +161,31 @@ export function LocationExplorer({
   const visibleLocations = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
   const shortlistSet = useMemo(() => new Set(shortlist), [shortlist]);
   const selectedLocations = useMemo(() => locations.filter((location) => shortlistSet.has(location.id)), [locations, shortlistSet]);
-  const mapFitKey = `${filters.search}|${filters.category}|${filters.city}|${filters.type}|${filters.status}|${filters.premium}`;
-  const stats = {
-    total: filtered.length,
-    available: filtered.filter((location) => location.publicStatus === "AVAILABLE").length,
-    rented: filtered.filter((location) => location.publicStatus === "BOOKED").length,
-    selected: selectedLocations.length
-  };
+  const mapFitKey = useMemo(
+    () =>
+      `${deferredFilters.search}|${deferredFilters.category}|${deferredFilters.city}|${deferredFilters.type}|${deferredFilters.status}|${deferredFilters.premium}`,
+    [deferredFilters]
+  );
+  const stats = useMemo(
+    () => ({
+      total: filtered.length,
+      available: filtered.filter((location) => location.publicStatus === "AVAILABLE").length,
+      rented: filtered.filter((location) => location.publicStatus === "BOOKED").length,
+      selected: selectedLocations.length
+    }),
+    [filtered, selectedLocations.length]
+  );
 
-  function toggleShortlist(id: string) {
-    const isSelected = shortlistSet.has(id);
-    const location = locations.find((item) => item.id === id);
-    if (!isSelected) setSelectionNotice(`${location?.code || "Locatia"} a fost adaugata in media plan.`);
-    setShortlist((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
-  }
+  const toggleShortlist = useCallback(
+    (id: string) => {
+      setShortlist((current) => {
+        const isSelected = current.includes(id);
+        if (!isSelected) setSelectionNotice(`${locationCodeById.get(id) || "Locatia"} a fost adaugata in media plan.`);
+        return isSelected ? current.filter((item) => item !== id) : [...current, id];
+      });
+    },
+    [locationCodeById]
+  );
 
   const openPreview = useCallback((location: LocationDTO) => {
     setPreviewLocation(location);
@@ -299,17 +312,17 @@ export function LocationExplorer({
             </button>
           </div>
 
-          <motion.div layout className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {visibleLocations.map((location) => (
               <LocationCard
                 key={location.id}
                 location={location}
-                onOpen={() => openPreview(location)}
-                onShortlist={() => toggleShortlist(location.id)}
+                onOpen={openPreview}
+                onShortlist={toggleShortlist}
                 isShortlisted={shortlistSet.has(location.id)}
               />
             ))}
-          </motion.div>
+          </div>
 
           {visibleLocations.length < filtered.length ? (
             <div className="flex justify-center pt-2">

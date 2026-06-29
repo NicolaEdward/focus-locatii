@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { ExternalLink, Link2, Printer, Star, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { LocationPresentation } from "@/components/public/LocationPresentation";
@@ -20,6 +20,7 @@ export function LocationPresentationOverlay({
 }) {
   const [copied, setCopied] = useState(false);
   const directUrl = `/locatii/${location.id}`;
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -61,16 +62,17 @@ export function LocationPresentationOverlay({
 
   return (
     <motion.div
-      className="fixed inset-0 z-[60] overflow-auto bg-focus-ink/96 p-3 backdrop-blur md:p-6"
+      className="fixed inset-0 z-[60] overflow-auto bg-focus-ink/98 p-3 md:p-6"
       role="dialog"
       aria-modal="true"
       aria-label="Prezentare locatie"
-      initial={{ opacity: 0 }}
+      initial={reduceMotion ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      transition={{ duration: 0.14, ease: "easeOut" }}
     >
       <div className="mx-auto grid max-w-[1680px] gap-4">
-        <div className="no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-focus-line bg-focus-navy/96 p-3 shadow-focus backdrop-blur">
+        <div className="no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-focus-line bg-focus-navy/98 p-3 shadow-lg">
           <div>
             <p className="text-xs font-black uppercase text-focus-yellow">Prezentare locatie</p>
             <h2 className="font-display text-2xl font-black uppercase leading-none text-white">

@@ -51,6 +51,7 @@
     "test:financial-import": "node scripts/test-financial-import.cjs",
     "test:finance-consistency": "node scripts/test-finance-consistency.cjs",
     "test:billing": "node scripts/test-billing.cjs",
+    "test:montaj-billing": "node scripts/test-montaj-billing.cjs",
     "test:data-integrity": "node scripts/test-data-integrity.cjs",
     "test:operations-rbac": "node scripts/test-operations-rbac.cjs",
     "test:notifications": "node scripts/test-notifications.cjs",

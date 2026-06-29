@@ -29,6 +29,7 @@ import {
   operationCost,
   operationStatus,
   operationStatusLabel,
+  operationUpdatedAt,
   stripOperationMeta,
   withOperationCost,
   type OperationExtraTask,
@@ -40,6 +41,12 @@ import { hasAnyPermission, hasPermission } from "@/lib/rbac";
 import { allowedReservationTransitions } from "@/lib/reservation-workflow";
 import { companyEntities, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
+import {
+  buildDecorationBillingReport,
+  decorationBillingCsv,
+  decorationBillingFileName,
+  type DecorationBillingReport
+} from "@/lib/decoration-billing";
 
 type AdminPanel = "sales" | "future" | "decorations" | "neutralizations";
 type ReservationListSort = "created" | "start";
@@ -80,6 +87,8 @@ type OperationTableTask = {
   note?: string | null;
   cost?: number | null;
   currency?: string | null;
+  finalizationDate?: string | null;
+  dedupeKey?: string | null;
 };
 
 type ReservationForm = {
@@ -445,27 +454,14 @@ export function AdminReservationsPanel({
     [reservations, today]
   );
 
+  const allDecorationTasks = useMemo(
+    () => operationalReservations.flatMap((reservation) => decorationOperationTasks(reservation)),
+    [operationalReservations]
+  );
+
   const decorationTasks = useMemo(
     () =>
-      operationalReservations
-        .flatMap((reservation): OperationTableTask[] => {
-          const baseStatus = operationStatus(reservation.productionNotes, "decoration");
-          const baseCost = operationCost(reservation.productionNotes, "decoration");
-          const tasks: OperationTableTask[] = [];
-          tasks.push({
-            reservation,
-            taskDate: reservation.installationDate || reservation.periodStart,
-            operationStatus: baseStatus,
-            taskType: "initial",
-            note: stripOperationMeta(reservation.productionNotes),
-            cost: baseCost.cost,
-            currency: baseCost.currency
-          });
-          for (const task of operationExtraTasks(reservation.productionNotes, "decoration")) {
-            tasks.push(extraOperationTask(reservation, task));
-          }
-          return tasks;
-        })
+      allDecorationTasks
         .filter(
           ({ reservation, taskDate, operationStatus: status }) =>
             activeReservationStatuses.includes(reservation.status) &&
@@ -474,40 +470,13 @@ export function AdminReservationsPanel({
               : isOperationActive(status) && new Date(taskDate) >= operationsWindowStart && new Date(taskDate) <= decorationWindowEnd)
         )
         .sort((a, b) => new Date(a.taskDate).getTime() - new Date(b.taskDate).getTime()),
-    [decorationWindowEnd, operationalReservations, operationsWindowStart, showOperationHistory]
+    [allDecorationTasks, decorationWindowEnd, operationsWindowStart, showOperationHistory]
   );
 
-  const monthlyDecoratedTasks = useMemo(() => {
-    const range = monthInputRange(decorationBillingMonth);
-    if (!range) return [];
-    return operationalReservations
-      .flatMap((reservation): OperationTableTask[] => {
-        const baseCost = operationCost(reservation.productionNotes, "decoration");
-        return [
-          {
-            reservation,
-            taskDate: reservation.installationDate || reservation.periodStart,
-            operationStatus: operationStatus(reservation.productionNotes, "decoration"),
-            taskType: "initial",
-            note: stripOperationMeta(reservation.productionNotes),
-            cost: baseCost.cost,
-            currency: baseCost.currency
-          },
-          ...operationExtraTasks(reservation.productionNotes, "decoration").map((task) => extraOperationTask(reservation, task))
-        ];
-      })
-      .filter(({ reservation, taskDate, operationStatus: status }) => {
-        const date = new Date(taskDate);
-        return (
-          activeReservationStatuses.includes(reservation.status) &&
-          status === "DONE" &&
-          !Number.isNaN(date.getTime()) &&
-          date >= range.from &&
-          date <= range.to
-        );
-      })
-      .sort((a, b) => new Date(a.taskDate).getTime() - new Date(b.taskDate).getTime());
-  }, [decorationBillingMonth, operationalReservations]);
+  const decorationBillingReport = useMemo(
+    () => buildDecorationBillingReport(allDecorationTasks, decorationBillingMonth),
+    [allDecorationTasks, decorationBillingMonth]
+  );
 
   const neutralizationTasks = useMemo(
     () =>
@@ -1404,7 +1373,7 @@ export function AdminReservationsPanel({
         >
           <OperationHistoryToggle checked={showOperationHistory} onChange={setShowOperationHistory} />
           <DecorationBillingSummary
-            tasks={monthlyDecoratedTasks}
+            report={decorationBillingReport}
             locationsById={locationsById}
             month={decorationBillingMonth}
             onMonthChange={setDecorationBillingMonth}
@@ -1708,6 +1677,26 @@ function QuickOperationsSummary({
   );
 }
 
+function decorationOperationTasks(reservation: ReservationDTO): OperationTableTask[] {
+  const baseStatus = operationStatus(reservation.productionNotes, "decoration");
+  const baseCost = operationCost(reservation.productionNotes, "decoration");
+  const taskDate = reservation.installationDate || reservation.periodStart;
+  return [
+    {
+      reservation,
+      taskDate,
+      operationStatus: baseStatus,
+      taskType: "initial",
+      note: stripOperationMeta(reservation.productionNotes),
+      cost: baseCost.cost,
+      currency: baseCost.currency,
+      finalizationDate: baseStatus === "DONE" ? operationUpdatedAt(reservation.productionNotes, "decoration") || taskDate : null,
+      dedupeKey: `reservation:${reservation.id}:DECORATION:base`
+    },
+    ...operationExtraTasks(reservation.productionNotes, "decoration").map((task) => extraOperationTask(reservation, task))
+  ];
+}
+
 function extraOperationTask(reservation: ReservationDTO, task: OperationExtraTask): OperationTableTask {
   return {
     reservation,
@@ -1717,7 +1706,9 @@ function extraOperationTask(reservation: ReservationDTO, task: OperationExtraTas
     taskType: task.taskType,
     note: task.note,
     cost: task.cost,
-    currency: task.currency
+    currency: task.currency,
+    finalizationDate: task.status === "DONE" ? task.completedAt || task.updatedAt || task.taskDate : null,
+    dedupeKey: task.id ? `reservation:${reservation.id}:task:${task.id}` : undefined
   };
 }
 
@@ -2110,24 +2101,30 @@ function ReservationsTable({
 }
 
 function DecorationBillingSummary({
-  tasks,
+  report,
   locationsById,
   month,
   onMonthChange
 }: {
-  tasks: OperationTableTask[];
+  report: DecorationBillingReport;
   locationsById: Map<string, LocationDTO>;
   month: string;
   onMonthChange: (value: string) => void;
 }) {
-  const totals = tasks.reduce<Record<string, number>>((sum, task) => {
-    const currency = task.currency || task.reservation.currency || "EUR";
-    sum[currency] = (sum[currency] || 0) + (task.cost || 0);
-    return sum;
-  }, {});
-  const totalLabel = Object.entries(totals)
+  const totalLabel = Object.entries(report.totals)
     .map(([currency, value]) => `${moneyLabel(value)} ${currency}`)
     .join(" / ") || "0";
+
+  function exportCsv() {
+    const csv = decorationBillingCsv(report);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = decorationBillingFileName(month);
+    link.click();
+    window.URL.revokeObjectURL(url);
+  }
 
   return (
     <div className="mb-4 rounded-lg border border-focus-line bg-focus-navy/35 p-4">
@@ -2144,27 +2141,52 @@ function DecorationBillingSummary({
           <ReadOnlyField label="Total cost" value={totalLabel} />
         </div>
       </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs font-bold text-slate-300">
+          {report.rows.length} montaj(e) finalizate in luna selectata. Doar statusul Finalizata intra in total.
+        </p>
+        <button className="focus-button secondary" type="button" onClick={exportCsv} disabled={!report.rows.length}>
+          <FileSpreadsheet size={18} /> Export CSV
+        </button>
+      </div>
+      {report.missingCostRows.length ? (
+        <div className="mt-3 rounded-md border border-amber-300/40 bg-amber-400/10 px-3 py-2 text-sm font-bold text-amber-100">
+          {report.missingCostRows.length} montaj(e) finalizate nu au cost completat si trebuie verificate inainte de facturare.
+        </div>
+      ) : null}
       <div className="mt-3 overflow-auto">
-        <table className="w-full min-w-[760px] border-collapse text-sm">
+        <table className="w-full min-w-[1120px] border-collapse text-sm">
           <thead className="bg-focus-navy text-left text-xs uppercase text-focus-yellow">
-            <tr><Th>Data</Th><Th>Locatie</Th><Th>Client</Th><Th>Campanie</Th><Th>Cost</Th></tr>
+            <tr>
+              <Th>Data finalizare</Th>
+              <Th>Locatie</Th>
+              <Th>Client</Th>
+              <Th>Campanie</Th>
+              <Th>Referinta</Th>
+              <Th>Status</Th>
+              <Th>Cost</Th>
+            </tr>
           </thead>
           <tbody>
-            {tasks.slice(0, 20).map((task) => {
-              const location = locationsById.get(task.reservation.locationId);
+            {report.rows.map((row) => {
+              const location = row.locationId ? locationsById.get(row.locationId) : null;
               return (
-                <tr className="border-t border-focus-line" key={`billing-${task.reservation.id}-${task.taskId || "base"}`}>
-                  <Td>{dateLabel(task.taskDate)}</Td>
-                  <Td>{task.reservation.locationCode || location?.code || "N/A"}</Td>
-                  <Td>{task.reservation.clientName}</Td>
-                  <Td>{task.reservation.campaignName || "-"}</Td>
-                  <Td>{task.cost != null ? `${moneyLabel(task.cost)} ${task.currency || task.reservation.currency || "EUR"}` : "Fara cost"}</Td>
+                <tr className="border-t border-focus-line" key={row.key}>
+                  <Td>{dateLabel(row.finalizationDate)}</Td>
+                  <Td>{row.location || location?.code || "N/A"}</Td>
+                  <Td>{row.client}</Td>
+                  <Td>{row.campaign}</Td>
+                  <Td>{row.campaignReference}</Td>
+                  <Td>{operationStatusLabel(row.status)}</Td>
+                  <Td>
+                    {row.cost != null ? `${moneyLabel(row.cost)} ${row.currency}` : <span className="text-amber-200">Fara cost</span>}
+                  </Td>
                 </tr>
               );
             })}
-            {!tasks.length ? (
+            {!report.rows.length ? (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-sm font-bold text-slate-400">
+                <td colSpan={7} className="px-4 py-6 text-center text-sm font-bold text-slate-400">
                   Nu exista decorari finalizate in luna selectata.
                 </td>
               </tr>

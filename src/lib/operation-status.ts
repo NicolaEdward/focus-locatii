@@ -26,6 +26,8 @@ export type OperationExtraTask = {
   createdByUserId?: string | null;
   createdByName?: string | null;
   createdAt?: string | null;
+  updatedAt?: string | null;
+  completedAt?: string | null;
 };
 
 const META_PATTERN = /<!--focus-ops:([\s\S]*?)-->/;
@@ -58,6 +60,11 @@ export function operationStatus(value: string | null | undefined, kind: Operatio
   const meta = parseOperationMeta(value);
   const status = kind === "decoration" ? meta.decorationStatus : meta.neutralizationStatus;
   return status || "NEW";
+}
+
+export function operationUpdatedAt(value: string | null | undefined, kind: OperationKind) {
+  const meta = parseOperationMeta(value);
+  return kind === "decoration" ? meta.decorationUpdatedAt || null : meta.neutralizationUpdatedAt || null;
 }
 
 export function operationCost(value: string | null | undefined, kind: OperationKind) {
@@ -135,7 +142,12 @@ export function withOperationTask(value: string | null | undefined, task: Operat
 export function withOperationTaskStatus(value: string | null | undefined, taskId: string, status: OperationStatus) {
   const text = stripOperationMeta(value);
   const meta = parseOperationMeta(value);
-  const tasks = (meta.tasks || []).map((task) => task.id === taskId ? { ...task, status } : task);
+  const now = new Date().toISOString();
+  const tasks = (meta.tasks || []).map((task) =>
+    task.id === taskId
+      ? { ...task, status, updatedAt: now, completedAt: status === "DONE" ? task.completedAt || now : null }
+      : task
+  );
   const metaText = `<!--focus-ops:${JSON.stringify({ ...meta, tasks })}-->`;
   return text ? `${text}\n${metaText}` : metaText;
 }
@@ -172,6 +184,8 @@ function normalizeTask(value: unknown): OperationExtraTask | null {
     briefUrl: task.briefUrl || null,
     createdByUserId: task.createdByUserId || null,
     createdByName: task.createdByName || null,
-    createdAt: task.createdAt || null
+    createdAt: task.createdAt || null,
+    updatedAt: task.updatedAt || null,
+    completedAt: task.completedAt || null
   };
 }

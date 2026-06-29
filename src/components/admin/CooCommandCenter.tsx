@@ -29,7 +29,6 @@ type TaskRow = CooData["decorationTasks"][number];
 type CrmLead = CooData["crmLeads"][number];
 type ProblemRow = CooData["problems"][number];
 type SellerUser = { id: string; name: string; email: string; role: string };
-type ReassignRow = { id: string; code: string; city: string | null; clientName: string; campaignName: string | null; periodStart: string; periodEnd: string; status: string; currentSellerName: string | null };
 
 const tabs: Array<{ id: CooTab; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -66,7 +65,6 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
   const [hiddenTasks, setHiddenTasks] = useState<Set<string>>(new Set());
   const [crmLeads, setCrmLeads] = useState(coo.crmLeads);
   const [sellerUsers, setSellerUsers] = useState<SellerUser[]>([]);
-  const [reassignments, setReassignments] = useState<{ reservations: ReassignRow[]; sellers: SellerUser[] } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +77,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
   const visibleProblems = useMemo(() => coo.problems.filter((item) => problemMatches(item, filterText)).slice(0, 80), [coo.problems, filterText]);
 
   useEffect(() => {
-    if (activeTab !== "crm" && activeTab !== "admin") return;
+    if (activeTab !== "crm") return;
     let cancelled = false;
     fetch("/api/admin/sellers", { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
@@ -88,22 +86,6 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
       })
       .catch(() => {
         if (!cancelled) setSellerUsers([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (activeTab !== "admin") return;
-    let cancelled = false;
-    fetch("/api/admin/seller-reassignments", { cache: "no-store" })
-      .then((response) => response.ok ? response.json() : null)
-      .then((payload) => {
-        if (!cancelled && payload) setReassignments(payload);
-      })
-      .catch(() => {
-        if (!cancelled) setReassignments({ reservations: [], sellers: [] });
       });
     return () => {
       cancelled = true;
@@ -127,7 +109,8 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
         setHiddenReservations((current) => new Set(current).add(reservationId));
       }
       if (action === "operationStatus" && ["DONE", "ARCHIVED"].includes(String(body.status))) {
-        setHiddenTasks((current) => new Set(current).add(`${body.kind}-${reservationId}`));
+        const taskKey = body.taskId ? `${body.kind}-${reservationId}-${body.taskId}` : `${body.kind}-${reservationId}`;
+        setHiddenTasks((current) => new Set(current).add(taskKey));
       }
     } catch (commandError) {
       setError(commandError instanceof Error ? commandError.message : "Actiunea nu a putut fi executata.");
@@ -288,7 +271,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                   <HoldPanel title="Hold-uri expirate" rows={visibleExpiredHolds} busy={busy} onCommand={command} expired />
                 </div>
                 <div className="grid gap-5 xl:grid-cols-2">
-                  <CampaignList title="Fara data montaj" rows={coo.missingInstallations} />
+                  <CampaignList title="Montaj fara data valida" rows={coo.missingInstallations} />
                   <CampaignList title="Fara data neutralizare" rows={coo.missingNeutralizations} />
                 </div>
               </div>
@@ -358,7 +341,6 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                     <Link className="focus-button secondary" href="/admin/locatii/gps"><ShieldAlert size={18} /> Conflicte GPS</Link>
                   </div>
                 </Panel>
-                <SellerReassignmentPanel data={reassignments} onReload={() => setReassignments(null)} />
               </div>
             ) : null}
           </div>
@@ -439,14 +421,22 @@ function TaskPanel({ title, rows, busy, onCommand }: { title: string; rows: Task
           <td className="px-3 py-3">{row.clientName}<small className="block text-slate-400">{row.salesperson || "-"}</small></td>
           <td className="px-3 py-3"><Badge tone={row.overdue ? "red" : "yellow"}>{row.status}</Badge></td>
           <td className="px-3 py-3"><div className="flex flex-wrap gap-2">
-            <button className="focus-button secondary" type="button" disabled={busy === `operationStatus-${row.reservationId}`} onClick={() => onCommand(row.reservationId, "operationStatus", { kind: row.kind, status: "IN_PROGRESS", taskId: row.taskId }, "Taskul este in lucru.")}>In lucru</button>
-            <button className="focus-button" type="button" onClick={() => onCommand(row.reservationId, "operationStatus", { kind: row.kind, status: "DONE", taskId: row.taskId }, "Taskul a fost finalizat.")}>Finalizat</button>
-            <ActionMenu><button type="button" onClick={() => onCommand(row.reservationId, "operationStatus", { kind: row.kind, status: "ARCHIVED", taskId: row.taskId }, "Taskul a fost arhivat.")}>Arhiveaza</button><Link href="/admin/locatii#rezervari">Vezi contract</Link></ActionMenu>
+            <button className="focus-button secondary" type="button" disabled={busy === `operationStatus-${row.reservationId}`} onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "IN_PROGRESS"), "Taskul este in lucru.")}>In lucru</button>
+            <button className="focus-button" type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "DONE"), "Taskul a fost finalizat.")}>Finalizat</button>
+            <ActionMenu><button type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "ARCHIVED"), "Taskul a fost arhivat.")}>Arhiveaza</button><Link href="/admin/locatii#rezervari">Vezi contract</Link></ActionMenu>
           </div></td>
         </tr>) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={5}>Nu exista taskuri active.</td></tr>}</tbody>
       </table>
     </div>
   </Panel>;
+}
+
+function operationStatusBody(row: TaskRow, status: "IN_PROGRESS" | "DONE" | "ARCHIVED") {
+  return {
+    kind: row.kind,
+    status,
+    ...(row.taskId ? { taskId: row.taskId } : {})
+  };
 }
 
 function ProblemCenterPanel({ rows }: { rows: ProblemRow[] }) {
@@ -617,63 +607,6 @@ function LocationList({ title, rows }: { title: string; rows: CooData["available
   }
   return <Panel title={`${title} (${rows.length})`} icon={<MapPinned size={18} />}>
     <div className="grid gap-2">{rows.length ? rows.map((row) => <div className="rounded-md border border-focus-line bg-focus-navy/40 p-3 text-sm" key={row.id}><strong className="text-white">{row.code}</strong><span className="block text-slate-400">{[row.city, row.type, row.status].filter(Boolean).join(" / ")}</span></div>) : <Empty text="Nu exista locatii in lista." />}</div>
-  </Panel>;
-}
-
-function SellerReassignmentPanel({ data }: { data: { reservations: ReassignRow[]; sellers: SellerUser[] } | null; onReload?: () => void }) {
-  const [targetById, setTargetById] = useState<Record<string, string>>({});
-  const [reasonById, setReasonById] = useState<Record<string, string>>({});
-  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState<string | null>(null);
-
-  async function reassign(row: ReassignRow) {
-    const sellerUserId = targetById[row.id];
-    if (!sellerUserId) {
-      window.alert("Alege un vanzator valid.");
-      return;
-    }
-    setBusy(row.id);
-    try {
-      const response = await fetch("/api/admin/seller-reassignments", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ reservationIds: [row.id], sellerUserId, reason: reasonById[row.id] || undefined })
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.error || "Realocarea nu a putut fi salvata.");
-      setHiddenIds((current) => new Set(current).add(row.id));
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Realocarea nu a putut fi salvata.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  const rows = (data?.reservations || []).filter((row) => !hiddenIds.has(row.id));
-  return <Panel title={`Realocare vanzari neclare (${rows.length})`} icon={<ShieldAlert size={18} />}>
-    {!data ? <Empty text="Se incarca vanzarile cu vanzator invalid." /> : (
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px] text-sm">
-          <thead className="bg-focus-navy/70 text-left text-xs uppercase text-slate-400">
-            <tr><th className="px-3 py-2">Locatie</th><th className="px-3 py-2">Client</th><th className="px-3 py-2">Perioada</th><th className="px-3 py-2">Vanzator curent</th><th className="px-3 py-2">Vanzator corect</th><th className="px-3 py-2">Motiv</th><th className="px-3 py-2">Actiune</th></tr>
-          </thead>
-          <tbody>{rows.length ? rows.slice(0, 40).map((row) => <tr className="border-t border-focus-line" key={row.id}>
-            <td className="px-3 py-3 font-black text-white">{row.code}<small className="block text-slate-400">{row.city || "-"}</small></td>
-            <td className="px-3 py-3">{row.clientName}<small className="block text-slate-400">{row.campaignName || row.status}</small></td>
-            <td className="px-3 py-3">{date(row.periodStart)} - {date(row.periodEnd)}</td>
-            <td className="px-3 py-3">{row.currentSellerName || "Nealocat"}</td>
-            <td className="px-3 py-3">
-              <select className="focus-input min-w-52" value={targetById[row.id] || ""} onChange={(event) => setTargetById((current) => ({ ...current, [row.id]: event.target.value }))}>
-                <option value="">Alege vanzator</option>
-                {data.sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
-              </select>
-            </td>
-            <td className="px-3 py-3"><input className="focus-input min-w-52" value={reasonById[row.id] || ""} onChange={(event) => setReasonById((current) => ({ ...current, [row.id]: event.target.value }))} placeholder="Motiv optional" /></td>
-            <td className="px-3 py-3"><button className="focus-button" type="button" disabled={busy === row.id} onClick={() => reassign(row)}>Realoca</button></td>
-          </tr>) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={7}>Nu exista vanzari cu vanzator invalid.</td></tr>}</tbody>
-        </table>
-      </div>
-    )}
   </Panel>;
 }
 

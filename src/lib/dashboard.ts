@@ -9,6 +9,12 @@ import { parseOfferRequestMeta } from "@/lib/offer-request-meta";
 import { getFinancialDashboardData } from "@/lib/financial-dashboard";
 import { sortOperationalLocations } from "@/lib/location-order";
 import { calculateLocationProfit } from "@/lib/profit";
+import { effectiveInstallationDate, hasMissingInstallationSchedule } from "@/lib/installation-date";
+import {
+  listOperationalTasksWithFallback,
+  operationTaskReadsEnabled,
+  reportOperationTaskReadComparison
+} from "@/lib/operation-task-read-adapter";
 
 type CampaignRow = {
   id: string;
@@ -301,7 +307,9 @@ export async function getDashboardData(session: AuthSession) {
     .filter((item) => item.periodEnd <= inThirtyDays)
     .sort((a, b) => a.periodEnd.getTime() - b.periodEnd.getTime());
   const startingSoon = future.filter((item) => item.periodStart <= inThirtyDays);
-  const missingInstallations = campaigns.filter((item) => item.status === "BOOKED" && item.periodStart <= inThirtyDays && !item.installationDate);
+  const missingInstallations = campaigns.filter(
+    (item) => item.status === "BOOKED" && item.periodStart <= inThirtyDays && hasMissingInstallationSchedule(item)
+  );
   const missingNeutralizations = campaigns.filter(
     (item) => item.status === "BOOKED" && item.periodEnd >= operationWindowStart && item.periodEnd <= inThirtyDays && !item.neutralizationDate
   );
@@ -318,8 +326,24 @@ export async function getDashboardData(session: AuthSession) {
   const agentPerformance = groupPerformance(monthlySales, sellerName);
   const cityPerformance = groupPerformance(monthlySales, (item) => item.location.city || "Fara oras");
   const topClients = groupPerformance(monthlySales, (item) => item.clientName || "Fara client");
-  const decorationTasks = operationTasks(operationCampaigns, "decoration", now, operationWindowStart, decorationWindowEnd);
-  const neutralizationTasks = operationTasks(operationCampaigns, "neutralization", now, operationWindowStart, neutralizationWindowEnd);
+  const legacyDecorationTasks = operationTasks(operationCampaigns, "decoration", now, operationWindowStart, decorationWindowEnd);
+  const legacyNeutralizationTasks = operationTasks(operationCampaigns, "neutralization", now, operationWindowStart, neutralizationWindowEnd);
+  const operationTaskReadResult = operationTaskReadsEnabled()
+    ? await listOperationalTasksWithFallback({
+        reservations: operationCampaigns,
+        now,
+        windowStart: operationWindowStart,
+        decorationWindowEnd,
+        neutralizationWindowEnd
+      })
+    : null;
+  if (operationTaskReadResult) reportOperationTaskReadComparison(operationTaskReadResult.comparison);
+  const decorationTasks = operationTaskReadResult
+    ? operationTaskReadResult.active.filter((task) => task.kind === "decoration")
+    : legacyDecorationTasks;
+  const neutralizationTasks = operationTaskReadResult
+    ? operationTaskReadResult.active.filter((task) => task.kind === "neutralization")
+    : legacyNeutralizationTasks;
   const overdueTasks = [...decorationTasks, ...neutralizationTasks].filter((task) => task.overdue);
   const operations = {
     decorations: decorationTasks.length,
@@ -422,6 +446,7 @@ export async function getDashboardData(session: AuthSession) {
       decorationTasks: decorationTasks.slice(0, 30),
       neutralizationTasks: neutralizationTasks.slice(0, 30),
       overdueTasks: overdueTasks.slice(0, 20),
+      ...(operationTaskReadResult ? { operationTaskReadComparison: operationTaskReadResult.comparison } : {}),
       sellers,
       crmLeads,
       inventoryByCity: inventoryByCity.slice(0, 12),
@@ -497,7 +522,8 @@ function serializeCampaign(item: CampaignRow) {
     contractGroupId: item.contractGroupId,
     periodStart: item.periodStart.toISOString(),
     periodEnd: item.periodEnd.toISOString(),
-    installationDate: item.installationDate?.toISOString() || null,
+    installationDate: effectiveInstallationDate(item).date?.toISOString() || null,
+    installationDateSource: effectiveInstallationDate(item).source,
     neutralizationDate: (item.neutralizationDate || (item.status === "BOOKED" ? item.periodEnd : null))?.toISOString() || null,
     holdExpiresAt: item.holdExpiresAt?.toISOString() || null,
     bookedAt: item.bookedAt?.toISOString() || item.createdAt.toISOString(),
@@ -763,15 +789,15 @@ function buildProblemCenter(input: {
   input.missingInstallations.forEach((campaign) => problems.push({
     id: `missing-install-${campaign.id}`,
     module: "Operational",
-    type: "missing_installation_date",
-    title: `Campanie fara data montaj: ${campaign.clientName}`,
-    plainLanguageDescription: `Campania ${campaign.campaignName || campaign.location.code} incepe curand si nu are data de montaj.`,
+    type: "missing_installation_schedule",
+    title: `Campanie fara data valida de montaj: ${campaign.clientName}`,
+    plainLanguageDescription: `Campania ${campaign.campaignName || campaign.location.code} nu are nici data de montaj, nici data valida de start.`,
     entityType: "reservation",
     entityId: campaign.id,
     severity: "medium",
     ownerUserId: campaign.sellerUserId || campaign.ownerId,
-    dueDate: campaign.periodStart.toISOString(),
-    recommendedAction: "Seteaza data de decorare si statusul taskului operational.",
+    dueDate: null,
+    recommendedAction: "Corecteaza data de start sau seteaza explicit data de montaj.",
     status: "open"
   }));
 

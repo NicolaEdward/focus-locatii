@@ -45,6 +45,8 @@
     "test:operation-tasks": "node scripts/test-operation-tasks.cjs",
     "test:operation-task-backfill": "node scripts/test-operation-task-backfill.cjs",
     "test:operation-route-bridge": "node scripts/test-operation-route-bridge.cjs",
+    "test:operation-task-reads": "node scripts/test-operation-task-read-adapter.cjs",
+    "test:dashboard-form-cleanup": "node scripts/test-dashboard-form-cleanup.cjs",
     "test:financial-import": "node scripts/test-financial-import.cjs",
     "test:finance-consistency": "node scripts/test-finance-consistency.cjs",
     "test:billing": "node scripts/test-billing.cjs",

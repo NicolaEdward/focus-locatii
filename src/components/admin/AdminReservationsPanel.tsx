@@ -1117,53 +1117,57 @@ export function AdminReservationsPanel({
               </SelectField>
               <InputField type="date" label="Start campanie" value={form.periodStart} onChange={(periodStart) => setForm({ ...form, periodStart })} />
               <InputField type="date" label="Final campanie" value={form.periodEnd} onChange={(periodEnd) => setForm({ ...form, periodEnd })} />
-              <SelectField label="Termen plata" value={form.paymentTermType} onChange={(paymentTermType) => setForm({ ...form, paymentTermType, paymentTermDays: defaultPaymentTermDays(paymentTermType, form.paymentTermDays) })}>
-                <option value="advance">Plata in avans / 0 zile</option>
-                <option value="7_days">7 zile</option>
-                <option value="15_days">15 zile</option>
-                <option value="30_days">30 zile</option>
-                <option value="45_days">45 zile</option>
-                <option value="custom">Termen personalizat</option>
-              </SelectField>
-              <InputField label="Zile termen plata" value={form.paymentTermDays} onChange={(paymentTermDays) => setForm({ ...form, paymentTermDays, paymentTermType: "custom" })} />
-              <SelectField label="Regula facturare" value={form.billingRule} onChange={(billingRule) => setForm({ ...form, billingRule, billingFrequency: defaultBillingFrequency(billingRule, form.billingFrequency) })}>
-                <option value="month_start">La inceputul lunii</option>
-                <option value="month_end">La finalul lunii</option>
-                <option value="campaign_start">La inceputul campaniei</option>
-                <option value="campaign_end">La finalul campaniei</option>
-                <option value="monthly_in_advance">Lunar in avans</option>
-                <option value="monthly_after_service">Lunar dupa prestare</option>
-                <option value="upfront_on_contract">Integral la semnarea contractului</option>
-                <option value="upfront_before_campaign_start">Integral inainte de campanie</option>
-                <option value="fixed_custom_date">Data fixa personalizata</option>
-                <option value="manual_per_contract">Manual / conform contract</option>
-              </SelectField>
-              <SelectField label="Frecventa facturare" value={form.billingFrequency} onChange={(billingFrequency) => setForm({ ...form, billingFrequency })}>
-                <option value="monthly">Lunar</option>
-                <option value="once">Integral o singura data</option>
-                <option value="custom">Personalizat</option>
-              </SelectField>
-              <InputField label="Zi facturare in luna" value={form.billingDayOfMonth} onChange={(billingDayOfMonth) => setForm({ ...form, billingDayOfMonth })} />
-              <InputField type="date" label="Data facturare personalizata" value={form.customBillingDate} onChange={(customBillingDate) => setForm({ ...form, customBillingDate })} />
-              {form.status !== "BOOKED" ? (
-                <>
-                  <InputField label="Email client" value={form.clientEmail} onChange={(clientEmail) => setForm({ ...form, clientEmail })} />
-                  <InputField label="Telefon client" value={form.clientPhone} onChange={(clientPhone) => setForm({ ...form, clientPhone })} />
-                </>
-              ) : null}
               {form.status === "BOOKED" ? (
                 <label className="flex items-center justify-between gap-3 rounded-lg border border-focus-line bg-focus-navy/35 px-3 py-2 text-sm font-bold text-slate-200">
-                  Necesita decorare / adauga task de montaj
+                  Urmareste montajul operational (implicit la data de start)
                   <input type="checkbox" checked={form.needsDecoration} onChange={(event) => setForm({ ...form, needsDecoration: event.target.checked })} />
                 </label>
               ) : null}
-              <TextareaField label="Observatii facturare" value={form.billingNotes} onChange={(billingNotes) => setForm({ ...form, billingNotes })} />
-              <TextareaField
-                label="Ce trebuie montat"
-                value={form.productionNotes}
-                onChange={(productionNotes) => setForm({ ...form, productionNotes })}
-              />
-              <TextareaField label="Observatii interne" value={form.notes} onChange={(notes) => setForm({ ...form, notes })} />
+              <AdvancedSection title="Setari facturare / optional">
+                <SelectField label="Termen plata" value={form.paymentTermType} onChange={(paymentTermType) => setForm({ ...form, paymentTermType, paymentTermDays: defaultPaymentTermDays(paymentTermType, form.paymentTermDays) })}>
+                  <option value="advance">Plata in avans / 0 zile</option>
+                  <option value="7_days">7 zile</option>
+                  <option value="15_days">15 zile</option>
+                  <option value="30_days">30 zile</option>
+                  <option value="45_days">45 zile</option>
+                  <option value="custom">Termen personalizat</option>
+                </SelectField>
+                <InputField label="Zile termen plata" value={form.paymentTermDays} onChange={(paymentTermDays) => setForm({ ...form, paymentTermDays, paymentTermType: "custom" })} />
+                <SelectField label="Regula facturare" value={form.billingRule} onChange={(billingRule) => setForm({ ...form, billingRule, billingFrequency: defaultBillingFrequency(billingRule, form.billingFrequency) })}>
+                  <option value="month_start">La inceputul lunii</option>
+                  <option value="month_end">La finalul lunii</option>
+                  <option value="campaign_start">La inceputul campaniei</option>
+                  <option value="campaign_end">La finalul campaniei</option>
+                  <option value="monthly_in_advance">Lunar in avans</option>
+                  <option value="monthly_after_service">Lunar dupa prestare</option>
+                  <option value="upfront_on_contract">Integral la semnarea contractului</option>
+                  <option value="upfront_before_campaign_start">Integral inainte de campanie</option>
+                  <option value="fixed_custom_date">Data fixa personalizata</option>
+                  <option value="manual_per_contract">Manual / conform contract</option>
+                </SelectField>
+                <SelectField label="Frecventa facturare" value={form.billingFrequency} onChange={(billingFrequency) => setForm({ ...form, billingFrequency })}>
+                  <option value="monthly">Lunar</option>
+                  <option value="once">Integral o singura data</option>
+                  <option value="custom">Personalizat</option>
+                </SelectField>
+                <InputField label="Zi facturare in luna" value={form.billingDayOfMonth} onChange={(billingDayOfMonth) => setForm({ ...form, billingDayOfMonth })} />
+                <InputField type="date" label="Data facturare personalizata" value={form.customBillingDate} onChange={(customBillingDate) => setForm({ ...form, customBillingDate })} />
+                <TextareaField label="Observatii facturare" value={form.billingNotes} onChange={(billingNotes) => setForm({ ...form, billingNotes })} />
+              </AdvancedSection>
+              {form.status !== "BOOKED" ? (
+                <AdvancedSection title="Date contact hold / optional">
+                  <InputField label="Email client" value={form.clientEmail} onChange={(clientEmail) => setForm({ ...form, clientEmail })} />
+                  <InputField label="Telefon client" value={form.clientPhone} onChange={(clientPhone) => setForm({ ...form, clientPhone })} />
+                </AdvancedSection>
+              ) : null}
+              <AdvancedSection title="Note operationale / optional">
+                <TextareaField
+                  label="Ce trebuie montat"
+                  value={form.productionNotes}
+                  onChange={(productionNotes) => setForm({ ...form, productionNotes })}
+                />
+                <TextareaField label="Observatii interne" value={form.notes} onChange={(notes) => setForm({ ...form, notes })} />
+              </AdvancedSection>
             </div>
 
             <ReservationSummary
@@ -1834,41 +1838,50 @@ function ReservationEditDialog({
           )}
           <InputField type="date" label="Start campanie" value={form.periodStart} onChange={(value) => updateField("periodStart", value)} />
           <InputField type="date" label="Final campanie" value={form.periodEnd} onChange={(value) => updateField("periodEnd", value)} />
-          <SelectField label="Termen plata" value={form.paymentTermType} onChange={(value) => onChange((current) => current ? { ...current, paymentTermType: value, paymentTermDays: defaultPaymentTermDays(value, current.paymentTermDays) } : current)}>
-            <option value="advance">Plata in avans / 0 zile</option>
-            <option value="7_days">7 zile</option>
-            <option value="15_days">15 zile</option>
-            <option value="30_days">30 zile</option>
-            <option value="45_days">45 zile</option>
-            <option value="custom">Termen personalizat</option>
-          </SelectField>
-          <InputField label="Zile termen plata" value={form.paymentTermDays} onChange={(value) => onChange((current) => current ? { ...current, paymentTermDays: value, paymentTermType: "custom" } : current)} />
-          <SelectField label="Regula facturare" value={form.billingRule} onChange={(value) => onChange((current) => current ? { ...current, billingRule: value, billingFrequency: defaultBillingFrequency(value, current.billingFrequency) } : current)}>
-            <option value="month_start">La inceputul lunii</option>
-            <option value="month_end">La finalul lunii</option>
-            <option value="campaign_start">La inceputul campaniei</option>
-            <option value="campaign_end">La finalul campaniei</option>
-            <option value="monthly_in_advance">Lunar in avans</option>
-            <option value="monthly_after_service">Lunar dupa prestare</option>
-            <option value="upfront_on_contract">Integral la semnarea contractului</option>
-            <option value="upfront_before_campaign_start">Integral inainte de campanie</option>
-            <option value="fixed_custom_date">Data fixa personalizata</option>
-            <option value="manual_per_contract">Manual / conform contract</option>
-          </SelectField>
-          <SelectField label="Frecventa facturare" value={form.billingFrequency} onChange={(value) => updateField("billingFrequency", value)}>
-            <option value="monthly">Lunar</option>
-            <option value="once">Integral o singura data</option>
-            <option value="custom">Personalizat</option>
-          </SelectField>
-          <InputField label="Zi facturare in luna" value={form.billingDayOfMonth} onChange={(value) => updateField("billingDayOfMonth", value)} />
-          <InputField type="date" label="Data facturare personalizata" value={form.customBillingDate} onChange={(value) => updateField("customBillingDate", value)} />
-          <InputField type="date" label="Data montaj" value={form.installationDate} onChange={(value) => updateField("installationDate", value)} />
+          <InputField type="date" label="Data montaj explicita" value={form.installationDate} onChange={(value) => updateField("installationDate", value)} />
+          {!form.installationDate && form.periodStart ? (
+            <p className="text-xs font-bold text-slate-400">Implicit: data de start {dateLabel(form.periodStart)}.</p>
+          ) : null}
           <InputField type="date" label="Data neutralizare" value={form.neutralizationDate} onChange={(value) => updateField("neutralizationDate", value)} />
-          <InputField label="Email client" value={form.clientEmail} onChange={(value) => updateField("clientEmail", value)} />
-          <InputField label="Telefon client" value={form.clientPhone} onChange={(value) => updateField("clientPhone", value)} />
-          <TextareaField label="Observatii facturare" value={form.billingNotes} onChange={(value) => updateField("billingNotes", value)} />
-          <TextareaField label="Ce trebuie montat" value={form.productionNotes} onChange={(value) => updateField("productionNotes", value)} />
-          <TextareaField label="Observatii interne" value={form.notes} onChange={(value) => updateField("notes", value)} />
+          <AdvancedSection title="Setari facturare / optional">
+            <SelectField label="Termen plata" value={form.paymentTermType} onChange={(value) => onChange((current) => current ? { ...current, paymentTermType: value, paymentTermDays: defaultPaymentTermDays(value, current.paymentTermDays) } : current)}>
+              <option value="advance">Plata in avans / 0 zile</option>
+              <option value="7_days">7 zile</option>
+              <option value="15_days">15 zile</option>
+              <option value="30_days">30 zile</option>
+              <option value="45_days">45 zile</option>
+              <option value="custom">Termen personalizat</option>
+            </SelectField>
+            <InputField label="Zile termen plata" value={form.paymentTermDays} onChange={(value) => onChange((current) => current ? { ...current, paymentTermDays: value, paymentTermType: "custom" } : current)} />
+            <SelectField label="Regula facturare" value={form.billingRule} onChange={(value) => onChange((current) => current ? { ...current, billingRule: value, billingFrequency: defaultBillingFrequency(value, current.billingFrequency) } : current)}>
+              <option value="month_start">La inceputul lunii</option>
+              <option value="month_end">La finalul lunii</option>
+              <option value="campaign_start">La inceputul campaniei</option>
+              <option value="campaign_end">La finalul campaniei</option>
+              <option value="monthly_in_advance">Lunar in avans</option>
+              <option value="monthly_after_service">Lunar dupa prestare</option>
+              <option value="upfront_on_contract">Integral la semnarea contractului</option>
+              <option value="upfront_before_campaign_start">Integral inainte de campanie</option>
+              <option value="fixed_custom_date">Data fixa personalizata</option>
+              <option value="manual_per_contract">Manual / conform contract</option>
+            </SelectField>
+            <SelectField label="Frecventa facturare" value={form.billingFrequency} onChange={(value) => updateField("billingFrequency", value)}>
+              <option value="monthly">Lunar</option>
+              <option value="once">Integral o singura data</option>
+              <option value="custom">Personalizat</option>
+            </SelectField>
+            <InputField label="Zi facturare in luna" value={form.billingDayOfMonth} onChange={(value) => updateField("billingDayOfMonth", value)} />
+            <InputField type="date" label="Data facturare personalizata" value={form.customBillingDate} onChange={(value) => updateField("customBillingDate", value)} />
+            <TextareaField label="Observatii facturare" value={form.billingNotes} onChange={(value) => updateField("billingNotes", value)} />
+          </AdvancedSection>
+          <AdvancedSection title="Date contact / optional">
+            <InputField label="Email client" value={form.clientEmail} onChange={(value) => updateField("clientEmail", value)} />
+            <InputField label="Telefon client" value={form.clientPhone} onChange={(value) => updateField("clientPhone", value)} />
+          </AdvancedSection>
+          <AdvancedSection title="Note operationale / optional">
+            <TextareaField label="Ce trebuie montat" value={form.productionNotes} onChange={(value) => updateField("productionNotes", value)} />
+            <TextareaField label="Observatii interne" value={form.notes} onChange={(value) => updateField("notes", value)} />
+          </AdvancedSection>
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-end gap-3 border-t border-focus-line pt-4">
@@ -2178,6 +2191,15 @@ function SelectField({
         {children}
       </select>
     </label>
+  );
+}
+
+function AdvancedSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <details className="md:col-span-2 rounded-lg border border-focus-line bg-focus-navy/35 p-3">
+      <summary className="cursor-pointer text-sm font-black uppercase text-focus-yellow">{title}</summary>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">{children}</div>
+    </details>
   );
 }
 

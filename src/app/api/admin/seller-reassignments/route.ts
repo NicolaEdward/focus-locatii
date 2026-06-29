@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
   const { response } = await requireAnyPermission(request, ["reservations.manage", "users.manage"]);
   if (response) return response;
 
+  // Manual admin correction endpoint only; the legacy "vanzari neclare" dashboard panel was retired.
   const [reservations, sellers] = await Promise.all([
     prisma.reservation.findMany({
       include: {

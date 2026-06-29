@@ -131,7 +131,7 @@ export function LocationPresentation({
             {onShortlist ? (
               <button className="focus-button" type="button" onClick={onShortlist}>
                 <Star size={20} />
-                {isShortlisted ? "In media plan" : "Adauga in media plan"}
+                {isShortlisted ? "In selectie" : "Adauga in selectie"}
               </button>
             ) : null}
             <ContactButtons
@@ -206,7 +206,7 @@ export function LocationPresentation({
             {onShortlist ? (
               <button className="focus-button" type="button" onClick={onShortlist}>
                 <Star size={20} />
-                {isShortlisted ? "In media plan" : "Adauga in media plan"}
+                {isShortlisted ? "In selectie" : "Adauga in selectie"}
               </button>
             ) : null}
             <ContactButtons

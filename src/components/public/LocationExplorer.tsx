@@ -170,7 +170,7 @@ export function LocationExplorer({
     (id: string) => {
       setShortlist((current) => {
         const isSelected = current.includes(id);
-        if (!isSelected) setSelectionNotice(`${locationCodeById.get(id) || "Locatia"} a fost adaugata in media plan.`);
+        if (!isSelected) setSelectionNotice(`${locationCodeById.get(id) || "Locatia"} a fost adaugata in selectie.`);
         return isSelected ? current.filter((item) => item !== id) : [...current, id];
       });
     },
@@ -281,12 +281,12 @@ export function LocationExplorer({
               <p className="text-sm font-black uppercase text-focus-yellow">Selectie comerciala</p>
               <h2 className="font-display text-4xl font-black uppercase">Locatii pentru campanie</h2>
               <p className="mt-2 max-w-2xl text-sm font-bold leading-6 text-slate-300">
-                Deschide prezentarea, verifica imaginile si adauga pozitiile potrivite in media planul tau.
+                Deschide prezentarea, verifica imaginile si adauga pozitiile potrivite in selectia ta.
               </p>
             </div>
             <button className="focus-button no-print" type="button" onClick={() => setDrawerOpen(true)}>
               <ShoppingBag size={20} />
-              Media plan ({selectedLocations.length})
+              Selectia ta ({selectedLocations.length})
             </button>
           </div>
 

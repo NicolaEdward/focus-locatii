@@ -49,7 +49,7 @@ export function PortfolioHero({
             </a>
             <button className="focus-button secondary" type="button" onClick={onOpenShortlist}>
               <Target size={20} />
-              Media plan / selectie
+              Selectie client
             </button>
           </div>
 

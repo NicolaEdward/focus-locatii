@@ -15,7 +15,7 @@ export async function downloadMediaPlanExcel(locationIds: string[]) {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `focus-media-plan-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  link.download = `focus-selectie-locatii-${new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();

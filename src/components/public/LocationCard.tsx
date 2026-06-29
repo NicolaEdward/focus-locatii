@@ -111,7 +111,7 @@ function LocationCardComponent({
           </button>
           <button type="button" className="focus-button" onClick={() => onShortlist(location.id)}>
             {isShortlisted ? <Star size={18} /> : <Plus size={18} />}
-            {isShortlisted ? "In media plan" : "Adauga in media plan"}
+            {isShortlisted ? "In selectie" : "Adauga in selectie"}
           </button>
         </div>
         {isShortlisted ? (

@@ -141,7 +141,7 @@ export function LocationMiniPreview({
             </button>
             <button className="focus-button secondary" type="button" onClick={onShortlist}>
               <Star size={20} />
-              {isShortlisted ? "In media plan" : "Adauga in media plan"}
+              {isShortlisted ? "In selectie" : "Adauga in selectie"}
             </button>
             {hasMap ? (
               <a className="focus-button secondary sm:col-span-2" href={mapsUrl} target="_blank" rel="noreferrer">

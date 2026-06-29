@@ -46,7 +46,7 @@ export function ShortlistDrawer({
     return `Perioada dorita: ${periodStart || periodEnd}`;
   }, [periodEnd, periodStart]);
   const message = [mediaPlanMessage(locations), periodSummary].filter(Boolean).join("\n\n");
-  const subject = "Cerere media plan Focus Media";
+  const subject = "Cerere oferta selectie locatii Focus Media";
 
   if (!open) return null;
 
@@ -112,15 +112,15 @@ export function ShortlistDrawer({
       className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-2xl min-w-0 transform-gpu flex-col overflow-hidden border-l border-focus-line bg-focus-navy shadow-2xl"
       role="dialog"
       aria-modal="true"
-      aria-label="Media plan selectat"
+      aria-label="Selectia ta de locatii"
     >
       <header className="flex items-center justify-between gap-3 border-b border-focus-line p-5">
         <div className="min-w-0">
-          <p className="text-xs font-black uppercase text-focus-yellow">Media plan client</p>
-          <h2 className="font-display text-3xl font-black uppercase leading-none text-white">Selectia ta</h2>
-          <p className="mt-1 text-sm font-bold text-slate-300">Locatii salvate pentru oferta si export.</p>
+          <p className="text-xs font-black uppercase text-focus-yellow">Selectie client</p>
+          <h2 className="font-display text-3xl font-black uppercase leading-none text-white">Selectia ta de locatii</h2>
+          <p className="mt-1 text-sm font-bold text-slate-300">Trimite selectia catre Focus Media pentru ofertare.</p>
         </div>
-        <button className="focus-button secondary shrink-0" type="button" onClick={onClose} aria-label="Inchide media plan">
+        <button className="focus-button secondary shrink-0" type="button" onClick={onClose} aria-label="Inchide selectia">
           <X size={18} />
         </button>
       </header>
@@ -189,7 +189,7 @@ export function ShortlistDrawer({
                   className="rounded-md p-2 text-slate-300 transition hover:bg-red-500/15 hover:text-red-100"
                   type="button"
                   onClick={() => onRemove(location.id)}
-                  aria-label={`Elimina ${location.code} din media plan`}
+                  aria-label={`Elimina ${location.code} din selectie`}
                 >
                   <Trash2 size={18} />
                 </button>
@@ -202,9 +202,9 @@ export function ShortlistDrawer({
               <span className="mx-auto grid h-14 w-14 place-items-center rounded-lg bg-focus-yellow text-focus-navy">
                 <ShoppingBag size={26} />
               </span>
-              <h3 className="mt-4 font-display text-3xl font-black uppercase text-white">Media plan gol</h3>
+              <h3 className="mt-4 font-display text-3xl font-black uppercase text-white">Selectie goala</h3>
               <p className="mt-2 text-sm font-bold leading-6 text-slate-300">
-                Alege locatiile potrivite si le poti exporta intr-un Excel pregatit pentru planificare.
+                Alege locatiile potrivite si le poti trimite catre Focus Media pentru ofertare.
               </p>
             </div>
           </div>
@@ -266,7 +266,7 @@ export function ShortlistDrawer({
             disabled={!locations.length || sendingOffer}
           >
             <Send size={18} />
-            {sendingOffer ? "Se trimite..." : "Trimite cerere"}
+            {sendingOffer ? "Se trimite..." : "Trimite selectia"}
           </button>
           {offerFeedback ? <p className="text-sm font-bold text-emerald-200">{offerFeedback}</p> : null}
           {offerError ? <p className="text-sm font-bold text-red-200">{offerError}</p> : null}
@@ -276,12 +276,12 @@ export function ShortlistDrawer({
       <footer className="grid gap-3 border-t border-focus-line p-5">
         <button className="focus-button" type="button" onClick={exportExcel} disabled={!locations.length || exporting}>
           <FileSpreadsheet size={20} />
-          {exporting ? "Se exporta..." : "Exporta Excel media plan"}
+          {exporting ? "Se exporta..." : "Exporta Excel selectie"}
         </button>
         {exportError ? <p className="text-sm font-bold text-red-200">{exportError}</p> : null}
         <button className="focus-button secondary" type="button" disabled>
           <Lock size={18} />
-          Salveaza ca media plan - in curand
+          Media Plan intern - creat de consultant
         </button>
         <ContactButtons message={message} subject={subject} className="grid gap-2" buttonClassName="focus-button secondary" />
         <button className="focus-button secondary" type="button" onClick={() => window.print()}>

@@ -83,7 +83,7 @@ export function LocationPresentationOverlay({
           <div className="flex flex-wrap gap-2">
             <button className="focus-button secondary !min-h-0 px-3 py-2" type="button" onClick={onShortlist}>
               <Star size={18} />
-              {isShortlisted ? "In media plan" : "Adauga in media plan"}
+              {isShortlisted ? "In selectie" : "Adauga in selectie"}
             </button>
             <button className="focus-button secondary !min-h-0 px-3 py-2" type="button" onClick={copyDirectLink}>
               <Link2 size={18} />

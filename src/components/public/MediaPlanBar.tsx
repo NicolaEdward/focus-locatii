@@ -44,20 +44,20 @@ export function MediaPlanBar({
       transition={{ duration: 0.16, ease: "easeOut" }}
       className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-focus-yellow/40 bg-focus-ink/98 px-4 py-3 shadow-lg"
       role="region"
-      aria-label="Media plan selectat"
+      aria-label="Selectie de locatii"
     >
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           type="button"
           className="flex min-w-0 items-center gap-3 text-left"
           onClick={onOpen}
-          aria-label="Deschide media planul selectat"
+          aria-label="Deschide selectia de locatii"
         >
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-focus-yellow text-focus-navy">
             <ShoppingBag size={21} />
           </span>
           <span className="min-w-0">
-            <span className="block text-xs font-black uppercase text-focus-yellow">Media plan in lucru</span>
+            <span className="block text-xs font-black uppercase text-focus-yellow">Selectia ta</span>
             <span className="block truncate font-display text-2xl font-black uppercase text-white">
               {locations.length} {locations.length === 1 ? "locatie selectata" : "locatii selectate"}
             </span>
@@ -74,7 +74,7 @@ export function MediaPlanBar({
           </button>
           <button type="button" className="focus-button secondary" disabled>
             <Lock size={18} />
-            Salvare in curand
+            Media Plan intern
           </button>
           <button type="button" className="focus-button" onClick={exportExcel} disabled={exporting}>
             <FileSpreadsheet size={20} />

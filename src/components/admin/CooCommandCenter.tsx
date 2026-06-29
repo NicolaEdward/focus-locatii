@@ -432,10 +432,11 @@ function TaskPanel({ title, rows, busy, onCommand }: { title: string; rows: Task
 }
 
 function operationStatusBody(row: TaskRow, status: "IN_PROGRESS" | "DONE" | "ARCHIVED") {
+  const taskId = typeof row.taskId === "string" && row.taskId.trim() ? row.taskId.trim() : null;
   return {
     kind: row.kind,
     status,
-    ...(row.taskId ? { taskId: row.taskId } : {})
+    ...(taskId ? { taskId } : {})
   };
 }
 

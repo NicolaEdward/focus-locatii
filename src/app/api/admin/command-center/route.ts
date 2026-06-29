@@ -10,9 +10,19 @@ import {
   markReservationHoldLost,
   releaseReservationHold,
   updateReservation,
+  updateReservationProductionNotesWithClient,
   updateReservationGroupStatus
 } from "@/lib/reservations";
 import { withOperationStatus, withOperationTaskStatus, type OperationKind, type OperationStatus } from "@/lib/operation-status";
+import {
+  bridgeReservationSelect,
+  findOrCreateTaskForLegacyOperation,
+  isOperationTaskBridgeUnavailable,
+  mirrorOperationTaskStatusToProductionNotes,
+  updateOperationTaskStatus,
+  type OperationTaskBridgeReservation
+} from "@/lib/operation-task-bridge";
+import type { OperationTaskStatus } from "@/lib/operation-tasks";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -66,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     const reservation = await prisma.reservation.findUnique({
       where: { id: input.reservationId },
-      select: { id: true, contractGroupId: true, productionNotes: true, notes: true, ownerId: true, sellerUserId: true, salesperson: true, status: true }
+      select: { ...bridgeReservationSelect, contractGroupId: true, notes: true, ownerId: true, sellerUserId: true, salesperson: true, status: true }
     });
     if (!reservation) {
       return NextResponse.json({ error: "Rezervarea nu exista." }, { status: 404, headers: noStoreHeaders });
@@ -108,18 +118,55 @@ export async function POST(request: NextRequest) {
         }
       });
       result = await refreshedReservations(where);
-    } else if (input.action === "createTask" || input.action === "operationStatus") {
+    } else if (input.action === "createTask") {
       const kind = input.kind || "decoration";
       const status = input.status || "NEW";
       result = await updateReservation(reservation.id, {
-        productionNotes: input.taskId
-          ? withOperationTaskStatus(reservation.productionNotes, input.taskId, status as OperationStatus)
-          : withOperationStatus(
-              appendNote(reservation.productionNotes, input.action === "createTask" ? input.note || "Task creat din command center." : undefined),
-              kind as OperationKind,
-              status as OperationStatus
-            )
+        productionNotes: withOperationStatus(
+          appendNote(reservation.productionNotes, input.note || "Task creat din command center."),
+          kind as OperationKind,
+          status as OperationStatus
+        )
       }, session);
+    } else if (input.action === "operationStatus") {
+      const kind = input.kind || "decoration";
+      const status = input.status || "NEW";
+      if (operationTasksEnabled()) {
+        try {
+          const bridged = await updateOperationStatusThroughBridge(
+            reservation.id,
+            reservation,
+            { kind: kind as OperationKind, status: status as OperationStatus, taskId: input.taskId || null },
+            session
+          );
+          if (bridged) {
+            result = bridged.reservation;
+          }
+        } catch (error) {
+          if (isOperationTaskBridgeUnavailable(error)) {
+            console.warn("OperationTask command-center bridge unavailable; falling back to legacy operation status write.", {
+              reservationId: reservation.id,
+              kind,
+              taskId: input.taskId || null
+            });
+          } else {
+            console.error("OperationTask command-center bridge write failed; not falling back after transactional write attempt.", {
+              reservationId: reservation.id,
+              kind,
+              taskId: input.taskId || null,
+              error
+            });
+            throw error;
+          }
+        }
+      }
+      if (!result) {
+        result = await updateReservation(reservation.id, {
+          productionNotes: input.taskId
+            ? withOperationTaskStatus(reservation.productionNotes, input.taskId, status as OperationStatus)
+            : withOperationStatus(reservation.productionNotes, kind as OperationKind, status as OperationStatus)
+        }, session);
+      }
     }
 
     await recordAudit({
@@ -188,4 +235,29 @@ function appendNote(current: string | null | undefined, note?: string) {
   if (!note) return current || null;
   const line = `[${new Date().toISOString().slice(0, 10)}] ${note}`;
   return current ? `${current}\n${line}` : line;
+}
+
+function operationTasksEnabled() {
+  return ["1", "true", "yes"].includes(String(process.env.OPERATION_TASKS_ENABLED || "").toLowerCase());
+}
+
+async function updateOperationStatusThroughBridge(
+  reservationId: string,
+  reservation: OperationTaskBridgeReservation,
+  payload: { kind: OperationKind; status: OperationStatus; taskId: string | null },
+  session: AuthSession
+) {
+  return prisma.$transaction(async (tx) => {
+    const task = await findOrCreateTaskForLegacyOperation(reservation, payload, tx);
+    if (!task) return null;
+
+    const updatedTask = await updateOperationTaskStatus(task.id, payload.status as OperationTaskStatus, session, tx);
+    const mirroredNotes = mirrorOperationTaskStatusToProductionNotes(reservation, updatedTask);
+    const updatedReservation = await updateReservationProductionNotesWithClient(tx, reservationId, mirroredNotes || "", session);
+
+    return {
+      reservation: updatedReservation,
+      task: updatedTask
+    };
+  });
 }

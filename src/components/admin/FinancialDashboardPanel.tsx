@@ -8,6 +8,7 @@ import { companyEntities } from "@/lib/company-entities";
 type FinancialData = NonNullable<DashboardData["finance"]>;
 type FinancialListRow = FinancialData["lists"]["overdueReceivables"][number] | FinancialData["lists"]["overduePayables"][number];
 type FinancialTab = "receivable" | "payable" | "overdue" | "upcoming" | "companies" | "review" | "archive" | "uploads";
+type SmartBillReportType = "customer_invoices" | "supplier_documents";
 type FinancialPreview = {
   upload: {
     id: string;
@@ -49,6 +50,57 @@ type FinancialPreview = {
     payablesNeedsReview: Array<{ supplierName: string | null; reviewNote: string | null; rawRowJson: Record<string, unknown> }>;
     receivablesNeedsReview: Array<{ clientName: string | null; reviewNote: string | null; rawRowJson: Record<string, unknown> }>;
   };
+};
+
+type SmartBillPreview = {
+  reportType: SmartBillReportType;
+  companyName: string;
+  companyCode: string;
+  fileName: string;
+  fileHash: string;
+  generatedAt: string;
+  detectedColumns: string[];
+  importToken: string;
+  summary: {
+    rowCount: number;
+    matchedCount: number;
+    createClientCount: number;
+    createSupplierCount: number;
+    duplicateCount: number;
+    needsReviewCount: number;
+    invalidCount: number;
+    ignoredCount: number;
+    totalReceivable: number;
+    totalPayable: number;
+    totalReceivableByCurrency: Record<string, number>;
+    totalPayableByCurrency: Record<string, number>;
+    buckets: Record<string, number>;
+  };
+  rows: Array<{
+    rowNumber: number;
+    sheetName: string;
+    kind: "customer_invoice" | "supplier_document";
+    entityKind: "client" | "supplier";
+    entityName: string;
+    fiscalCode: string | null;
+    normalizedFiscalCode: string | null;
+    documentNumber: string;
+    issueDate: string | null;
+    dueDate: string | null;
+    sourceStatus: string | null;
+    mappedStatus: string;
+    currency: string | null;
+    netAmount: number;
+    vatAmount: number;
+    totalAmount: number;
+    matchedEntityId: string | null;
+    matchedEntityName: string | null;
+    duplicateId: string | null;
+    proposedAction: string;
+    warning: string | null;
+    errors: string[];
+    dedupeKey: string;
+  }>;
 };
 
 type ManualFinancialForm = {
@@ -95,12 +147,17 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
   const [data, setData] = useState(financial);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<FinancialPreview | null>(null);
+  const [smartBillFile, setSmartBillFile] = useState<File | null>(null);
+  const [smartBillReportType, setSmartBillReportType] = useState<SmartBillReportType>("customer_invoices");
+  const [smartBillCompanyName, setSmartBillCompanyName] = useState("");
+  const [smartBillPreview, setSmartBillPreview] = useState<SmartBillPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currencyFilter, setCurrencyFilter] = useState("");
   const [financialTab, setFinancialTab] = useState<FinancialTab>("receivable");
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [smartBillFileInputKey, setSmartBillFileInputKey] = useState(0);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualForm, setManualForm] = useState<ManualFinancialForm>(emptyManualForm);
   const [clients, setClients] = useState<Array<{ id: string; companyName: string }>>([]);
@@ -229,6 +286,70 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
     setFileInputKey((current) => current + 1);
   }
 
+  function clearSmartBillFile() {
+    setSmartBillFile(null);
+    setSmartBillPreview(null);
+    setSmartBillFileInputKey((current) => current + 1);
+  }
+
+  async function previewSmartBillImport() {
+    if (!smartBillCompanyName) {
+      setError("Alege firma pentru importul SmartBill.");
+      return;
+    }
+    if (!smartBillFile) {
+      setError("Alege raportul SmartBill Excel.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const form = new FormData();
+      form.set("file", smartBillFile);
+      form.set("reportType", smartBillReportType);
+      form.set("companyName", smartBillCompanyName);
+      const response = await fetch("/api/admin/financial/smartbill/preview", { method: "POST", body: form });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Raportul SmartBill nu a putut fi previzualizat.");
+      setSmartBillPreview(payload.preview);
+      setMessage("Preview SmartBill generat. Verifica randurile inainte de confirmare.");
+    } catch (previewError) {
+      setError(previewError instanceof Error ? previewError.message : "Raportul SmartBill nu a putut fi previzualizat.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmSmartBillImport() {
+    if (!smartBillPreview || !smartBillCompanyName || smartBillPreview.companyName !== smartBillCompanyName) return;
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/admin/financial/smartbill/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          importToken: smartBillPreview.importToken,
+          reportType: smartBillPreview.reportType,
+          companyName: smartBillCompanyName
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Importul SmartBill nu a putut fi confirmat.");
+      const summary = payload.summary;
+      setMessage(`Import SmartBill confirmat: ${summary.createdReceivables + summary.createdPayables} randuri create, ${summary.updatedReceivables + summary.updatedPayables} actualizate, ${summary.skippedDuplicates + summary.skippedNeedsReview + summary.skippedInvalid + summary.skippedIgnored + summary.skippedUnsafe} sarite.`);
+      setSmartBillPreview(null);
+      clearSmartBillFile();
+      await refreshFinancial();
+    } catch (confirmError) {
+      setError(confirmError instanceof Error ? confirmError.message : "Importul SmartBill nu a putut fi confirmat.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submitManualEntry() {
     setBusy(true);
     setError(null);
@@ -299,6 +420,82 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
             <UploadCloud size={18} /> {busy ? "Se proceseaza..." : "Incarca si previzualizeaza"}
           </button>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-focus-line bg-focus-ink/70 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase text-focus-yellow">Import SmartBill</p>
+            <h2 className="font-display text-2xl font-black uppercase text-white">Facturi clienti si documente furnizori</h2>
+            <p className="mt-1 text-sm font-bold text-slate-400">
+              Importul SmartBill ruleaza mereu cu preview: potriveste clientii/furnizorii dupa CUI/CIF sau nume, apoi confirma doar randurile sigure.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-[220px_260px_1fr_auto_auto]">
+          <label className="grid gap-1 text-sm font-bold text-slate-200">
+            Tip raport
+            <select className="focus-input" value={smartBillReportType} onChange={(event) => {
+              setSmartBillReportType(event.target.value as SmartBillReportType);
+              setSmartBillPreview(null);
+            }}>
+              <option value="customer_invoices">Facturi clienti</option>
+              <option value="supplier_documents">Documente furnizori</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-bold text-slate-200">
+            Firma import
+            <select className="focus-input" required value={smartBillCompanyName} onChange={(event) => {
+              setSmartBillCompanyName(event.target.value);
+              setSmartBillPreview(null);
+            }}>
+              <option value="">Alege firma</option>
+              {companyEntities.map((entity) => <option key={entity.value} value={entity.value}>{entity.label}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm font-bold text-slate-200">
+            Fisier Excel SmartBill
+            <input key={smartBillFileInputKey} className="focus-input" type="file" accept=".xlsx,.xls,.xlsm" onChange={(event) => {
+              setSmartBillFile(event.target.files?.[0] || null);
+              setSmartBillPreview(null);
+            }} />
+          </label>
+          <button className="focus-button secondary self-end" type="button" onClick={clearSmartBillFile} disabled={busy || (!smartBillFile && !smartBillPreview)}>
+            <XCircle size={18} /> Sterge
+          </button>
+          <button className="focus-button self-end" type="button" onClick={previewSmartBillImport} disabled={busy || !smartBillFile || !smartBillCompanyName}>
+            <FileSpreadsheet size={18} /> {busy ? "Se citeste..." : "Previzualizeaza"}
+          </button>
+        </div>
+        {smartBillPreview ? (
+          <div className="mt-5 rounded-lg border border-focus-line bg-focus-navy/35 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-black text-white">{smartBillPreview.fileName}</h3>
+                <p className="mt-1 text-xs font-bold text-slate-400">
+                  Firma selectata: <strong className="text-slate-100">{smartBillPreview.companyName}</strong> ({smartBillPreview.companyCode}) ·{" "}
+                  Coloane detectate: {smartBillPreview.detectedColumns.join(", ")}
+                </p>
+              </div>
+              <button className="focus-button" type="button" onClick={confirmSmartBillImport} disabled={busy || !smartBillPreview.importToken || !smartBillCompanyName || smartBillPreview.companyName !== smartBillCompanyName}>
+                <CheckCircle2 size={18} /> Confirma randurile sigure
+              </button>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+              <FinanceMetric label="Randuri" value={smartBillPreview.summary.rowCount} detail="citite din SmartBill" />
+              <FinanceMetric label="Potrivite" value={smartBillPreview.summary.matchedCount} detail="client/furnizor existent" tone="green" />
+              <FinanceMetric label="De creat" value={smartBillPreview.summary.createClientCount + smartBillPreview.summary.createSupplierCount} detail="clienti/furnizori noi" tone="yellow" />
+              <FinanceMetric label="Duplicate" value={smartBillPreview.summary.duplicateCount} detail="nu se vor dubla" tone={smartBillPreview.summary.duplicateCount ? "yellow" : "green"} />
+              <FinanceMetric label="Review" value={smartBillPreview.summary.needsReviewCount} detail="raman neimportate" tone={smartBillPreview.summary.needsReviewCount ? "red" : "green"} />
+              <FinanceMetric label="Invalid" value={smartBillPreview.summary.invalidCount} detail="raman neimportate" tone={smartBillPreview.summary.invalidCount ? "red" : "green"} />
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <FinanceMetric label="Total clienti importabil" value={currencyTotals(smartBillPreview.summary.totalReceivableByCurrency)} detail="fara review/duplicate" />
+              <FinanceMetric label="Total furnizori importabil" value={currencyTotals(smartBillPreview.summary.totalPayableByCurrency)} detail="fara review/duplicate" />
+            </div>
+            <SmartBillPreviewTable rows={smartBillPreview.rows} />
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-lg border border-focus-line bg-focus-ink/70 p-5">
@@ -743,6 +940,51 @@ function IssuesTable({ issues }: { issues: FinancialPreview["preview"]["issues"]
   </section>;
 }
 
+function SmartBillPreviewTable({ rows }: { rows: SmartBillPreview["rows"] }) {
+  return <section className="mt-4 rounded-lg border border-focus-line bg-focus-ink/45 p-4">
+    <h4 className="text-sm font-black uppercase text-focus-yellow">Randuri SmartBill</h4>
+    <div className="mt-3 max-h-[520px] overflow-auto">
+      <table className="w-full min-w-[980px] text-sm">
+        <thead className="sticky top-0 z-10 bg-focus-navy text-left text-xs uppercase text-slate-400">
+          <tr>
+            <th className="px-3 py-2">Actiune</th>
+            <th className="px-3 py-2">Client / furnizor</th>
+            <th className="px-3 py-2">CIF/CUI original</th>
+            <th className="px-3 py-2">CIF/CUI normalizat</th>
+            <th className="px-3 py-2">Document</th>
+            <th className="px-3 py-2">Emitere</th>
+            <th className="px-3 py-2">Scadenta</th>
+            <th className="px-3 py-2">Status</th>
+            <th className="px-3 py-2 text-right">Total</th>
+            <th className="px-3 py-2">Potrivire / avertizare</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length ? rows.slice(0, 120).map((row) => (
+            <tr className="border-t border-focus-line" key={`${row.dedupeKey}-${row.rowNumber}`}>
+              <td className="px-3 py-3"><Badge tone={smartBillActionTone(row.proposedAction)}>{smartBillActionLabel(row.proposedAction)}</Badge></td>
+              <td className="px-3 py-3 font-black text-white">{row.entityName}<small className="block text-slate-400">{row.entityKind === "client" ? "client" : "furnizor"}</small></td>
+              <td className="px-3 py-3">{row.fiscalCode || "-"}</td>
+              <td className="px-3 py-3">{row.normalizedFiscalCode || "-"}</td>
+              <td className="px-3 py-3">{row.documentNumber}</td>
+              <td className="px-3 py-3">{row.issueDate ? date(row.issueDate) : "-"}</td>
+              <td className="px-3 py-3">{row.dueDate ? date(row.dueDate) : "-"}</td>
+              <td className="px-3 py-3"><span className="text-slate-200">{statusLabel(row.mappedStatus)}</span><small className="block text-slate-500">{row.sourceStatus || "-"}</small></td>
+              <td className="px-3 py-3 text-right font-black">{money(row.totalAmount, row.currency)}</td>
+              <td className="px-3 py-3">
+                <span className="text-slate-200">{row.matchedEntityName || (row.duplicateId ? "Document existent" : "-")}</span>
+                {row.warning ? <small className="block text-focus-yellow">{row.warning}</small> : null}
+                {row.errors.length ? <small className="block text-red-100">{row.errors.join(" ")}</small> : null}
+              </td>
+            </tr>
+          )) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={10}>Nu exista randuri SmartBill in preview.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+    {rows.length > 120 ? <p className="mt-3 text-xs font-bold text-slate-400">Se afiseaza primele 120 de randuri. Confirmarea foloseste toate randurile sigure din preview.</p> : null}
+  </section>;
+}
+
 function Feedback({ tone, text }: { tone: "green" | "red" | "yellow"; text: string }) {
   const Icon = tone === "green" ? CheckCircle2 : tone === "red" ? XCircle : AlertTriangle;
   const className = tone === "green"
@@ -751,6 +993,26 @@ function Feedback({ tone, text }: { tone: "green" | "red" | "yellow"; text: stri
       ? "border-red-300/30 bg-red-500/10 text-red-100"
       : "border-focus-yellow/30 bg-focus-yellow/10 text-focus-yellow";
   return <p className={`flex items-center gap-2 rounded-lg border px-4 py-3 text-sm font-bold ${className}`}><Icon size={18} /> {text}</p>;
+}
+
+function smartBillActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    AUTO_MATCHED: "Potrivit",
+    PROPOSE_CREATE_CLIENT: "Creeaza client",
+    PROPOSE_CREATE_SUPPLIER: "Creeaza furnizor",
+    DUPLICATE: "Duplicat",
+    NEEDS_REVIEW: "Review",
+    INVALID: "Invalid",
+    IGNORED: "Ignorat"
+  };
+  return labels[action] || action;
+}
+
+function smartBillActionTone(action: string): "neutral" | "green" | "yellow" | "red" {
+  if (action === "AUTO_MATCHED") return "green";
+  if (action === "PROPOSE_CREATE_CLIENT" || action === "PROPOSE_CREATE_SUPPLIER" || action === "DUPLICATE" || action === "IGNORED") return "yellow";
+  if (action === "NEEDS_REVIEW" || action === "INVALID") return "red";
+  return "neutral";
 }
 
 function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "green" | "yellow" | "red" }) {
@@ -783,6 +1045,14 @@ function moneyPair(ron: number, eur: number) {
   return <span className="grid gap-1 text-lg leading-tight">
     <span>{money(ron, "RON")}</span>
     <span>{money(eur, "EUR")}</span>
+  </span>;
+}
+
+function currencyTotals(values: Record<string, number>) {
+  const entries = Object.entries(values).filter(([, value]) => value);
+  if (!entries.length) return "0";
+  return <span className="grid gap-1 text-lg leading-tight">
+    {entries.map(([currency, value]) => <span key={currency}>{money(value, currency)}</span>)}
   </span>;
 }
 

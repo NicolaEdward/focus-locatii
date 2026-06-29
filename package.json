@@ -54,6 +54,7 @@
     "test:reservation-workflow-cleanup": "node scripts/test-reservation-workflow-cleanup.cjs",
     "test:admin-route-links": "node scripts/test-admin-route-links.cjs",
     "test:financial-import": "node scripts/test-financial-import.cjs",
+    "test:smartbill-import": "node scripts/test-smartbill-import.cjs",
     "test:finance-consistency": "node scripts/test-finance-consistency.cjs",
     "test:billing": "node scripts/test-billing.cjs",
     "test:montaj-billing": "node scripts/test-montaj-billing.cjs",

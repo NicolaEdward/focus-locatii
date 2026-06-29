@@ -8,7 +8,7 @@ export async function getFinancialDashboardData() {
   const inSevenDays = addDays(now, 7);
   const inThirtyDays = addDays(now, 30);
 
-  const [latestUpload, activeUpload, recentUploads] = await Promise.all([
+  const [latestUpload, activeUpload, recentUploads, smartBillUploads] = await Promise.all([
     prisma.financialReportUpload.findFirst({
       include: { uploadedBy: { select: { name: true, email: true } } },
       orderBy: { uploadedAt: "desc" }
@@ -25,24 +25,35 @@ export async function getFinancialDashboardData() {
       include: { uploadedBy: { select: { name: true, email: true } } },
       orderBy: { uploadedAt: "desc" },
       take: 8
+    }),
+    prisma.financialReportUpload.findMany({
+      where: { status: "confirmed", fileHash: { startsWith: "smartbill-" } },
+      include: { uploadedBy: { select: { name: true, email: true } } },
+      orderBy: { uploadedAt: "desc" },
+      take: 50
     })
   ]);
 
-  if (!activeUpload) {
+  const dashboardUpload = activeUpload || smartBillUploads[0] || null;
+  if (!dashboardUpload) {
     return emptyFinancialDashboard(latestUpload, recentUploads);
   }
+  const uploadIds = Array.from(new Set([
+    activeUpload?.id,
+    ...smartBillUploads.map((upload) => upload.id)
+  ].filter((id): id is string => Boolean(id))));
 
   const [payables, receivables, issues] = await Promise.all([
     prisma.financialPayable.findMany({
-      where: { uploadId: activeUpload.id },
+      where: { uploadId: { in: uploadIds } },
       orderBy: [{ dueDate: "asc" }, { remainingAmount: "desc" }]
     }),
     prisma.financialReceivable.findMany({
-      where: { uploadId: activeUpload.id },
+      where: { uploadId: { in: uploadIds } },
       orderBy: [{ dueDate: "asc" }, { remainingAmount: "desc" }]
     }),
     prisma.financialImportIssue.findMany({
-      where: { uploadId: activeUpload.id, severity: { not: "info" } },
+      where: { uploadId: { in: uploadIds }, severity: { not: "info" } },
       orderBy: [{ severity: "desc" }, { rowNumber: "asc" }],
       take: 80
     })
@@ -65,9 +76,9 @@ export async function getFinancialDashboardData() {
 
   return {
     hasActiveReport: true,
-    todayReportLoaded: sameReportDay(activeUpload.reportDate, now),
+    todayReportLoaded: [activeUpload, ...smartBillUploads].filter(isDefined).some((upload) => sameReportDay(upload.reportDate, now)),
     latestUpload: serializeUpload(latestUpload),
-    activeUpload: serializeUpload(activeUpload),
+    activeUpload: serializeUpload(dashboardUpload),
     uploads: recentUploads.map(serializeUpload).filter(isDefined),
     kpis: {
       totalReceivable: sum(clearReceivables, "invoicedAmount"),
@@ -109,32 +120,7 @@ export async function getFinancialDashboardData() {
       overduePayableCount: overduePayables.length,
       needsReviewCount: needsReviewPayables.length + needsReviewReceivables.length
     },
-    companies: activeUpload.companySnapshots.map((row) => ({
-      id: row.id,
-      companyName: row.companyName,
-      companyCode: row.companyCode,
-      totalPayable: moneyNumber(row.totalPayable),
-      totalPaid: moneyNumber(row.totalPaid),
-      remainingPayable: moneyNumber(row.remainingPayable),
-      totalReceivable: moneyNumber(row.totalReceivable),
-      totalCollected: moneyNumber(row.totalCollected),
-      remainingReceivable: moneyNumber(row.remainingReceivable),
-      totalPayableRon: moneyNumber(row.totalPayableRon),
-      totalPayableEur: moneyNumber(row.totalPayableEur),
-      totalPaidRon: moneyNumber(row.totalPaidRon),
-      totalPaidEur: moneyNumber(row.totalPaidEur),
-      remainingPayableRon: moneyNumber(row.remainingPayableRon),
-      remainingPayableEur: moneyNumber(row.remainingPayableEur),
-      totalReceivableRon: moneyNumber(row.totalReceivableRon),
-      totalReceivableEur: moneyNumber(row.totalReceivableEur),
-      totalCollectedRon: moneyNumber(row.totalCollectedRon),
-      totalCollectedEur: moneyNumber(row.totalCollectedEur),
-      remainingReceivableRon: moneyNumber(row.remainingReceivableRon),
-      remainingReceivableEur: moneyNumber(row.remainingReceivableEur),
-      payableRows: row.payableRows,
-      receivableRows: row.receivableRows,
-      issueCount: row.issueCount
-    })),
+    companies: buildCompanyRows(clearPayables, clearReceivables, issues),
     lists: {
       overdueReceivables: overdueReceivables.slice(0, 200).map(serializeReceivable),
       dueTodayReceivables: dueTodayReceivables.slice(0, 200).map(serializeReceivable),
@@ -159,6 +145,68 @@ export async function getFinancialDashboardData() {
       severity: row.severity
     }))
   };
+}
+
+type CompanyPayableRow = {
+  companyName: string;
+  companyCode: string | null;
+  amountToPay: MoneyInput;
+  amountPaid: MoneyInput;
+  remainingAmount: MoneyInput;
+  currency: string | null;
+  needsReview: boolean;
+  includedInReport: boolean;
+};
+
+type CompanyReceivableRow = {
+  companyName: string;
+  companyCode: string | null;
+  invoicedAmount: MoneyInput;
+  collectedAmount: MoneyInput;
+  remainingAmount: MoneyInput;
+  currency: string | null;
+  needsReview: boolean;
+  includedInReport: boolean;
+};
+
+type CompanyIssueRow = {
+  companyName: string | null;
+};
+
+function buildCompanyRows(payables: CompanyPayableRow[], receivables: CompanyReceivableRow[], issues: CompanyIssueRow[]) {
+  const companyKeys = Array.from(new Set([...payables, ...receivables].map((row) => row.companyCode || row.companyName)));
+  return companyKeys.sort().map((companyKey) => {
+    const companyPayables = payables.filter((row) => (row.companyCode || row.companyName) === companyKey);
+    const companyReceivables = receivables.filter((row) => (row.companyCode || row.companyName) === companyKey);
+    const companyName = companyReceivables[0]?.companyName || companyPayables[0]?.companyName || companyKey;
+    const companyCode = companyReceivables[0]?.companyCode || companyPayables[0]?.companyCode || null;
+    return {
+      id: companyCode || companyName,
+      companyName,
+      companyCode,
+      totalPayable: sum(companyPayables, "amountToPay"),
+      totalPaid: sum(companyPayables, "amountPaid"),
+      remainingPayable: sum(companyPayables, "remainingAmount"),
+      totalReceivable: sum(companyReceivables, "invoicedAmount"),
+      totalCollected: sum(companyReceivables, "collectedAmount"),
+      remainingReceivable: sum(companyReceivables, "remainingAmount"),
+      totalPayableRon: sumCurrency(companyPayables, "amountToPay", "RON"),
+      totalPayableEur: sumCurrency(companyPayables, "amountToPay", "EUR"),
+      totalPaidRon: sumCurrency(companyPayables, "amountPaid", "RON"),
+      totalPaidEur: sumCurrency(companyPayables, "amountPaid", "EUR"),
+      remainingPayableRon: sumCurrency(companyPayables, "remainingAmount", "RON"),
+      remainingPayableEur: sumCurrency(companyPayables, "remainingAmount", "EUR"),
+      totalReceivableRon: sumCurrency(companyReceivables, "invoicedAmount", "RON"),
+      totalReceivableEur: sumCurrency(companyReceivables, "invoicedAmount", "EUR"),
+      totalCollectedRon: sumCurrency(companyReceivables, "collectedAmount", "RON"),
+      totalCollectedEur: sumCurrency(companyReceivables, "collectedAmount", "EUR"),
+      remainingReceivableRon: sumCurrency(companyReceivables, "remainingAmount", "RON"),
+      remainingReceivableEur: sumCurrency(companyReceivables, "remainingAmount", "EUR"),
+      payableRows: companyPayables.length,
+      receivableRows: companyReceivables.length,
+      issueCount: issues.filter((issue) => issue.companyName === companyName).length
+    };
+  });
 }
 
 function emptyFinancialDashboard(latestUpload: Awaited<ReturnType<typeof prisma.financialReportUpload.findFirst>>, uploads: Awaited<ReturnType<typeof prisma.financialReportUpload.findMany>>) {

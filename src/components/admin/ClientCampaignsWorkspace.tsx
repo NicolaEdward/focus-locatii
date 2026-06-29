@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Archive,
   BriefcaseBusiness,
@@ -178,6 +179,9 @@ export function ClientCampaignsWorkspace({
   session: AuthSession;
   initialTab?: WorkspaceTab;
 }) {
+  const searchParams = useSearchParams();
+  const focusedClientId = searchParams.get("clientId");
+  const focusedCampaignId = searchParams.get("campaignId");
   const [data, setData] = useState(initialData);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>(initialTab);
   const [query, setQuery] = useState("");
@@ -204,6 +208,30 @@ export function ClientCampaignsWorkspace({
     () => data.clients.find((client) => client.key === selectedKey) || null,
     [data.clients, selectedKey]
   );
+
+  useEffect(() => {
+    if (focusedClientId) {
+      const focusedClient = data.clients.find((client) => client.clientId === focusedClientId);
+      setActiveTab("clients");
+      if (focusedClient) {
+        setSelectedKey(focusedClient.key);
+        setQuery(focusedClient.companyName);
+      } else {
+        setQuery(focusedClientId);
+      }
+      return;
+    }
+    if (focusedCampaignId) {
+      const focusedCampaign = data.campaigns.find((campaign) => campaign.id === focusedCampaignId);
+      setActiveTab("campaigns");
+      if (focusedCampaign) {
+        setSelectedKey(focusedCampaign.clientKey);
+        setQuery(focusedCampaign.campaignName || focusedCampaign.clientName || focusedCampaignId);
+      } else {
+        setQuery(focusedCampaignId);
+      }
+    }
+  }, [data.campaigns, data.clients, focusedCampaignId, focusedClientId]);
 
   useEffect(() => {
     const controller = new AbortController();

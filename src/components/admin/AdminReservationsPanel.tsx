@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Building2,
   CalendarDays,
@@ -212,6 +213,10 @@ export function AdminReservationsPanel({
   onLocationsUpdated?: (locations: LocationDTO[]) => void;
   session: AuthSession;
 }) {
+  const searchParams = useSearchParams();
+  const focusedReservationId = searchParams.get("reservationId");
+  const requestedPanel = panelFromQuery(searchParams.get("panel"));
+  const shouldFocusNewReservation = searchParams.get("newReservation") === "1";
   const initialForm = { ...emptyForm, salesperson: session.name, sellerUserId: session.id };
   const canManageAllReservations = hasPermission(session.role, "reservations.manage");
   const canAssignOtherSeller = ["SALES_DIRECTOR", "COO", "SUPER_ADMIN"].includes(session.role);
@@ -287,6 +292,41 @@ export function AdminReservationsPanel({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (requestedPanel) {
+      setActivePanel(requestedPanel);
+    }
+  }, [requestedPanel]);
+
+  useEffect(() => {
+    if (!shouldFocusNewReservation) return;
+    setActivePanel("sales");
+    setMessage("Completeaza formularul pentru o rezervare noua.");
+  }, [shouldFocusNewReservation]);
+
+  useEffect(() => {
+    if (!focusedReservationId) return;
+    const reservation = reservations.find((item) => item.id === focusedReservationId);
+    setActivePanel("sales");
+    setShowReservationLog(true);
+    if (!reservation) {
+      setReservationSearch(focusedReservationId);
+      setMessage("Rezervarea cautata nu este vizibila in lista curenta.");
+      return;
+    }
+    setReservationSearch(
+      reservation.locationCode ||
+      reservation.clientName ||
+      reservation.campaignName ||
+      reservation.contractNumber ||
+      focusedReservationId
+    );
+    if (reservation.status === "BOOKED") {
+      setSalesLogMonth(monthInputValueFromDate(reservation.bookedAt || reservation.createdAt || reservation.periodStart));
+    }
+    setMessage(`Rezervarea ${reservation.locationCode || reservation.id} este filtrata in lista.`);
+  }, [focusedReservationId, reservations]);
 
   useEffect(() => {
     if (!form.clientId) {
@@ -897,7 +937,7 @@ export function AdminReservationsPanel({
   });
 
   return (
-    <section className="grid gap-5" id="rezervari">
+    <section className="grid scroll-mt-28 gap-5" id="rezervari">
       <div className="focus-card rounded-lg p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1359,6 +1399,7 @@ export function AdminReservationsPanel({
             role={session.role}
             canEdit={canEditReservations}
             canDelete={canManageAllReservations}
+            highlightedReservationId={focusedReservationId}
           />
         </AdminTableShell>
       ) : null}
@@ -1453,6 +1494,7 @@ export function AdminReservationsPanel({
               role={session.role}
               canEdit={canEditReservations}
               canDelete={canManageAllReservations}
+              highlightedReservationId={focusedReservationId}
             />
 
             <div className="mt-6 border-t border-focus-line pt-5">
@@ -1470,6 +1512,7 @@ export function AdminReservationsPanel({
                 role={session.role}
                 canEdit={canEditReservations}
                 canDelete={canManageAllReservations}
+                highlightedReservationId={focusedReservationId}
               />
             </div>
           </>
@@ -1982,7 +2025,8 @@ function ReservationsTable({
   onStatusChange,
   role,
   canEdit,
-  canDelete
+  canDelete,
+  highlightedReservationId
 }: {
   reservations: ReservationDTO[];
   locationsById: Map<string, LocationDTO>;
@@ -1992,6 +2036,7 @@ function ReservationsTable({
   role: AuthSession["role"];
   canEdit: boolean;
   canDelete: boolean;
+  highlightedReservationId?: string | null;
 }) {
   return (
     <div className="mt-4 overflow-auto">
@@ -2013,7 +2058,10 @@ function ReservationsTable({
           {reservations.map((reservation) => {
             const location = locationsById.get(reservation.locationId);
             return (
-              <tr key={reservation.id} className="border-t border-focus-line">
+              <tr
+                key={reservation.id}
+                className={`border-t border-focus-line ${highlightedReservationId === reservation.id ? "bg-focus-yellow/10 outline outline-1 outline-focus-yellow/50" : ""}`}
+              >
                 <Td>
                   <strong className="text-white">{reservation.locationCode || location?.code || "N/A"}</strong>
                   <p className="text-xs text-slate-400">{location?.city || reservation.locationName || reservation.locationId}</p>
@@ -2638,6 +2686,18 @@ function unique(values: Array<string | null>) {
 function currentMonthInputValue() {
   const today = new Date();
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthInputValueFromDate(value?: string | null) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return currentMonthInputValue();
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function panelFromQuery(value?: string | null): AdminPanel | null {
+  if (value === "sales" || value === "future" || value === "decorations" || value === "neutralizations") return value;
+  if (value === "operations") return "decorations";
+  return null;
 }
 
 function monthInputRange(value: string) {

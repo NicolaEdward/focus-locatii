@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { CalendarClock, ClipboardList, Plus, Save, Search } from "lucide-react";
+import { adminNewReservationHref } from "@/lib/admin-routes";
 
 type Seller = { id: string; name: string; email: string; role: string };
 type CrmActivity = {
@@ -198,7 +199,7 @@ export function CrmWorkspace({ currentUserId, canViewTeam }: { currentUserId: st
           <h1 className="font-display text-4xl font-black uppercase text-white">Pipeline vanzari</h1>
           <p className="mt-2 max-w-3xl text-sm font-bold text-slate-300">Lead-uri si activitati in stil jurnal, dupa modelul Edward CRM.</p>
         </div>
-        <Link className="focus-button" href="/admin/locatii#rezervari"><ClipboardList size={18} /> Creeaza hold</Link>
+        <Link className="focus-button" href={adminNewReservationHref({ source: "crm" })}><ClipboardList size={18} /> Creeaza hold</Link>
       </section>
 
       {message ? <Feedback tone="green" text={message} /> : null}

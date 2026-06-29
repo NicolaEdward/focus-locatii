@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Copy, Download, Edit, Eye, EyeOff, Plus, Search, Trash2 } from "lucide-react";
 import type { CategoryDTO, LocationDTO, LocationStatus, OfferRequestDTO, ReservationDTO } from "@/types/location";
 import { LocationEditor } from "@/components/admin/LocationEditor";
@@ -24,6 +25,8 @@ export function AdminDashboard({
   initialOfferRequests: OfferRequestDTO[];
   session: AuthSession;
 }) {
+  const searchParams = useSearchParams();
+  const focusedLocationParam = searchParams.get("locationId");
   const [locations, setLocations] = useState(initialLocations);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -31,6 +34,21 @@ export function AdminDashboard({
   const [editing, setEditing] = useState<LocationDTO | null | undefined>(undefined);
   const [feedback, setFeedback] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const canManageLocations = hasPermission(session.role, "inventory.manage");
+  const focusedLocation = useMemo(
+    () => locations.find((location) => location.id === focusedLocationParam || location.code === focusedLocationParam) || null,
+    [focusedLocationParam, locations]
+  );
+
+  useEffect(() => {
+    if (!focusedLocationParam) return;
+    if (focusedLocation) {
+      setSearch(focusedLocation.code || focusedLocation.address || focusedLocationParam);
+      setFeedback({ tone: "ok", text: `Locatia ${focusedLocation.code} este filtrata mai jos.` });
+      return;
+    }
+    setSearch(focusedLocationParam);
+    setFeedback({ tone: "error", text: "Locatia cautata nu este vizibila in lista curenta." });
+  }, [focusedLocation, focusedLocationParam]);
 
   const filtered = useMemo(() => {
     return locations.filter((location) => {
@@ -101,7 +119,7 @@ export function AdminDashboard({
             </button>
             <a className="focus-button secondary" href="/api/export/json">
               <Download size={18} />
-              Backup JSON
+              Export inventar JSON
             </a>
           </div> : null}
         </div>
@@ -145,7 +163,7 @@ export function AdminDashboard({
           </select>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-focus-line">
+        <div id="locatii" className="scroll-mt-28 overflow-hidden rounded-lg border border-focus-line">
           <table className="w-full min-w-[1100px] border-collapse bg-focus-ink/70 text-sm">
             <thead className="bg-focus-navy text-left text-xs uppercase text-focus-yellow">
               <tr>
@@ -161,7 +179,10 @@ export function AdminDashboard({
             </thead>
             <tbody>
               {filtered.map((location) => (
-                <tr key={location.id} className="border-t border-focus-line">
+                <tr
+                  key={location.id}
+                  className={`border-t border-focus-line ${focusedLocationParam && (location.id === focusedLocationParam || location.code === focusedLocationParam) ? "bg-focus-yellow/10 outline outline-1 outline-focus-yellow/50" : ""}`}
+                >
                   <Td>
                     <strong className="text-white">{location.code}</strong>
                     <p className="text-xs text-slate-400">{location.categoryName}</p>

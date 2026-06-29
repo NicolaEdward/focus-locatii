@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import type { DashboardData } from "@/lib/dashboard";
 import { FinancialDashboardPanel } from "@/components/admin/FinancialDashboardPanel";
+import { adminNewReservationHref, adminReservationHref, adminReservationsHref } from "@/lib/admin-routes";
 
 type CooData = DashboardData["coo"];
 type CooTab = "overview" | "issues" | "sales" | "crm" | "operations" | "inventory" | "financial" | "exports" | "admin";
@@ -175,7 +176,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
             </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 xl:w-[460px]">
-            <Link className="focus-button" href="/admin/locatii#rezervari"><BriefcaseBusiness size={18} /> Creeaza rezervare</Link>
+            <Link className="focus-button" href={adminNewReservationHref()}><BriefcaseBusiness size={18} /> Creeaza rezervare</Link>
             <Link className="focus-button secondary" href="/admin/locatii"><MapPinned size={18} /> Adauga locatie</Link>
             <a className="focus-button secondary" href={coo.reports.availabilityUrl}><FileSpreadsheet size={18} /> Export disponibil</a>
             <a className="focus-button secondary" href={coo.reports.salesUrl}><Download size={18} /> Export vanzari</a>
@@ -253,8 +254,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                             <h3 className="text-xl font-black text-white">{conflict.locationCode} {conflict.city ? `- ${conflict.city}` : ""}</h3>
                           </div>
                           <ActionMenu>
-                            <button type="button" onClick={() => command(conflict.reservations[0].id, "markResolved", { note: "Conflict verificat din dashboard COO." })}>Marcheaza rezolvat</button>
-                            <button type="button" onClick={() => command(conflict.reservations[0].id, "approveException", { note: "Exceptie aprobata de COO." })}>Aproba exceptie</button>
+                            <span className="px-3 py-2 text-xs font-bold text-slate-300">Rezolvare manuala necesara</span>
                             <button type="button" onClick={() => command(conflict.reservations[0].id, "createTask", { kind: "decoration", status: "NEW", note: "Verificare conflict operational." })}>Creeaza task</button>
                           </ActionMenu>
                         </div>
@@ -325,7 +325,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                   <a className="focus-button" href={coo.reports.availabilityUrl}><FileSpreadsheet size={18} /> Disponibil complet</a>
                   <a className="focus-button secondary" href={coo.reports.salesUrl}><Download size={18} /> Situatie vanzari</a>
                   <a className="focus-button secondary" href={coo.reports.billingUrl}><Download size={18} /> Financiar manual</a>
-                  <Link className="focus-button secondary" href="/admin/locatii#rezervari"><ClipboardList size={18} /> Solicitari</Link>
+                  <Link className="focus-button secondary" href={adminReservationsHref()}><ClipboardList size={18} /> Solicitari</Link>
                   <Link className="focus-button secondary" href="/admin/locatii/gps"><MapPinned size={18} /> Audit GPS</Link>
                 </div>
               </Panel>
@@ -399,7 +399,7 @@ function ReservationMini({ row, busy, onCommand, expired = false }: { row: Reser
       <button className="focus-button secondary" type="button" onClick={() => onCommand(row.id, "extendHold", { days: 5 }, "Hold-ul a fost prelungit cu 5 zile.")}>Prelungeste</button>
       <button className="focus-button secondary" type="button" onClick={() => onCommand(row.id, "releaseHold", {}, "Locatia a fost eliberata.")}>Elibereaza</button>
       <ActionMenu>
-        <Link href="/admin/locatii#rezervari">Vezi detalii</Link>
+        <Link href={adminReservationHref(row.id)}>Vezi detalii</Link>
         <button type="button" onClick={() => changePeriod(row, onCommand)}>Schimba perioada</button>
         <button type="button" onClick={() => onCommand(row.id, "markLost", {}, "Hold-ul a fost marcat ca pierdut.")}>Marcheaza pierdut</button>
         <button type="button" onClick={() => onCommand(row.id, "createTask", { kind: "decoration", status: "NEW", note: "Follow-up operational pentru hold." })}>Creeaza task</button>
@@ -423,7 +423,7 @@ function TaskPanel({ title, rows, busy, onCommand }: { title: string; rows: Task
           <td className="px-3 py-3"><div className="flex flex-wrap gap-2">
             <button className="focus-button secondary" type="button" disabled={busy === `operationStatus-${row.reservationId}`} onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "IN_PROGRESS"), "Taskul este in lucru.")}>In lucru</button>
             <button className="focus-button" type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "DONE"), "Taskul a fost finalizat.")}>Finalizat</button>
-            <ActionMenu><button type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "ARCHIVED"), "Taskul a fost arhivat.")}>Arhiveaza</button><Link href="/admin/locatii#rezervari">Vezi contract</Link></ActionMenu>
+            <ActionMenu><button type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "ARCHIVED"), "Taskul a fost arhivat.")}>Arhiveaza</button><Link href={adminReservationHref(row.reservationId)}>Vezi contract</Link></ActionMenu>
           </div></td>
         </tr>) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={5}>Nu exista taskuri active.</td></tr>}</tbody>
       </table>

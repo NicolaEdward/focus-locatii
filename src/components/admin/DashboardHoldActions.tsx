@@ -5,6 +5,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, XCircle } from "lucide-react";
 import type { AuthSession } from "@/lib/auth";
 import type { DashboardData } from "@/lib/dashboard";
+import { adminReservationHref, adminReservationsHref } from "@/lib/admin-routes";
 
 type HoldRow = DashboardData["coo"]["holds"][number];
 type HoldAction = "confirmBooking" | "extendHold" | "releaseHold" | "markLost" | "changePeriod";
@@ -78,7 +79,7 @@ export function DashboardHoldActions({
               : "Actiuni rapide pentru holdurile care asteapta decizie comerciala."}
           </p>
         </div>
-        <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href="/admin/locatii#rezervari">
+        <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href={adminReservationsHref()}>
           Vezi lista completa <ArrowRight size={14} />
         </Link>
       </div>
@@ -122,7 +123,7 @@ export function DashboardHoldActions({
               <button className="focus-button secondary" type="button" disabled={busy === `markLost-${row.id}`} onClick={() => command(row, "markLost", {}, "Hold-ul a fost marcat ca pierdut.")}>
                 Pierdut
               </button>
-              <Link className="focus-button secondary" href="/admin/locatii#rezervari">
+              <Link className="focus-button secondary" href={adminReservationHref(row.id)}>
                 Detalii
               </Link>
             </div>

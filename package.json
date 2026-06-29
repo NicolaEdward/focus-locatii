@@ -48,6 +48,7 @@
     "test:command-center-operation-bridge": "node scripts/test-command-center-operation-bridge.cjs",
     "test:operation-task-reads": "node scripts/test-operation-task-read-adapter.cjs",
     "test:dashboard-form-cleanup": "node scripts/test-dashboard-form-cleanup.cjs",
+    "test:admin-route-links": "node scripts/test-admin-route-links.cjs",
     "test:financial-import": "node scripts/test-financial-import.cjs",
     "test:finance-consistency": "node scripts/test-finance-consistency.cjs",
     "test:billing": "node scripts/test-billing.cjs",

@@ -6,6 +6,7 @@ import { ROLE_LABELS } from "@/lib/rbac";
 import { CooCommandCenter } from "@/components/admin/CooCommandCenter";
 import { DashboardHoldActions } from "@/components/admin/DashboardHoldActions";
 import { FinancialDashboardPanel } from "@/components/admin/FinancialDashboardPanel";
+import { adminCampaignHref, adminNewReservationHref, adminOperationalHref, adminReservationHref, adminReservationsHref } from "@/lib/admin-routes";
 
 export function RoleDashboard({ session, data }: { session: AuthSession; data: DashboardData }) {
   if (session.role === "COO") return <CooCommandCenter data={data} />;
@@ -43,7 +44,7 @@ export function RoleDashboard({ session, data }: { session: AuthSession; data: D
             <Link className="focus-button" href="/admin/locatii">
               <MapPinned size={18} /> Vezi inventarul
             </Link>
-            <Link className="focus-button secondary" href="/admin/locatii#rezervari">
+            <Link className="focus-button secondary" href={adminNewReservationHref()}>
               <BriefcaseBusiness size={18} /> Actiune comerciala
             </Link>
           </div>
@@ -150,7 +151,7 @@ function OperationsPreview({ data, compact = false }: { data: DashboardData["coo
           <p className="mt-1 text-xs font-bold text-slate-400">Vizibil pentru toata echipa, ca sa fie clar ce urmeaza operational.</p>
         </div>
         {!compact ? (
-          <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href="/admin/locatii#rezervari">
+          <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href={adminOperationalHref()}>
             Vezi toate <ArrowRight size={14} />
           </Link>
         ) : null}
@@ -187,9 +188,9 @@ function DashboardTable({ title, rows, compact = false }: { title: string; rows:
   return <section className="overflow-hidden rounded-lg border border-focus-line bg-focus-ink/70">
     <div className="flex items-center justify-between border-b border-focus-line px-5 py-4">
       <h2 className="text-sm font-black uppercase text-focus-yellow">{title}</h2>
-      <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href="/admin/locatii#rezervari">Deschide <ArrowRight size={14} /></Link>
+      <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href={adminReservationsHref()}>Deschide lista <ArrowRight size={14} /></Link>
     </div>
-    {rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-sm"><thead className="bg-focus-navy/70 text-left text-xs uppercase text-slate-400"><tr><th className="px-4 py-3">Cod</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Perioada</th><th className="px-4 py-3">Status</th>{compact ? null : <th className="px-4 py-3">Vanzator</th>}</tr></thead><tbody>{rows.map((row) => <tr className="border-t border-focus-line" key={row.id}><td className="px-4 py-3 font-black text-white">{row.code}</td><td className="px-4 py-3">{row.clientName}<span className="block text-xs text-slate-400">{row.campaignName || row.city || "-"}</span></td><td className="px-4 py-3 text-xs">{date(row.periodStart)} - {date(row.periodEnd)}</td><td className="px-4 py-3"><span className="rounded border border-focus-line px-2 py-1 text-xs font-black">{row.status}</span></td>{compact ? null : <td className="px-4 py-3 text-slate-400">{row.salesperson || "-"}</td>}</tr>)}</tbody></table></div> : <p className="p-6 text-sm text-slate-400">Nu exista inregistrari pentru acest interval.</p>}
+    {rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-focus-navy/70 text-left text-xs uppercase text-slate-400"><tr><th className="px-4 py-3">Cod</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Perioada</th><th className="px-4 py-3">Status</th>{compact ? null : <th className="px-4 py-3">Vanzator</th>}<th className="px-4 py-3">Actiune</th></tr></thead><tbody>{rows.map((row) => <tr className="border-t border-focus-line" key={row.id}><td className="px-4 py-3 font-black text-white">{row.code}</td><td className="px-4 py-3">{row.clientName}<span className="block text-xs text-slate-400">{row.campaignName || row.city || "-"}</span></td><td className="px-4 py-3 text-xs">{date(row.periodStart)} - {date(row.periodEnd)}</td><td className="px-4 py-3"><span className="rounded border border-focus-line px-2 py-1 text-xs font-black">{row.status}</span></td>{compact ? null : <td className="px-4 py-3 text-slate-400">{row.salesperson || "-"}</td>}<td className="px-4 py-3"><Link className="text-xs font-black text-focus-yellow hover:text-white" href={row.campaignId ? adminCampaignHref(row.campaignId) : adminReservationHref(row.reservationId || row.id)}>Deschide</Link></td></tr>)}</tbody></table></div> : <p className="p-6 text-sm text-slate-400">Nu exista inregistrari pentru acest interval.</p>}
   </section>;
 }
 

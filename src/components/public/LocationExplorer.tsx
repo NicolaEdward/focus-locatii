@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
-import { Filter, MapPinned, Search, ShoppingBag, SlidersHorizontal } from "lucide-react";
+import { Filter, Search, ShoppingBag, SlidersHorizontal } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CategoryDTO, LocationDTO } from "@/types/location";
 import { LocationCard } from "@/components/public/LocationCard";
@@ -166,16 +166,6 @@ export function LocationExplorer({
       `${deferredFilters.search}|${deferredFilters.category}|${deferredFilters.city}|${deferredFilters.type}|${deferredFilters.status}|${deferredFilters.premium}`,
     [deferredFilters]
   );
-  const stats = useMemo(
-    () => ({
-      total: filtered.length,
-      available: filtered.filter((location) => location.publicStatus === "AVAILABLE").length,
-      rented: filtered.filter((location) => location.publicStatus === "BOOKED").length,
-      selected: selectedLocations.length
-    }),
-    [filtered, selectedLocations.length]
-  );
-
   const toggleShortlist = useCallback(
     (id: string) => {
       setShortlist((current) => {
@@ -198,7 +188,7 @@ export function LocationExplorer({
 
   return (
     <main className="focus-shell pb-32">
-      <PortfolioHero locations={locations} onOpenShortlist={() => setDrawerOpen(true)} />
+      <PortfolioHero locations={locations} selectedCount={selectedLocations.length} onOpenShortlist={() => setDrawerOpen(true)} />
 
       <section id="portfolio-map" className="focus-container grid gap-8 py-8">
         <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
@@ -277,18 +267,6 @@ export function LocationExplorer({
           </aside>
 
           <section className="grid gap-5">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Stat label="In catalog" value={stats.total.toString()} />
-              <Stat label="Disponibile" value={stats.available.toString()} />
-              <Stat label="In campanii" value={stats.rented.toString()} />
-              <button type="button" className="focus-card rounded-lg p-4 text-left" onClick={() => setDrawerOpen(true)}>
-                <p className="text-xs font-black uppercase text-focus-yellow">Media plan</p>
-                <p className="mt-1 flex items-center gap-2 font-display text-3xl font-black uppercase">
-                  <ShoppingBag size={24} /> {stats.selected}
-                </p>
-              </button>
-            </div>
-
             <LocationMap
               locations={filtered}
               onSelect={openPreview}
@@ -308,7 +286,7 @@ export function LocationExplorer({
             </div>
             <button className="focus-button no-print" type="button" onClick={() => setDrawerOpen(true)}>
               <ShoppingBag size={20} />
-              Media plan ({stats.selected})
+              Media plan ({selectedLocations.length})
             </button>
           </div>
 
@@ -408,17 +386,6 @@ function Select({
         {children}
       </select>
     </label>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="focus-card rounded-lg p-4">
-      <p className="text-xs font-black uppercase text-focus-yellow">{label}</p>
-      <p className="mt-1 flex items-center gap-2 font-display text-3xl font-black uppercase">
-        <MapPinned size={24} /> {value}
-      </p>
-    </div>
   );
 }
 

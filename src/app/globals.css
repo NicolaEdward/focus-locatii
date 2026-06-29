@@ -44,6 +44,279 @@
   }
 }
 
+.portfolio-hero-premium {
+  background:
+    radial-gradient(circle at 74% 18%, rgba(255, 184, 0, 0.18), transparent 28%),
+    radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.08), transparent 30%),
+    linear-gradient(118deg, #020814 0%, #031322 48%, #071d31 100%);
+}
+
+.portfolio-hero-premium::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -15;
+  background:
+    linear-gradient(90deg, rgba(255, 184, 0, 0.16), transparent 28%, transparent 72%, rgba(255, 184, 0, 0.14)),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.055) 0 1px, transparent 1px 116px),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 92px);
+  opacity: 0.36;
+}
+
+.portfolio-hero-premium::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  z-index: -5;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, rgba(255, 184, 0, 0.82), transparent);
+}
+
+.portfolio-hero-network {
+  background:
+    linear-gradient(90deg, rgba(2, 8, 20, 0.74), rgba(2, 8, 20, 0.12)),
+    url("/graphics/location-network.svg") left center / cover no-repeat;
+  opacity: 0.2;
+}
+
+.portfolio-contact-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.055);
+  transition: transform 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.portfolio-contact-pill:hover {
+  color: #fff;
+  border-color: rgba(255, 184, 0, 0.52);
+  transform: translateY(-1px);
+}
+
+.portfolio-hero-stat {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.portfolio-hero-visual {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 22px 54px rgba(0, 0, 0, 0.24);
+  background:
+    radial-gradient(circle at 80% 22%, rgba(255, 184, 0, 0.22), transparent 30%),
+    radial-gradient(circle at 8% 12%, rgba(220, 238, 245, 0.2), transparent 32%),
+    linear-gradient(135deg, rgba(248, 250, 252, 0.11), rgba(3, 19, 34, 0.86) 42%, rgba(2, 8, 20, 0.96));
+}
+
+.portfolio-hero-visual::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(115deg, transparent 0 46%, rgba(255, 184, 0, 0.28) 46.2%, transparent 46.8%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 52%);
+  opacity: 0.82;
+}
+
+.portfolio-hero-orbit {
+  position: absolute;
+  left: -170px;
+  top: -122px;
+  width: 390px;
+  height: 390px;
+  border: 1px solid rgba(255, 184, 0, 0.26);
+  border-radius: 999px;
+}
+
+.portfolio-hero-orbit::after {
+  content: "";
+  position: absolute;
+  right: 18px;
+  top: 55%;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ffb800;
+  box-shadow: 0 0 18px rgba(255, 184, 0, 0.7);
+}
+
+.portfolio-hero-mapdots {
+  position: absolute;
+  left: 18px;
+  top: 56px;
+  width: min(46%, 270px);
+  height: 150px;
+  opacity: 0.42;
+  background:
+    radial-gradient(circle, rgba(248, 250, 252, 0.55) 0 1.3px, transparent 1.8px),
+    radial-gradient(circle, rgba(255, 184, 0, 0.52) 0 1.4px, transparent 1.9px);
+  background-position: 0 0, 34px 22px;
+  background-size: 12px 12px, 48px 48px;
+  clip-path: polygon(0 18%, 62% 0, 100% 28%, 78% 70%, 34% 100%, 0 76%);
+}
+
+.portfolio-billboard {
+  position: absolute;
+  right: 36px;
+  top: 62px;
+  z-index: 5;
+  width: min(48%, 290px);
+  min-width: 210px;
+  transform: perspective(700px) rotateY(-9deg) rotateZ(1deg);
+  transform-origin: center;
+}
+
+.portfolio-billboard-lights {
+  display: flex;
+  justify-content: space-around;
+  padding: 0 18px 5px;
+}
+
+.portfolio-billboard-lights span {
+  width: 24px;
+  height: 13px;
+  border-radius: 999px 999px 0 0;
+  border-top: 2px solid rgba(248, 250, 252, 0.9);
+  transform: rotate(-8deg);
+}
+
+.portfolio-billboard-screen {
+  position: relative;
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  border: 1px solid rgba(255, 184, 0, 0.72);
+  background:
+    linear-gradient(145deg, rgba(3, 19, 34, 0.96), rgba(2, 8, 20, 0.98)),
+    radial-gradient(circle at 82% 20%, rgba(255, 184, 0, 0.18), transparent 32%);
+  box-shadow: 0 18px 34px rgba(2, 8, 20, 0.44), inset 0 0 0 8px rgba(255, 184, 0, 0.06);
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.portfolio-billboard-screen p,
+.portfolio-billboard-screen span {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.portfolio-billboard-screen strong {
+  display: block;
+  color: #ffb800;
+  font-family: var(--font-display);
+  font-size: clamp(38px, 5vw, 58px);
+  line-height: 0.86;
+}
+
+.portfolio-billboard-leg {
+  width: 24px;
+  height: 128px;
+  margin: 0 auto;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.82), rgba(248, 250, 252, 0.86), rgba(71, 85, 105, 0.88));
+}
+
+.portfolio-hero-mini-card {
+  position: absolute;
+  left: 24px;
+  bottom: 72px;
+  z-index: 6;
+  width: min(220px, 44%);
+  border: 1px solid rgba(255, 184, 0, 0.42);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(3, 19, 34, 0.9);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.24);
+}
+
+.portfolio-road-lines {
+  position: absolute;
+  inset: auto -10% 0 24%;
+  height: 118px;
+  background:
+    linear-gradient(160deg, transparent 30%, rgba(255, 184, 0, 0.72) 31%, transparent 32%),
+    linear-gradient(164deg, transparent 38%, rgba(248, 250, 252, 0.56) 39%, transparent 40%),
+    linear-gradient(168deg, transparent 48%, rgba(255, 184, 0, 0.42) 49%, transparent 50%);
+  opacity: 0.72;
+}
+
+.portfolio-skyline {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 32%;
+  z-index: 3;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-right: 24px;
+  opacity: 0.68;
+}
+
+.portfolio-skyline span {
+  display: block;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.52), rgba(15, 23, 42, 0.92));
+}
+
+.portfolio-visual-link {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 8;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  border: 1px solid rgba(255, 184, 0, 0.52);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #ffb800;
+  color: #07131f;
+  font-size: 12px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+@media (max-width: 767px) {
+  .portfolio-hero-visual {
+    min-height: 300px;
+  }
+
+  .portfolio-billboard {
+    right: 18px;
+    top: 72px;
+    width: 58%;
+    min-width: 180px;
+  }
+
+  .portfolio-billboard-screen {
+    min-height: 124px;
+  }
+
+  .portfolio-billboard-leg {
+    height: 90px;
+  }
+
+  .portfolio-hero-mini-card {
+    left: 14px;
+    bottom: 56px;
+    width: 142px;
+    padding: 11px;
+  }
+
+  .portfolio-skyline {
+    left: 22%;
+    gap: 4px;
+    padding-right: 12px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

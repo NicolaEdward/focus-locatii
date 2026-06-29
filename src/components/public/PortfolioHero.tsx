@@ -1,73 +1,125 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { ArrowRight, MapPinned, Send, Target } from "lucide-react";
-import { ContactInlineLinks } from "@/components/public/ContactButtons";
-import { GENERAL_CONTACT_MESSAGE } from "@/lib/contact";
+import { ArrowRight, Mail, MapPinned, MessageCircle, Send, Sparkles, Target } from "lucide-react";
+import { emailHref, GENERAL_CONTACT_MESSAGE, WHATSAPP_CONTACTS, whatsappHref } from "@/lib/contact";
 import type { LocationDTO } from "@/types/location";
 
 export function PortfolioHero({
   locations,
+  selectedCount,
   onOpenShortlist
 }: {
   locations: LocationDTO[];
+  selectedCount: number;
   onOpenShortlist: () => void;
 }) {
   const available = locations.filter((location) => location.publicStatus === "AVAILABLE").length;
   const rented = locations.filter((location) => location.publicStatus === "BOOKED").length;
   const contactSubject = "Cerere portofoliu Focus Media";
+  const stats = [
+    { label: "Locatii", value: locations.length.toString() },
+    { label: "Disponibile", value: available.toString() },
+    { label: "Inchiriate", value: rented.toString() },
+    { label: "Selectie client", value: selectedCount.toString() }
+  ];
 
   return (
-    <section className="relative isolate overflow-hidden border-b border-focus-line bg-focus-ink">
-      <div className="absolute inset-0 -z-20 bg-[url('/graphics/location-network.svg')] bg-cover bg-center opacity-35" />
-      <div className="absolute inset-0 -z-10 bg-[linear-gradient(115deg,rgba(2,8,20,0.98)_0%,rgba(3,19,34,0.95)_48%,rgba(255,184,0,0.16)_100%)]" />
-      <div className="absolute inset-x-0 bottom-0 -z-10 h-40 bg-gradient-to-t from-focus-ink to-transparent" />
+    <section className="portfolio-hero-premium relative isolate overflow-hidden border-b border-focus-line bg-focus-ink">
+      <div className="portfolio-hero-network absolute inset-0 -z-20" />
+      <div className="absolute inset-x-0 bottom-0 -z-10 h-32 bg-gradient-to-t from-focus-ink to-transparent" />
 
-      <div className="focus-container grid content-center gap-6 py-7 md:min-h-[560px] md:gap-8 md:py-10">
-        <motion.div
-          initial={{ opacity: 0, y: 22 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45 }}
-          className="max-w-4xl"
-        >
-          <div className="mb-5 inline-flex rounded-md bg-white p-1 shadow-focus md:mb-8">
-            <img src="/brand/focus-logo.jpg" alt="Focus Media" className="h-12 w-auto object-contain md:h-16" />
-          </div>
-          <p className="font-display text-lg font-black uppercase tracking-normal text-focus-yellow md:text-2xl">
+      <div className="focus-container grid gap-7 py-7 md:py-10 lg:min-h-[560px] lg:grid-cols-[minmax(0,0.92fr)_minmax(420px,1.08fr)] lg:items-center lg:gap-10">
+        <div className="relative z-10 min-w-0">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-focus-yellow/40 bg-focus-yellow/10 px-3 py-1.5 text-xs font-black uppercase text-focus-yellow">
+            <Sparkles size={15} />
             Inventar disponibil pentru campanii OOH
-          </p>
-          <h1 className="mt-3 max-w-4xl font-display text-4xl font-black uppercase leading-[0.95] text-white md:text-7xl md:leading-[0.92]">
-            Portofoliu Focus Media
+          </div>
+          <h1 className="max-w-4xl font-display text-4xl font-black uppercase leading-[0.96] text-white sm:text-5xl md:text-7xl md:leading-[0.92]">
+            Portofoliu Focus Media Outdoor
           </h1>
           <p className="mt-4 max-w-2xl text-base leading-7 text-slate-100 md:mt-5 md:text-xl md:leading-8">
-            Alege locatii dupa zona, format si disponibilitate. Fiecare pozitie include fotografie, harta
-            si detalii relevante pentru o selectie rapida de campanie.
+            Alege locatii dupa zona, format si disponibilitate. Creeaza rapid o selectie vizuala pentru
+            campania ta, cu harti, imagini si detalii comerciale pregatite pentru client.
           </p>
 
-          <div className="hero-actions mt-5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3 md:mt-8">
-            <a className="focus-button" href="#portfolio-map">
+          <div className="hero-actions mt-5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3 md:mt-7">
+            <a className="focus-button" href="#portfolio-list">
               <MapPinned size={20} />
-              Vezi harta
+              Vezi locatiile
               <ArrowRight size={20} />
             </a>
             <button className="focus-button secondary" type="button" onClick={onOpenShortlist}>
               <Target size={20} />
-              Media plan
+              Media plan / selectie
             </button>
-            <ContactInlineLinks message={GENERAL_CONTACT_MESSAGE} subject={contactSubject} compact />
           </div>
-        </motion.div>
 
-        <div className="hidden gap-3 md:grid md:grid-cols-[1fr_1fr_1fr_auto]">
-          <HeroStat label="Locatii" value={locations.length.toString()} />
-          <HeroStat label="Disponibile" value={available.toString()} />
-          <HeroStat label="Inchiriate" value={rented.toString()} />
-          <a
-            className="focus-card flex min-h-[84px] items-center justify-center gap-3 rounded-lg px-5 font-black uppercase text-focus-yellow"
-            href="#portfolio-list"
-          >
-            <Send size={20} />
-            Selectie client
+          <div className="portfolio-hero-contact no-print mt-3 flex flex-wrap items-center gap-2 text-xs font-black uppercase text-slate-300 md:mt-4">
+            <span className="mr-1 text-focus-yellow/90">Contact rapid</span>
+            <a className="portfolio-contact-pill" href={emailHref(contactSubject, GENERAL_CONTACT_MESSAGE)}>
+              <Mail size={15} />
+              Email
+            </a>
+            {WHATSAPP_CONTACTS.map((contact) => (
+              <a
+                key={contact.phone}
+                className="portfolio-contact-pill"
+                href={whatsappHref(contact.phone, GENERAL_CONTACT_MESSAGE)}
+                target="_blank"
+                rel="noreferrer"
+                title={`${contact.label}: ${contact.display}`}
+              >
+                <MessageCircle size={15} />
+                {contact.label}
+              </a>
+            ))}
+          </div>
+
+          <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4 md:mt-8">
+            {stats.map((stat) => (
+              <HeroStat key={stat.label} label={stat.label} value={stat.value} />
+            ))}
+          </div>
+        </div>
+
+        <div className="portfolio-hero-visual relative min-h-[280px] overflow-hidden rounded-lg border border-focus-yellow/35 bg-focus-navy/70 lg:min-h-[420px]">
+          <div className="portfolio-hero-orbit" />
+          <div className="portfolio-hero-mapdots" />
+          <div className="absolute left-4 top-4 z-10 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.08] px-3 py-1.5 text-[11px] font-black uppercase text-white">
+            <span className="h-2 w-2 rounded-full bg-focus-yellow" />
+            OOH network
+          </div>
+          <div className="portfolio-billboard" aria-hidden="true">
+            <div className="portfolio-billboard-lights">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className="portfolio-billboard-screen">
+              <p>We put</p>
+              <strong>brands</strong>
+              <span>in focus</span>
+            </div>
+            <div className="portfolio-billboard-leg" />
+          </div>
+          <div className="portfolio-hero-mini-card">
+            <p className="text-[10px] font-black uppercase text-focus-yellow">Portofoliu activ</p>
+            <p className="mt-1 font-display text-3xl font-black uppercase text-white">{locations.length}</p>
+            <p className="text-xs font-bold text-slate-300">locatii disponibile in catalog</p>
+          </div>
+          <div className="portfolio-road-lines" />
+          <div className="portfolio-skyline" aria-hidden="true">
+            <span className="h-14 w-7" />
+            <span className="h-24 w-8" />
+            <span className="h-16 w-6" />
+            <span className="h-32 w-10" />
+            <span className="h-20 w-7" />
+            <span className="h-28 w-9" />
+            <span className="h-12 w-8" />
+          </div>
+          <a className="portfolio-visual-link no-print" href={emailHref(contactSubject, GENERAL_CONTACT_MESSAGE)}>
+            <Send size={16} />
+            Cere oferta
           </a>
         </div>
       </div>
@@ -77,9 +129,9 @@ export function PortfolioHero({
 
 function HeroStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="focus-card rounded-lg p-4">
-      <p className="text-xs font-black uppercase text-focus-yellow">{label}</p>
-      <p className="mt-1 font-display text-3xl font-black uppercase text-white">{value}</p>
+    <div className="portfolio-hero-stat rounded-lg border border-focus-yellow/30 bg-white/[0.055] px-3 py-3">
+      <p className="text-[10px] font-black uppercase text-focus-yellow">{label}</p>
+      <p className="mt-1 font-display text-2xl font-black uppercase text-white md:text-3xl">{value}</p>
     </div>
   );
 }

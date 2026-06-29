@@ -26,9 +26,11 @@ import { calculateAvailability } from "@/lib/availability";
 import {
   isOperationActive,
   operationExtraTasks,
+  operationCost,
   operationStatus,
   operationStatusLabel,
   stripOperationMeta,
+  withOperationCost,
   type OperationExtraTask,
   type OperationKind,
   type OperationStatus
@@ -106,6 +108,8 @@ type ReservationForm = {
   invoiceGenerationMode: string;
   billingNotes: string;
   needsDecoration: boolean;
+  decorationCost: string;
+  decorationCurrency: string;
   periodStart: string;
   periodEnd: string;
   productionNotes: string;
@@ -138,6 +142,8 @@ type ReservationEditForm = {
   periodStart: string;
   periodEnd: string;
   installationDate: string;
+  decorationCost: string;
+  decorationCurrency: string;
   neutralizationDate: string;
   productionNotes: string;
   notes: string;
@@ -170,6 +176,8 @@ const emptyForm: ReservationForm = {
   invoiceGenerationMode: "manual",
   billingNotes: "",
   needsDecoration: false,
+  decorationCost: "",
+  decorationCurrency: "EUR",
   periodStart: "",
   periodEnd: "",
   productionNotes: "",
@@ -235,6 +243,7 @@ export function AdminReservationsPanel({
   const [salesMonth, setSalesMonth] = useState(currentMonthInputValue);
   const [salesFrom, setSalesFrom] = useState("");
   const [salesTo, setSalesTo] = useState("");
+  const [decorationBillingMonth, setDecorationBillingMonth] = useState(currentMonthInputValue);
   const [requestStatusFilter, setRequestStatusFilter] = useState("");
   const [requestOwnerFilter, setRequestOwnerFilter] = useState("");
   const [requestOwnerName, setRequestOwnerName] = useState("");
@@ -441,13 +450,16 @@ export function AdminReservationsPanel({
       operationalReservations
         .flatMap((reservation): OperationTableTask[] => {
           const baseStatus = operationStatus(reservation.productionNotes, "decoration");
+          const baseCost = operationCost(reservation.productionNotes, "decoration");
           const tasks: OperationTableTask[] = [];
           tasks.push({
             reservation,
             taskDate: reservation.installationDate || reservation.periodStart,
             operationStatus: baseStatus,
             taskType: "initial",
-            note: stripOperationMeta(reservation.productionNotes)
+            note: stripOperationMeta(reservation.productionNotes),
+            cost: baseCost.cost,
+            currency: baseCost.currency
           });
           for (const task of operationExtraTasks(reservation.productionNotes, "decoration")) {
             tasks.push(extraOperationTask(reservation, task));
@@ -464,6 +476,38 @@ export function AdminReservationsPanel({
         .sort((a, b) => new Date(a.taskDate).getTime() - new Date(b.taskDate).getTime()),
     [decorationWindowEnd, operationalReservations, operationsWindowStart, showOperationHistory]
   );
+
+  const monthlyDecoratedTasks = useMemo(() => {
+    const range = monthInputRange(decorationBillingMonth);
+    if (!range) return [];
+    return operationalReservations
+      .flatMap((reservation): OperationTableTask[] => {
+        const baseCost = operationCost(reservation.productionNotes, "decoration");
+        return [
+          {
+            reservation,
+            taskDate: reservation.installationDate || reservation.periodStart,
+            operationStatus: operationStatus(reservation.productionNotes, "decoration"),
+            taskType: "initial",
+            note: stripOperationMeta(reservation.productionNotes),
+            cost: baseCost.cost,
+            currency: baseCost.currency
+          },
+          ...operationExtraTasks(reservation.productionNotes, "decoration").map((task) => extraOperationTask(reservation, task))
+        ];
+      })
+      .filter(({ reservation, taskDate, operationStatus: status }) => {
+        const date = new Date(taskDate);
+        return (
+          activeReservationStatuses.includes(reservation.status) &&
+          status === "DONE" &&
+          !Number.isNaN(date.getTime()) &&
+          date >= range.from &&
+          date <= range.to
+        );
+      })
+      .sort((a, b) => new Date(a.taskDate).getTime() - new Date(b.taskDate).getTime());
+  }, [decorationBillingMonth, operationalReservations]);
 
   const neutralizationTasks = useMemo(
     () =>
@@ -548,6 +592,13 @@ export function AdminReservationsPanel({
     setMessage(null);
 
     try {
+      const decorationCost = form.needsDecoration ? moneyInputValue(form.decorationCost) : null;
+      if (form.status === "BOOKED" && form.needsDecoration && decorationCost == null) {
+        throw new Error("Completeaza costul de montaj/decorare pentru taskul operational.");
+      }
+      const productionNotes = form.status === "BOOKED" && form.needsDecoration
+        ? withOperationCost(form.productionNotes, "decoration", decorationCost, form.decorationCurrency)
+        : form.productionNotes;
       const payloadBody = {
         ...form,
         clientId: form.status === "BOOKED" ? form.clientId : null,
@@ -557,6 +608,7 @@ export function AdminReservationsPanel({
         campaignName: form.status === "BOOKED" ? selectedCampaign?.campaignName || "" : form.campaignName,
         installationDate: form.status === "BOOKED" && form.needsDecoration ? form.periodStart : null,
         neutralizationDate: form.status === "BOOKED" ? form.periodEnd : null,
+        productionNotes,
         sellerUserId: assignOtherSeller ? form.sellerUserId : session.id,
         salesperson: assignOtherSeller
           ? sellers.find((seller) => seller.id === form.sellerUserId)?.name || form.salesperson
@@ -604,6 +656,7 @@ export function AdminReservationsPanel({
     setError(null);
     setMessage(null);
     setEditingReservation(reservation);
+    const decorationCost = operationCost(reservation.productionNotes, "decoration");
     setEditForm({
       clientName: reservation.clientName || "",
       clientCompany: reservation.clientCompany || "",
@@ -630,6 +683,8 @@ export function AdminReservationsPanel({
       periodStart: dateInputValue(reservation.periodStart),
       periodEnd: dateInputValue(reservation.periodEnd),
       installationDate: dateInputValue(reservation.installationDate),
+      decorationCost: numberInputValue(decorationCost.cost),
+      decorationCurrency: decorationCost.currency || reservation.currency || "EUR",
       neutralizationDate: dateInputValue(reservation.neutralizationDate),
       productionNotes: reservation.productionNotes || "",
       notes: reservation.notes || "",
@@ -688,7 +743,7 @@ export function AdminReservationsPanel({
           periodEnd: editForm.periodEnd,
           installationDate: editForm.installationDate,
           neutralizationDate: editForm.neutralizationDate,
-          productionNotes: editForm.productionNotes,
+          productionNotes: withOperationCost(editForm.productionNotes, "decoration", moneyInputValue(editForm.decorationCost), editForm.decorationCurrency),
           notes: editForm.notes
         };
       };
@@ -1118,10 +1173,24 @@ export function AdminReservationsPanel({
               <InputField type="date" label="Start campanie" value={form.periodStart} onChange={(periodStart) => setForm({ ...form, periodStart })} />
               <InputField type="date" label="Final campanie" value={form.periodEnd} onChange={(periodEnd) => setForm({ ...form, periodEnd })} />
               {form.status === "BOOKED" ? (
-                <label className="flex items-center justify-between gap-3 rounded-lg border border-focus-line bg-focus-navy/35 px-3 py-2 text-sm font-bold text-slate-200">
-                  Urmareste montajul operational (implicit la data de start)
-                  <input type="checkbox" checked={form.needsDecoration} onChange={(event) => setForm({ ...form, needsDecoration: event.target.checked })} />
-                </label>
+                <div className="grid gap-3 md:col-span-2">
+                  <label className="flex items-center justify-between gap-3 rounded-lg border border-focus-line bg-focus-navy/35 px-3 py-2 text-sm font-bold text-slate-200">
+                    Necesita montaj
+                    <input type="checkbox" checked={form.needsDecoration} onChange={(event) => setForm({ ...form, needsDecoration: event.target.checked })} />
+                  </label>
+                  {form.needsDecoration ? (
+                    <div className="grid gap-3 rounded-lg border border-focus-line bg-focus-ink/35 p-3 md:grid-cols-[1fr_160px]">
+                      <InputField label="Cost montaj / decorare" value={form.decorationCost} onChange={(decorationCost) => setForm({ ...form, decorationCost })} />
+                      <SelectField label="Moneda" value={form.decorationCurrency} onChange={(decorationCurrency) => setForm({ ...form, decorationCurrency })}>
+                        <option value="EUR">EUR</option>
+                        <option value="RON">RON</option>
+                      </SelectField>
+                      <p className="text-xs font-bold text-slate-400 md:col-span-2">
+                        Daca este bifat, apare ca task de montaj la data de start si intra in sumarul lunar de decorari.
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               <AdvancedSection title="Setari facturare / optional">
                 <SelectField label="Termen plata" value={form.paymentTermType} onChange={(paymentTermType) => setForm({ ...form, paymentTermType, paymentTermDays: defaultPaymentTermDays(paymentTermType, form.paymentTermDays) })}>
@@ -1334,6 +1403,12 @@ export function AdminReservationsPanel({
             : "Lista comuna pentru toti utilizatorii. Statusul este disponibil doar responsabililor si rolurilor operationale."}
         >
           <OperationHistoryToggle checked={showOperationHistory} onChange={setShowOperationHistory} />
+          <DecorationBillingSummary
+            tasks={monthlyDecoratedTasks}
+            locationsById={locationsById}
+            month={decorationBillingMonth}
+            onMonthChange={setDecorationBillingMonth}
+          />
           <OperationsTable
             tasks={decorationTasks}
             locationsById={locationsById}
@@ -1842,6 +1917,16 @@ function ReservationEditDialog({
           {!form.installationDate && form.periodStart ? (
             <p className="text-xs font-bold text-slate-400">Implicit: data de start {dateLabel(form.periodStart)}.</p>
           ) : null}
+          <div className="grid gap-3 md:col-span-2 md:grid-cols-[1fr_160px]">
+            <InputField label="Cost montaj / decorare" value={form.decorationCost} onChange={(value) => updateField("decorationCost", value)} />
+            <SelectField label="Moneda" value={form.decorationCurrency} onChange={(value) => updateField("decorationCurrency", value)}>
+              <option value="EUR">EUR</option>
+              <option value="RON">RON</option>
+            </SelectField>
+            <p className="text-xs font-bold text-slate-400 md:col-span-2">
+              Costul apare in lista de decorari si in sumarul lunar pentru facturare.
+            </p>
+          </div>
           <InputField type="date" label="Data neutralizare" value={form.neutralizationDate} onChange={(value) => updateField("neutralizationDate", value)} />
           <AdvancedSection title="Setari facturare / optional">
             <SelectField label="Termen plata" value={form.paymentTermType} onChange={(value) => onChange((current) => current ? { ...current, paymentTermType: value, paymentTermDays: defaultPaymentTermDays(value, current.paymentTermDays) } : current)}>
@@ -2020,6 +2105,73 @@ function ReservationsTable({
           ) : null}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function DecorationBillingSummary({
+  tasks,
+  locationsById,
+  month,
+  onMonthChange
+}: {
+  tasks: OperationTableTask[];
+  locationsById: Map<string, LocationDTO>;
+  month: string;
+  onMonthChange: (value: string) => void;
+}) {
+  const totals = tasks.reduce<Record<string, number>>((sum, task) => {
+    const currency = task.currency || task.reservation.currency || "EUR";
+    sum[currency] = (sum[currency] || 0) + (task.cost || 0);
+    return sum;
+  }, {});
+  const totalLabel = Object.entries(totals)
+    .map(([currency, value]) => `${moneyLabel(value)} ${currency}`)
+    .join(" / ") || "0";
+
+  return (
+    <div className="mb-4 rounded-lg border border-focus-line bg-focus-navy/35 p-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-focus-yellow">Facturare montaj</p>
+          <h3 className="font-display text-xl font-black uppercase text-white">Decorari finalizate in luna</h3>
+          <p className="mt-1 text-sm font-bold text-slate-300">
+            Lista ajuta la verificarea costurilor de montaj inainte de facturare.
+          </p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[180px_160px]">
+          <InputField type="month" label="Luna" value={month} onChange={onMonthChange} />
+          <ReadOnlyField label="Total cost" value={totalLabel} />
+        </div>
+      </div>
+      <div className="mt-3 overflow-auto">
+        <table className="w-full min-w-[760px] border-collapse text-sm">
+          <thead className="bg-focus-navy text-left text-xs uppercase text-focus-yellow">
+            <tr><Th>Data</Th><Th>Locatie</Th><Th>Client</Th><Th>Campanie</Th><Th>Cost</Th></tr>
+          </thead>
+          <tbody>
+            {tasks.slice(0, 20).map((task) => {
+              const location = locationsById.get(task.reservation.locationId);
+              return (
+                <tr className="border-t border-focus-line" key={`billing-${task.reservation.id}-${task.taskId || "base"}`}>
+                  <Td>{dateLabel(task.taskDate)}</Td>
+                  <Td>{task.reservation.locationCode || location?.code || "N/A"}</Td>
+                  <Td>{task.reservation.clientName}</Td>
+                  <Td>{task.reservation.campaignName || "-"}</Td>
+                  <Td>{task.cost != null ? `${moneyLabel(task.cost)} ${task.currency || task.reservation.currency || "EUR"}` : "Fara cost"}</Td>
+                </tr>
+              );
+            })}
+            {!tasks.length ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-sm font-bold text-slate-400">
+                  Nu exista decorari finalizate in luna selectata.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -2351,6 +2503,12 @@ function Td({ children }: { children: React.ReactNode }) {
 
 function numberInputValue(value: number | null | undefined) {
   return value == null ? "" : String(value);
+}
+
+function moneyInputValue(value: string) {
+  if (!value.trim()) return null;
+  const parsed = Number(value.replace(",", "."));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function defaultPaymentTermDays(type: string, current: string) {

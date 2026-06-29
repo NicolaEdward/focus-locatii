@@ -4,6 +4,7 @@ const path = require("node:path");
 const { loadTsModule } = require("./load-ts-module.cjs");
 
 const installationDates = loadTsModule(path.join(process.cwd(), "src", "lib", "installation-date.ts"));
+const operationStatus = loadTsModule(path.join(process.cwd(), "src", "lib", "operation-status.ts"));
 
 main();
 
@@ -11,6 +12,7 @@ function main() {
   installationDateBusinessRule();
   dashboardNoLongerFlagsImplicitMontajAsProblem();
   reservationFormKeepsOptionalFieldsCollapsed();
+  decorationCostWorkflow();
   cooLegacyReassignmentPanelRetired();
   cooTaskActionOmitsNullTaskId();
 
@@ -22,6 +24,9 @@ function main() {
       "missing installation schedule only when both dates are missing or invalid",
       "dashboard no longer treats null installationDate alone as a problem",
       "reservation form moves billing/contact/notes fields into optional collapsed sections",
+      "decoration checkbox asks for decoration cost",
+      "decoration cost is persisted in operation metadata",
+      "monthly decorated summary is available for billing",
       "hidden optional billing/contact fields remain optional in reservation validation",
       "COO legacy unclear-sales reassignment panel is retired",
       "seller reassignment route remains protected manual correction endpoint",
@@ -58,6 +63,22 @@ function dashboardNoLongerFlagsImplicitMontajAsProblem() {
   assert(dashboard.includes("missing_installation_schedule"), "invalid schedule problem should remain for genuinely missing/invalid data");
 }
 
+function decorationCostWorkflow() {
+  const notes = operationStatus.withOperationCost("Montaj mesh", "decoration", 350, "EUR");
+  assert.equal(operationStatus.operationCost(notes, "decoration").cost, 350, "decoration cost should be readable from metadata");
+  assert.equal(operationStatus.operationCost(notes, "decoration").currency, "EUR", "decoration currency should be readable from metadata");
+  assert.equal(operationStatus.stripOperationMeta(notes), "Montaj mesh", "plain production notes should remain intact");
+
+  const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
+  assert(panel.includes("Necesita montaj"), "booking form should use clear decoration label");
+  assert(!panel.includes("Urmareste montajul operational"), "unclear montaj label should be removed");
+  assert(panel.includes("Cost montaj / decorare"), "decoration cost should be requested when decoration is selected");
+  assert(panel.includes("Completeaza costul de montaj/decorare"), "selected decoration should require a valid cost");
+  assert(panel.includes("withOperationCost(form.productionNotes"), "create flow should persist decoration cost in operation metadata");
+  assert(panel.includes("Decorari finalizate in luna"), "decorations panel should include monthly billing summary");
+  assert(panel.includes("Facturare montaj"), "monthly decoration summary should be labeled for billing");
+}
+
 function reservationFormKeepsOptionalFieldsCollapsed() {
   const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
   assert(panel.includes('title="Setari facturare / optional"'), "billing fields should live in an optional section");
@@ -89,7 +110,8 @@ function cooLegacyReassignmentPanelRetired() {
 function cooTaskActionOmitsNullTaskId() {
   const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
   assert(commandCenter.includes("function operationStatusBody"), "COO task buttons should share operation status body helper");
-  assert(commandCenter.includes("...(row.taskId ? { taskId: row.taskId } : {})"), "base task payload must omit null taskId");
+  assert(commandCenter.includes('typeof row.taskId === "string" && row.taskId.trim()'), "base task payload must only include non-empty string taskId");
+  assert(commandCenter.includes("...(taskId ? { taskId } : {})"), "base task payload must omit null taskId");
   assert(!commandCenter.includes("taskId: row.taskId }, \"Taskul"), "task buttons must not pass taskId directly when it is null");
 }
 

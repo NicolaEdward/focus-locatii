@@ -17,6 +17,7 @@ async function main() {
   await relationalRowsWinWithLegacyFallback();
   await noDuplicateTasksForSameDedupeKey();
   await activeAndHistoryStatusRules();
+  await legacyDecorationCostSurvivesFallback();
   await redecorationTaskAppearsCorrectly();
   await comparisonReportsZeroMismatchForMatchingFixtures();
   await corruptedLegacyMetadataDoesNotCrash();
@@ -34,6 +35,7 @@ async function main() {
       "DONE excluded from active",
       "ARCHIVED included in history",
       "CANCELLED excluded from active",
+      "legacy decoration cost appears in fallback DTO",
       "redecoration task appears correctly",
       "matching fixtures compare cleanly",
       "corrupted productionNotes does not crash",
@@ -112,6 +114,25 @@ async function activeAndHistoryStatusRules() {
     ...windowFilters()
   });
   assert(archived.some((task) => task.operationTaskId === "task-archived"), "ARCHIVED task should remain visible in history");
+}
+
+async function legacyDecorationCostSurvivesFallback() {
+  const reservation = bookedReservation({
+    productionNotes: legacyMeta({
+      decorationStatus: "NEW",
+      decorationCost: 420,
+      decorationCurrency: "EUR"
+    })
+  });
+  const result = await adapter.listOperationalTasksWithFallback({
+    reservations: [reservation],
+    relationalTasks: [],
+    ...windowFilters()
+  });
+  const task = result.active.find((item) => item.kind === "decoration" && item.taskId == null);
+  assert(task, "legacy base decoration should be present");
+  assert.equal(task.cost, 420, "legacy base decoration cost should be exposed");
+  assert.equal(task.currency, "EUR", "legacy base decoration currency should be exposed");
 }
 
 async function redecorationTaskAppearsCorrectly() {
@@ -197,6 +218,8 @@ async function dtoShapeRemainsCompatible() {
     "taskDate",
     "overdue",
     "note",
+    "cost",
+    "currency",
     "code",
     "city",
     "clientName",

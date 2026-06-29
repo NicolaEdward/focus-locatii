@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import {
   isOperationActive,
   operationExtraTasks,
+  operationCost,
   operationStatus,
   type OperationKind,
   type OperationStatus
@@ -49,6 +50,8 @@ export type OperationTaskReadRecord = {
   scheduledFor?: Date | string | null;
   completedAt?: Date | string | null;
   notes?: string | null;
+  cost?: Prisma.Decimal | number | string | null;
+  currency?: string | null;
   reservation?: OperationTaskReadReservation | null;
 };
 
@@ -63,6 +66,8 @@ export type OperationalTaskDto = {
   taskDate: string;
   overdue: boolean;
   note: string | null;
+  cost?: number | null;
+  currency?: string | null;
   code: string;
   city: string | null;
   clientName: string;
@@ -254,6 +259,8 @@ export function toLegacyOperationalTaskDto(
     taskDate: scheduledFor.toISOString(),
     overdue: ACTIVE_STATUSES.has(status) && scheduledFor < now,
     note: task.notes || null,
+    cost: decimalToNumber(task.cost),
+    currency: task.currency || null,
     code: reservation.location.code,
     city: reservation.location.city || null,
     clientName: reservation.clientName,
@@ -322,6 +329,7 @@ function legacyBaseTask(reservation: OperationTaskReadReservation, kind: Operati
   if (!taskDate) return null;
   const taskKind = kind === "decoration" ? "DECORATION" : "NEUTRALIZATION";
   const status = operationStatus(reservation.productionNotes, kind);
+  const baseCost = operationCost(reservation.productionNotes, kind);
   return {
     id: legacyTaskId(kind, reservation.id, null),
     reservationId: reservation.id,
@@ -332,6 +340,8 @@ function legacyBaseTask(reservation: OperationTaskReadReservation, kind: Operati
     taskDate: taskDate.toISOString(),
     overdue: isOperationActive(status) && taskDate < now,
     note: null,
+    cost: baseCost.cost,
+    currency: baseCost.currency,
     code: reservation.location.code,
     city: reservation.location.city || null,
     clientName: reservation.clientName,
@@ -362,6 +372,8 @@ function legacyExtraTask(
     taskDate: scheduledFor.toISOString(),
     overdue: isOperationActive(task.status) && scheduledFor < now,
     note: task.note || null,
+    cost: task.cost ?? null,
+    currency: task.currency || null,
     code: reservation.location.code,
     city: reservation.location.city || null,
     clientName: reservation.clientName,
@@ -533,4 +545,10 @@ function coerceDate(value: unknown): Date | null {
   if (value == null || value === "") return null;
   const date = value instanceof Date ? value : new Date(String(value));
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function decimalToNumber(value: Prisma.Decimal | number | string | null | undefined) {
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }

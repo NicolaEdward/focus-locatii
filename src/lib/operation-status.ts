@@ -4,6 +4,8 @@ export type OperationStatus = "NEW" | "IN_PROGRESS" | "DONE" | "ARCHIVED";
 export type OperationMeta = {
   decorationStatus?: OperationStatus;
   decorationUpdatedAt?: string;
+  decorationCost?: number | null;
+  decorationCurrency?: "RON" | "EUR" | string | null;
   neutralizationStatus?: OperationStatus;
   neutralizationUpdatedAt?: string;
   tasks?: OperationExtraTask[];
@@ -37,6 +39,8 @@ export function parseOperationMeta(value?: string | null): OperationMeta {
     return {
       decorationStatus: normalizeStatus(parsed.decorationStatus),
       decorationUpdatedAt: parsed.decorationUpdatedAt,
+      decorationCost: normalizeCost(parsed.decorationCost),
+      decorationCurrency: parsed.decorationCurrency || null,
       neutralizationStatus: normalizeStatus(parsed.neutralizationStatus),
       neutralizationUpdatedAt: parsed.neutralizationUpdatedAt,
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(normalizeTask).filter(Boolean) as OperationExtraTask[] : []
@@ -54,6 +58,15 @@ export function operationStatus(value: string | null | undefined, kind: Operatio
   const meta = parseOperationMeta(value);
   const status = kind === "decoration" ? meta.decorationStatus : meta.neutralizationStatus;
   return status || "NEW";
+}
+
+export function operationCost(value: string | null | undefined, kind: OperationKind) {
+  if (kind !== "decoration") return { cost: null, currency: null };
+  const meta = parseOperationMeta(value);
+  return {
+    cost: meta.decorationCost ?? null,
+    currency: meta.decorationCurrency || null
+  };
 }
 
 export function operationStatusLabel(status: OperationStatus) {
@@ -78,6 +91,26 @@ export function withOperationStatus(value: string | null | undefined, kind: Oper
     kind === "decoration"
       ? { ...meta, decorationStatus: status, decorationUpdatedAt: now }
       : { ...meta, neutralizationStatus: status, neutralizationUpdatedAt: now };
+  const metaText = `<!--focus-ops:${JSON.stringify(nextMeta)}-->`;
+  return text ? `${text}\n${metaText}` : metaText;
+}
+
+export function withOperationCost(
+  value: string | null | undefined,
+  kind: OperationKind,
+  cost: number | null,
+  currency?: string | null
+) {
+  if (kind !== "decoration") return value || null;
+  const text = stripOperationMeta(value);
+  const hadMeta = META_PATTERN.test(String(value || ""));
+  if (cost == null && !hadMeta) return text || null;
+  const meta = parseOperationMeta(value);
+  const nextMeta: OperationMeta = {
+    ...meta,
+    decorationCost: cost,
+    decorationCurrency: cost == null ? null : currency || meta.decorationCurrency || "EUR"
+  };
   const metaText = `<!--focus-ops:${JSON.stringify(nextMeta)}-->`;
   return text ? `${text}\n${metaText}` : metaText;
 }
@@ -112,6 +145,12 @@ function normalizeStatus(value: unknown): OperationStatus | undefined {
   return undefined;
 }
 
+function normalizeCost(value: unknown) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function normalizeTask(value: unknown): OperationExtraTask | null {
   if (!value || typeof value !== "object") return null;
   const task = value as Partial<OperationExtraTask>;
@@ -126,7 +165,7 @@ function normalizeTask(value: unknown): OperationExtraTask | null {
     taskType: task.taskType || (kind === "decoration" ? "redecoration" : "neutralization"),
     taskDate: String(taskDate),
     requestedDate: task.requestedDate || null,
-    cost: typeof task.cost === "number" ? task.cost : task.cost == null ? null : Number(task.cost),
+    cost: normalizeCost(task.cost),
     currency: task.currency || null,
     costOwner: task.costOwner || null,
     note: task.note || null,

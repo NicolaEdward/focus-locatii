@@ -118,6 +118,19 @@ export type SmartBillExistingFinancialRow = {
   status?: string | null;
 };
 
+export type SmartBillAdjustmentCandidate = {
+  id: string;
+  documentNumber: string | null;
+  entityName: string | null;
+  issueDate: string | null;
+  dueDate: string | null;
+  currency: string | null;
+  totalAmount: number;
+  remainingAmount: number;
+  matchConfidence: "high" | "medium" | "low";
+  reason: string;
+};
+
 export type SmartBillPreviewRow = {
   rowNumber: number;
   sheetName: string;
@@ -145,6 +158,7 @@ export type SmartBillPreviewRow = {
   linkedDocumentNumber: string | null;
   matchConfidence: "high" | "medium" | "low" | null;
   adjustmentReason: string | null;
+  adjustmentCandidates: SmartBillAdjustmentCandidate[];
   proposedAction: SmartBillPreviewAction;
   warning: string | null;
   errors: string[];
@@ -727,6 +741,9 @@ function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, c
   const adjustmentKind = classifySmartBillAdjustment(row);
   const adjustmentRows = adjustmentKind ? [...financialRows, ...sameReportAdjustmentCandidates(row, reportRows, companyContext)] : financialRows;
   const adjustmentMatch = adjustmentKind ? findSmartBillAdjustmentMatch(row, adjustmentRows, companyContext) : null;
+  const adjustmentCandidates = adjustmentKind && row.kind === "customer_invoice"
+    ? findSmartBillAdjustmentCandidates(row, financialRows, companyContext)
+    : [];
   let proposedAction: SmartBillPreviewAction = "AUTO_MATCHED";
   let warning: string | null = null;
 
@@ -789,6 +806,7 @@ function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, c
     linkedDocumentNumber: adjustmentMatch?.linkedRow?.invoiceNumber || adjustmentMatch?.linkedRow?.normalizedInvoiceNumber || null,
     matchConfidence: adjustmentMatch?.matchConfidence || null,
     adjustmentReason: adjustmentMatch?.reason || null,
+    adjustmentCandidates,
     proposedAction,
     warning,
     errors,
@@ -927,6 +945,43 @@ export function findSmartBillAdjustmentMatch(
       ? "Factura originala este mentionata clar in observatiile SmartBill."
       : "Exista exact o singura factura pozitiva deschisa pentru client si moneda."
   };
+}
+
+export function findSmartBillAdjustmentCandidates(
+  row: SmartBillParsedRow,
+  existingRows: SmartBillExistingFinancialRow[],
+  companyContext?: SmartBillCompanyContext
+): SmartBillAdjustmentCandidate[] {
+  const adjustmentKind = classifySmartBillAdjustment(row);
+  if (!adjustmentKind || row.kind !== "customer_invoice") return [];
+  return existingRows
+    .filter((existing) =>
+      sameFinancialCompany(existing, companyContext) &&
+      sameSmartBillEntity(row, existing) &&
+      normalizedCurrency(existing.currency) === normalizedCurrency(row.currency) &&
+      existingAmount(existing) > 0 &&
+      existingRemainingAmount(existing) > 0 &&
+      existing.includedInReport !== false &&
+      !["cancelled", "archived", "lost", "collected", "paid"].includes(String(existing.status || ""))
+    )
+    .slice(0, 25)
+    .map((existing) => {
+      const referenced = smartBillAdjustmentReferencesInvoice(row, existing);
+      return {
+        id: existing.id,
+        documentNumber: existing.invoiceNumber || existing.normalizedInvoiceNumber || null,
+        entityName: existing.clientName || existing.supplierName || null,
+        issueDate: isoDate(existing.invoiceDate),
+        dueDate: isoDate(existing.dueDate),
+        currency: normalizedCurrency(existing.currency),
+        totalAmount: existingAmount(existing),
+        remainingAmount: existingRemainingAmount(existing),
+        matchConfidence: referenced ? "high" : "medium",
+        reason: referenced
+          ? "Factura pare mentionata in observatiile documentului negativ."
+          : "Aceeasi firma, client si moneda; necesita alegere manuala."
+      };
+    });
 }
 
 function sameReportAdjustmentCandidates(row: SmartBillParsedRow, reportRows: SmartBillParsedRow[], companyContext: SmartBillCompanyContext): SmartBillExistingFinancialRow[] {

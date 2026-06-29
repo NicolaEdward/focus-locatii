@@ -103,11 +103,32 @@ type SmartBillPreview = {
     linkedDocumentNumber: string | null;
     matchConfidence: "high" | "medium" | "low" | null;
     adjustmentReason: string | null;
+    adjustmentCandidates: Array<{
+      id: string;
+      documentNumber: string | null;
+      entityName: string | null;
+      issueDate: string | null;
+      dueDate: string | null;
+      currency: string | null;
+      totalAmount: number;
+      remainingAmount: number;
+      matchConfidence: "high" | "medium" | "low";
+      reason: string;
+    }>;
     proposedAction: string;
     warning: string | null;
     errors: string[];
     dedupeKey: string;
   }>;
+};
+
+type SmartBillManualAction = {
+  dedupeKey: string;
+  rowNumber: number;
+  action: "skip" | "match_existing" | "create_new" | "link_adjustment";
+  entityId?: string;
+  linkedFinancialRowId?: string;
+  reason?: string;
 };
 
 type ManualFinancialForm = {
@@ -158,6 +179,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
   const [smartBillReportType, setSmartBillReportType] = useState<SmartBillReportType>("customer_invoices");
   const [smartBillCompanyName, setSmartBillCompanyName] = useState("");
   const [smartBillPreview, setSmartBillPreview] = useState<SmartBillPreview | null>(null);
+  const [smartBillManualActions, setSmartBillManualActions] = useState<Record<string, SmartBillManualAction>>({});
   const [smartBillConfirmOpen, setSmartBillConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -176,10 +198,17 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
     () => Boolean(preview && (preview.preview.summary.criticalIssueCount > 0 || preview.preview.summary.needsReviewCount > 0)),
     [preview]
   );
-  const smartBillImportableRows = useMemo(
-    () => smartBillPreview ? smartBillPreview.rows.filter((row) => smartBillImportableAction(row.proposedAction)).length : 0,
-    [smartBillPreview]
+  const smartBillReviewState = useMemo(
+    () => smartBillPreview ? summarizeSmartBillManualState(smartBillPreview, smartBillManualActions) : {
+      importableRows: 0,
+      manualImportRows: 0,
+      manualSkippedRows: 0,
+      unresolvedReviewRows: 0,
+      invalidManualRows: 0
+    },
+    [smartBillPreview, smartBillManualActions]
   );
+  const smartBillImportableRows = smartBillReviewState.importableRows;
   const smartBillSkippedRows = smartBillPreview
     ? smartBillPreview.summary.duplicateCount + smartBillPreview.summary.needsReviewCount + smartBillPreview.summary.adjustmentNeedsReviewCount + smartBillPreview.summary.invalidCount + smartBillPreview.summary.ignoredCount
     : 0;
@@ -188,7 +217,8 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
     smartBillPreview?.importToken &&
     smartBillCompanyName &&
     smartBillPreview.companyName === smartBillCompanyName &&
-    smartBillImportableRows > 0
+    smartBillImportableRows > 0 &&
+    smartBillReviewState.invalidManualRows === 0
   );
 
   async function refreshFinancial() {
@@ -311,6 +341,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
   function clearSmartBillFile() {
     setSmartBillFile(null);
     setSmartBillPreview(null);
+    setSmartBillManualActions({});
     setSmartBillConfirmOpen(false);
     setSmartBillFileInputKey((current) => current + 1);
   }
@@ -336,6 +367,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Raportul SmartBill nu a putut fi previzualizat.");
       setSmartBillPreview(payload.preview);
+      setSmartBillManualActions({});
       setSmartBillConfirmOpen(false);
       setMessage("Preview SmartBill generat. Verifica randurile inainte de confirmare.");
     } catch (previewError) {
@@ -357,7 +389,8 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
         body: JSON.stringify({
           importToken: smartBillPreview.importToken,
           reportType: smartBillPreview.reportType,
-          companyName: smartBillCompanyName
+          companyName: smartBillCompanyName,
+          manualActions: Object.values(smartBillManualActions)
         })
       });
       const payload = await response.json();
@@ -365,6 +398,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
       const summary = payload.summary;
       setMessage(`Import SmartBill confirmat: ${summary.createdReceivables + summary.createdPayables} randuri create, ${summary.updatedReceivables + summary.updatedPayables} actualizate, ${summary.skippedDuplicates + summary.skippedNeedsReview + summary.skippedInvalid + summary.skippedIgnored + summary.skippedUnsafe} sarite.`);
       setSmartBillPreview(null);
+      setSmartBillManualActions({});
       setSmartBillConfirmOpen(false);
       clearSmartBillFile();
       await refreshFinancial();
@@ -463,6 +497,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
             <select className="focus-input" value={smartBillReportType} onChange={(event) => {
               setSmartBillReportType(event.target.value as SmartBillReportType);
               setSmartBillPreview(null);
+              setSmartBillManualActions({});
               setSmartBillConfirmOpen(false);
             }}>
               <option value="customer_invoices">Facturi clienti</option>
@@ -474,6 +509,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
             <select className="focus-input" required value={smartBillCompanyName} onChange={(event) => {
               setSmartBillCompanyName(event.target.value);
               setSmartBillPreview(null);
+              setSmartBillManualActions({});
               setSmartBillConfirmOpen(false);
             }}>
               <option value="">Alege firma</option>
@@ -485,6 +521,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
             <input key={smartBillFileInputKey} className="focus-input" type="file" accept=".xlsx,.xls,.xlsm" onChange={(event) => {
               setSmartBillFile(event.target.files?.[0] || null);
               setSmartBillPreview(null);
+              setSmartBillManualActions({});
               setSmartBillConfirmOpen(false);
             }} />
           </label>
@@ -511,7 +548,12 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
             </div>
             {smartBillHasReviewWarning ? (
               <div className="mt-4">
-                <Feedback tone="yellow" text={`${smartBillPreview.summary.invalidCount + smartBillPreview.summary.needsReviewCount + smartBillPreview.summary.adjustmentNeedsReviewCount} randuri sunt invalide sau necesita verificare si nu vor fi importate automat.`} />
+                <Feedback tone="yellow" text={`${smartBillPreview.summary.invalidCount + smartBillPreview.summary.needsReviewCount + smartBillPreview.summary.adjustmentNeedsReviewCount} randuri sunt invalide sau necesita verificare. Le poti exclude, potrivi manual sau lasa neimportate.`} />
+              </div>
+            ) : null}
+            {smartBillReviewState.invalidManualRows ? (
+              <div className="mt-4">
+                <Feedback tone="red" text={`${smartBillReviewState.invalidManualRows} corectii manuale sunt incomplete. Alege client/furnizor/factura sau sterge actiunea manuala inainte de confirmare.`} />
               </div>
             ) : null}
             <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -532,7 +574,18 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
               <FinanceMetric label="Total clienti importabil pe moneda" value={currencyTotals(smartBillPreview.summary.totalReceivableByCurrency)} detail="fara review/duplicate/invalid" />
               <FinanceMetric label="Total furnizori importabil pe moneda" value={currencyTotals(smartBillPreview.summary.totalPayableByCurrency)} detail="fara review/duplicate/invalid" />
             </div>
-            <SmartBillPreviewBuckets rows={smartBillPreview.rows} />
+            <SmartBillManualCorrections
+              rows={smartBillPreview.rows}
+              actions={smartBillManualActions}
+              onChange={setSmartBillManualActions}
+            />
+            <SmartBillPreviewBuckets
+              rows={smartBillPreview.rows}
+              clients={clients}
+              suppliers={suppliers}
+              manualActions={smartBillManualActions}
+              onManualActionChange={setSmartBillManualActions}
+            />
           </div>
         ) : null}
       </section>
@@ -542,6 +595,9 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
           busy={busy}
           importableRows={smartBillImportableRows}
           skippedRows={smartBillSkippedRows}
+          manualImportRows={smartBillReviewState.manualImportRows}
+          manualSkippedRows={smartBillReviewState.manualSkippedRows}
+          unresolvedReviewRows={smartBillReviewState.unresolvedReviewRows}
           canConfirm={smartBillCanConfirm}
           onCancel={() => setSmartBillConfirmOpen(false)}
           onConfirm={confirmSmartBillImport}
@@ -990,7 +1046,58 @@ function IssuesTable({ issues }: { issues: FinancialPreview["preview"]["issues"]
   </section>;
 }
 
-function SmartBillPreviewBuckets({ rows }: { rows: SmartBillPreview["rows"] }) {
+function SmartBillManualCorrections({
+  rows,
+  actions,
+  onChange
+}: {
+  rows: SmartBillPreview["rows"];
+  actions: Record<string, SmartBillManualAction>;
+  onChange: React.Dispatch<React.SetStateAction<Record<string, SmartBillManualAction>>>;
+}) {
+  const corrected = Object.values(actions)
+    .map((action) => ({ action, row: rows.find((item) => smartBillRowKey(item) === smartBillManualActionKey(action)) }))
+    .filter((item): item is { action: SmartBillManualAction; row: SmartBillPreview["rows"][number] } => Boolean(item.row));
+  if (!corrected.length) return null;
+  return <section className="mt-4 rounded-lg border border-focus-line bg-focus-ink/45 p-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h4 className="text-sm font-black uppercase text-focus-yellow">Corectate manual</h4>
+        <p className="mt-1 text-xs font-bold text-slate-400">Aceste alegeri vor fi trimise la confirmare si validate din nou pe server.</p>
+      </div>
+      <Badge tone="yellow">{corrected.length} randuri</Badge>
+    </div>
+    <div className="mt-3 grid gap-2">
+      {corrected.map(({ action, row }) => (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-focus-line bg-focus-navy/45 p-3 text-sm" key={smartBillManualActionKey(action)}>
+          <span>
+            <strong className="text-white">#{row.rowNumber} {row.entityName}</strong>
+            <small className="block text-slate-400">{row.documentNumber} / {smartBillManualActionLabel(action)}</small>
+          </span>
+          <button className="focus-button secondary" type="button" onClick={() => onChange((current) => {
+            const next = { ...current };
+            delete next[smartBillManualActionKey(action)];
+            return next;
+          })}>Sterge corectia</button>
+        </div>
+      ))}
+    </div>
+  </section>;
+}
+
+function SmartBillPreviewBuckets({
+  rows,
+  clients,
+  suppliers,
+  manualActions,
+  onManualActionChange
+}: {
+  rows: SmartBillPreview["rows"];
+  clients: Array<{ id: string; companyName: string }>;
+  suppliers: Array<{ id: string; supplierName: string }>;
+  manualActions: Record<string, SmartBillManualAction>;
+  onManualActionChange: React.Dispatch<React.SetStateAction<Record<string, SmartBillManualAction>>>;
+}) {
   const buckets = [
     {
       title: "Se vor asocia automat",
@@ -1042,12 +1149,32 @@ function SmartBillPreviewBuckets({ rows }: { rows: SmartBillPreview["rows"] }) {
         title={bucket.title}
         description={bucket.description}
         rows={bucketRows}
+        clients={clients}
+        suppliers={suppliers}
+        manualActions={manualActions}
+        onManualActionChange={onManualActionChange}
       />;
     })}
   </div>;
 }
 
-function SmartBillBucketTable({ title, description, rows }: { title: string; description: string; rows: SmartBillPreview["rows"] }) {
+function SmartBillBucketTable({
+  title,
+  description,
+  rows,
+  clients,
+  suppliers,
+  manualActions,
+  onManualActionChange
+}: {
+  title: string;
+  description: string;
+  rows: SmartBillPreview["rows"];
+  clients: Array<{ id: string; companyName: string }>;
+  suppliers: Array<{ id: string; supplierName: string }>;
+  manualActions: Record<string, SmartBillManualAction>;
+  onManualActionChange: React.Dispatch<React.SetStateAction<Record<string, SmartBillManualAction>>>;
+}) {
   return <section className="rounded-lg border border-focus-line bg-focus-ink/45 p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div>
@@ -1074,6 +1201,7 @@ function SmartBillBucketTable({ title, description, rows }: { title: string; des
             <th className="px-3 py-2">Moneda</th>
             <th className="px-3 py-2">Actiune propusa</th>
             <th className="px-3 py-2">Potrivire / avertizare</th>
+            <th className="px-3 py-2">Corectie manuala</th>
           </tr>
         </thead>
         <tbody>
@@ -1101,8 +1229,17 @@ function SmartBillBucketTable({ title, description, rows }: { title: string; des
                 {row.warning ? <small className="block text-focus-yellow">{row.warning}</small> : null}
                 {row.errors.length ? <small className="block text-red-100">{row.errors.join(" ")}</small> : null}
               </td>
+              <td className="px-3 py-3">
+                <SmartBillManualActionControl
+                  row={row}
+                  clients={clients}
+                  suppliers={suppliers}
+                  action={manualActions[smartBillRowKey(row)]}
+                  onChange={onManualActionChange}
+                />
+              </td>
             </tr>
-          )) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={14}>Nu exista randuri in aceasta categorie.</td></tr>}
+          )) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={15}>Nu exista randuri in aceasta categorie.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -1110,11 +1247,111 @@ function SmartBillBucketTable({ title, description, rows }: { title: string; des
   </section>;
 }
 
+function SmartBillManualActionControl({
+  row,
+  clients,
+  suppliers,
+  action,
+  onChange
+}: {
+  row: SmartBillPreview["rows"][number];
+  clients: Array<{ id: string; companyName: string }>;
+  suppliers: Array<{ id: string; supplierName: string }>;
+  action: SmartBillManualAction | undefined;
+  onChange: React.Dispatch<React.SetStateAction<Record<string, SmartBillManualAction>>>;
+}) {
+  if (!smartBillCanEditManualAction(row)) {
+    return <span className="text-xs font-bold text-slate-500">Nu necesita actiune.</span>;
+  }
+  const key = smartBillRowKey(row);
+  const update = (next: SmartBillManualAction | null) => {
+    onChange((current) => {
+      const copy = { ...current };
+      if (!next) delete copy[key];
+      else copy[key] = next;
+      return copy;
+    });
+  };
+  const base = {
+    dedupeKey: row.dedupeKey,
+    rowNumber: row.rowNumber
+  };
+  const selectedAction = action?.action || "";
+  const isCustomerAdjustment = row.kind === "customer_invoice" && Boolean(row.adjustmentKind);
+  const isSupplierAdjustment = row.kind === "supplier_document" && Boolean(row.adjustmentKind);
+  return <div className="grid min-w-64 gap-2">
+    <select
+      className="focus-input"
+      value={selectedAction}
+      onChange={(event) => {
+        const value = event.target.value as SmartBillManualAction["action"] | "";
+        if (!value) {
+          update(null);
+          return;
+        }
+        update({ ...base, action: value });
+      }}
+    >
+      <option value="">Fara corectie</option>
+      <option value="skip">Exclude din import</option>
+      {!row.adjustmentKind ? <option value="match_existing">Potriveste cu existent</option> : null}
+      {!row.adjustmentKind && !row.errors.length ? <option value="create_new">Creeaza nou explicit</option> : null}
+      {isCustomerAdjustment ? <option value="link_adjustment">Leaga storno la factura</option> : null}
+    </select>
+    {isSupplierAdjustment ? (
+      <small className="text-focus-yellow">Documentele negative de furnizor necesita gestionare manuala momentan. Le poti exclude din import.</small>
+    ) : null}
+    {selectedAction === "match_existing" ? (
+      row.entityKind === "client" ? (
+        <select
+          className="focus-input"
+          value={action?.entityId || ""}
+          onChange={(event) => update({ ...base, action: "match_existing", entityId: event.target.value || undefined })}
+        >
+          <option value="">Alege clientul</option>
+          {clients.map((client) => <option key={client.id} value={client.id}>{client.companyName}</option>)}
+        </select>
+      ) : (
+        <select
+          className="focus-input"
+          value={action?.entityId || ""}
+          onChange={(event) => update({ ...base, action: "match_existing", entityId: event.target.value || undefined })}
+        >
+          <option value="">Alege furnizorul</option>
+          {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.supplierName}</option>)}
+        </select>
+      )
+    ) : null}
+    {selectedAction === "link_adjustment" ? (
+      <select
+        className="focus-input"
+        value={action?.linkedFinancialRowId || ""}
+        onChange={(event) => update({ ...base, action: "link_adjustment", linkedFinancialRowId: event.target.value || undefined })}
+      >
+        <option value="">Alege factura pozitiva</option>
+        {row.adjustmentCandidates.map((candidate) => (
+          <option key={candidate.id} value={candidate.id}>
+            {(candidate.documentNumber || candidate.id)} / rest {money(candidate.remainingAmount, candidate.currency)}
+          </option>
+        ))}
+      </select>
+    ) : null}
+    {selectedAction === "create_new" ? <small className="text-focus-yellow">Va crea {row.entityKind === "client" ? "clientul" : "furnizorul"} din datele SmartBill.</small> : null}
+    {selectedAction === "skip" ? <small className="text-slate-400">Randul va fi sarit explicit la confirmare.</small> : null}
+    {row.errors.length && selectedAction && selectedAction !== "skip" ? (
+      <small className="text-red-100">Rand invalid: {row.errors.join(" ")}</small>
+    ) : null}
+  </div>;
+}
+
 function SmartBillConfirmDialog({
   preview,
   busy,
   importableRows,
   skippedRows,
+  manualImportRows,
+  manualSkippedRows,
+  unresolvedReviewRows,
   canConfirm,
   onCancel,
   onConfirm
@@ -1123,6 +1360,9 @@ function SmartBillConfirmDialog({
   busy: boolean;
   importableRows: number;
   skippedRows: number;
+  manualImportRows: number;
+  manualSkippedRows: number;
+  unresolvedReviewRows: number;
   canConfirm: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -1147,12 +1387,14 @@ function SmartBillConfirmDialog({
         <FinanceMetric label="Tip raport" value={smartBillReportTypeLabel(preview.reportType)} detail={preview.fileName} />
         <FinanceMetric label="Clienti/furnizori noi" value={createEntities} detail="create la confirmare" tone={createEntities ? "yellow" : "green"} />
         <FinanceMetric label={`Randuri ${financialLabel} create/actualizate`} value={importableRows} detail="doar actiuni sigure" tone="green" />
+        <FinanceMetric label="Corectate manual" value={manualImportRows} detail="match/create/link ales de tine" tone={manualImportRows ? "yellow" : "green"} />
+        <FinanceMetric label="Sarite manual" value={manualSkippedRows} detail="excluse explicit" tone={manualSkippedRows ? "yellow" : "green"} />
         <FinanceMetric label="Randuri sarite" value={skippedRows} detail="duplicate, review, invalid sau ignorate" tone={skippedRows ? "yellow" : "green"} />
         <FinanceMetric label="Necesita verificare" value={reviewRows} detail="nu intra in import automat" tone={reviewRows ? "red" : "green"} />
       </div>
       {reviewRows ? (
         <div className="mt-4">
-          <Feedback tone="yellow" text={`${reviewRows} randuri raman pentru corectie manuala. Ele nu vor crea clienti, furnizori, incasari sau plati la confirmare.`} />
+          <Feedback tone="yellow" text={`${unresolvedReviewRows} randuri raman pentru corectie manuala. Randurile invalide sau necorectate nu vor crea clienti, furnizori, incasari sau plati la confirmare.`} />
         </div>
       ) : null}
       <div className="mt-5 flex flex-wrap justify-end gap-2">
@@ -1196,6 +1438,76 @@ function smartBillReportTypeLabel(reportType: SmartBillReportType) {
 
 function smartBillImportableAction(action: string) {
   return action === "AUTO_MATCHED" || action === "PROPOSE_CREATE_CLIENT" || action === "PROPOSE_CREATE_SUPPLIER" || action === "AUTO_LINK_ADJUSTMENT";
+}
+
+function summarizeSmartBillManualState(preview: SmartBillPreview, actions: Record<string, SmartBillManualAction>) {
+  return preview.rows.reduce((summary, row) => {
+    const action = actions[smartBillRowKey(row)];
+    if (!action) {
+      if (smartBillImportableAction(row.proposedAction)) summary.importableRows += 1;
+      if (smartBillNeedsManualReview(row)) summary.unresolvedReviewRows += 1;
+      return summary;
+    }
+    if (action.action === "skip") {
+      summary.manualSkippedRows += 1;
+      return summary;
+    }
+    const valid = smartBillManualActionComplete(row, action);
+    if (!valid) {
+      summary.invalidManualRows += 1;
+      return summary;
+    }
+    summary.importableRows += 1;
+    summary.manualImportRows += 1;
+    return summary;
+  }, {
+    importableRows: 0,
+    manualImportRows: 0,
+    manualSkippedRows: 0,
+    unresolvedReviewRows: 0,
+    invalidManualRows: 0
+  });
+}
+
+function smartBillManualActionComplete(row: SmartBillPreview["rows"][number], action: SmartBillManualAction) {
+  if (action.action === "skip") return true;
+  if (row.errors.length) return false;
+  if (row.proposedAction === "DUPLICATE" || row.proposedAction === "IGNORED") return false;
+  if (row.adjustmentKind && action.action !== "link_adjustment") return false;
+  if (action.action === "match_existing") return Boolean(action.entityId);
+  if (action.action === "create_new") return !row.adjustmentKind;
+  if (action.action === "link_adjustment") return row.kind === "customer_invoice" && Boolean(row.adjustmentKind && action.linkedFinancialRowId);
+  return false;
+}
+
+function smartBillCanEditManualAction(row: SmartBillPreview["rows"][number]) {
+  return row.proposedAction === "PROPOSE_CREATE_CLIENT" ||
+    row.proposedAction === "PROPOSE_CREATE_SUPPLIER" ||
+    row.proposedAction === "NEEDS_REVIEW" ||
+    row.proposedAction === "ADJUSTMENT_NEEDS_REVIEW" ||
+    row.proposedAction === "INVALID";
+}
+
+function smartBillNeedsManualReview(row: SmartBillPreview["rows"][number]) {
+  return row.proposedAction === "NEEDS_REVIEW" ||
+    row.proposedAction === "ADJUSTMENT_NEEDS_REVIEW" ||
+    row.proposedAction === "INVALID";
+}
+
+function smartBillRowKey(row: SmartBillPreview["rows"][number]) {
+  return `${row.dedupeKey}::${row.rowNumber}`;
+}
+
+function smartBillManualActionKey(action: SmartBillManualAction) {
+  return `${action.dedupeKey}::${action.rowNumber}`;
+}
+
+function smartBillManualActionLabel(action: SmartBillManualAction) {
+  if (action.action === "skip") return "exclus din import";
+  if (action.action === "match_existing") return "potrivire manuala";
+  if (action.action === "create_new") return "creare explicita";
+  if (action.action === "link_adjustment") return "storno legat manual";
+  return action.action;
 }
 
 function smartBillActionTone(action: string): "neutral" | "green" | "yellow" | "red" {

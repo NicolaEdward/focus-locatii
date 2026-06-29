@@ -41,8 +41,35 @@ const noStoreHeaders = {
 const schema = z.object({
   importToken: z.string().min(20),
   companyName: z.string().trim().min(1, "Firma SmartBill este obligatorie."),
-  reportType: z.enum(["customer_invoices", "supplier_documents"])
+  reportType: z.enum(["customer_invoices", "supplier_documents"]),
+  manualActions: z.array(z.object({
+    dedupeKey: z.string().min(1),
+    rowNumber: z.number().int().positive(),
+    action: z.enum(["skip", "match_existing", "create_new", "link_adjustment"]),
+    entityId: z.string().optional(),
+    linkedFinancialRowId: z.string().optional(),
+    reason: z.string().optional()
+  })).optional().default([])
 });
+
+type SmartBillManualAction = z.infer<typeof schema>["manualActions"][number];
+
+type SmartBillConfirmPlanItem = {
+  row: SmartBillParsedRow;
+  previewRow: ReturnType<typeof buildSmartBillPreview>["rows"][number];
+  action:
+    | "AUTO_IMPORT"
+    | "AUTO_CREATE_ENTITY"
+    | "AUTO_LINK_ADJUSTMENT"
+    | "MANUAL_MATCH_ENTITY"
+    | "MANUAL_CREATE_ENTITY"
+    | "MANUAL_LINK_ADJUSTMENT"
+    | "SKIP_MANUAL"
+    | "SKIP_AUTO";
+  entityId?: string;
+  linkedFinancialRowId?: string;
+  manualAction?: SmartBillManualAction;
+};
 
 type SmartBillConfirmSummary = {
   uploadId: string;
@@ -61,6 +88,10 @@ type SmartBillConfirmSummary = {
   skippedInvalid: number;
   skippedIgnored: number;
   skippedUnsafe: number;
+  skippedManual: number;
+  manualMatches: number;
+  manualCreates: number;
+  manualAdjustments: number;
   createdClientIds: string[];
   createdSupplierIds: string[];
   createdReceivableIds: string[];
@@ -95,7 +126,10 @@ export async function POST(request: NextRequest) {
       invalidRows: payload.rows.filter((row) => row.issues.length)
     };
     const preview = buildSmartBillPreview({ parsed, fileName: payload.fileName, companyContext, context, includeToken: false });
-    const importableRows = preview.rows.filter((row) => importableAction(row.proposedAction)).length;
+    const manualActions = normalizeManualActions(body.manualActions);
+    validateManualActionTargets(manualActions, preview.rows);
+    const plan = buildSmartBillConfirmPlan({ rows: payload.rows, previewRows: preview.rows, manualActions });
+    const importableRows = plan.filter((item) => isImportPlanItem(item)).length;
     if (!importableRows) {
       return NextResponse.json(
         { error: "Preview-ul SmartBill nu contine randuri sigure pentru import. Corecteaza randurile neclare si genereaza un preview nou." },
@@ -103,7 +137,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const planStats = summarizeConfirmPlan(plan);
+    console.info("[smartbill-confirm] started", {
+      reportType: payload.reportType,
+      companyCode: companyContext.companyCode,
+      rowCount: payload.rows.length,
+      ...planStats
+    });
+    const transactionStartedAt = Date.now();
     const result = await prisma.$transaction(async (tx) => {
+      console.info("[smartbill-confirm] transaction_start", {
+        reportType: payload.reportType,
+        companyCode: companyContext.companyCode,
+        rowCount: payload.rows.length
+      });
       const existingActiveUpload = await tx.financialReportUpload.findFirst({
         where: { activeVersion: true, status: "confirmed" },
         select: { id: true }
@@ -139,6 +186,10 @@ export async function POST(request: NextRequest) {
         skippedInvalid: 0,
         skippedIgnored: 0,
         skippedUnsafe: 0,
+        skippedManual: 0,
+        manualMatches: 0,
+        manualCreates: 0,
+        manualAdjustments: 0,
         createdClientIds: [],
         createdSupplierIds: [],
         createdReceivableIds: [],
@@ -154,16 +205,85 @@ export async function POST(request: NextRequest) {
       [...clients.values()].forEach((client) => setIdentityCache(clientByIdentity, client));
       [...suppliers.values()].forEach((supplier) => setIdentityCache(supplierByIdentity, supplier));
       const seenDedupeKeys = new Set<string>();
+      const createdReceivableIdByDedupeKey = new Map<string, string>();
+      const companyWhere = {
+        OR: [
+          { companyCode: companyContext.companyCode },
+          { companyName: companyContext.companyName }
+        ]
+      };
+      const latestReceivables: SmartBillExistingFinancialRow[] = payload.reportType === "customer_invoices"
+        ? (await tx.financialReceivable.findMany({
+          where: { ...companyWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
+          select: {
+            id: true,
+            companyName: true,
+            companyCode: true,
+            normalizedInvoiceNumber: true,
+            invoiceNumber: true,
+            invoiceDate: true,
+            clientId: true,
+            clientName: true,
+            dueDate: true,
+            currency: true,
+            invoicedAmount: true,
+            collectedAmount: true,
+            remainingAmount: true,
+            rawRowJson: true,
+            includedInReport: true,
+            status: true,
+            client: { select: { taxId: true, normalizedName: true } }
+          },
+          take: 10000,
+          orderBy: { createdAt: "desc" }
+        })).map((row) => ({
+          ...row,
+          amount: row.invoicedAmount,
+          paidOrCollectedAmount: row.collectedAmount,
+          entityTaxId: row.client?.taxId || null,
+          entityNormalizedName: row.client?.normalizedName || null
+        })) satisfies SmartBillExistingFinancialRow[]
+        : [];
+      const latestPayables: SmartBillExistingFinancialRow[] = payload.reportType === "supplier_documents"
+        ? (await tx.financialPayable.findMany({
+          where: { ...companyWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
+          select: {
+            id: true,
+            companyName: true,
+            companyCode: true,
+            normalizedInvoiceNumber: true,
+            invoiceNumber: true,
+            invoiceDate: true,
+            supplierId: true,
+            supplierName: true,
+            dueDate: true,
+            currency: true,
+            amountToPay: true,
+            amountPaid: true,
+            remainingAmount: true,
+            rawRowJson: true,
+            includedInReport: true,
+            status: true,
+            supplier: { select: { taxId: true, normalizedName: true } }
+          },
+          take: 10000,
+          orderBy: { createdAt: "desc" }
+        })).map((row) => ({
+          ...row,
+          amount: row.amountToPay,
+          paidOrCollectedAmount: row.amountPaid,
+          entityTaxId: row.supplier?.taxId || null,
+          entityNormalizedName: row.supplier?.normalizedName || null
+        })) satisfies SmartBillExistingFinancialRow[]
+        : [];
 
-      const orderedRows = [...payload.rows].sort((left, right) => {
-        const leftPreview = preview.rows.find((item) => item.dedupeKey === left.dedupeKey && item.rowNumber === left.rowNumber);
-        const rightPreview = preview.rows.find((item) => item.dedupeKey === right.dedupeKey && item.rowNumber === right.rowNumber);
-        return Number(leftPreview?.proposedAction === "AUTO_LINK_ADJUSTMENT") - Number(rightPreview?.proposedAction === "AUTO_LINK_ADJUSTMENT");
-      });
-
-      for (const row of orderedRows) {
-        const previewRow = preview.rows.find((item) => item.dedupeKey === row.dedupeKey && item.rowNumber === row.rowNumber);
-        if (!previewRow || !importableAction(previewRow.proposedAction)) {
+      for (const item of plan) {
+        const { row, previewRow } = item;
+        if (item.action === "SKIP_MANUAL") {
+          summary.skippedManual += 1;
+          continue;
+        }
+        if (item.action === "SKIP_AUTO") {
           countSkipped(summary, previewRow?.proposedAction || "INVALID");
           continue;
         }
@@ -174,18 +294,28 @@ export async function POST(request: NextRequest) {
         seenDedupeKeys.add(row.dedupeKey);
 
         if (row.kind === "customer_invoice") {
-          const latestReceivables = (context.receivables || []) as SmartBillExistingFinancialRow[];
           const duplicate = findSmartBillDuplicate(row, latestReceivables, companyContext);
           if (duplicate && !isSmartBillSourceDuplicate(duplicate, row.dedupeKey)) {
             summary.skippedDuplicates += 1;
             continue;
           }
-          if (previewRow.proposedAction === "AUTO_LINK_ADJUSTMENT") {
+          if (item.action === "AUTO_LINK_ADJUSTMENT" || item.action === "MANUAL_LINK_ADJUSTMENT") {
             if (duplicate) {
               summary.skippedDuplicates += 1;
               continue;
             }
-            const applied = await applySmartBillCustomerAdjustment(tx, row, upload.id, companyContext, session.id);
+            const linkedFinancialRowId = item.action === "MANUAL_LINK_ADJUSTMENT"
+              ? resolveManualLinkedReceivableId(item.linkedFinancialRowId, createdReceivableIdByDedupeKey)
+              : undefined;
+            const applied = await applySmartBillCustomerAdjustment(
+              tx,
+              row,
+              upload.id,
+              companyContext,
+              session.id,
+              latestReceivables,
+              linkedFinancialRowId
+            );
             if (!applied) {
               summary.skippedUnsafe += 1;
               continue;
@@ -193,11 +323,12 @@ export async function POST(request: NextRequest) {
             latestReceivables.unshift(applied.adjustmentRow);
             summary.createdReceivables += 1;
             summary.updatedReceivables += 1;
+            if (item.action === "MANUAL_LINK_ADJUSTMENT") summary.manualAdjustments += 1;
             summary.createdReceivableIds.push(applied.adjustmentId);
             summary.updatedReceivableIds.push(applied.linkedReceivableId);
             continue;
           }
-          const client = await ensureClientForSmartBillRow(tx, row, clients, clientByIdentity, session.id);
+          const client = await ensureClientForSmartBillRow(tx, row, clients, clientByIdentity, session.id, item);
           if (!client) {
             summary.skippedUnsafe += 1;
             continue;
@@ -205,7 +336,10 @@ export async function POST(request: NextRequest) {
           if (!clients.has(client.id)) {
             clients.set(client.id, client);
             summary.createdClients += 1;
+            if (item.action === "MANUAL_CREATE_ENTITY") summary.manualCreates += 1;
             summary.createdClientIds.push(client.id);
+          } else if (item.action === "MANUAL_MATCH_ENTITY") {
+            summary.manualMatches += 1;
           }
           const data = smartBillCustomerReceivableData({
             row,
@@ -239,17 +373,17 @@ export async function POST(request: NextRequest) {
               includedInReport: created.includedInReport,
               status: created.status
             });
+            createdReceivableIdByDedupeKey.set(row.dedupeKey, created.id);
             summary.createdReceivables += 1;
             summary.createdReceivableIds.push(created.id);
           }
         } else {
-          const latestPayables = (context.payables || []) as SmartBillExistingFinancialRow[];
           const duplicate = findSmartBillDuplicate(row, latestPayables, companyContext);
           if (duplicate && !isSmartBillSourceDuplicate(duplicate, row.dedupeKey)) {
             summary.skippedDuplicates += 1;
             continue;
           }
-          const supplier = await ensureSupplierForSmartBillRow(tx, row, suppliers, supplierByIdentity, session.id);
+          const supplier = await ensureSupplierForSmartBillRow(tx, row, suppliers, supplierByIdentity, session.id, item);
           if (!supplier) {
             summary.skippedUnsafe += 1;
             continue;
@@ -257,7 +391,10 @@ export async function POST(request: NextRequest) {
           if (!suppliers.has(supplier.id)) {
             suppliers.set(supplier.id, supplier);
             summary.createdSuppliers += 1;
+            if (item.action === "MANUAL_CREATE_ENTITY") summary.manualCreates += 1;
             summary.createdSupplierIds.push(supplier.id);
+          } else if (item.action === "MANUAL_MATCH_ENTITY") {
+            summary.manualMatches += 1;
           }
           const data = smartBillSupplierPayableData({
             row,
@@ -301,7 +438,19 @@ export async function POST(request: NextRequest) {
         throw new Error("Importul SmartBill nu a schimbat niciun rand financiar; raportul activ a ramas neschimbat.");
       }
 
+      console.info("[smartbill-confirm] transaction_end", {
+        uploadId: upload.id,
+        durationMs: Date.now() - transactionStartedAt,
+        createdClients: summary.createdClients,
+        createdSuppliers: summary.createdSuppliers,
+        createdReceivables: summary.createdReceivables,
+        createdPayables: summary.createdPayables,
+        adjustments: summary.manualAdjustments + summary.updatedReceivables
+      });
       return summary;
+    }, {
+      maxWait: 10000,
+      timeout: 30000
     });
 
     await recalculateFinancialSnapshots(result.uploadId);
@@ -316,11 +465,170 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, summary: result }, { headers: noStoreHeaders });
   } catch (error) {
+    console.error("[smartbill-confirm] failed", {
+      message: error instanceof Error ? error.message : String(error)
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Importul SmartBill nu a putut fi confirmat." },
       { status: 400, headers: noStoreHeaders }
     );
   }
+}
+
+function normalizeManualActions(actions: SmartBillManualAction[]) {
+  const normalized = new Map<string, SmartBillManualAction>();
+  for (const action of actions) {
+    const key = manualRowKey(action.dedupeKey, action.rowNumber);
+    if (normalized.has(key)) {
+      throw new Error("Exista mai multe corectii manuale pentru acelasi rand SmartBill.");
+    }
+    normalized.set(key, action);
+  }
+  return normalized;
+}
+
+function validateManualActionTargets(
+  manualActions: Map<string, SmartBillManualAction>,
+  previewRows: ReturnType<typeof buildSmartBillPreview>["rows"]
+) {
+  const previewKeys = new Set(previewRows.map((row) => manualRowKey(row.dedupeKey, row.rowNumber)));
+  for (const key of manualActions.keys()) {
+    if (!previewKeys.has(key)) {
+      throw new Error("Corectia manuala SmartBill nu mai corespunde preview-ului semnat.");
+    }
+  }
+}
+
+function buildSmartBillConfirmPlan(input: {
+  rows: SmartBillParsedRow[];
+  previewRows: ReturnType<typeof buildSmartBillPreview>["rows"];
+  manualActions: Map<string, SmartBillManualAction>;
+}): SmartBillConfirmPlanItem[] {
+  const previewByKey = new Map(input.previewRows.map((row) => [manualRowKey(row.dedupeKey, row.rowNumber), row]));
+  const plan = input.rows.map((row) => {
+    const key = manualRowKey(row.dedupeKey, row.rowNumber);
+    const previewRow = previewByKey.get(key);
+    if (!previewRow) throw new Error("Preview-ul SmartBill este incomplet. Genereaza-l din nou.");
+    const manualAction = input.manualActions.get(key);
+    if (manualAction) {
+      return buildManualPlanItem(row, previewRow, manualAction);
+    }
+    if (!importableAction(previewRow.proposedAction)) {
+      return { row, previewRow, action: "SKIP_AUTO" as const };
+    }
+    if (previewRow.proposedAction === "AUTO_LINK_ADJUSTMENT") {
+      return { row, previewRow, action: "AUTO_LINK_ADJUSTMENT" as const };
+    }
+    if (previewRow.proposedAction === "PROPOSE_CREATE_CLIENT" || previewRow.proposedAction === "PROPOSE_CREATE_SUPPLIER") {
+      return { row, previewRow, action: "AUTO_CREATE_ENTITY" as const };
+    }
+    return { row, previewRow, action: "AUTO_IMPORT" as const };
+  });
+  return plan.sort((left, right) => Number(isAdjustmentPlanItem(left)) - Number(isAdjustmentPlanItem(right)));
+}
+
+function buildManualPlanItem(
+  row: SmartBillParsedRow,
+  previewRow: ReturnType<typeof buildSmartBillPreview>["rows"][number],
+  manualAction: SmartBillManualAction
+): SmartBillConfirmPlanItem {
+  if (manualAction.action === "skip") {
+    return { row, previewRow, action: "SKIP_MANUAL", manualAction };
+  }
+  if (row.ignored) {
+    throw new Error(`Randul ${row.rowNumber} este ignorat de SmartBill si poate fi doar exclus.`);
+  }
+  if (previewRow.proposedAction === "DUPLICATE") {
+    throw new Error(`Randul ${row.rowNumber} pare duplicat si nu poate fi importat manual.`);
+  }
+  if (row.issues.length) {
+    throw new Error(`Randul ${row.rowNumber} are date lipsa si nu poate fi importat fara corectie completa.`);
+  }
+  const isAdjustment = Boolean(previewRow.adjustmentKind);
+  if (manualAction.action === "link_adjustment") {
+    if (row.kind !== "customer_invoice" || !isAdjustment) {
+      throw new Error(`Randul ${row.rowNumber} nu este o ajustare de client care poate fi legata manual.`);
+    }
+    if (!manualAction.linkedFinancialRowId) {
+      throw new Error(`Alege factura pozitiva pentru storno-ul de la randul ${row.rowNumber}.`);
+    }
+    return {
+      row,
+      previewRow,
+      action: "MANUAL_LINK_ADJUSTMENT",
+      linkedFinancialRowId: manualAction.linkedFinancialRowId,
+      manualAction
+    };
+  }
+  if (isAdjustment) {
+    throw new Error(`Randul negativ ${row.rowNumber} trebuie exclus sau legat la o factura; nu poate crea client/furnizor obisnuit.`);
+  }
+  if (manualAction.action === "match_existing") {
+    if (!manualAction.entityId) {
+      throw new Error(`Alege ${row.kind === "customer_invoice" ? "clientul" : "furnizorul"} pentru randul ${row.rowNumber}.`);
+    }
+    return { row, previewRow, action: "MANUAL_MATCH_ENTITY", entityId: manualAction.entityId, manualAction };
+  }
+  if (manualAction.action === "create_new") {
+    return { row, previewRow, action: "MANUAL_CREATE_ENTITY", manualAction };
+  }
+  throw new Error(`Actiunea manuala SmartBill de la randul ${row.rowNumber} nu este suportata.`);
+}
+
+function isImportPlanItem(item: SmartBillConfirmPlanItem) {
+  return !["SKIP_AUTO", "SKIP_MANUAL"].includes(item.action);
+}
+
+function isAdjustmentPlanItem(item: SmartBillConfirmPlanItem) {
+  return item.action === "AUTO_LINK_ADJUSTMENT" || item.action === "MANUAL_LINK_ADJUSTMENT";
+}
+
+function summarizeConfirmPlan(plan: SmartBillConfirmPlanItem[]) {
+  return plan.reduce((summary, item) => {
+    summary.importRows += isImportPlanItem(item) ? 1 : 0;
+    summary.manualRows += item.manualAction ? 1 : 0;
+    summary.manualSkipped += item.action === "SKIP_MANUAL" ? 1 : 0;
+    summary.adjustments += isAdjustmentPlanItem(item) ? 1 : 0;
+    summary.entityCreates += item.action === "AUTO_CREATE_ENTITY" || item.action === "MANUAL_CREATE_ENTITY" ? 1 : 0;
+    return summary;
+  }, {
+    importRows: 0,
+    manualRows: 0,
+    manualSkipped: 0,
+    adjustments: 0,
+    entityCreates: 0
+  });
+}
+
+function manualRowKey(dedupeKey: string, rowNumber: number) {
+  return `${dedupeKey}::${rowNumber}`;
+}
+
+function resolveManualLinkedReceivableId(linkedFinancialRowId: string | undefined, createdReceivableIdByDedupeKey: Map<string, string>) {
+  if (!linkedFinancialRowId) throw new Error("Alege factura pozitiva pentru ajustarea SmartBill.");
+  if (linkedFinancialRowId.startsWith("preview:")) {
+    const createdId = createdReceivableIdByDedupeKey.get(linkedFinancialRowId.slice("preview:".length));
+    if (!createdId) throw new Error("Factura pozitiva aleasa din acelasi raport nu a fost creata inainte de ajustare.");
+    return createdId;
+  }
+  return linkedFinancialRowId;
+}
+
+function validateManualSmartBillAdjustmentLink(
+  row: SmartBillCustomerInvoiceRow,
+  existingRows: SmartBillExistingFinancialRow[],
+  linkedFinancialRowId: string,
+  companyContext: SmartBillCompanyContext
+) {
+  const linked = existingRows.find((receivable) => receivable.id === linkedFinancialRowId);
+  if (!linked) {
+    throw new Error("Factura aleasa pentru storno nu exista sau nu mai este deschisa.");
+  }
+  const match = findSmartBillAdjustmentMatch(row, [linked], companyContext);
+  if (!match || match.kind !== "auto" || match.linkedRow?.id !== linkedFinancialRowId) {
+    throw new Error("Factura aleasa pentru storno nu respecta firma, clientul, moneda sau soldul disponibil.");
+  }
+  return match;
 }
 
 async function loadSmartBillConfirmContext(reportType: SmartBillReportType, companyContext: SmartBillCompanyContext) {
@@ -431,9 +739,22 @@ async function ensureClientForSmartBillRow(
   row: SmartBillCustomerInvoiceRow,
   clients: Map<string, SmartBillMatchEntity>,
   identityCache: Map<string, SmartBillMatchEntity>,
-  actorId: string
+  actorId: string,
+  planItem: SmartBillConfirmPlanItem
 ) {
+  if (planItem.action === "MANUAL_MATCH_ENTITY") {
+    if (!planItem.entityId) throw new Error("Alege clientul pentru randul SmartBill corectat manual.");
+    const entity = clients.get(planItem.entityId);
+    if (!entity) throw new Error("Clientul ales pentru corectie manuala nu exista sau nu mai este activ.");
+    return entity;
+  }
+  if (planItem.action === "MANUAL_CREATE_ENTITY" && row.issues.length) {
+    throw new Error("Randul SmartBill are date lipsa si nu poate crea client fara corectie completa.");
+  }
   const match = matchSmartBillEntity(row, [...clients.values()]);
+  if (planItem.action === "MANUAL_CREATE_ENTITY" && match.kind !== "none") {
+    throw new Error("Randul SmartBill are deja o potrivire posibila; alege clientul existent in loc sa creezi unul nou.");
+  }
   if (match.kind === "matched") return match.entity;
   if (match.kind === "ambiguous") return null;
   const identity = identityKey(row.normalizedFiscalCode, row.clientName);
@@ -466,50 +787,16 @@ async function applySmartBillCustomerAdjustment(
   row: SmartBillCustomerInvoiceRow,
   uploadId: string,
   companyContext: SmartBillCompanyContext,
-  actorId: string
+  actorId: string,
+  existingRows: SmartBillExistingFinancialRow[],
+  linkedFinancialRowId?: string
 ) {
-  const companyWhere = {
-    OR: [
-      { companyCode: companyContext.companyCode },
-      { companyName: companyContext.companyName }
-    ]
-  };
-  const receivables = await tx.financialReceivable.findMany({
-    where: { ...companyWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
-    select: {
-      id: true,
-      companyName: true,
-      companyCode: true,
-      normalizedInvoiceNumber: true,
-      invoiceNumber: true,
-      invoiceDate: true,
-      dueDate: true,
-      clientId: true,
-      clientName: true,
-      currency: true,
-      invoicedAmount: true,
-      collectedAmount: true,
-      remainingAmount: true,
-      rawRowJson: true,
-      includedInReport: true,
-      status: true,
-      client: { select: { taxId: true, normalizedName: true } }
-    },
-    take: 10000,
-    orderBy: { createdAt: "desc" }
-  });
-  const existingRows = receivables.map((receivable) => ({
-    ...receivable,
-    amount: receivable.invoicedAmount,
-    paidOrCollectedAmount: receivable.collectedAmount,
-    entityTaxId: receivable.client?.taxId || null,
-    entityNormalizedName: receivable.client?.normalizedName || null
-  })) satisfies SmartBillExistingFinancialRow[];
-  const match = findSmartBillAdjustmentMatch(row, existingRows, companyContext);
+  const match = linkedFinancialRowId
+    ? validateManualSmartBillAdjustmentLink(row, existingRows, linkedFinancialRowId, companyContext)
+    : findSmartBillAdjustmentMatch(row, existingRows, companyContext);
   if (!match || match.kind !== "auto" || !match.linkedRow) return null;
-  const linked = receivables.find((receivable) => receivable.id === match.linkedRow?.id);
   const linkedRow = existingRows.find((receivable) => receivable.id === match.linkedRow?.id);
-  if (!linked || !linkedRow) return null;
+  if (!linkedRow) return null;
   let application: ReturnType<typeof calculateSmartBillReceivableAdjustment>;
   try {
     application = calculateSmartBillReceivableAdjustment({ row, receivable: linkedRow });
@@ -526,9 +813,9 @@ async function applySmartBillCustomerAdjustment(
   const adjustment = await tx.financialReceivable.create({
     data: { ...adjustmentData, rawRowJson: adjustmentData.rawRowJson as Prisma.InputJsonValue }
   });
-  const updatedRaw = appendSmartBillAdjustmentMetadata(linked.rawRowJson, row, adjustment.id, application.adjustmentAmount, application.remainingAmount);
+  const updatedRaw = appendSmartBillAdjustmentMetadata(linkedRow.rawRowJson, row, adjustment.id, application.adjustmentAmount, application.remainingAmount);
   const updated = await tx.financialReceivable.update({
-    where: { id: linked.id },
+    where: { id: linkedRow.id },
     data: {
       remainingAmount: application.remainingAmount,
       status: application.status,
@@ -566,9 +853,22 @@ async function ensureSupplierForSmartBillRow(
   row: SmartBillSupplierDocumentRow,
   suppliers: Map<string, SmartBillMatchEntity>,
   identityCache: Map<string, SmartBillMatchEntity>,
-  actorId: string
+  actorId: string,
+  planItem: SmartBillConfirmPlanItem
 ) {
+  if (planItem.action === "MANUAL_MATCH_ENTITY") {
+    if (!planItem.entityId) throw new Error("Alege furnizorul pentru randul SmartBill corectat manual.");
+    const entity = suppliers.get(planItem.entityId);
+    if (!entity) throw new Error("Furnizorul ales pentru corectie manuala nu exista sau nu mai este activ.");
+    return entity;
+  }
+  if (planItem.action === "MANUAL_CREATE_ENTITY" && row.issues.length) {
+    throw new Error("Randul SmartBill are date lipsa si nu poate crea furnizor fara corectie completa.");
+  }
   const match = matchSmartBillEntity(row, [...suppliers.values()]);
+  if (planItem.action === "MANUAL_CREATE_ENTITY" && match.kind !== "none") {
+    throw new Error("Randul SmartBill are deja o potrivire posibila; alege furnizorul existent in loc sa creezi unul nou.");
+  }
   if (match.kind === "matched") return match.entity;
   if (match.kind === "ambiguous") return null;
   const identity = identityKey(row.normalizedFiscalCode, row.supplierName);

@@ -221,6 +221,10 @@ const adjustmentMatch = smartbill.findSmartBillAdjustmentMatch(negativeCustomerP
 assert.equal(adjustmentMatch.kind, "auto");
 assert.equal(adjustmentMatch.linkedRow.id, "receivable-1");
 assert.equal(adjustmentMatch.matchConfidence, "high");
+const adjustmentCandidates = smartbill.findSmartBillAdjustmentCandidates(negativeCustomerParsed.rows[0], [existingReceivable], focusCompany);
+assert.equal(adjustmentCandidates.length, 1);
+assert.equal(adjustmentCandidates[0].id, "receivable-1");
+assert.equal(adjustmentCandidates[0].remainingAmount, 47283.07);
 const adjustmentApplication = smartbill.calculateSmartBillReceivableAdjustment({
   row: negativeCustomerParsed.rows[0],
   receivable: existingReceivable,
@@ -271,6 +275,7 @@ const autoAdjustmentPreview = smartbill.buildSmartBillPreview({
 assert.equal(autoAdjustmentPreview.summary.autoLinkedAdjustmentCount, 1);
 assert.equal(autoAdjustmentPreview.rows[0].proposedAction, "AUTO_LINK_ADJUSTMENT");
 assert.equal(autoAdjustmentPreview.rows[0].linkedFinancialRowId, "receivable-1");
+assert.equal(autoAdjustmentPreview.rows[0].adjustmentCandidates.length, 1);
 
 const duplicateAdjustmentPreview = smartbill.buildSmartBillPreview({
   parsed: negativeCustomerParsed,
@@ -410,7 +415,15 @@ assert.ok(confirmRouteSource.includes("!importableAction(previewRow.proposedActi
 assert.ok(confirmRouteSource.includes('previewRow.proposedAction === "AUTO_LINK_ADJUSTMENT"'), "SmartBill confirm must apply only auto-linked negative adjustments.");
 assert.ok(confirmRouteSource.includes("applySmartBillCustomerAdjustment"), "SmartBill confirm must recheck adjustment links before writing.");
 assert.ok(confirmRouteSource.includes("remainingAmount: application.remainingAmount"), "SmartBill confirm must reduce only the linked remaining amount.");
-assert.ok(confirmRouteSource.includes("orderedRows"), "SmartBill confirm should process regular invoices before same-file adjustments.");
+assert.ok(confirmRouteSource.includes("manualActions"), "SmartBill confirm must accept reviewed manual actions.");
+assert.ok(confirmRouteSource.includes("buildSmartBillConfirmPlan"), "SmartBill confirm must build a deterministic plan before opening the write transaction.");
+assert.ok(confirmRouteSource.includes("validateManualSmartBillAdjustmentLink"), "SmartBill confirm must revalidate manual storno links server-side.");
+assert.ok(confirmRouteSource.includes("SKIP_MANUAL"), "SmartBill confirm must support explicit manual skips.");
+assert.ok(confirmRouteSource.includes("maxWait: 10000") && confirmRouteSource.includes("timeout: 30000"), "SmartBill confirm must use an explicit longer interactive transaction timeout.");
+assert.ok(confirmRouteSource.includes("transaction_start") && confirmRouteSource.includes("transaction_end"), "SmartBill confirm must log transaction boundaries.");
+const applyAdjustmentSource = confirmRouteSource.slice(confirmRouteSource.indexOf("async function applySmartBillCustomerAdjustment"), confirmRouteSource.indexOf("async function ensureSupplierForSmartBillRow"));
+assert.equal(applyAdjustmentSource.includes("findMany"), false, "SmartBill adjustment application must not re-query all receivables inside every adjustment.");
+assert.ok(confirmRouteSource.includes("createdReceivableIdByDedupeKey"), "SmartBill confirm should preserve same-file adjustment idempotency.");
 
 const financePanelSource = fs.readFileSync(path.join(repoRoot, "src/components/admin/FinancialDashboardPanel.tsx"), "utf8");
 assert.ok(financePanelSource.includes("Firma import"), "SmartBill UI must show a required company selector.");
@@ -426,6 +439,13 @@ assert.ok(financePanelSource.includes("Se vor crea clienti/furnizori noi"), "Sma
 assert.ok(financePanelSource.includes("Storno / discounturi legate automat"), "SmartBill preview must group auto-linked negative adjustments.");
 assert.ok(financePanelSource.includes("Storno / discounturi necesita verificare"), "SmartBill preview must group negative adjustments that need review.");
 assert.ok(financePanelSource.includes("Factura legata") && financePanelSource.includes("Incredere"), "SmartBill adjustment preview must show linked invoice and match confidence.");
+assert.ok(financePanelSource.includes("Corectate manual"), "SmartBill UI must show manually corrected rows separately.");
+assert.ok(financePanelSource.includes("Exclude din import"), "SmartBill UI must let the user skip review rows explicitly.");
+assert.ok(financePanelSource.includes("Potriveste cu existent"), "SmartBill UI must let the user match a row to an existing client/supplier.");
+assert.ok(financePanelSource.includes("Creeaza nou explicit"), "SmartBill UI must let the user force-create an unmatched client/supplier.");
+assert.ok(financePanelSource.includes("Leaga storno la factura"), "SmartBill UI must let the user manually link customer storno rows.");
+assert.ok(financePanelSource.includes("manualActions: Object.values(smartBillManualActions)"), "SmartBill confirm request must include manual actions.");
+assert.ok(financePanelSource.includes("smartBillReviewState.invalidManualRows === 0"), "SmartBill confirm must be disabled when a manual correction is incomplete.");
 assert.ok(financePanelSource.includes("Duplicate detectate"), "SmartBill preview must group duplicates.");
 assert.ok(financePanelSource.includes("Necesita verificare"), "SmartBill preview must group review rows.");
 assert.ok(financePanelSource.includes("Randuri invalide"), "SmartBill preview must group invalid rows.");

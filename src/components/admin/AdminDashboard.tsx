@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Copy, Download, Edit, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
+import { Copy, Download, Edit, Eye, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
 import type { CategoryDTO, LocationDTO, OfferRequestDTO, ReservationDTO } from "@/types/location";
 import { LocationEditor } from "@/components/admin/LocationEditor";
+import { LocationDetailDrawer } from "@/components/admin/LocationDetailDrawer";
 import { AdminReservationsPanel } from "@/components/admin/AdminReservationsPanel";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import type { AuthSession } from "@/lib/auth";
@@ -32,6 +33,7 @@ export function AdminDashboard({
   const [status, setStatus] = useState("");
   const [category, setCategory] = useState("");
   const [editing, setEditing] = useState<LocationDTO | null | undefined>(undefined);
+  const [detailLocation, setDetailLocation] = useState<LocationDTO | null>(null);
   const [feedback, setFeedback] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const canManageLocations = hasPermission(session.role, "inventory.manage");
   const focusedLocation = useMemo(
@@ -197,18 +199,26 @@ export function AdminDashboard({
                     {location.installationRemoval ? <small className="block text-slate-400">Montaj: {location.installationRemoval}</small> : null}
                   </Td>
                   <Td>
-                    {canManageLocations ? <div className="flex flex-wrap gap-2">
-                      <button className="focus-button secondary" type="button" onClick={() => setEditing(location)} title="Edit">
-                        <Edit size={16} />
-                        Editare
+                    <div className="flex flex-wrap gap-2">
+                      <button className="focus-button secondary" type="button" onClick={() => setDetailLocation(location)}>
+                        <Eye size={16} />
+                        Vezi detalii
                       </button>
-                      <LocationActionMenu
-                        location={location}
-                        onEdit={() => setEditing(location)}
-                        onDuplicate={() => duplicate(location)}
-                        onDelete={() => remove(location)}
-                      />
-                    </div> : <span className="text-xs text-slate-500">Doar vizualizare</span>}
+                      {canManageLocations ? (
+                        <>
+                          <button className="focus-button secondary" type="button" onClick={() => setEditing(location)} title="Edit">
+                            <Edit size={16} />
+                            Editare
+                          </button>
+                          <LocationActionMenu
+                            location={location}
+                            onEdit={() => setEditing(location)}
+                            onDuplicate={() => duplicate(location)}
+                            onDelete={() => remove(location)}
+                          />
+                        </>
+                      ) : null}
+                    </div>
                   </Td>
                 </tr>
               ))}
@@ -228,6 +238,19 @@ export function AdminDashboard({
               return exists ? current.map((location) => (location.id === saved.id ? saved : location)) : [saved, ...current];
             });
             setEditing(undefined);
+          }}
+        />
+      ) : null}
+
+      {detailLocation ? (
+        <LocationDetailDrawer
+          location={detailLocation}
+          session={session}
+          canEdit={canManageLocations}
+          onClose={() => setDetailLocation(null)}
+          onEdit={() => {
+            setEditing(detailLocation);
+            setDetailLocation(null);
           }}
         />
       ) : null}

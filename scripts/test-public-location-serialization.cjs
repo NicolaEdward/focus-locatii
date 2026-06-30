@@ -37,6 +37,16 @@ assert.equal(hidden.latDisplay, 44.43, "Display coordinates should remain public
 assert.equal("latReal" in hidden, false, "Hidden public DTO should not expose real latitude key.");
 assert.equal("lngReal" in hidden, false, "Hidden public DTO should not expose real longitude key.");
 
+const withSketch = serializeLocation(location({
+  images: [
+    image({ url: "https://cdn.example/gallery.jpg", alt: null, isMain: true }),
+    image({ url: "https://cdn.example/sketch.pdf", alt: "PRODUCTION_SKETCH", sortOrder: 9999 })
+  ]
+}));
+assert.equal(withSketch.productionSketchUrl, "https://cdn.example/sketch.pdf", "Public/commercial production sketch URL should be exposed deliberately.");
+assert.equal(withSketch.images.length, 1, "Production sketch should not be mixed into the public gallery.");
+assert.equal(withSketch.images[0].url, "https://cdn.example/gallery.jpg", "Regular gallery image should remain visible.");
+
 const admin = serializeLocation(location({
   showPricePublic: false,
   showInstallationCostPublic: false
@@ -71,6 +81,7 @@ console.log(JSON.stringify({
     "price visible/hidden",
     "installation cost visible/hidden",
     "display coordinates exposed",
+    "production sketch exposed as a deliberate public/commercial asset",
     "private coordinates hidden",
     "BOOKED blocks with or without client/campaign",
     "CANCELLED/ARCHIVED ignored"
@@ -137,6 +148,20 @@ function location(overrides = {}) {
     internalNotes: "private",
     images: [],
     reservations: [],
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    ...overrides
+  };
+}
+
+function image(overrides = {}) {
+  return {
+    id: `img-${Math.random().toString(36).slice(2)}`,
+    locationId: "loc-1",
+    url: "https://cdn.example/image.jpg",
+    alt: null,
+    sortOrder: 0,
+    isMain: false,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
     ...overrides

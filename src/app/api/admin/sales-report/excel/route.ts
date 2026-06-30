@@ -153,7 +153,13 @@ export async function GET(request: NextRequest) {
   }
 
   const locations = (await listAdminLocations()).sort(sortSalesLocations);
-  const rows = locations.map((location, index) => salesRow(location, index, periodStart, periodEnd));
+  const rows = locations
+    .map((location, index) => salesRow(location, index, periodStart, periodEnd))
+    .sort(sortSalesRows)
+    .map((row, index) => ({
+      ...row,
+      cells: row.cells.map((cell, cellIndex) => (cellIndex === 0 ? { ...cell, value: index + 1 } : cell))
+    }));
   const soldRows = rows.filter((row) => row.sold);
   const unsoldRows = rows.filter((row) => !row.sold);
   const totalSales = roundMoney(soldRows.reduce((sum, row) => sum + row.amount, 0));
@@ -270,6 +276,11 @@ function salesRow(location: LocationDTO, index: number, periodStart: Date, perio
     sold,
     amount,
     potentialAmount,
+    code: location.code,
+    firstReservationStart: reservations[0]?.periodStart || null,
+    firstReservationEnd: reservations[0]?.periodEnd || null,
+    clientSort: reservations.map((reservation) => reservation.clientName).filter(Boolean).join(" "),
+    campaignSort: reservations.map((reservation) => reservation.campaignName).filter(Boolean).join(" "),
     cells: [
       { value: index + 1, style: XLSX_STYLES.centered },
       { value: location.city || "", style: bodyStyle },
@@ -373,6 +384,38 @@ function sortSalesLocations(a: LocationDTO, b: LocationDTO) {
   const bNr = numberOrNull(b.nr);
   if (aNr != null && bNr != null && aNr !== bNr) return aNr - bNr;
   return sortOperationalLocations(a, b);
+}
+
+function sortSalesRows(
+  a: ReturnType<typeof salesRow>,
+  b: ReturnType<typeof salesRow>
+) {
+  const byGroup = salesRowTimingRank(a) - salesRowTimingRank(b);
+  if (byGroup) return byGroup;
+  const byStart = dateTimeOrMax(a.firstReservationStart) - dateTimeOrMax(b.firstReservationStart);
+  if (byStart) return byStart;
+  const byClient = a.clientSort.localeCompare(b.clientSort, "ro");
+  if (byClient) return byClient;
+  const byCampaign = a.campaignSort.localeCompare(b.campaignSort, "ro");
+  if (byCampaign) return byCampaign;
+  const aRank = salesReportReferenceRank.get(a.code) ?? Number.MAX_SAFE_INTEGER;
+  const bRank = salesReportReferenceRank.get(b.code) ?? Number.MAX_SAFE_INTEGER;
+  if (aRank !== bRank) return aRank - bRank;
+  return a.code.localeCompare(b.code, "ro");
+}
+
+function salesRowTimingRank(row: ReturnType<typeof salesRow>) {
+  if (!row.sold || !row.firstReservationStart || !row.firstReservationEnd) return 3;
+  const today = startOfUtcDay(new Date());
+  const start = startOfUtcDay(new Date(row.firstReservationStart));
+  const end = startOfUtcDay(new Date(row.firstReservationEnd));
+  if (start <= today && end >= today) return 0;
+  if (start > today) return 1;
+  return 2;
+}
+
+function dateTimeOrMax(value?: Date | string | null) {
+  return value ? new Date(value).getTime() : Number.MAX_SAFE_INTEGER;
 }
 
 function numberOrNull(value?: string | null) {

@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { companyEntities } from "@/lib/company-entities";
 import { normalizeMediaType } from "@/lib/format";
+import { isProductionSketchImage } from "@/lib/location-images";
 import { displayPhotoUrl, samplePhotoForCode } from "@/lib/photos";
 import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/rbac";
@@ -43,7 +44,7 @@ const selectionLocationSelect = {
   updatedAt: true,
   category: { select: { name: true, slug: true } },
   images: {
-    select: { url: true, isMain: true, sortOrder: true },
+    select: { url: true, alt: true, isMain: true, sortOrder: true },
     orderBy: [{ isMain: "desc" as const }, { sortOrder: "asc" as const }]
   }
 } satisfies Prisma.LocationSelect;
@@ -87,6 +88,7 @@ export function toSelectionSnapshot(location: LocationSelectionLocationDTO): Loc
     dimensions: location.dimensions,
     surface: location.surface,
     mainImage: location.thumbnail,
+    productionSketchUrl: location.productionSketchUrl,
     displayLat: location.displayLat,
     displayLng: location.displayLng,
     publicDescription: location.publicDescription
@@ -106,7 +108,8 @@ export function buildMediaPlanSeedFromSelection(selection: LocationSelectionPayl
 
 export function selectionQualityWarnings(selection: LocationSelectionPayload) {
   const warnings: string[] = [];
-  if (!selection.periodStart || !selection.periodEnd) warnings.push("Alege perioada pentru verificare exacta.");
+  if (!selection.periodStart) warnings.push("Alege perioada pentru verificare exacta.");
+  else if (!selection.periodEnd) warnings.push("Completeaza finalul campaniei cand perioada este confirmata.");
   if (!selection.selectedLocations.length) warnings.push("Nu ai selectat locatii.");
   const conflicts = selection.selectedLocations.filter((item) => item.availabilityState === "CONFLICT").length;
   if (conflicts) warnings.push(`${conflicts} locatii selectate au conflict in perioada aleasa.`);
@@ -134,7 +137,9 @@ export function companyEntityOptions() {
 
 function serializeSelectionLocation(row: SelectionLocationRow, session: AuthSession): LocationSelectionLocationDTO {
   const type = normalizeMediaType(row.type, row.category.name, row.address, row.code);
-  const mainImage = row.mainPhotoUrl || row.images.find((image) => image.isMain)?.url || row.images[0]?.url || samplePhotoForCode(row.code);
+  const regularImages = row.images.filter((image) => !isProductionSketchImage(image));
+  const productionSketch = row.images.find(isProductionSketchImage);
+  const mainImage = row.mainPhotoUrl || regularImages.find((image) => image.isMain)?.url || regularImages[0]?.url || samplePhotoForCode(row.code);
   const canSeePrices = canSeeCommercialPrices(session);
 
   return {
@@ -149,13 +154,15 @@ function serializeSelectionLocation(row: SelectionLocationRow, session: AuthSess
     dimensions: row.size,
     surface: row.sqm,
     thumbnail: displayPhotoUrl(mainImage),
+    productionSketchUrl: displayPhotoUrl(productionSketch?.url) || null,
+    hasProductionSketch: Boolean(productionSketch?.url),
     displayLat: validCoordinate(row.latDisplay, row.lngDisplay) ? row.latDisplay : null,
     displayLng: validCoordinate(row.latDisplay, row.lngDisplay) ? row.lngDisplay : null,
     status: row.status,
     visibility: row.showInPublic ? "PUBLIC" : "HIDDEN",
     isPremium: row.isPremium,
     isFeatured: row.isFeatured,
-    hasImage: Boolean(row.mainPhotoUrl || row.images.length),
+    hasImage: Boolean(row.mainPhotoUrl || regularImages.length),
     publicDescription: selectionDescription(row),
     suggestedBasePrice: canSeePrices ? row.rateCardValue : null,
     rateCard: canSeePrices ? row.rateCard : null,
@@ -196,8 +203,10 @@ function selectionWhere(filters: LocationSelectionFilters): Prisma.LocationWhere
 }
 
 function applyClientSafeFilters(locations: LocationSelectionLocationDTO[], filters: LocationSelectionFilters) {
+  const mediaTypes = filters.mediaTypes?.map((value) => value.trim()).filter(Boolean) || [];
   return locations.filter((location) => {
     if (filters.mediaType && location.mediaType !== filters.mediaType && location.category !== filters.mediaType) return false;
+    if (mediaTypes.length && !mediaTypes.includes(location.mediaType || "") && !mediaTypes.includes(location.category || "")) return false;
     if (filters.minSurface != null && (location.surface == null || location.surface < filters.minSurface)) return false;
     if (filters.maxSurface != null && (location.surface == null || location.surface > filters.maxSurface)) return false;
     if (filters.minPrice != null && (location.suggestedBasePrice == null || location.suggestedBasePrice < filters.minPrice)) return false;
@@ -241,6 +250,7 @@ function sanitizeSelectionItem(item: LocationSelectionItem, index: number): Loca
       dimensions: item.snapshot.dimensions || null,
       surface: item.snapshot.surface ?? null,
       mainImage: item.snapshot.mainImage || null,
+      productionSketchUrl: item.snapshot.productionSketchUrl || null,
       displayLat: item.snapshot.displayLat ?? null,
       displayLng: item.snapshot.displayLng ?? null,
       publicDescription: item.snapshot.publicDescription || null

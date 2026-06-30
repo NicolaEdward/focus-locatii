@@ -11,7 +11,7 @@ assert.equal(routes.adminNewReservationHref({ source: "crm" }), "/admin/locatii?
 assert.equal(routes.adminLocationHref("loc_123"), "/admin/locatii?locationId=loc_123#locatii");
 assert.equal(routes.adminClientHref("client_123"), "/admin/clienti?clientId=client_123");
 assert.equal(routes.adminCampaignHref("campaign_123"), "/admin/campanii?campaignId=campaign_123");
-assert.equal(routes.adminOperationalHref(), "/admin/locatii?panel=decorations#rezervari");
+assert.equal(routes.adminOperationalHref(), "/admin/operational");
 
 const dashboardActionFiles = [
   "src/components/admin/RoleDashboard.tsx",
@@ -44,6 +44,7 @@ assert(
   "Furnizori should live inside the Financiar workflow menu."
 );
 assert.match(header, /label="Setari"/, "AdminHeader should expose Setari instead of a vague Admin button.");
+assert.match(header, /href="\/admin\/operational"/, "AdminHeader should expose a dedicated Operational workspace.");
 assert.equal(header.includes('<AdminNavLink href="/admin/campanii"'), false, "Campanii should not be a misleading top-level nav item.");
 assert.equal(header.includes('<AdminNavLink href="/admin/furnizori"'), false, "Furnizori should not clutter top-level navigation.");
 assert.equal(header.includes("/api/admin/availability/excel"), false, "Availability export should not be exposed from the global admin header.");

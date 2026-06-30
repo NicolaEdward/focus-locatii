@@ -51,7 +51,7 @@ import {
 
 type AdminPanel = "sales" | "future" | "decorations" | "neutralizations";
 type ReservationListSort = "created" | "start";
-type SalesPeriodMode = "month" | "custom";
+type ReservationsWorkspace = "locations" | "operational";
 
 type SellerUser = {
   id: string;
@@ -223,7 +223,8 @@ export function AdminReservationsPanel({
   operationReservations,
   initialOfferRequests,
   onLocationsUpdated,
-  session
+  session,
+  workspace = "locations"
 }: {
   locations: LocationDTO[];
   initialReservations: ReservationDTO[];
@@ -231,8 +232,10 @@ export function AdminReservationsPanel({
   initialOfferRequests: OfferRequestDTO[];
   onLocationsUpdated?: (locations: LocationDTO[]) => void;
   session: AuthSession;
+  workspace?: ReservationsWorkspace;
 }) {
   const searchParams = useSearchParams();
+  const isOperationalWorkspace = workspace === "operational";
   const focusedReservationId = searchParams.get("reservationId");
   const requestedPanel = panelFromQuery(searchParams.get("panel"));
   const shouldFocusNewReservation = searchParams.get("newReservation") === "1";
@@ -241,7 +244,6 @@ export function AdminReservationsPanel({
   const canAssignOtherSeller = ["SALES_DIRECTOR", "COO", "SUPER_ADMIN"].includes(session.role);
   const canApproveReservations = hasPermission(session.role, "proposals.approve") || session.role === "COO" || session.role === "SUPER_ADMIN";
   const canUpdateOperationStatus = hasPermission(session.role, "campaigns.operate");
-  const canViewSalesReport = hasPermission(session.role, "reports.view");
   const canManageLeads = hasAnyPermission(session.role, ["leads.manage", "leads.manage.own"]);
   const canEditReservations = hasAnyPermission(session.role, ["reservations.manage", "reservations.manage.own"]);
   const canCreateBookedReservation = canEditReservations || canApproveReservations;
@@ -249,7 +251,7 @@ export function AdminReservationsPanel({
     (reservation: ReservationDTO) => canEditOperationalReservation(reservation, session),
     [session]
   );
-  const [activePanel, setActivePanel] = useState<AdminPanel>("sales");
+  const [activePanel, setActivePanel] = useState<AdminPanel>(isOperationalWorkspace ? "future" : "sales");
   const [reservations, setReservations] = useState(initialReservations);
   const [offerRequests, setOfferRequests] = useState(initialOfferRequests);
   const [form, setForm] = useState<ReservationForm>(initialForm);
@@ -263,10 +265,6 @@ export function AdminReservationsPanel({
   const [reservationSort, setReservationSort] = useState<ReservationListSort>("created");
   const [salesLogMonth, setSalesLogMonth] = useState(currentMonthInputValue);
   const [showReservationLog, setShowReservationLog] = useState(false);
-  const [salesPeriodMode, setSalesPeriodMode] = useState<SalesPeriodMode>("month");
-  const [salesMonth, setSalesMonth] = useState(currentMonthInputValue);
-  const [salesFrom, setSalesFrom] = useState("");
-  const [salesTo, setSalesTo] = useState("");
   const [decorationBillingMonth, setDecorationBillingMonth] = useState(currentMonthInputValue);
   const [requestStatusFilter, setRequestStatusFilter] = useState("");
   const [requestOwnerFilter, setRequestOwnerFilter] = useState("");
@@ -305,19 +303,19 @@ export function AdminReservationsPanel({
   }, []);
 
   useEffect(() => {
-    if (requestedPanel) {
+    if (requestedPanel && panelAllowedInWorkspace(requestedPanel, workspace)) {
       setActivePanel(requestedPanel);
     }
-  }, [requestedPanel]);
+  }, [requestedPanel, workspace]);
 
   useEffect(() => {
-    if (!shouldFocusNewReservation) return;
+    if (!shouldFocusNewReservation || isOperationalWorkspace) return;
     setActivePanel("sales");
     setMessage("Completeaza formularul pentru o rezervare noua.");
-  }, [shouldFocusNewReservation]);
+  }, [isOperationalWorkspace, shouldFocusNewReservation]);
 
   useEffect(() => {
-    if (!focusedReservationId) return;
+    if (!focusedReservationId || isOperationalWorkspace) return;
     const reservation = reservations.find((item) => item.id === focusedReservationId);
     setActivePanel("sales");
     setShowReservationLog(true);
@@ -337,7 +335,7 @@ export function AdminReservationsPanel({
       setSalesLogMonth(monthInputValueFromDate(reservation.bookedAt || reservation.createdAt || reservation.periodStart));
     }
     setMessage(`Rezervarea ${reservation.locationCode || reservation.id} este filtrata in lista.`);
-  }, [focusedReservationId, reservations]);
+  }, [focusedReservationId, isOperationalWorkspace, reservations]);
 
   useEffect(() => {
     if (!form.clientId) {
@@ -561,25 +559,6 @@ export function AdminReservationsPanel({
         .sort((a, b) => new Date(a.taskDate).getTime() - new Date(b.taskDate).getTime()),
     [neutralizationWindowEnd, operationalReservations, operationsWindowStart, showOperationHistory]
   );
-
-  const salesReportUrl = useMemo(() => {
-    const params = new URLSearchParams();
-    if (salesPeriodMode === "month" && salesMonth) {
-      params.set("month", salesMonth);
-    } else {
-      if (salesFrom) params.set("from", salesFrom);
-      if (salesTo) params.set("to", salesTo);
-    }
-    const query = params.toString();
-    return `/api/admin/sales-report/excel${query ? `?${query}` : ""}`;
-  }, [salesFrom, salesMonth, salesPeriodMode, salesTo]);
-
-  const salesPeriodError = useMemo(() => {
-    if (salesPeriodMode === "month") return salesMonth ? null : "Selecteaza luna raportata.";
-    if (!salesFrom || !salesTo) return "Completeaza ambele date pentru intervalul personalizat.";
-    if (salesFrom > salesTo) return "Data de inceput trebuie sa fie inainte de data de final.";
-    return null;
-  }, [salesFrom, salesMonth, salesPeriodMode, salesTo]);
 
   const toggleLocation = useCallback((location: LocationDTO) => {
     setForm((current) => {
@@ -960,8 +939,10 @@ export function AdminReservationsPanel({
       <div className="focus-card rounded-lg p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-black uppercase text-focus-yellow">Portal vanzari OOH</p>
-            <h2 className="font-display text-3xl font-black uppercase text-white">Rezervari, contracte si implementare</h2>
+            <p className="text-xs font-black uppercase text-focus-yellow">{isOperationalWorkspace ? "Workflow operational OOH" : "Ocupare locatii OOH"}</p>
+            <h2 className="font-display text-3xl font-black uppercase text-white">
+              {isOperationalWorkspace ? "Decorari, neutralizari si implementare" : "Rezervari si HOLD-uri"}
+            </h2>
           </div>
           {canManageAllReservations ? <button className="focus-button secondary" type="button" onClick={syncReservations} disabled={syncing}>
             <RefreshCcw size={18} />
@@ -978,19 +959,30 @@ export function AdminReservationsPanel({
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <PanelButton active={activePanel === "sales"} icon={<Building2 size={18} />} onClick={() => setActivePanel("sales")}>
-            Vanzari
-          </PanelButton>
-          <PanelButton active={activePanel === "future"} icon={<ClipboardList size={18} />} onClick={() => setActivePanel("future")}>
-            Inchirieri viitoare
-          </PanelButton>
-          <PanelButton active={activePanel === "decorations"} icon={<Hammer size={18} />} onClick={() => setActivePanel("decorations")}>
-            Decorari
-          </PanelButton>
-          <PanelButton active={activePanel === "neutralizations"} icon={<Undo2 size={18} />} onClick={() => setActivePanel("neutralizations")}>
-            Neutralizari
-          </PanelButton>
+          {isOperationalWorkspace ? (
+            <>
+              <PanelButton active={activePanel === "future"} icon={<ClipboardList size={18} />} onClick={() => setActivePanel("future")}>
+                Inchirieri viitoare
+              </PanelButton>
+              <PanelButton active={activePanel === "decorations"} icon={<Hammer size={18} />} onClick={() => setActivePanel("decorations")}>
+                Decorari
+              </PanelButton>
+              <PanelButton active={activePanel === "neutralizations"} icon={<Undo2 size={18} />} onClick={() => setActivePanel("neutralizations")}>
+                Neutralizari
+              </PanelButton>
+            </>
+          ) : (
+            <PanelButton active={activePanel === "sales"} icon={<Building2 size={18} />} onClick={() => setActivePanel("sales")}>
+              Rezervari / HOLD
+            </PanelButton>
+          )}
         </div>
+
+        {isOperationalWorkspace ? (
+          <div className="mt-4">
+            <QuickOperationsSummary future={futureReservations.length} decorations={decorationTasks.length} neutralizations={neutralizationTasks.length} />
+          </div>
+        ) : null}
 
         {message ? (
           <p className="mt-4 flex items-center gap-2 text-sm font-bold text-emerald-200">
@@ -1008,7 +1000,7 @@ export function AdminReservationsPanel({
       </div>
 
       {activePanel === "sales" ? (
-        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="grid gap-4">
           <div className="focus-card rounded-lg p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -1291,50 +1283,6 @@ export function AdminReservationsPanel({
             </div>
           </div>
 
-          <div className="grid gap-4">
-            <div className="focus-card rounded-lg p-5">
-              <p className="text-xs font-black uppercase text-focus-yellow">Situatie vanzari</p>
-              <h2 className="font-display text-2xl font-black uppercase text-white">Perioada raportata</h2>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <SelectField
-                  label="Tip perioada"
-                  value={salesPeriodMode}
-                  onChange={(value) => setSalesPeriodMode(value as SalesPeriodMode)}
-                >
-                  <option value="month">Luna intreaga</option>
-                  <option value="custom">Interval personalizat</option>
-                </SelectField>
-                {salesPeriodMode === "month" ? (
-                  <InputField type="month" label="Luna" value={salesMonth} onChange={setSalesMonth} />
-                ) : (
-                  <>
-                    <InputField type="date" label="De la" value={salesFrom} onChange={setSalesFrom} />
-                    <InputField type="date" label="Pana la" value={salesTo} onChange={setSalesTo} />
-                  </>
-                )}
-              </div>
-              <p className="mt-3 text-xs font-bold leading-5 text-slate-300">
-                Pretul de vanzare si totalurile se calculeaza pro-rata: chirie lunara x zile active / zilele
-                calendaristice ale lunii.
-              </p>
-              {!canViewSalesReport ? (
-                <p className="mt-3 rounded-md border border-focus-line px-3 py-2 text-sm text-slate-400">
-                  Raportul financiar agregat este disponibil directorului de vanzari, COO si administratorului.
-                </p>
-              ) : salesPeriodError ? (
-                <p className="mt-3 rounded-md border border-red-300/30 bg-red-300/10 px-3 py-2 text-sm font-bold text-red-100">
-                  {salesPeriodError}
-                </p>
-              ) : (
-                <a className="focus-button secondary mt-3 w-full" href={salesReportUrl}>
-                  <FileSpreadsheet size={20} />
-                  Exporta situatie vanzari
-                </a>
-              )}
-            </div>
-
-            <QuickOperationsSummary future={futureReservations.length} decorations={decorationTasks.length} neutralizations={neutralizationTasks.length} />
-          </div>
         </div>
       ) : null}
 
@@ -1404,6 +1352,8 @@ export function AdminReservationsPanel({
         </AdminTableShell>
       ) : null}
 
+      {!isOperationalWorkspace ? (
+      <>
       <div className="focus-card rounded-lg p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1557,6 +1507,8 @@ export function AdminReservationsPanel({
           )}
         </div>
       </div>
+      </>
+      ) : null}
 
       {editingReservation && editForm ? (
         <ReservationEditDialog
@@ -2802,6 +2754,11 @@ function panelFromQuery(value?: string | null): AdminPanel | null {
   if (value === "sales" || value === "future" || value === "decorations" || value === "neutralizations") return value;
   if (value === "operations") return "decorations";
   return null;
+}
+
+function panelAllowedInWorkspace(panel: AdminPanel, workspace: ReservationsWorkspace) {
+  if (workspace === "operational") return panel === "future" || panel === "decorations" || panel === "neutralizations";
+  return panel === "sales";
 }
 
 function monthInputRange(value: string) {

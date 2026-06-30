@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { publicAvailability } from "@/lib/availability";
 import { arrayFromJson, makeSlug, normalizeMediaType, statusFromAvailabilityText } from "@/lib/format";
 import { isInsideRomania } from "@/lib/gps";
+import { isProductionSketchImage } from "@/lib/location-images";
 import { displayPhotoUrl, samplePhotoForCode } from "@/lib/photos";
 import { expireStaleHolds } from "@/lib/reservation-lifecycle";
 import { sortOperationalLocations } from "@/lib/location-order";
@@ -28,8 +29,10 @@ type SerializeLocationOptions = {
 };
 
 export function serializeLocation(location: LocationWithRelations, options: SerializeLocationOptions = {}): LocationDTO {
+  const regularImages = location.images.filter((image) => !isProductionSketchImage(image));
+  const productionSketch = location.images.find(isProductionSketchImage);
   const mainPhoto =
-    location.mainPhotoUrl || location.images.find((image) => image.isMain)?.url || samplePhotoForCode(location.code);
+    location.mainPhotoUrl || regularImages.find((image) => image.isMain)?.url || samplePhotoForCode(location.code);
   const latReal = validCoordinate(location.latReal, location.lngReal) ? location.latReal : null;
   const lngReal = validCoordinate(location.latReal, location.lngReal) ? location.lngReal : null;
   const displayLat = location.latDisplay ?? location.latReal;
@@ -92,6 +95,7 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
     mapsUrl: exposePrivateFields ? location.mapsUrl : null,
     mainPhotoUrl: displayPhotoUrl(mainPhoto),
     photoOriginalUrl: exposePrivateFields ? location.photoOriginalUrl : null,
+    productionSketchUrl: displayPhotoUrl(productionSketch?.url) || null,
     showPricePublic: location.showPricePublic,
     showInstallationCostPublic: location.showInstallationCostPublic,
     showInPublic: location.showInPublic,
@@ -122,7 +126,7 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
       defaultCampaignDetails({ installationRemoval: exposeInstallationCost ? location.installationRemoval : null })
     ),
     internalNotes: exposePrivateFields ? location.internalNotes : null,
-    images: location.images.map((image) => ({
+    images: regularImages.map((image) => ({
       id: image.id,
       url: displayPhotoUrl(image.url) || samplePhotoForCode(location.code),
       alt: image.alt,

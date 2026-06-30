@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { AlertTriangle, Check, Plus, X } from "lucide-react";
+import { AlertTriangle, FileImage, Plus, X } from "lucide-react";
 import { AvailabilityBadge } from "@/components/admin/location-selection/AvailabilityBadge";
 import type { LocationSelectionAvailability, LocationSelectionLocationDTO } from "@/lib/location-selection-dto";
 
@@ -67,6 +67,18 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
                           <span className="font-black text-white">{location.code}</span>
                           {selected ? <span className="rounded-full bg-focus-yellow px-2 py-0.5 text-[10px] font-black uppercase text-focus-black">Selectata</span> : null}
                           {!location.hasImage ? <span title="Fara poza principala"><AlertTriangle className="h-4 w-4 text-amber-200" /></span> : null}
+                          {location.productionSketchUrl ? (
+                            <a
+                              className="inline-flex items-center gap-1 rounded-full border border-focus-line px-2 py-0.5 text-[10px] font-black uppercase text-slate-200 hover:border-focus-yellow hover:text-focus-yellow"
+                              href={location.productionSketchUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Deschide schita de productie"
+                            >
+                              <FileImage size={12} />
+                              Schita
+                            </a>
+                          ) : null}
                         </div>
                         <p className="max-w-[300px] truncate text-xs font-bold text-slate-300">{location.name || location.address || "-"}</p>
                         <p className="text-xs text-slate-500">{location.visibility === "PUBLIC" ? "Publica" : "Ascunsa public"}</p>

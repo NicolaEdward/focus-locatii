@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import {
   CalendarDays,
   CheckCircle2,
+  Download,
   Image as ImageIcon,
   Layers,
   MapPin,
@@ -123,6 +124,12 @@ export function LocationPresentation({
               )}
               {showInstallationCost ? (
                 <InfoLine label="Montaj / neutralizare" value={oneTimeRate(location.installationRemovalValue, location.installationRemoval)} />
+              ) : null}
+              {location.productionSketchUrl ? (
+                <a className="focus-button secondary justify-center" href={location.productionSketchUrl} target="_blank" rel="noreferrer" download>
+                  <Download size={18} />
+                  Descarca schita
+                </a>
               ) : null}
             </div>
           </div>

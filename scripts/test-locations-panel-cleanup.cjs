@@ -13,6 +13,9 @@ function main() {
   costFieldsAreClarified();
   privateFieldsStayOutOfOverview();
   galleryPreviewIsPresent();
+  productionSketchSupportUsesExistingImages();
+  operationalWidgetsMovedToWorkspace();
+  salesExportsBelongToFinance();
   numericBlankValuesRemainNull();
 
   console.log(JSON.stringify({
@@ -28,6 +31,9 @@ function main() {
       "cost fields are clarified as supplier/financial context",
       "raw/private fields are not in Overview",
       "gallery preview and empty state exist",
+      "production sketch is edited separately from public gallery",
+      "operational widgets moved to /admin/operational",
+      "sales export removed from /admin/locatii and kept under finance",
       "blank numeric values remain null"
     ]
   }, null, 2));
@@ -52,10 +58,12 @@ function adminLocationTableIsScanFirst() {
   assert(dashboard.includes("Import / actualizare"), "inventory import should remain available as a secondary tool");
   assert(dashboard.includes("Audit GPS"), "GPS audit should remain available as a secondary tool");
   assert(!dashboard.includes("Exporta disponibil"), "availability export should move out of /admin/locatii");
+  assert(!dashboard.includes("Exporta situatie vanzari"), "sales export should not be exposed on /admin/locatii");
 
   const reservationsPanel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
   assert(!reservationsPanel.includes("Disponibil pentru vanzari"), "availability export card should not remain in locations reservations panel");
   assert(!reservationsPanel.includes("Exporta disponibil"), "availability export action should not remain in locations reservations panel");
+  assert(!reservationsPanel.includes("Exporta situatie vanzari"), "sales export action should not remain in locations reservations panel");
 }
 
 function rowDangerousActionsAreInMenu() {
@@ -129,6 +137,43 @@ function galleryPreviewIsPresent() {
   assert(editor.includes("function GalleryPreview"), "gallery preview helper should exist");
   assert(editor.includes("Nu exista poze pentru aceasta locatie."), "gallery should show an empty state");
   assert(editor.includes("Principala / prima poza"), "gallery should identify the main/first image");
+}
+
+function productionSketchSupportUsesExistingImages() {
+  const editor = read("src", "components", "admin", "LocationEditor.tsx");
+  const mutations = read("src", "lib", "location-mutations.ts");
+  const locations = read("src", "lib", "locations.ts");
+  const presentation = read("src", "components", "public", "LocationPresentation.tsx");
+  const availabilityExport = read("src", "app", "api", "admin", "availability", "excel", "route.ts");
+  assert(editor.includes("Schita de productie URL"), "LocationEditor should expose production sketch URL editing");
+  assert(mutations.includes("PRODUCTION_SKETCH_ALT"), "sketch should reuse existing image rows without a migration");
+  assert(mutations.includes("NOT: { alt: PRODUCTION_SKETCH_ALT }"), "gallery sync should preserve sketch image rows");
+  assert(locations.includes("productionSketchUrl"), "location serializer should expose an explicit sketch URL");
+  assert(presentation.includes("Descarca schita"), "public presentation should show sketch download when available");
+  assert(availabilityExport.includes('"Schita"'), "availability export should include a Schita column");
+}
+
+function operationalWidgetsMovedToWorkspace() {
+  const dashboard = read("src", "components", "admin", "AdminDashboard.tsx");
+  const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
+  const operationalPage = read("src", "app", "admin", "operational", "page.tsx");
+  const routes = read("src", "lib", "admin-routes.ts");
+  const header = read("src", "components", "admin", "AdminHeader.tsx");
+  assert(!dashboard.includes("Active, urmatoare si operationale"), "locations page copy should not mix operational widgets into /admin/locatii");
+  assert(panel.includes('workspace = "locations"'), "reservations panel should default to locations workspace");
+  assert(panel.includes('workspace === "operational"'), "reservations panel should have an operational workspace mode");
+  assert(panel.includes("panelAllowedInWorkspace"), "operational panels should be gated by workspace");
+  assert(operationalPage.includes('workspace="operational"'), "/admin/operational should render operational widgets");
+  assert(routes.includes('adminHref("/admin/operational"'), "operational route helper should point to the operational workspace");
+  assert(header.includes('href="/admin/operational"'), "admin navigation should include Operational");
+}
+
+function salesExportsBelongToFinance() {
+  const header = read("src", "components", "admin", "AdminHeader.tsx");
+  const salesReport = read("src", "app", "api", "admin", "sales-report", "excel", "route.ts");
+  assert(header.includes('label="Export vanzari"'), "sales export should remain available under finance navigation");
+  assert(salesReport.includes("sortSalesRows"), "sales export should have deterministic business sorting");
+  assert(salesReport.includes("salesRowTimingRank"), "sales export should group active/upcoming/past rows");
 }
 
 function numericBlankValuesRemainNull() {

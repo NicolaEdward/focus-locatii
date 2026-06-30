@@ -36,6 +36,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
   const canViewClients = hasAnyPermission(session.role, ["clients.view", "clients.view.own", "campaigns.view", "campaigns.view.own", "finance.view"]);
   const canViewCampaigns = hasAnyPermission(session.role, ["campaigns.view", "campaigns.view.own", "finance.view"]);
   const canViewFinance = hasPermission(session.role, "finance.view");
+  const canViewOperational = hasAnyPermission(session.role, ["campaigns.operate", "reservations.view", "reservations.view.own", "inventory.view"]);
   const hasCommercialMenu = canViewInventory || canViewCrm || canViewClients || canViewCampaigns;
   const hasFinanceMenu = canViewFinance || canExportSales;
   const hasSettingsMenu = canManageInventory || canManageUsers;
@@ -65,6 +66,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
             </AdminNavMenu>
           ) : null}
           {canViewInventory ? <AdminNavLink href="/admin/locatii" active={isActiveAdminPath(pathname, "/admin/locatii")}><Shield size={18} />Locatii</AdminNavLink> : null}
+          {canViewOperational ? <AdminNavLink href="/admin/operational" active={isActiveAdminPath(pathname, "/admin/operational")}><Truck size={18} />Operational</AdminNavLink> : null}
           {hasFinanceMenu ? (
             <AdminNavMenu
               active={isActiveAnyAdminPath(pathname, ["/admin/furnizori"])}

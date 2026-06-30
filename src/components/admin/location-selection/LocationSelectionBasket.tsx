@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Copy, Download, MoreHorizontal, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Download, FileImage, MoreHorizontal, Trash2, X } from "lucide-react";
 import { AvailabilityBadge } from "@/components/admin/location-selection/AvailabilityBadge";
 import type {
   LocationSelectionAvailability,
@@ -96,6 +96,9 @@ export function LocationSelectionBasket({
           <Download size={16} />
           Exporta disponibil
         </a>
+        <p className="-mt-1 text-xs font-bold text-slate-400">
+          Daca nu ai selectie, exportul foloseste rezultatele filtrate.
+        </p>
         <button className="focus-button secondary" type="button" onClick={onClear} disabled={!items.length}>
           <Trash2 size={15} />
           Goleste selectia
@@ -168,6 +171,17 @@ function SelectedLocationRow({
           <p className="mt-1 text-xs text-slate-400">
             {[item.snapshot.mediaType, item.snapshot.dimensions, item.snapshot.surface ? `${item.snapshot.surface} mp` : null].filter(Boolean).join(" / ") || "-"}
           </p>
+          {item.snapshot.productionSketchUrl ? (
+            <a
+              className="mt-2 inline-flex items-center gap-1 rounded-full border border-focus-line px-2 py-1 text-[10px] font-black uppercase text-slate-200 hover:border-focus-yellow hover:text-focus-yellow"
+              href={item.snapshot.productionSketchUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <FileImage size={12} />
+              Schita
+            </a>
+          ) : null}
           <div className="mt-2">
             <AvailabilityBadge availability={availability} />
           </div>

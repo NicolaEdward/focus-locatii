@@ -48,12 +48,12 @@ export async function getLocationSelectionAvailability(input: {
   });
 
   if (!periodStart || !periodEnd) {
-    const today = startOfUtcDay(new Date());
+    const referenceDate = periodStart || periodEnd || startOfUtcDay(new Date());
     const futureReservations = await prisma.reservation.findMany({
       where: {
         locationId: { in: locationIds },
         status: { in: [...LOCATION_SELECTION_BLOCKING_STATUSES] as ReservationStatus[] },
-        periodEnd: { gte: today }
+        periodEnd: { gte: referenceDate }
       },
       include: {
         client: { select: { companyName: true } },
@@ -68,7 +68,7 @@ export async function getLocationSelectionAvailability(input: {
         const intervals = futureReservations
           .filter((reservation) => reservation.locationId === location.id)
           .map((reservation) => serializeConflict(reservation, input.session));
-        return [location.id, buildNoPeriodAvailability(location, intervals, today)];
+        return [location.id, buildNoPeriodAvailability(location, intervals, referenceDate)];
       })
     );
   }
@@ -189,12 +189,12 @@ function unknownAvailability(location: AvailabilityLocation, reason: string): Lo
 function buildNoPeriodAvailability(
   location: AvailabilityLocation,
   futureConflicts: LocationSelectionConflict[],
-  today: Date
+  referenceDate: Date
 ): LocationSelectionAvailability {
   const intervals = futureConflicts.map(toBlockingInterval);
-  const current = futureConflicts.find((conflict) => new Date(conflict.periodStart) <= today && new Date(conflict.periodEnd) >= today);
-  const next = futureConflicts.find((conflict) => new Date(conflict.periodStart) > today);
-  const baseWarnings = locationWarnings(location, today, today).filter((warning) => !isGenericAvailableNote(warning));
+  const current = futureConflicts.find((conflict) => new Date(conflict.periodStart) <= referenceDate && new Date(conflict.periodEnd) >= referenceDate);
+  const next = futureConflicts.find((conflict) => new Date(conflict.periodStart) > referenceDate);
+  const baseWarnings = locationWarnings(location, referenceDate, referenceDate).filter((warning) => !isGenericAvailableNote(warning));
 
   if (current) {
     const availableFrom = addDays(new Date(current.periodEnd), 1).toISOString();
@@ -204,8 +204,8 @@ function buildNoPeriodAvailability(
       state: "CONFLICT",
       label,
       tone: "red",
-      explanation: `Ocupat acum: ${formatDate(current.periodStart)} - ${formatDate(current.periodEnd)}.`,
-      warnings: [`Ocupat acum pana la ${formatDate(current.periodEnd)}.`, ...baseWarnings],
+      explanation: `Ocupat la data verificata: ${formatDate(current.periodStart)} - ${formatDate(current.periodEnd)}.`,
+      warnings: [`Ocupat pana la ${formatDate(current.periodEnd)}.`, ...baseWarnings],
       conflicts: futureConflicts,
       blockingIntervals: intervals,
       availableFrom

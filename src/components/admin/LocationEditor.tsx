@@ -34,6 +34,7 @@ type EditorState = {
   mapsUrl: string;
   mainPhotoUrl: string;
   imageUrls: string;
+  productionSketchUrl: string;
   showPricePublic: boolean;
   showInstallationCostPublic: boolean;
   showInPublic: boolean;
@@ -245,6 +246,8 @@ export function LocationEditor({
         <EditorSection title="Galerie / Poze">
           <Text label="Poza principala URL" value={state.mainPhotoUrl} onChange={(value) => update("mainPhotoUrl", value)} />
           <Textarea label="Linkuri galerie foto" value={state.imageUrls} onChange={(value) => update("imageUrls", value)} />
+          <Text label="Schita de productie URL" value={state.productionSketchUrl} onChange={(value) => update("productionSketchUrl", value)} />
+          <SketchPreview url={state.productionSketchUrl} code={state.code} />
           <GalleryPreview mainUrl={state.mainPhotoUrl} imageUrls={galleryUrls} code={state.code} />
         </EditorSection>
 
@@ -396,6 +399,31 @@ function GalleryPreview({ mainUrl, imageUrls, code }: { mainUrl: string; imageUr
   );
 }
 
+function SketchPreview({ url, code }: { url: string; code: string }) {
+  const safeUrl = url.trim();
+  if (!safeUrl) {
+    return (
+      <p className="rounded-lg border border-focus-line bg-focus-navy/40 p-4 text-sm font-bold text-slate-400">
+        Nu exista schita de productie pentru aceasta locatie.
+      </p>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-focus-line bg-focus-navy/45 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-focus-yellow">Schita de productie</p>
+          <p className="text-sm font-bold text-slate-300">{code || "Locatie"} are o schita atasata.</p>
+        </div>
+        <a className="focus-button secondary !min-h-0 px-3 py-2 text-xs" href={safeUrl} target="_blank" rel="noreferrer">
+          Deschide schita
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function toEditorState(location: LocationDTO | null | undefined, fallbackCategory: string): EditorState {
   return {
     id: location?.id,
@@ -426,6 +454,7 @@ function toEditorState(location: LocationDTO | null | undefined, fallbackCategor
     mapsUrl: location?.mapsUrl || "",
     mainPhotoUrl: location?.photoOriginalUrl || location?.mainPhotoUrl || "",
     imageUrls: location?.images.map((image) => image.url).join("\n") || "",
+    productionSketchUrl: location?.productionSketchUrl || "",
     showPricePublic: location?.showPricePublic || false,
     showInstallationCostPublic: location?.showInstallationCostPublic || false,
     showInPublic: location?.showInPublic ?? true,
@@ -483,6 +512,7 @@ function toPayload(state: EditorState) {
     lngDisplay: numberOrNull(state.lngDisplay),
     mapsUrl: nullable(state.mapsUrl),
     mainPhotoUrl: nullable(state.mainPhotoUrl),
+    productionSketchUrl: nullable(state.productionSketchUrl),
     imageUrls: lines(state.imageUrls),
     showPricePublic: state.showPricePublic,
     showInstallationCostPublic: state.showInstallationCostPublic,

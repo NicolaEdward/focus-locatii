@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     city: params.get("city"),
     area: params.get("area"),
     mediaType: params.get("mediaType"),
+    mediaTypes: listParam(params.get("mediaTypes")),
     status: params.get("status"),
     minSurface: numberParam(params.get("minSurface")),
     maxSurface: numberParam(params.get("maxSurface")),
@@ -43,6 +44,12 @@ function numberParam(value: string | null) {
 function booleanParam(value: string | null) {
   if (value == null || value === "") return null;
   return value === "1" || value === "true";
+}
+
+function listParam(value: string | null) {
+  return value
+    ? value.split(",").map((item) => item.trim()).filter(Boolean)
+    : null;
 }
 
 function sortParam(value: string | null): LocationSelectionFilters["sort"] {

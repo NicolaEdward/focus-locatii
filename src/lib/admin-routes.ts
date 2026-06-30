@@ -30,7 +30,7 @@ export function adminCampaignHref(campaignId?: string | null) {
 }
 
 export function adminOperationalHref(params: AdminRouteParams = {}) {
-  return adminReservationsHref({ panel: "decorations", ...params });
+  return adminHref("/admin/operational", params);
 }
 
 export function adminLocationSelectorHref(params: AdminRouteParams = {}) {

@@ -112,7 +112,7 @@ export function AdminDashboard({
             ) : null}
             <Link className="focus-button secondary" href="/admin/selectie-locatii">
               <ListChecks size={18} />
-              Selector oferta
+              Deschide Selector oferta
             </Link>
             {canManageLocations ? <LocationToolsMenu /> : null}
           </div>
@@ -125,7 +125,7 @@ export function AdminDashboard({
               <h2 className="font-display text-2xl font-black uppercase text-white">Rezervari si HOLD-uri</h2>
             </div>
             <p className="max-w-2xl text-sm text-slate-400">
-              Active, urmatoare si operationale. Pentru selectie si disponibilitate pe oferta foloseste Selector oferta.
+              Rezervari, HOLD-uri si ocupare curenta. Pentru selectie si disponibilitate pe oferta foloseste Selector oferta.
             </p>
           </div>
           <AdminReservationsPanel

@@ -162,6 +162,7 @@ export type LocationDTO = {
   mapsUrl: string | null;
   mainPhotoUrl: string | null;
   photoOriginalUrl: string | null;
+  productionSketchUrl: string | null;
   showPricePublic: boolean;
   showInstallationCostPublic: boolean;
   showInPublic: boolean;

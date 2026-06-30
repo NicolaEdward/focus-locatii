@@ -1,13 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { auditCoordinates, extractCoordinatesFromMapsUrl, spreadOverlappingLocations } from "@/lib/gps";
 import { normalizeMediaType } from "@/lib/format";
+import { PRODUCTION_SKETCH_ALT } from "@/lib/location-images";
 import { getOrCreateCategory, listAdminLocations } from "@/lib/locations";
 import { locationInputSchema, locationPatchSchema } from "@/lib/validation";
 
 export async function createLocation(input: unknown) {
   const parsed = locationInputSchema.parse(input);
   const category = await getOrCreateCategory(parsed.categoryName);
-  const { imageUrls, data } = withoutCategoryNameAndImages(parsed);
+  const { imageUrls, productionSketchUrl, data } = withoutCategoryNameAndImages(parsed);
   const normalizedData = normalizeLocationData(data);
 
   return prisma.$transaction(async (tx) => {
@@ -20,7 +21,7 @@ export async function createLocation(input: unknown) {
       }
     });
 
-    await syncLocationImages(tx, location.id, imageUrls, parsed.mainPhotoUrl);
+    await syncLocationImages(tx, location.id, imageUrls, parsed.mainPhotoUrl, productionSketchUrl);
     return location;
   });
 }
@@ -28,7 +29,7 @@ export async function createLocation(input: unknown) {
 export async function updateLocation(id: string, input: unknown) {
   const parsed = locationPatchSchema.parse(input);
   const category = parsed.categoryName ? await getOrCreateCategory(parsed.categoryName) : null;
-  const { imageUrls, data } = withoutCategoryNameAndImages(parsed);
+  const { imageUrls, productionSketchUrl, data } = withoutCategoryNameAndImages(parsed);
   const normalizedData = normalizeLocationData(data);
 
   return prisma.$transaction(async (tx) => {
@@ -40,8 +41,8 @@ export async function updateLocation(id: string, input: unknown) {
       }
     });
 
-    if (imageUrls) {
-      await syncLocationImages(tx, id, imageUrls, parsed.mainPhotoUrl);
+    if (imageUrls || productionSketchUrl !== undefined) {
+      await syncLocationImages(tx, id, imageUrls, parsed.mainPhotoUrl, productionSketchUrl);
     }
 
     return location;
@@ -315,9 +316,9 @@ export async function restoreCoordinatesFromMapsUrls() {
   return { updated, skipped, total: locations.length };
 }
 
-function withoutCategoryNameAndImages<T extends { categoryName?: string; imageUrls?: string[] }>(input: T) {
-  const { categoryName, imageUrls, ...data } = input;
-  return { imageUrls, data };
+function withoutCategoryNameAndImages<T extends { categoryName?: string; imageUrls?: string[]; productionSketchUrl?: string | null }>(input: T) {
+  const { categoryName, imageUrls, productionSketchUrl, ...data } = input;
+  return { imageUrls, productionSketchUrl, data };
 }
 
 function normalizeLocationData<T extends { type?: string | null; categoryName?: string; address?: string | null; code?: string }>(data: T) {
@@ -332,24 +333,43 @@ async function syncLocationImages(
   tx: PrismaTransaction,
   locationId: string,
   imageUrls: string[] | undefined,
-  mainPhotoUrl?: string | null
+  mainPhotoUrl?: string | null,
+  productionSketchUrl?: string | null
 ) {
-  if (!imageUrls) return;
+  if (!imageUrls && productionSketchUrl === undefined) return;
 
-  const urls = Array.from(new Set(imageUrls.map((url) => url.trim()).filter(Boolean)));
-  await tx.image.deleteMany({ where: { locationId } });
+  if (imageUrls) {
+    const urls = Array.from(new Set(imageUrls.map((url) => url.trim()).filter(Boolean)));
+    await tx.image.deleteMany({ where: { locationId, NOT: { alt: PRODUCTION_SKETCH_ALT } } });
 
-  if (!urls.length) return;
+    if (urls.length) {
+      await tx.image.createMany({
+        data: urls.map((url, index) => ({
+          locationId,
+          url,
+          alt: null,
+          sortOrder: index,
+          isMain: index === 0 || Boolean(mainPhotoUrl && url === mainPhotoUrl)
+        }))
+      });
+    }
+  }
 
-  await tx.image.createMany({
-    data: urls.map((url, index) => ({
-      locationId,
-      url,
-      alt: null,
-      sortOrder: index,
-      isMain: index === 0 || Boolean(mainPhotoUrl && url === mainPhotoUrl)
-    }))
-  });
+  if (productionSketchUrl !== undefined) {
+    const sketchUrl = productionSketchUrl?.trim();
+    await tx.image.deleteMany({ where: { locationId, alt: PRODUCTION_SKETCH_ALT } });
+    if (sketchUrl) {
+      await tx.image.create({
+        data: {
+          locationId,
+          url: sketchUrl,
+          alt: PRODUCTION_SKETCH_ALT,
+          sortOrder: 9999,
+          isMain: false
+        }
+      });
+    }
+  }
 }
 
 type PrismaTransaction = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;

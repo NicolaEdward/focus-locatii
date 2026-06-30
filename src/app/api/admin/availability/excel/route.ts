@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { calculateAvailability, formatAvailability, type CalculatedAvailability } from "@/lib/availability";
 import { mapsHref } from "@/lib/gps";
+import { getLocationSelectionAvailability } from "@/lib/location-selection-availability";
 import { listAdminLocations } from "@/lib/locations";
 import { sortOperationalLocations } from "@/lib/location-order";
 import { requireAnyPermission } from "@/lib/auth";
 import { createStyledWorkbook, XLSX_STYLES, type StyledCell, type StyledSheet } from "@/lib/styled-xlsx";
+import type { LocationSelectionAvailability } from "@/lib/location-selection-dto";
 import type { LocationDTO } from "@/types/location";
 
 export const dynamic = "force-dynamic";
@@ -23,12 +24,13 @@ const headers = [
   "Illum",
   "Rate Card",
   "Installation & Removal",
+  "Schita",
   "Availability"
 ];
 
 export async function GET(request: NextRequest) {
-  const { response } = await requireAnyPermission(request, ["reports.view", "reports.view.own"]);
-  if (response) return response;
+  const { session, response } = await requireAnyPermission(request, ["reports.view", "reports.view.own"]);
+  if (response || !session) return response;
 
   const fromParam = request.nextUrl.searchParams.get("from");
   const toParam = request.nextUrl.searchParams.get("to");
@@ -50,6 +52,7 @@ export async function GET(request: NextRequest) {
       .filter(Boolean)
   );
   const includeHidden = request.nextUrl.searchParams.get("includeHidden") === "1";
+  const includeUnavailable = request.nextUrl.searchParams.get("includeUnavailable") === "1";
 
   const periodStart = from || to;
   const periodEnd = to || from;
@@ -57,7 +60,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Perioada selectata nu este valida." }, { status: 400 });
   }
 
-  const locations = (await listAdminLocations())
+  const baseLocations = (await listAdminLocations())
     .filter((location) => includeHidden || location.showInPublic)
     .filter((location) => (ids.size ? ids.has(location.id) : true))
     .filter((location) => {
@@ -71,13 +74,18 @@ export async function GET(request: NextRequest) {
     .filter((location) => (county ? location.county?.toLowerCase() === county : true))
     .filter((location) => (type ? location.type?.toLowerCase() === type : true))
     .filter((location) => (category ? location.categorySlug === category : true))
-    .filter((location) => (status ? location.publicStatus === status || location.status === status : true))
-    .filter((location) => {
-      if (periodStart && periodEnd) {
-        return calculateAvailability(location, periodStart, periodEnd).status !== "UNAVAILABLE";
-      }
-      return location.publicStatus !== "UNKNOWN";
-    });
+    .filter((location) => (status ? location.publicStatus === status || location.status === status : true));
+  const availabilityById = await getLocationSelectionAvailability({
+    locationIds: baseLocations.map((location) => location.id),
+    periodStart: fromParam,
+    periodEnd: toParam,
+    session
+  });
+  const locations = baseLocations.filter((location) => {
+    const availability = availabilityById[location.id];
+    if (from && to && !includeUnavailable) return availability?.state !== "CONFLICT";
+    return availability?.state !== "UNKNOWN";
+  });
 
   const groups = groupByCategory(locations);
   const sheets: StyledSheet[] = [];
@@ -89,12 +97,12 @@ export async function GET(request: NextRequest) {
       rows: [
         titleRow(`Locatii ${categoryName}`),
         headers.map((header) => ({ value: header, style: XLSX_STYLES.header })),
-        ...orderedLocations.map((location, index) => locationRow(request, location, index, periodStart, periodEnd))
+        ...orderedLocations.map((location, index) => locationRow(request, location, index, availabilityById[location.id]))
       ],
-      merges: [{ startRow: 1, startCol: 1, endRow: 1, endCol: 13 }],
+      merges: [{ startRow: 1, startCol: 1, endRow: 1, endCol: 14 }],
       columns: defaultColumns().map((width) => ({ width })),
       freezeRows: 2,
-      autoFilter: { startRow: 2, startCol: 1, endRow: Math.max(groupLocations.length + 2, 2), endCol: 13 }
+      autoFilter: { startRow: 2, startCol: 1, endRow: Math.max(groupLocations.length + 2, 2), endCol: 14 }
     });
   }
 
@@ -105,7 +113,7 @@ export async function GET(request: NextRequest) {
         titleRow("Nu exista locatii disponibile pentru filtrele selectate."),
         headers.map((header) => ({ value: header, style: XLSX_STYLES.header }))
       ],
-      merges: [{ startRow: 1, startCol: 1, endRow: 1, endCol: 13 }],
+      merges: [{ startRow: 1, startCol: 1, endRow: 1, endCol: 14 }],
       columns: defaultColumns().map((width) => ({ width })),
       freezeRows: 2
     });
@@ -124,7 +132,7 @@ export async function GET(request: NextRequest) {
 }
 
 function titleRow(title: string): StyledCell[] {
-  return Array.from({ length: 13 }, (_, index) => ({
+  return Array.from({ length: 14 }, (_, index) => ({
     value: index === 0 ? title : "",
     style: XLSX_STYLES.title
   }));
@@ -134,16 +142,13 @@ function locationRow(
   request: NextRequest,
   location: LocationDTO,
   index: number,
-  periodStart: Date | null,
-  periodEnd: Date | null
+  availability: LocationSelectionAvailability | undefined
 ): StyledCell[] {
   const bodyStyle = index % 2 === 0 ? XLSX_STYLES.body : XLSX_STYLES.bodyAlt;
-  const mapUrl = mapsHref(location.mapsUrl, location.latReal, location.lngReal);
+  const mapUrl = mapsHref(null, location.latDisplay, location.lngDisplay);
   const photoUrl = absoluteUrl(request, location.mainPhotoUrl);
-  const calculated = periodStart && periodEnd ? calculateAvailability(location, periodStart, periodEnd) : null;
-  const availability = calculated
-    ? formatAvailability({ label: calculated.label, detail: calculated.detail })
-    : formatAvailability({ label: location.availabilityLabel, detail: location.availabilityDetail });
+  const sketchUrl = absoluteUrl(request, location.productionSketchUrl);
+  const availabilityLabel = availabilityLabelForExport(availability);
 
   return [
     { value: index + 1, style: XLSX_STYLES.centered },
@@ -158,22 +163,36 @@ function locationRow(
     { value: location.illum ? "Yes" : location.illum === false ? "No" : "", style: XLSX_STYLES.centered },
     { value: euroCell(location.rateCardValue, location.rateCard), style: bodyStyle },
     { value: euroCell(location.installationRemovalValue, location.installationRemoval), style: bodyStyle },
-    { value: availability, style: availabilityStyle(location, calculated) }
+    { value: sketchUrl ? "Schita" : "", style: sketchUrl ? XLSX_STYLES.hyperlink : bodyStyle, hyperlink: sketchUrl || undefined },
+    { value: availabilityLabel, style: availabilityStyle(availability) }
   ];
 }
 
-function availabilityStyle(location: LocationDTO, calculated?: CalculatedAvailability | null) {
-  if (calculated) {
-    if (calculated.status === "AVAILABLE") return XLSX_STYLES.availabilityAvailable;
-    if (calculated.status === "PARTIAL") return XLSX_STYLES.availabilityReserved;
-    if (calculated.status === "UNAVAILABLE") return XLSX_STYLES.availabilityBooked;
-  }
-  if (location.publicStatus === "AVAILABLE") {
-    return location.availabilityDetail ? XLSX_STYLES.availabilityReserved : XLSX_STYLES.availabilityAvailable;
-  }
-  if (location.publicStatus === "RESERVED") return XLSX_STYLES.availabilityReserved;
-  if (location.publicStatus === "BOOKED") return XLSX_STYLES.availabilityBooked;
+function availabilityStyle(availability?: LocationSelectionAvailability) {
+  if (availability?.state === "AVAILABLE") return availability.tone === "yellow" ? XLSX_STYLES.availabilityReserved : XLSX_STYLES.availabilityAvailable;
+  if (availability?.state === "PARTIAL") return XLSX_STYLES.availabilityReserved;
+  if (availability?.state === "CONFLICT") return XLSX_STYLES.availabilityBooked;
   return XLSX_STYLES.body;
+}
+
+function availabilityLabelForExport(availability?: LocationSelectionAvailability) {
+  if (!availability) return "Disponibilitate necunoscuta";
+  const parts = [availability.label, availability.explanation, occupiedIntervalsLabel(availability)]
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return [...new Set(parts)].join(" | ");
+}
+
+function occupiedIntervalsLabel(availability: LocationSelectionAvailability) {
+  if (!availability.blockingIntervals.length) return "";
+  return availability.blockingIntervals
+    .slice(0, 3)
+    .map((interval) => `Ocupat: ${formatDate(new Date(interval.start))} - ${formatDate(new Date(interval.end))}`)
+    .join("; ");
+}
+
+function formatDate(date: Date) {
+  return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" }).format(date);
 }
 
 function parseDateParam(value: string | null) {
@@ -235,6 +254,7 @@ function defaultColumns() {
     8,
     16,
     24,
+    14,
     32
   ];
 }

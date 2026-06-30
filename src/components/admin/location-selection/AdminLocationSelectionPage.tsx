@@ -63,16 +63,18 @@ export function AdminLocationSelectionPage({
     [selection.items]
   );
   const periodValid = Boolean(selection.periodStart && selection.periodEnd && selection.periodStart <= selection.periodEnd);
+  const periodInvalid = Boolean(selection.periodStart && selection.periodEnd && selection.periodStart > selection.periodEnd);
 
   const baseFilteredLocations = useMemo(() => {
     const normalizedSearch = normalizeSearch(deferredSearch);
+    const selectedMediaTypes = filters.mediaTypes?.length ? filters.mediaTypes : filters.mediaType ? [filters.mediaType] : [];
     return initialData.locations.filter((location) => {
       if (normalizedSearch && !locationMatchesSearch(location, normalizedSearch)) return false;
-      if (filters.mediaType && location.mediaType !== filters.mediaType && location.category !== filters.mediaType) return false;
+      if (selectedMediaTypes.length && !selectedMediaTypes.includes(location.mediaType || "") && !selectedMediaTypes.includes(location.category || "")) return false;
       if (filters.status && location.status !== filters.status) return false;
       return true;
     });
-  }, [deferredSearch, filters.mediaType, filters.status, initialData.locations]);
+  }, [deferredSearch, filters.mediaType, filters.mediaTypes, filters.status, initialData.locations]);
 
   const filteredLocations = useMemo(() => {
     let rows = baseFilteredLocations.filter((location) => {
@@ -269,16 +271,17 @@ export function AdminLocationSelectionPage({
   }, [selection.items]);
 
   const periodError =
-    selection.periodStart && selection.periodEnd && selection.periodStart > selection.periodEnd
+    periodInvalid
       ? "Data de final trebuie sa fie dupa data de start."
       : null;
   const exportHref = useMemo(
     () => buildAvailabilityExportHref({
       locationIds: selection.items.length ? selection.items.map((item) => item.locationId) : filteredLocations.map((location) => location.id),
-      periodStart: periodValid ? selection.periodStart : "",
-      periodEnd: periodValid ? selection.periodEnd : ""
+      periodStart: !periodInvalid ? selection.periodStart : "",
+      periodEnd: periodValid ? selection.periodEnd : "",
+      includeUnavailable: filters.availability === "CONFLICT" || filters.availability === "ALL"
     }),
-    [filteredLocations, periodValid, selection.items, selection.periodEnd, selection.periodStart]
+    [filteredLocations, filters.availability, periodInvalid, periodValid, selection.items, selection.periodEnd, selection.periodStart]
   );
 
   return (
@@ -301,20 +304,30 @@ export function AdminLocationSelectionPage({
 
           <div className="mt-5 grid gap-3 rounded-lg border border-focus-line bg-focus-ink/60 p-4 lg:grid-cols-[1fr_1fr_1.4fr]">
             <Field label="Start campanie">
-              <input className="focus-input" type="date" value={selection.periodStart} onChange={(event) => updatePeriod({ periodStart: event.target.value })} />
+              <input className="focus-input bg-focus-navy/80" type="date" value={selection.periodStart} onChange={(event) => updatePeriod({ periodStart: event.target.value })} />
             </Field>
             <Field label="Final campanie">
-              <input className="focus-input" type="date" value={selection.periodEnd} onChange={(event) => updatePeriod({ periodEnd: event.target.value })} />
+              <input
+                className="focus-input bg-focus-navy/80"
+                type="date"
+                value={selection.periodEnd}
+                min={selection.periodStart || undefined}
+                onChange={(event) => updatePeriod({ periodEnd: event.target.value })}
+              />
             </Field>
             <div className="min-h-[66px] rounded-lg border border-focus-line bg-focus-navy/55 p-3 text-sm">
               <p className="font-black text-white">
                 {periodValid && !availabilityLoading ? <CheckCircle2 className="mr-2 inline h-4 w-4 text-emerald-300" /> : <AlertTriangle className="mr-2 inline h-4 w-4 text-focus-yellow" />}
-                {availabilityLoading ? "Verificare disponibilitate..." : periodValid ? "Afisam implicit doar locatiile propunibile." : "Disponibilitate generala incarcata."}
+                {availabilityLoading ? "Verificare disponibilitate..." : periodValid ? "Afisam implicit doar locatiile propunibile." : selection.periodStart ? "Disponibilitate calculata din data de start." : "Disponibilitate generala incarcata."}
               </p>
               {periodError ? <p className="mt-1 font-bold text-red-100">{periodError}</p> : null}
               {availabilityError ? <p className="mt-1 font-bold text-red-100">{availabilityError}</p> : null}
               <p className="mt-1 text-slate-400">
-                {periodValid ? "Statusurile sunt calculate pentru perioada selectata." : "Alege perioada pentru verificare exacta pe campanie."}
+                {periodValid
+                  ? "Statusurile sunt calculate pentru perioada selectata."
+                  : selection.periodStart
+                    ? "Poti completa finalul campaniei cand ai perioada exacta."
+                    : "Alege perioada pentru verificare exacta pe campanie."}
               </p>
             </div>
           </div>
@@ -495,11 +508,12 @@ function selectionStorageKey(userId: string) {
   return `focus-admin-location-selection:${userId}`;
 }
 
-function buildAvailabilityExportHref(input: { locationIds: string[]; periodStart?: string; periodEnd?: string }) {
+function buildAvailabilityExportHref(input: { locationIds: string[]; periodStart?: string; periodEnd?: string; includeUnavailable?: boolean }) {
   const params = new URLSearchParams();
   if (input.locationIds.length) params.set("ids", input.locationIds.join(","));
   if (input.periodStart) params.set("from", input.periodStart);
   if (input.periodEnd) params.set("to", input.periodEnd);
+  if (input.includeUnavailable) params.set("includeUnavailable", "1");
   params.set("includeHidden", "1");
   return `/api/admin/availability/excel?${params.toString()}`;
 }

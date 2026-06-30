@@ -19,6 +19,7 @@ const files = {
   map: read("src", "components", "admin", "location-selection", "LocationSelectionMap.tsx"),
   header: read("src", "components", "admin", "AdminHeader.tsx"),
   adminRoutes: read("src", "lib", "admin-routes.ts"),
+  availabilityExport: read("src", "app", "api", "admin", "availability", "excel", "route.ts"),
   publicCard: read("src", "components", "public", "LocationCard.tsx"),
   publicDrawer: read("src", "components", "public", "ShortlistDrawer.tsx")
 };
@@ -38,6 +39,8 @@ for (const status of ["CANCELLED", "EXPIRED", "LOST", "ARCHIVED"]) {
 assert(files.availability.includes("periodStart: { lte: periodEnd }"), "availability must use inclusive overlap start check");
 assert(files.availability.includes("periodEnd: { gte: periodStart }"), "availability must use inclusive overlap end check");
 assert(files.availability.includes("buildNoPeriodAvailability"), "availability must provide useful no-period status");
+assert(files.availability.includes("referenceDate"), "start-date-only availability should use the selected start date as reference");
+assert(files.availability.includes("periodEnd: { gte: referenceDate }"), "start-date-only availability should look forward from the selected start date");
 assert(files.availability.includes("Disponibil pana la"), "no-period future booking should show available-until label");
 assert(files.availability.includes("Disponibil din"), "current booking should show available-from label");
 assert(files.availability.includes("label: \"Indisponibil\""), "selected-period conflicts must be labelled unavailable");
@@ -52,6 +55,8 @@ assert(files.availability.includes("isGenericAvailableNote"), "generic available
 assert(files.dto.includes("tone: LocationSelectionAvailabilityTone"), "availability DTO must include tone");
 assert(files.dto.includes("explanation: string"), "availability DTO must include explanation");
 assert(files.dto.includes("blockingIntervals"), "availability DTO must expose safe blocking intervals");
+assert(files.dto.includes("mediaTypes?: string[]"), "selector filters should support multiple media formats");
+assert(files.dto.includes("productionSketchUrl"), "selector DTO should expose safe production sketch links");
 
 for (const forbidden of [
   "latReal",
@@ -87,6 +92,7 @@ assert(files.builder.includes("availabilityById[location.id]?.state !== \"CONFLI
 assert(files.builder.includes("Selecteaza tot"), "bulk select action should be sales-friendly");
 assert(files.builder.includes("Vrei sa selectezi ${candidates.length} locatii?"), "bulk selecting more than 25 should ask for confirmation");
 assert(files.builder.includes("buildAvailabilityExportHref"), "selector should build an availability export URL");
+assert(files.builder.includes("includeUnavailable"), "selector export should explicitly include unavailable rows only when requested");
 assert(files.filters.includes("Disponibile / partiale"), "availability filter should support default proposable locations");
 assert(files.filters.includes("Disponibile partial"), "availability filter should support partial availability");
 assert(files.filters.includes("Indisponibile / cu conflict"), "availability filter should expose conflicts only explicitly");
@@ -95,21 +101,30 @@ assert(!files.filters.includes("Suprafata max."), "surface max filter should not
 assert(!files.filters.includes("Pret min."), "price min filter should not be primary");
 assert(!files.filters.includes("Pret max."), "price max filter should not be primary");
 assert(!files.filters.includes("Select label=\"Zona\""), "zone filter should not be primary");
+assert(files.filters.includes("function MultiSelect"), "format filter should be a compact multi-select");
+assert(files.filters.includes("Selecteaza"), "format multi-select should expose a clear checklist trigger");
 assert(files.basket.includes("Continua catre Media Plan - urmatorul pas"), "future Media Plan CTA should be disabled placeholder");
 assert(files.basket.includes("disabled"), "future Media Plan CTA must not write in this batch");
 assert(files.basket.includes("Exporta disponibil"), "basket should expose availability export as a primary action");
+assert(files.basket.includes("Daca nu ai selectie, exportul foloseste rezultatele filtrate"), "export should explain empty basket behavior");
 assert(files.basket.includes("Mai multe") && files.basket.includes("Copiaza coduri selectate"), "copy codes should be secondary");
+assert(files.basket.includes("Schita"), "basket should show production sketch availability when present");
 
 assert(files.results.includes("Adauga") && files.results.includes("Scoate"), "result rows need add/remove actions");
 assert(files.results.includes("availability?.explanation"), "result rows must use normalized availability explanation");
 assert(files.results.includes("w-[104px]"), "result action button should keep a stable visible width");
 assert(files.results.includes("disabled={unavailable}"), "fully unavailable rows should not be addable by default");
 assert(files.results.includes("blockingText"), "conflict rows should show safe blocking intervals when visible");
+assert(files.results.includes("Schita"), "result rows should expose a compact production sketch action when present");
 assert(files.map.includes("scrollWheelZoom: false"), "selector map should not hijack page scroll");
 assert(files.map.includes("displayLat") && files.map.includes("displayLng"), "selector map must use display coordinates");
 assert(!files.map.includes("latReal") && !files.map.includes("lngReal"), "selector map must not use private coordinates");
 assert(files.header.includes("/admin/selectie-locatii"), "admin header must link to selector");
 assert(files.adminRoutes.includes("adminLocationSelectorHref"), "admin route helper must include selector href");
+assert(files.availabilityExport.includes("getLocationSelectionAvailability"), "availability export should reuse selector availability semantics");
+assert(files.availabilityExport.includes("availabilityLabelForExport"), "availability export should use normalized labels");
+assert(files.availabilityExport.includes('"Schita"'), "availability export should include production sketch column");
+assert(files.availabilityExport.includes("mapsHref(null, location.latDisplay, location.lngDisplay)"), "availability export should use display coordinates only");
 
 assert(files.publicCard.includes("Adauga in selectie") || files.publicCard.includes("Adaugă în selecție"), "public card must keep selection wording");
 assert(files.publicDrawer.includes("Selectia ta de locatii") || files.publicDrawer.includes("Selecția ta de locații"), "public drawer must keep selection wording");

@@ -422,6 +422,7 @@ function locationsSignature(locations: LocationDTO[]) {
       latDisplay: location.latDisplay,
       lngDisplay: location.lngDisplay,
       mainPhotoUrl: location.mainPhotoUrl,
+      productionSketchUrl: location.productionSketchUrl,
       isPremium: location.isPremium,
       isFeatured: location.isFeatured,
       images: location.images.map((image) => ({

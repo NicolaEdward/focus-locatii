@@ -16,6 +16,7 @@ export type LocationSelectionSnapshot = {
   dimensions?: string | null;
   surface?: number | null;
   mainImage?: string | null;
+  productionSketchUrl?: string | null;
   displayLat?: number | null;
   displayLng?: number | null;
   publicDescription?: string | null;
@@ -51,6 +52,8 @@ export type LocationSelectionLocationDTO = {
   dimensions: string | null;
   surface: number | null;
   thumbnail: string | null;
+  productionSketchUrl: string | null;
+  hasProductionSketch: boolean;
   displayLat: number | null;
   displayLng: number | null;
   status: string;
@@ -70,6 +73,7 @@ export type LocationSelectionFilters = {
   city?: string | null;
   area?: string | null;
   mediaType?: string | null;
+  mediaTypes?: string[] | null;
   availability?: LocationSelectionAvailabilityState | "ALL" | "PROPOSABLE" | "CURRENT_AVAILABLE" | "FUTURE_BOOKINGS" | "CURRENT_CONFLICT" | null;
   status?: string | null;
   minSurface?: number | null;

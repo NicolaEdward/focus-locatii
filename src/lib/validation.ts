@@ -62,6 +62,7 @@ export const locationInputSchema = z.object({
   mapsUrl: z.string().nullable().optional(),
   mainPhotoUrl: z.string().nullable().optional(),
   photoOriginalUrl: z.string().nullable().optional(),
+  productionSketchUrl: z.string().nullable().optional(),
   showPricePublic: z.boolean().default(false),
   showInstallationCostPublic: z.boolean().default(false),
   showInPublic: z.boolean().default(true),

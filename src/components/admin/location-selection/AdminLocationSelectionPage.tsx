@@ -50,7 +50,8 @@ export function AdminLocationSelectionPage({
   companyOptions: CompanyOption[];
   session: AuthSession;
 }) {
-  const [selection, setSelection] = useState<SelectionState>(() => readSavedSelection(session.id) || emptySelection);
+  const [selection, setSelection] = useState<SelectionState>(emptySelection);
+  const [selectionLoaded, setSelectionLoaded] = useState(false);
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [filters, setFilters] = useState<SelectionFilters>({ sort: "code", availability: "ALL" });
@@ -106,8 +107,15 @@ export function AdminLocationSelectionPage({
   const seed = useMemo(() => buildMediaPlanSeedFromSelection(selectionPayload), [selectionPayload]);
 
   useEffect(() => {
+    const savedSelection = readSavedSelection(session.id);
+    if (savedSelection) setSelection(savedSelection);
+    setSelectionLoaded(true);
+  }, [session.id]);
+
+  useEffect(() => {
+    if (!selectionLoaded) return;
     saveSelection(session.id, selection);
-  }, [selection, session.id]);
+  }, [selection, selectionLoaded, session.id]);
 
   useEffect(() => {
     setSelection((current) => {

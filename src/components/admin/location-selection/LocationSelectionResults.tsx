@@ -24,10 +24,10 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
     <section className="min-w-0 overflow-hidden rounded-lg border border-focus-line bg-focus-navy/80">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-focus-line p-4">
         <div>
-          <p className="text-xs font-black uppercase text-focus-yellow">Rezultate</p>
-          <h2 className="text-xl font-black text-white">{locations.length} locatii gasite</h2>
+          <p className="text-xs font-black uppercase text-focus-yellow">Locatii propunibile</p>
+          <h2 className="text-xl font-black text-white">{locations.length} rezultate</h2>
         </div>
-        <p className="text-sm font-bold text-slate-300">Lista densa pentru selectie rapida</p>
+        <p className="text-sm font-bold text-slate-300">Selectie rapida pentru oferta OOH</p>
       </header>
       <div className="max-h-[760px] overflow-auto">
         <table className="w-full min-w-[820px] table-fixed text-left text-sm">
@@ -45,10 +45,11 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
             {locations.map((location) => {
               const selected = selectedIds.has(location.id);
               const availability = availabilityById[location.id];
+              const unavailable = availability?.state === "CONFLICT";
               return (
                 <tr
                   key={location.id}
-                  className={selected ? "bg-focus-yellow/8" : "hover:bg-white/[0.03]"}
+                  className={selected ? "bg-focus-yellow/8" : unavailable ? "bg-red-950/15" : "hover:bg-white/[0.03]"}
                   onMouseEnter={() => onHover(location.id)}
                   onMouseLeave={() => onHover(null)}
                 >
@@ -85,10 +86,15 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
                     <p className={`mt-1 max-w-[260px] truncate text-xs ${availability?.state === "CONFLICT" ? "text-red-100" : availability?.tone === "yellow" ? "text-amber-100" : "text-slate-400"}`}>
                       {availability?.explanation || "Alege perioada pentru verificare exacta."}
                     </p>
+                    {availability?.blockingIntervals.length ? (
+                      <p className="mt-1 max-w-[260px] truncate text-[11px] font-bold text-slate-400">
+                        {blockingText(availability)}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-3 py-3">
                     <p className="font-black text-white">{price(location)}</p>
-                    {location.rateCard ? <p className="text-xs text-slate-400">{location.rateCard}</p> : null}
+                    {rateCardLabel(location) ? <p className="text-xs text-slate-400">{rateCardLabel(location)}</p> : null}
                   </td>
                   <td className="px-3 py-3 text-right align-middle">
                     {selected ? (
@@ -97,7 +103,13 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
                         Scoate
                       </button>
                     ) : (
-                      <button className="focus-button !min-h-0 w-[104px] justify-center px-3 py-2 text-xs" type="button" onClick={() => onAdd(location)}>
+                      <button
+                        className="focus-button !min-h-0 w-[104px] justify-center px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+                        type="button"
+                        onClick={() => onAdd(location)}
+                        disabled={unavailable}
+                        title={unavailable ? "Locatia este indisponibila in perioada selectata." : undefined}
+                      >
                         <Plus size={15} />
                         Adauga
                       </button>
@@ -109,7 +121,7 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
             {!locations.length ? (
               <tr>
                 <td colSpan={6} className="px-4 py-10 text-center text-sm font-bold text-slate-300">
-                  Nu exista locatii pentru filtrele curente.
+                  Nu exista locatii propunibile pentru filtrele curente.
                 </td>
               </tr>
             ) : null}
@@ -127,4 +139,20 @@ function sqm(value: number | null) {
 function price(location: LocationSelectionLocationDTO) {
   if (location.suggestedBasePrice == null) return "-";
   return `${location.suggestedBasePrice.toLocaleString("ro-RO")} ${location.currency || "EUR"}`;
+}
+
+function rateCardLabel(location: LocationSelectionLocationDTO) {
+  const value = location.rateCard?.trim();
+  if (!value || /^[\d\s.,]+$/.test(value)) return null;
+  return value;
+}
+
+function blockingText(availability: LocationSelectionAvailability) {
+  const first = availability.blockingIntervals[0];
+  if (!first) return "";
+  return `${first.status}: ${formatDate(first.start)} - ${formatDate(first.end)}`;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(value));
 }

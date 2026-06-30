@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { AdminLocationSelectionPage } from "@/components/admin/location-selection/AdminLocationSelectionPage";
-import { companyEntityOptions, listLocationSelectionLocations } from "@/lib/location-selection";
+import { listLocationSelectionLocations } from "@/lib/location-selection";
 import { getAdminSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/rbac";
 
@@ -19,7 +19,6 @@ export default async function AdminLocationSelectionRoute() {
       <AdminHeader session={session} />
       <AdminLocationSelectionPage
         initialData={initialData}
-        companyOptions={companyEntityOptions()}
         session={session}
       />
     </>

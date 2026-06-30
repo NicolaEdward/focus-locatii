@@ -174,11 +174,13 @@ function clusterClass(markers: import("leaflet").Marker[]) {
 }
 
 function popupHtml(location: LocationSelectionLocationDTO, availability: LocationSelectionAvailability | undefined, selected: boolean) {
+  const unavailable = availability?.state === "CONFLICT";
+  const action = selected ? "Selectata - click pentru scoatere" : unavailable ? "Indisponibila in perioada selectata" : "Click pentru adaugare";
   return `<div style="min-width:200px">
     <strong>${escapeHtml(location.code)}</strong>
     <div>${escapeHtml(location.city || "")} ${escapeHtml(location.area || "")}</div>
     <div>${escapeHtml(availability?.label || "Alege perioada")}</div>
-    <div style="margin-top:6px;font-weight:800">${selected ? "Selectata - click pentru scoatere" : "Click pentru adaugare"}</div>
+    <div style="margin-top:6px;font-weight:800">${action}</div>
   </div>`;
 }
 

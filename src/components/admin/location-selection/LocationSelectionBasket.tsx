@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Copy, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Download, MoreHorizontal, Trash2, X } from "lucide-react";
 import { AvailabilityBadge } from "@/components/admin/location-selection/AvailabilityBadge";
 import type {
   LocationSelectionAvailability,
@@ -12,6 +12,9 @@ export function LocationSelectionBasket({
   items,
   warnings,
   mediaPlanSeed,
+  periodStart,
+  periodEnd,
+  exportHref,
   onRemove,
   onClear,
   onMove,
@@ -21,6 +24,9 @@ export function LocationSelectionBasket({
   locationsById: Map<string, LocationSelectionItem>;
   warnings: string[];
   mediaPlanSeed: MediaPlanSeed;
+  periodStart: string;
+  periodEnd: string;
+  exportHref: string;
   onRemove: (locationId: string) => void;
   onClear: () => void;
   onMove: (locationId: string, direction: -1 | 1) => void;
@@ -32,15 +38,12 @@ export function LocationSelectionBasket({
   const conflictCount = items.filter((item) => item.availabilityState === "CONFLICT").length;
 
   return (
-    <aside className="sticky top-24 grid max-h-[calc(100vh-7rem)] min-w-0 content-start overflow-hidden rounded-lg border border-focus-line bg-focus-navy/90">
+    <aside className="sticky top-24 grid max-h-[calc(100vh-7rem)] min-w-0 content-start overflow-hidden rounded-lg border border-focus-line bg-focus-navy/92 shadow-2xl">
       <header className="border-b border-focus-line p-4">
-        <p className="text-xs font-black uppercase text-focus-yellow">Cos selectie</p>
+        <p className="text-xs font-black uppercase text-focus-yellow">Selectia pentru oferta</p>
         <div className="mt-1 flex items-end justify-between gap-3">
-          <h2 className="text-2xl font-black text-white">{items.length} locatii</h2>
-          <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={onClear} disabled={!items.length}>
-            <Trash2 size={15} />
-            Goleste
-          </button>
+          <h2 className="text-3xl font-black text-white">{items.length} locatii</h2>
+          <p className="max-w-36 text-right text-xs font-bold text-slate-300">{periodLabel(periodStart, periodEnd)}</p>
         </div>
         <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
           <Metric label="Suprafata" value={totalSurface ? `${round(totalSurface)} mp` : "-"} />
@@ -70,7 +73,7 @@ export function LocationSelectionBasket({
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-focus-line p-5 text-center text-sm text-slate-300">
-            Selectia este goala. Adauga locatii din lista sau de pe harta.
+            Selectia este goala. Adauga locatii disponibile din lista.
           </div>
         )}
       </div>
@@ -81,19 +84,38 @@ export function LocationSelectionBasket({
             {warnings.slice(0, 3).map((warning) => <p key={warning}>{warning}</p>)}
           </div>
         ) : null}
-        <button className="focus-button secondary" type="button" onClick={onCopyCodes} disabled={!items.length}>
-          <Copy size={16} />
-          Copiaza coduri
+        <button
+          className="cursor-not-allowed rounded-lg border border-focus-line bg-focus-ink/80 px-4 py-3 text-center text-sm font-black uppercase text-slate-400"
+          type="button"
+          disabled
+          title="Disponibil dupa activarea modulului Media Plan."
+        >
+          Continua catre Media Plan - urmatorul pas
         </button>
+        <a className="focus-button secondary justify-center" href={exportHref}>
+          <Download size={16} />
+          Exporta disponibil
+        </a>
+        <button className="focus-button secondary" type="button" onClick={onClear} disabled={!items.length}>
+          <Trash2 size={15} />
+          Goleste selectia
+        </button>
+        <details className="rounded-lg border border-focus-line bg-focus-ink/55 p-3 text-xs text-slate-300">
+          <summary className="flex cursor-pointer list-none items-center gap-2 font-black text-focus-yellow">
+            <MoreHorizontal size={15} />
+            Mai multe
+          </summary>
+          <button className="mt-3 inline-flex items-center gap-2 rounded-md border border-focus-line px-3 py-2 font-bold text-slate-100 disabled:opacity-45" type="button" onClick={onCopyCodes} disabled={!items.length}>
+            <Copy size={16} />
+            Copiaza coduri selectate
+          </button>
+        </details>
         {process.env.NODE_ENV !== "production" ? (
           <details className="rounded-lg border border-focus-line bg-focus-ink/55 p-3 text-xs text-slate-300">
             <summary className="cursor-pointer font-black text-focus-yellow">Payload viitor Media Plan</summary>
             <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(mediaPlanSeed, null, 2)}</pre>
           </details>
         ) : null}
-        <button className="focus-button" type="button" disabled title="Urmatorul batch va salva Media Plan-ul.">
-          Continua catre Media Plan - urmatorul pas
-        </button>
       </footer>
     </aside>
   );
@@ -150,6 +172,7 @@ function SelectedLocationRow({
             <AvailabilityBadge availability={availability} />
           </div>
           {item.availabilityWarnings[0] ? <p className="mt-1 line-clamp-2 text-xs text-amber-100">{item.availabilityWarnings[0]}</p> : null}
+          <p className="mt-1 truncate text-xs text-slate-400">{item.snapshot.name || item.snapshot.address || "-"}</p>
         </div>
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
@@ -178,4 +201,14 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function round(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function periodLabel(periodStart: string, periodEnd: string) {
+  if (!periodStart || !periodEnd) return "Alege perioada campaniei";
+  if (periodStart > periodEnd) return "Perioada invalida";
+  return `${formatDate(periodStart)} - ${formatDate(periodEnd)}`;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(value));
 }

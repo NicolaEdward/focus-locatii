@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
-import { AlertTriangle, CheckCircle2, Copy, Eraser, ListChecks, MapPin, Search, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ListChecks, MapPin, Search, SlidersHorizontal } from "lucide-react";
 import { LocationSelectionBasket } from "@/components/admin/location-selection/LocationSelectionBasket";
 import { LocationSelectionFilters } from "@/components/admin/location-selection/LocationSelectionFilters";
 import { LocationSelectionMap } from "@/components/admin/location-selection/LocationSelectionMap";
@@ -22,11 +22,6 @@ import type {
   LocationSelectionResponse
 } from "@/lib/location-selection-dto";
 
-type CompanyOption = {
-  value: string;
-  label: string;
-};
-
 type SelectionState = {
   companyEntity: string;
   periodStart: string;
@@ -35,7 +30,7 @@ type SelectionState = {
 };
 
 const emptySelection: SelectionState = {
-  companyEntity: "",
+  companyEntity: "Focus Media",
   periodStart: "",
   periodEnd: "",
   items: []
@@ -43,18 +38,16 @@ const emptySelection: SelectionState = {
 
 export function AdminLocationSelectionPage({
   initialData,
-  companyOptions,
   session
 }: {
   initialData: LocationSelectionResponse;
-  companyOptions: CompanyOption[];
   session: AuthSession;
 }) {
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [selectionLoaded, setSelectionLoaded] = useState(false);
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
-  const [filters, setFilters] = useState<SelectionFilters>({ sort: "code", availability: "ALL" });
+  const [filters, setFilters] = useState<SelectionFilters>({ sort: "code", availability: "PROPOSABLE" });
   const [availabilityById, setAvailabilityById] = useState<Record<string, LocationSelectionAvailability>>({});
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
@@ -75,28 +68,15 @@ export function AdminLocationSelectionPage({
     const normalizedSearch = normalizeSearch(deferredSearch);
     return initialData.locations.filter((location) => {
       if (normalizedSearch && !locationMatchesSearch(location, normalizedSearch)) return false;
-      if (filters.city && location.city !== filters.city) return false;
-      if (filters.area && location.area !== filters.area) return false;
       if (filters.mediaType && location.mediaType !== filters.mediaType && location.category !== filters.mediaType) return false;
       if (filters.status && location.status !== filters.status) return false;
-      if (filters.minSurface != null && (location.surface == null || location.surface < filters.minSurface)) return false;
-      if (filters.maxSurface != null && (location.surface == null || location.surface > filters.maxSurface)) return false;
-      if (filters.minPrice != null && (location.suggestedBasePrice == null || location.suggestedBasePrice < filters.minPrice)) return false;
-      if (filters.maxPrice != null && (location.suggestedBasePrice == null || location.suggestedBasePrice > filters.maxPrice)) return false;
-      if (filters.hasImage === true && !location.hasImage) return false;
-      if (filters.hasPublicPrice === true && location.suggestedBasePrice == null) return false;
       return true;
     });
-  }, [deferredSearch, filters.area, filters.city, filters.hasImage, filters.hasPublicPrice, filters.maxPrice, filters.maxSurface, filters.mediaType, filters.minPrice, filters.minSurface, filters.status, initialData.locations]);
+  }, [deferredSearch, filters.mediaType, filters.status, initialData.locations]);
 
   const filteredLocations = useMemo(() => {
     let rows = baseFilteredLocations.filter((location) => {
-      if (filters.availability && filters.availability !== "ALL") {
-        const state = availabilityById[location.id]?.state || "UNKNOWN";
-        if (filters.availability === "NO_PERIOD" && periodValid) return false;
-        if (filters.availability !== "NO_PERIOD" && state !== filters.availability) return false;
-      }
-      return true;
+      return locationMatchesAvailabilityFilter(location.id, filters.availability || "PROPOSABLE", availabilityById, periodValid, availabilityLoading);
     });
 
     rows = sortLocations(rows, filters.sort, selectedIds, availabilityById);
@@ -105,7 +85,7 @@ export function AdminLocationSelectionPage({
 
   const selectionPayload = useMemo(
     () => ({
-      companyEntity: selection.companyEntity || undefined,
+      companyEntity: selection.companyEntity || "Focus Media",
       periodStart: selection.periodStart || undefined,
       periodEnd: selection.periodEnd || undefined,
       selectedLocations: selection.items
@@ -202,14 +182,15 @@ export function AdminLocationSelectionPage({
     };
   }, [allAvailabilityIdsKey, availabilityRefreshKey, initialData.locations, selectedAvailabilityIdsKey, selection.periodEnd, selection.periodStart]);
 
-  const updatePeriod = useCallback((patch: Partial<Pick<SelectionState, "periodStart" | "periodEnd" | "companyEntity">>) => {
+  const updatePeriod = useCallback((patch: Partial<Pick<SelectionState, "periodStart" | "periodEnd">>) => {
     setSelection((current) => ({ ...current, ...patch }));
   }, []);
 
   const addLocation = useCallback((location: LocationSelectionLocationDTO) => {
+    const availability = availabilityById[location.id];
+    if (periodValid && availability?.state === "CONFLICT") return;
     setSelection((current) => {
       if (current.items.some((item) => item.locationId === location.id)) return current;
-      const availability = availabilityById[location.id];
       return {
         ...current,
         items: [
@@ -227,7 +208,7 @@ export function AdminLocationSelectionPage({
         ]
       };
     });
-  }, [availabilityById]);
+  }, [availabilityById, periodValid]);
 
   const removeLocation = useCallback((locationId: string) => {
     setSelection((current) => ({
@@ -244,8 +225,11 @@ export function AdminLocationSelectionPage({
   }, [selection.items.length]);
 
   const selectVisible = useCallback(() => {
-    const candidates = filteredLocations.filter((location) => !selectedIds.has(location.id));
-    if (candidates.length > 25 && !window.confirm(`Adaugi ${candidates.length} locatii vizibile in selectie?`)) return;
+    const candidates = filteredLocations.filter((location) => {
+      if (selectedIds.has(location.id)) return false;
+      return !periodValid || availabilityById[location.id]?.state !== "CONFLICT";
+    });
+    if (candidates.length > 25 && !window.confirm(`Vrei sa selectezi ${candidates.length} locatii?`)) return;
     setSelection((current) => {
       const existing = new Set(current.items.map((item) => item.locationId));
       const additions = candidates
@@ -265,17 +249,7 @@ export function AdminLocationSelectionPage({
         });
       return { ...current, items: [...current.items, ...additions] };
     });
-  }, [availabilityById, filteredLocations, selectedIds]);
-
-  const removeVisibleSelected = useCallback(() => {
-    const visibleIds = new Set(filteredLocations.map((location) => location.id));
-    setSelection((current) => ({
-      ...current,
-      items: current.items
-        .filter((item) => !visibleIds.has(item.locationId))
-        .map((item, index) => ({ ...item, sortOrder: index }))
-    }));
-  }, [filteredLocations]);
+  }, [availabilityById, filteredLocations, periodValid, selectedIds]);
 
   const moveItem = useCallback((locationId: string, direction: -1 | 1) => {
     setSelection((current) => {
@@ -298,6 +272,14 @@ export function AdminLocationSelectionPage({
     selection.periodStart && selection.periodEnd && selection.periodStart > selection.periodEnd
       ? "Data de final trebuie sa fie dupa data de start."
       : null;
+  const exportHref = useMemo(
+    () => buildAvailabilityExportHref({
+      locationIds: selection.items.length ? selection.items.map((item) => item.locationId) : filteredLocations.map((location) => location.id),
+      periodStart: periodValid ? selection.periodStart : "",
+      periodEnd: periodValid ? selection.periodEnd : ""
+    }),
+    [filteredLocations, periodValid, selection.items, selection.periodEnd, selection.periodStart]
+  );
 
   return (
     <main className="min-h-screen bg-focus-dark text-white">
@@ -306,9 +288,9 @@ export function AdminLocationSelectionPage({
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="max-w-3xl">
               <p className="text-xs font-black uppercase tracking-[0.18em] text-focus-yellow">Selector intern pentru oferte OOH</p>
-              <h1 className="mt-2 font-display text-4xl font-black uppercase tracking-tight text-white">Selectie locatii pentru Media Plan</h1>
+              <h1 className="mt-2 font-display text-4xl font-black uppercase tracking-tight text-white">Selector oferta OOH</h1>
               <p className="mt-2 text-sm text-slate-300">
-                Alege perioada, filtreaza inventarul si pregateste o selectie curata pentru viitorul flux de Media Plan.
+                Alege perioada campaniei, vezi disponibilitatea reala si construieste rapid selectia de locatii pentru client.
               </p>
             </div>
             <div className="rounded-lg border border-focus-line bg-focus-ink/60 px-4 py-3">
@@ -317,19 +299,7 @@ export function AdminLocationSelectionPage({
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 rounded-lg border border-focus-line bg-focus-ink/60 p-4 lg:grid-cols-[1fr_1fr_1fr_1.2fr]">
-            <Field label="Firma contractanta">
-              <select
-                className="focus-input"
-                value={selection.companyEntity}
-                onChange={(event) => updatePeriod({ companyEntity: event.target.value })}
-              >
-                <option value="">Alege firma</option>
-                {companyOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </Field>
+          <div className="mt-5 grid gap-3 rounded-lg border border-focus-line bg-focus-ink/60 p-4 lg:grid-cols-[1fr_1fr_1.4fr]">
             <Field label="Start campanie">
               <input className="focus-input" type="date" value={selection.periodStart} onChange={(event) => updatePeriod({ periodStart: event.target.value })} />
             </Field>
@@ -339,7 +309,7 @@ export function AdminLocationSelectionPage({
             <div className="min-h-[66px] rounded-lg border border-focus-line bg-focus-navy/55 p-3 text-sm">
               <p className="font-black text-white">
                 {periodValid && !availabilityLoading ? <CheckCircle2 className="mr-2 inline h-4 w-4 text-emerald-300" /> : <AlertTriangle className="mr-2 inline h-4 w-4 text-focus-yellow" />}
-                {availabilityLoading ? "Verificare disponibilitate..." : periodValid ? "Disponibilitate actualizata." : "Disponibilitate generala incarcata."}
+                {availabilityLoading ? "Verificare disponibilitate..." : periodValid ? "Afisam implicit doar locatiile propunibile." : "Disponibilitate generala incarcata."}
               </p>
               {periodError ? <p className="mt-1 font-bold text-red-100">{periodError}</p> : null}
               {availabilityError ? <p className="mt-1 font-bold text-red-100">{availabilityError}</p> : null}
@@ -351,31 +321,27 @@ export function AdminLocationSelectionPage({
         </div>
       </section>
 
-      <div className="focus-container grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="focus-container grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_430px]">
         <section className="grid min-w-0 gap-4">
           <div className="grid gap-3 rounded-lg border border-focus-line bg-focus-navy/80 p-4">
             <div className="flex items-center gap-2 text-sm font-black uppercase text-focus-yellow">
               <SlidersHorizontal size={16} />
               Filtrare rapida
             </div>
-            <div className="grid gap-3 lg:grid-cols-[minmax(260px,1.2fr)_repeat(4,minmax(0,1fr))]">
+            <div className="grid gap-3 lg:grid-cols-[minmax(280px,1.3fr)_220px_240px]">
               <label className="grid gap-1 text-xs font-bold uppercase text-slate-300">
-                Cauta cod, zona, oras, adresa
+                Cauta cod, nume sau adresa
                 <span className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input className="focus-input pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ex: DN1, Baneasa, FM..." />
                 </span>
               </label>
-              <LocationSelectionFilters filters={filters} onChange={setFilters} options={initialData.options} />
+              <LocationSelectionFilters filters={filters} onChange={setFilters} options={initialData.options} periodSelected={periodValid} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={selectVisible}>
                 <ListChecks size={16} />
-                Selecteaza rezultate vizibile
-              </button>
-              <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={removeVisibleSelected}>
-                <Eraser size={16} />
-                Scoate vizibile selectate
+                Selecteaza tot
               </button>
               <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => setShowMap((value) => !value)}>
                 <MapPin size={16} />
@@ -390,10 +356,6 @@ export function AdminLocationSelectionPage({
               <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => setAvailabilityRefreshKey((key) => key + 1)}>
                 <CheckCircle2 size={16} />
                 Reimprospateaza disponibilitatea
-              </button>
-              <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={copyCodes} disabled={!selection.items.length}>
-                <Copy size={16} />
-                Copiaza coduri selectate
               </button>
             </div>
           </div>
@@ -428,6 +390,9 @@ export function AdminLocationSelectionPage({
           locationsById={selectedItemsById}
           warnings={warnings}
           mediaPlanSeed={seed}
+          periodStart={selection.periodStart}
+          periodEnd={selection.periodEnd}
+          exportHref={exportHref}
           onRemove={removeLocation}
           onClear={clearSelection}
           onMove={moveItem}
@@ -477,6 +442,30 @@ function sortLocations(
   return rows;
 }
 
+function locationMatchesAvailabilityFilter(
+  locationId: string,
+  filter: SelectionFilters["availability"],
+  availabilityById: Record<string, LocationSelectionAvailability>,
+  periodValid: boolean,
+  availabilityLoading: boolean
+) {
+  const availability = availabilityById[locationId];
+  const state = availability?.state || "UNKNOWN";
+  if (periodValid) {
+    if (!availability && availabilityLoading) return true;
+    if (filter === "ALL") return true;
+    if (filter === "CONFLICT") return state === "CONFLICT";
+    if (filter === "PARTIAL") return state === "PARTIAL";
+    if (filter === "AVAILABLE") return state === "AVAILABLE";
+    return state === "AVAILABLE" || state === "PARTIAL";
+  }
+
+  if (filter === "CURRENT_AVAILABLE") return state === "AVAILABLE" && !availability?.blockingIntervals.length;
+  if (filter === "FUTURE_BOOKINGS") return state === "AVAILABLE" && Boolean(availability?.blockingIntervals.length);
+  if (filter === "CURRENT_CONFLICT" || filter === "CONFLICT") return state === "CONFLICT";
+  return true;
+}
+
 function availabilityRank(state?: LocationSelectionAvailabilityState) {
   if (state === "AVAILABLE") return 0;
   if (state === "PARTIAL") return 1;
@@ -502,12 +491,17 @@ function compare(left: string, right: string) {
   return left.localeCompare(right, "ro");
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(value));
-}
-
 function selectionStorageKey(userId: string) {
   return `focus-admin-location-selection:${userId}`;
+}
+
+function buildAvailabilityExportHref(input: { locationIds: string[]; periodStart?: string; periodEnd?: string }) {
+  const params = new URLSearchParams();
+  if (input.locationIds.length) params.set("ids", input.locationIds.join(","));
+  if (input.periodStart) params.set("from", input.periodStart);
+  if (input.periodEnd) params.set("to", input.periodEnd);
+  params.set("includeHidden", "1");
+  return `/api/admin/availability/excel?${params.toString()}`;
 }
 
 function readSavedSelection(userId: string): SelectionState | null {
@@ -518,7 +512,7 @@ function readSavedSelection(userId: string): SelectionState | null {
     const parsed = JSON.parse(raw) as SelectionState;
     if (!Array.isArray(parsed.items)) return null;
     return {
-      companyEntity: parsed.companyEntity || "",
+      companyEntity: parsed.companyEntity || "Focus Media",
       periodStart: parsed.periodStart || "",
       periodEnd: parsed.periodEnd || "",
       items: parsed.items

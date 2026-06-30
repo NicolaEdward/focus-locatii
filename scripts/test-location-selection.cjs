@@ -13,6 +13,7 @@ const files = {
   availability: read("src", "lib", "location-selection-availability.ts"),
   dto: read("src", "lib", "location-selection-dto.ts"),
   builder: read("src", "components", "admin", "location-selection", "AdminLocationSelectionPage.tsx"),
+  filters: read("src", "components", "admin", "location-selection", "LocationSelectionFilters.tsx"),
   results: read("src", "components", "admin", "location-selection", "LocationSelectionResults.tsx"),
   basket: read("src", "components", "admin", "location-selection", "LocationSelectionBasket.tsx"),
   map: read("src", "components", "admin", "location-selection", "LocationSelectionMap.tsx"),
@@ -39,7 +40,8 @@ assert(files.availability.includes("periodEnd: { gte: periodStart }"), "availabi
 assert(files.availability.includes("buildNoPeriodAvailability"), "availability must provide useful no-period status");
 assert(files.availability.includes("Disponibil pana la"), "no-period future booking should show available-until label");
 assert(files.availability.includes("Disponibil din"), "current booking should show available-from label");
-assert(files.availability.includes("Conflict in perioada selectata"), "selected-period conflicts must be unambiguous");
+assert(files.availability.includes("label: \"Indisponibil\""), "selected-period conflicts must be labelled unavailable");
+assert(files.availability.includes("Ocupat in perioada"), "selected-period conflicts must explain occupied period");
 assert(files.availability.includes("Disponibil in perioada selectata"), "selected-period available state must be unambiguous");
 assert(files.availability.includes("isGenericAvailableNote"), "generic available notes must be suppressed when they contradict conflicts");
 assert(files.dto.includes("tone: LocationSelectionAvailabilityTone"), "availability DTO must include tone");
@@ -71,14 +73,33 @@ assert(files.builder.includes("AbortController"), "availability requests must be
 assert(files.builder.includes("allAvailabilityIdsKey"), "availability requests must use stable location id keys");
 assert(!files.builder.includes("[filteredLocations, selection.items, selection.periodEnd, selection.periodStart]"), "availability effect must not depend on availability-derived filtered rows");
 assert(files.builder.includes("const [showMap, setShowMap] = useState(false)"), "map should be collapsed by default");
-assert(files.builder.includes("Selecteaza rezultate vizibile"), "bulk select visible action should exist");
-assert(files.builder.includes("Adaugi ${candidates.length} locatii vizibile"), "bulk selecting more than 25 should ask for confirmation");
+assert(!files.builder.includes("Firma contractanta"), "selector must not expose legal company selection");
+assert(files.builder.includes('companyEntity: "Focus Media"'), "selector may keep a safe internal company context for compatibility");
+assert(files.builder.includes("locationMatchesAvailabilityFilter"), "selector must use one availability filter model");
+assert(files.builder.includes('availability: "PROPOSABLE"'), "selected-period default should focus on proposable locations");
+assert(files.builder.includes("state === \"AVAILABLE\" || state === \"PARTIAL\""), "default selected-period filter should hide fully conflicted locations");
+assert(files.builder.includes("availabilityById[location.id]?.state !== \"CONFLICT\""), "bulk select must not select hidden or conflicted locations");
+assert(files.builder.includes("Selecteaza tot"), "bulk select action should be sales-friendly");
+assert(files.builder.includes("Vrei sa selectezi ${candidates.length} locatii?"), "bulk selecting more than 25 should ask for confirmation");
+assert(files.builder.includes("buildAvailabilityExportHref"), "selector should build an availability export URL");
+assert(files.filters.includes("Disponibile / partiale"), "availability filter should support default proposable locations");
+assert(files.filters.includes("Disponibile partial"), "availability filter should support partial availability");
+assert(files.filters.includes("Indisponibile / cu conflict"), "availability filter should expose conflicts only explicitly");
+assert(!files.filters.includes("Suprafata min."), "surface min filter should not be primary");
+assert(!files.filters.includes("Suprafata max."), "surface max filter should not be primary");
+assert(!files.filters.includes("Pret min."), "price min filter should not be primary");
+assert(!files.filters.includes("Pret max."), "price max filter should not be primary");
+assert(!files.filters.includes("Select label=\"Zona\""), "zone filter should not be primary");
 assert(files.basket.includes("Continua catre Media Plan - urmatorul pas"), "future Media Plan CTA should be disabled placeholder");
 assert(files.basket.includes("disabled"), "future Media Plan CTA must not write in this batch");
+assert(files.basket.includes("Exporta disponibil"), "basket should expose availability export as a primary action");
+assert(files.basket.includes("Mai multe") && files.basket.includes("Copiaza coduri selectate"), "copy codes should be secondary");
 
 assert(files.results.includes("Adauga") && files.results.includes("Scoate"), "result rows need add/remove actions");
 assert(files.results.includes("availability?.explanation"), "result rows must use normalized availability explanation");
 assert(files.results.includes("w-[104px]"), "result action button should keep a stable visible width");
+assert(files.results.includes("disabled={unavailable}"), "fully unavailable rows should not be addable by default");
+assert(files.results.includes("blockingText"), "conflict rows should show safe blocking intervals when visible");
 assert(files.map.includes("scrollWheelZoom: false"), "selector map should not hijack page scroll");
 assert(files.map.includes("displayLat") && files.map.includes("displayLng"), "selector map must use display coordinates");
 assert(!files.map.includes("latReal") && !files.map.includes("lngReal"), "selector map must not use private coordinates");

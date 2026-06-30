@@ -133,7 +133,7 @@ function buildAvailability(input: {
     return {
       locationId: input.location.id,
       state: "CONFLICT",
-      label: "Conflict in perioada selectata",
+      label: "Indisponibil",
       tone: "red",
       explanation,
       warnings: [explanation, ...baseWarnings.filter((warning) => !isGenericAvailableNote(warning))],
@@ -146,9 +146,9 @@ function buildAvailability(input: {
   return {
     locationId: input.location.id,
     state: "AVAILABLE",
-    label: "Disponibil in perioada selectata",
+    label: "Disponibil",
     tone: warnings.length ? "yellow" : "green",
-    explanation: warnings[0] || "Nu exista HOLD, RESERVED sau BOOKED suprapus.",
+    explanation: warnings[0] || "Disponibil in perioada selectata.",
     warnings,
     conflicts: [],
     blockingIntervals: []
@@ -288,7 +288,7 @@ function toBlockingInterval(conflict: LocationSelectionConflict): LocationSelect
 function conflictExplanation(intervals: LocationSelectionBlockingInterval[]) {
   const first = intervals[0];
   if (!first) return "Exista conflict in perioada selectata.";
-  return `Ocupat / rezervat intre ${formatDate(first.start)} - ${formatDate(first.end)}.`;
+  return `Ocupat in perioada ${formatDate(first.start)} - ${formatDate(first.end)}.`;
 }
 
 function isGenericAvailableNote(value: string) {

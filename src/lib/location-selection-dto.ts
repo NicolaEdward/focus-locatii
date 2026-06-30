@@ -70,7 +70,7 @@ export type LocationSelectionFilters = {
   city?: string | null;
   area?: string | null;
   mediaType?: string | null;
-  availability?: LocationSelectionAvailabilityState | "ALL" | "NO_PERIOD" | null;
+  availability?: LocationSelectionAvailabilityState | "ALL" | "PROPOSABLE" | "CURRENT_AVAILABLE" | "FUTURE_BOOKINGS" | "CURRENT_CONFLICT" | null;
   status?: string | null;
   minSurface?: number | null;
   maxSurface?: number | null;

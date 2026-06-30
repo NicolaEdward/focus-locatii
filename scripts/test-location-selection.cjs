@@ -43,6 +43,11 @@ assert(files.availability.includes("Disponibil din"), "current booking should sh
 assert(files.availability.includes("label: \"Indisponibil\""), "selected-period conflicts must be labelled unavailable");
 assert(files.availability.includes("Ocupat in perioada"), "selected-period conflicts must explain occupied period");
 assert(files.availability.includes("Disponibil in perioada selectata"), "selected-period available state must be unambiguous");
+assert(files.availability.includes("selectedPeriodCoverage"), "selected-period availability must calculate partial coverage");
+assert(files.availability.includes('state: "PARTIAL"'), "selected-period partial overlaps must be marked as partial, not full conflict");
+assert(files.availability.includes("Disponibil partial"), "selected-period partial availability must have a clear label");
+assert(files.availability.includes("availableFrom: firstAvailable.start.toISOString()"), "partial availability should expose the first available start date");
+assert(files.availability.includes("availableUntil: firstAvailable.end.toISOString()"), "partial availability should expose the first available end date");
 assert(files.availability.includes("isGenericAvailableNote"), "generic available notes must be suppressed when they contradict conflicts");
 assert(files.dto.includes("tone: LocationSelectionAvailabilityTone"), "availability DTO must include tone");
 assert(files.dto.includes("explanation: string"), "availability DTO must include explanation");

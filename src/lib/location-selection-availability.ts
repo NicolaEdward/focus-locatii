@@ -129,7 +129,25 @@ function buildAvailability(input: {
   const baseWarnings = locationWarnings(input.location, input.periodStart, input.periodEnd);
   if (input.conflicts.length) {
     const blockingIntervals = input.conflicts.map(toBlockingInterval);
-    const explanation = conflictExplanation(blockingIntervals);
+    const coverage = selectedPeriodCoverage(blockingIntervals, input.periodStart, input.periodEnd);
+    if (!coverage.coversEntirePeriod && coverage.availableSegments.length) {
+      const explanation = partialExplanation(coverage);
+      const firstAvailable = coverage.availableSegments[0];
+      return {
+        locationId: input.location.id,
+        state: "PARTIAL",
+        label: "Disponibil partial",
+        tone: "yellow",
+        explanation,
+        warnings: [explanation, ...baseWarnings.filter((warning) => !isGenericAvailableNote(warning))],
+        conflicts: input.conflicts,
+        blockingIntervals,
+        availableFrom: firstAvailable.start.toISOString(),
+        availableUntil: firstAvailable.end.toISOString()
+      };
+    }
+
+    const explanation = conflictExplanation(coverage.mergedIntervals.length ? coverage.mergedIntervals : blockingIntervals);
     return {
       locationId: input.location.id,
       state: "CONFLICT",
@@ -291,6 +309,81 @@ function conflictExplanation(intervals: LocationSelectionBlockingInterval[]) {
   return `Ocupat in perioada ${formatDate(first.start)} - ${formatDate(first.end)}.`;
 }
 
+function partialExplanation(coverage: SelectedPeriodCoverage) {
+  const firstBlocked = coverage.mergedIntervals[0];
+  const firstAvailable = coverage.availableSegments[0];
+  const blockedText = firstBlocked
+    ? coverage.mergedIntervals.length > 1
+      ? `Ocupat in ${coverage.mergedIntervals.length} intervale; primul: ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}.`
+      : `Ocupat ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}.`
+    : "Exista ocupare partiala.";
+  const availableText = firstAvailable
+    ? coverage.availableSegments.length > 1
+      ? `Primul interval disponibil: ${formatDate(firstAvailable.start)} - ${formatDate(firstAvailable.end)}.`
+      : `Disponibil ${formatDate(firstAvailable.start)} - ${formatDate(firstAvailable.end)}.`
+    : "Verifica intervalele disponibile.";
+  return `${blockedText} ${availableText}`;
+}
+
+type SelectedPeriodCoverage = {
+  mergedIntervals: LocationSelectionBlockingInterval[];
+  availableSegments: Array<{ start: Date; end: Date }>;
+  coversEntirePeriod: boolean;
+};
+
+function selectedPeriodCoverage(
+  intervals: LocationSelectionBlockingInterval[],
+  periodStart: Date,
+  periodEnd: Date
+): SelectedPeriodCoverage {
+  const clamped = intervals
+    .map((interval) => ({
+      status: interval.status,
+      start: maxDate(new Date(interval.start), periodStart),
+      end: minDate(new Date(interval.end), periodEnd)
+    }))
+    .filter((interval) => interval.start <= interval.end)
+    .sort((left, right) => left.start.getTime() - right.start.getTime() || left.end.getTime() - right.end.getTime());
+
+  const merged: Array<{ status: string; start: Date; end: Date }> = [];
+  for (const interval of clamped) {
+    const last = merged[merged.length - 1];
+    if (!last || interval.start > addDays(last.end, 1)) {
+      merged.push({ ...interval });
+      continue;
+    }
+    if (interval.end > last.end) last.end = interval.end;
+  }
+
+  const availableSegments: Array<{ start: Date; end: Date }> = [];
+  let cursor = periodStart;
+  for (const interval of merged) {
+    if (cursor < interval.start) {
+      availableSegments.push({ start: cursor, end: addDays(interval.start, -1) });
+    }
+    const nextCursor = addDays(interval.end, 1);
+    if (nextCursor > cursor) cursor = nextCursor;
+  }
+  if (cursor <= periodEnd) {
+    availableSegments.push({ start: cursor, end: periodEnd });
+  }
+
+  const coversEntirePeriod =
+    merged.length === 1 &&
+    merged[0].start <= periodStart &&
+    merged[0].end >= periodEnd;
+
+  return {
+    mergedIntervals: merged.map((interval) => ({
+      status: interval.status,
+      start: interval.start.toISOString(),
+      end: interval.end.toISOString()
+    })),
+    availableSegments,
+    coversEntirePeriod
+  };
+}
+
 function isGenericAvailableNote(value: string) {
   return /^Nota disponibilitate:\s*disponibil\.?$/i.test(value.trim());
 }
@@ -318,6 +411,14 @@ function startOfUtcDay(date: Date) {
 
 function addDays(date: Date, days: number) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
+}
+
+function maxDate(left: Date, right: Date) {
+  return left > right ? left : right;
+}
+
+function minDate(left: Date, right: Date) {
+  return left < right ? left : right;
 }
 
 function formatDate(value: string | Date) {

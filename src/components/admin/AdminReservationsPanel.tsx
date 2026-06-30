@@ -263,15 +263,6 @@ export function AdminReservationsPanel({
   const [reservationSort, setReservationSort] = useState<ReservationListSort>("created");
   const [salesLogMonth, setSalesLogMonth] = useState(currentMonthInputValue);
   const [showReservationLog, setShowReservationLog] = useState(false);
-  const [exportFrom, setExportFrom] = useState("");
-  const [exportTo, setExportTo] = useState("");
-  const [exportSearch, setExportSearch] = useState("");
-  const [exportCounty, setExportCounty] = useState("");
-  const [exportCity, setExportCity] = useState("");
-  const [exportCategory, setExportCategory] = useState("");
-  const [exportType, setExportType] = useState("");
-  const [exportStatus, setExportStatus] = useState("");
-  const [exportOnlySelected, setExportOnlySelected] = useState(false);
   const [salesPeriodMode, setSalesPeriodMode] = useState<SalesPeriodMode>("month");
   const [salesMonth, setSalesMonth] = useState(currentMonthInputValue);
   const [salesFrom, setSalesFrom] = useState("");
@@ -376,17 +367,6 @@ export function AdminReservationsPanel({
       ),
     [locations]
   );
-  const counties = useMemo(() => unique(locations.map((location) => location.county)), [locations]);
-  const cities = useMemo(() => unique(locations.map((location) => location.city)), [locations]);
-  const categories = useMemo(
-    () =>
-      [...new Map(locations.map((location) => [location.categorySlug, location.categoryName])).entries()].sort((a, b) =>
-        a[1].localeCompare(b[1], "ro")
-      ),
-    [locations]
-  );
-  const mediaTypes = useMemo(() => unique(locations.map((location) => location.type)), [locations]);
-
   const locationChoices = useMemo(() => {
     const search = locationSearch.toLowerCase();
     return sortedLocations
@@ -581,21 +561,6 @@ export function AdminReservationsPanel({
         .sort((a, b) => new Date(a.taskDate).getTime() - new Date(b.taskDate).getTime()),
     [neutralizationWindowEnd, operationalReservations, operationsWindowStart, showOperationHistory]
   );
-
-  const exportUrl = useMemo(() => {
-    const params = new URLSearchParams();
-    if (exportFrom) params.set("from", exportFrom);
-    if (exportTo) params.set("to", exportTo);
-    if (exportSearch) params.set("q", exportSearch);
-    if (exportCounty) params.set("county", exportCounty);
-    if (exportCity) params.set("city", exportCity);
-    if (exportCategory) params.set("category", exportCategory);
-    if (exportType) params.set("type", exportType);
-    if (exportStatus) params.set("status", exportStatus);
-    if (exportOnlySelected && form.locationIds.length) params.set("ids", form.locationIds.join(","));
-    const query = params.toString();
-    return `/api/admin/availability/excel${query ? `?${query}` : ""}`;
-  }, [exportCategory, exportCity, exportCounty, exportFrom, exportOnlySelected, exportSearch, exportStatus, exportTo, exportType, form.locationIds]);
 
   const salesReportUrl = useMemo(() => {
     const params = new URLSearchParams();
@@ -1328,113 +1293,44 @@ export function AdminReservationsPanel({
 
           <div className="grid gap-4">
             <div className="focus-card rounded-lg p-5">
-              <p className="text-xs font-black uppercase text-focus-yellow">Disponibil pentru vanzari</p>
-              <h2 className="font-display text-3xl font-black uppercase text-white">Export Excel</h2>
-              <p className="mt-2 text-sm font-bold leading-6 text-slate-300">
-                Exportul pastreaza structura fisierului de lucru: foi pe categorii, linkuri Maps/Photo, rate card,
-                montare/neutralizare si disponibilitate calculata.
-              </p>
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
-                <InputField type="date" label="Disponibil de la" value={exportFrom} onChange={setExportFrom} />
-                <InputField type="date" label="Disponibil pana la" value={exportTo} onChange={setExportTo} />
-                <InputField label="Cauta in export" value={exportSearch} onChange={setExportSearch} />
-                <SelectField label="Judet" value={exportCounty} onChange={setExportCounty}>
-                  <option value="">Toate judetele</option>
-                  {counties.map((county) => (
-                    <option key={county} value={county}>
-                      {county}
-                    </option>
-                  ))}
+              <p className="text-xs font-black uppercase text-focus-yellow">Situatie vanzari</p>
+              <h2 className="font-display text-2xl font-black uppercase text-white">Perioada raportata</h2>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <SelectField
+                  label="Tip perioada"
+                  value={salesPeriodMode}
+                  onChange={(value) => setSalesPeriodMode(value as SalesPeriodMode)}
+                >
+                  <option value="month">Luna intreaga</option>
+                  <option value="custom">Interval personalizat</option>
                 </SelectField>
-                <SelectField label="Oras / zona" value={exportCity} onChange={setExportCity}>
-                  <option value="">Toate orasele</option>
-                  {cities.map((city) => (
-                    <option key={city} value={city}>
-                      {city}
-                    </option>
-                  ))}
-                </SelectField>
-                <SelectField label="Categorie" value={exportCategory} onChange={setExportCategory}>
-                  <option value="">Toate categoriile</option>
-                  {categories.map(([slug, name]) => (
-                    <option key={slug} value={slug}>
-                      {name}
-                    </option>
-                  ))}
-                </SelectField>
-                <SelectField label="Format media" value={exportType} onChange={setExportType}>
-                  <option value="">Toate formatele</option>
-                  {mediaTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </SelectField>
-                <SelectField label="Status" value={exportStatus} onChange={setExportStatus}>
-                  <option value="">Toate statusurile</option>
-                  <option value="AVAILABLE">Disponibile</option>
-                  <option value="BOOKED">Inchiriate</option>
-                  <option value="RESERVED">Rezervate</option>
-                </SelectField>
-              </div>
-              <label className="mt-3 flex items-center justify-between rounded-lg border border-focus-line px-3 py-2 text-sm font-bold text-slate-200">
-                Exporta doar locatiile selectate ({selectedLocations.length})
-                <input
-                  type="checkbox"
-                  checked={exportOnlySelected}
-                  onChange={(event) => setExportOnlySelected(event.target.checked)}
-                  disabled={!selectedLocations.length}
-                />
-              </label>
-              <a className="focus-button mt-4 w-full" href={exportUrl}>
-                <FileSpreadsheet size={20} />
-                Exporta disponibil
-              </a>
-              <p className="mt-3 text-xs font-bold uppercase text-slate-400">
-                Fara perioada: exporta portofoliul vandabil cu statusul actual si datele viitoare. Cu perioada:
-                exclude automat suprapunerile.
-              </p>
-
-              <div className="mt-5 border-t border-focus-line pt-5">
-                <p className="text-xs font-black uppercase text-focus-yellow">Situatie vanzari</p>
-                <h3 className="font-display text-2xl font-black uppercase text-white">Perioada raportata</h3>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <SelectField
-                    label="Tip perioada"
-                    value={salesPeriodMode}
-                    onChange={(value) => setSalesPeriodMode(value as SalesPeriodMode)}
-                  >
-                    <option value="month">Luna intreaga</option>
-                    <option value="custom">Interval personalizat</option>
-                  </SelectField>
-                  {salesPeriodMode === "month" ? (
-                    <InputField type="month" label="Luna" value={salesMonth} onChange={setSalesMonth} />
-                  ) : (
-                    <>
-                      <InputField type="date" label="De la" value={salesFrom} onChange={setSalesFrom} />
-                      <InputField type="date" label="Pana la" value={salesTo} onChange={setSalesTo} />
-                    </>
-                  )}
-                </div>
-                <p className="mt-3 text-xs font-bold leading-5 text-slate-300">
-                  Pretul de vanzare si totalurile se calculeaza pro-rata: chirie lunara x zile active / zilele
-                  calendaristice ale lunii.
-                </p>
-                {!canViewSalesReport ? (
-                  <p className="mt-3 rounded-md border border-focus-line px-3 py-2 text-sm text-slate-400">
-                    Raportul financiar agregat este disponibil directorului de vanzari, COO si administratorului.
-                  </p>
-                ) : salesPeriodError ? (
-                  <p className="mt-3 rounded-md border border-red-300/30 bg-red-300/10 px-3 py-2 text-sm font-bold text-red-100">
-                    {salesPeriodError}
-                  </p>
+                {salesPeriodMode === "month" ? (
+                  <InputField type="month" label="Luna" value={salesMonth} onChange={setSalesMonth} />
                 ) : (
-                  <a className="focus-button secondary mt-3 w-full" href={salesReportUrl}>
-                    <FileSpreadsheet size={20} />
-                    Exporta situatie vanzari
-                  </a>
+                  <>
+                    <InputField type="date" label="De la" value={salesFrom} onChange={setSalesFrom} />
+                    <InputField type="date" label="Pana la" value={salesTo} onChange={setSalesTo} />
+                  </>
                 )}
               </div>
+              <p className="mt-3 text-xs font-bold leading-5 text-slate-300">
+                Pretul de vanzare si totalurile se calculeaza pro-rata: chirie lunara x zile active / zilele
+                calendaristice ale lunii.
+              </p>
+              {!canViewSalesReport ? (
+                <p className="mt-3 rounded-md border border-focus-line px-3 py-2 text-sm text-slate-400">
+                  Raportul financiar agregat este disponibil directorului de vanzari, COO si administratorului.
+                </p>
+              ) : salesPeriodError ? (
+                <p className="mt-3 rounded-md border border-red-300/30 bg-red-300/10 px-3 py-2 text-sm font-bold text-red-100">
+                  {salesPeriodError}
+                </p>
+              ) : (
+                <a className="focus-button secondary mt-3 w-full" href={salesReportUrl}>
+                  <FileSpreadsheet size={20} />
+                  Exporta situatie vanzari
+                </a>
+              )}
             </div>
 
             <QuickOperationsSummary future={futureReservations.length} decorations={decorationTasks.length} neutralizations={neutralizationTasks.length} />
@@ -2889,10 +2785,6 @@ function occupiedPeriodsLabel(location: LocationDTO) {
     .slice(0, 3)
     .map((reservation) => `${dateLabel(reservation.periodStart)} - ${dateLabel(reservation.periodEnd)}`);
   return periods.length ? `Ocupat: ${periods.join("; ")}` : null;
-}
-
-function unique(values: Array<string | null>) {
-  return Array.from(new Set(values.filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b, "ro"));
 }
 
 function currentMonthInputValue() {

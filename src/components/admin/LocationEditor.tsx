@@ -1,6 +1,6 @@
 "use client";
 
-import { Save, X } from "lucide-react";
+import { Ban, CheckCircle2, Save, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { MEDIA_TYPE_OPTIONS } from "@/lib/format";
 import type { CategoryDTO, GpsAuditStatus, LocationDTO, LocationStatus } from "@/types/location";
@@ -81,6 +81,27 @@ export function LocationEditor({
 
   function update<K extends keyof EditorState>(key: K, value: EditorState[K]) {
     setState((current) => ({ ...current, [key]: value }));
+  }
+
+  function markCommerciallyBlocked() {
+    setState((current) => ({
+      ...current,
+      blockedReason: current.blockedReason || "Blocaj comercial manual",
+      blockedFrom: current.blockedFrom || todayInputValue(),
+      availabilityText: current.availabilityText || "Indisponibila temporar"
+    }));
+  }
+
+  function clearCommercialBlock() {
+    setState((current) => ({
+      ...current,
+      status: "AVAILABLE",
+      blockedReason: "",
+      blockedFrom: "",
+      blockedUntil: "",
+      blockedNotes: "",
+      availabilityText: current.availabilityText === "Indisponibila temporar" ? "Disponibil" : current.availabilityText
+    }));
   }
 
   async function save() {
@@ -181,6 +202,19 @@ export function LocationEditor({
         </EditorSection>
 
         <EditorSection title="Disponibilitate">
+          <p className="rounded-lg border border-focus-line bg-focus-navy/40 p-3 text-sm font-bold text-slate-300">
+            Disponibilitatea comerciala se calculeaza din rezervari si blocaje manuale. Nu folosi UNKNOWN pentru o locatie indisponibila; foloseste blocajul comercial de mai jos.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button className="focus-button secondary" type="button" onClick={markCommerciallyBlocked}>
+              <Ban size={18} />
+              Marcheaza indisponibila
+            </button>
+            <button className="focus-button secondary" type="button" onClick={clearCommercialBlock}>
+              <CheckCircle2 size={18} />
+              Marcheaza disponibila / activa
+            </button>
+          </div>
           <div className="grid gap-4 md:grid-cols-3">
             <label className="grid gap-2">
               <span className="text-sm font-bold">Status locatie</span>
@@ -236,8 +270,11 @@ export function LocationEditor({
         </EditorSection>
 
         <EditorSection title="Financiar">
+          <p className="rounded-lg border border-focus-line bg-focus-navy/40 p-3 text-sm font-bold text-slate-300">
+            Costurile de chirie/furnizor sunt pastrate aici pentru context. Pe termen lung, chiria trebuie legata de acordul cu furnizorul, iar printul, montajul si transportul trebuie sa stea pe campanie/operational.
+          </p>
           <div className="grid gap-4 md:grid-cols-3">
-            <Text label="Cost lunar intern" type="number" value={state.monthlyCost} onChange={(value) => update("monthlyCost", value)} />
+            <Text label="Cost furnizor / chirie locatie" type="number" value={state.monthlyCost} onChange={(value) => update("monthlyCost", value)} />
             <label className="grid gap-2">
               <span className="text-sm font-bold">Moneda cost</span>
               <select className="focus-input" value={state.costCurrency} onChange={(event) => update("costCurrency", event.target.value)}>
@@ -246,10 +283,10 @@ export function LocationEditor({
                 <option value="RON">RON</option>
               </select>
             </label>
-            <Text label="Tip cost" value={state.costType} onChange={(value) => update("costType", value)} />
-            <Text label="Furnizor cost" value={state.costSupplier} onChange={(value) => update("costSupplier", value)} />
+            <Text label="Tip cost / acord" value={state.costType} onChange={(value) => update("costType", value)} />
+            <Text label="Furnizor / proprietar cost" value={state.costSupplier} onChange={(value) => update("costSupplier", value)} />
           </div>
-          <Textarea label="Note cost intern" value={state.costNotes} onChange={(value) => update("costNotes", value)} />
+          <Textarea label="Note costuri / context financiar" value={state.costNotes} onChange={(value) => update("costNotes", value)} />
         </EditorSection>
 
         <EditorSection title="Documente / Istoric">
@@ -488,6 +525,11 @@ function numberOrNull(value: string) {
 
 function dateOrNull(value: string) {
   return value || null;
+}
+
+function todayInputValue() {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 }
 
 function toDateInput(value?: string | null) {

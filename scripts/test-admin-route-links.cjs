@@ -32,7 +32,21 @@ for (const file of dashboardActionFiles) {
 const header = read("src/components/admin/AdminHeader.tsx");
 assert.match(header, /usePathname/, "AdminHeader should derive active page state from the current pathname.");
 assert.match(header, /aria-current=\{active \? "page" : undefined\}/, "Active admin nav item should expose aria-current.");
-assert.match(header, /Vezi portal public/, "Admin public link should use the clearer label.");
+assert.match(header, /Portal public/, "Admin public link should use the clearer label.");
+assert.match(header, /label="Comercial"/, "AdminHeader should group sales workflows under Comercial.");
+assert(
+  header.indexOf('label="Comercial"') < header.indexOf('href="/admin/selectie-locatii"'),
+  "Selector oferta should live inside the Comercial workflow menu."
+);
+assert.match(header, /label="Financiar"/, "AdminHeader should group finance workflows under Financiar.");
+assert(
+  header.indexOf('label="Financiar"') < header.indexOf('href="/admin/furnizori"'),
+  "Furnizori should live inside the Financiar workflow menu."
+);
+assert.match(header, /label="Setari"/, "AdminHeader should expose Setari instead of a vague Admin button.");
+assert.equal(header.includes('<AdminNavLink href="/admin/campanii"'), false, "Campanii should not be a misleading top-level nav item.");
+assert.equal(header.includes('<AdminNavLink href="/admin/furnizori"'), false, "Furnizori should not clutter top-level navigation.");
+assert.equal(header.includes("/api/admin/availability/excel"), false, "Availability export should not be exposed from the global admin header.");
 
 const adminDashboard = read("src/components/admin/AdminDashboard.tsx");
 assert.equal(adminDashboard.includes("Backup JSON"), false, "Developer-ish Backup JSON label should not be visible.");

@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Copy, Download, Edit, Eye, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
+import { Copy, Download, Edit, Eye, FileSpreadsheet, ListChecks, Map, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
 import type { CategoryDTO, LocationDTO, OfferRequestDTO, ReservationDTO } from "@/types/location";
 import { LocationEditor } from "@/components/admin/LocationEditor";
 import { LocationDetailDrawer } from "@/components/admin/LocationDetailDrawer";
@@ -98,133 +99,158 @@ export function AdminDashboard({
       <section className="focus-container grid gap-5">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-black uppercase text-focus-yellow">Panou administrare</p>
-            <h1 className="font-display text-4xl font-black uppercase">Locatii Focus Media</h1>
+            <p className="text-xs font-black uppercase text-focus-yellow">Inventar OOH</p>
+            <h1 className="font-display text-4xl font-black uppercase">Locatii</h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-400">Gestioneaza inventarul, statusurile si detaliile locatiilor. Selectia comerciala si exportul de disponibilitate se fac din Selector oferta.</p>
           </div>
-          {canManageLocations ? <div className="flex flex-wrap gap-2">
-            <button className="focus-button" type="button" onClick={() => setEditing(null)}>
-              <Plus size={18} />
-              Adauga locatie
-            </button>
-            <a className="focus-button secondary" href="/api/export/json">
-              <Download size={18} />
-              Export inventar JSON
-            </a>
-          </div> : null}
+          <div className="flex flex-wrap gap-2">
+            {canManageLocations ? (
+              <button className="focus-button" type="button" onClick={() => setEditing(null)}>
+                <Plus size={18} />
+                Adauga locatie
+              </button>
+            ) : null}
+            <Link className="focus-button secondary" href="/admin/selectie-locatii">
+              <ListChecks size={18} />
+              Selector oferta
+            </Link>
+            {canManageLocations ? <LocationToolsMenu /> : null}
+          </div>
         </div>
 
-        <AdminReservationsPanel
-          locations={locations}
-          initialReservations={initialReservations}
-          operationReservations={operationReservations}
-          initialOfferRequests={initialOfferRequests}
-          onLocationsUpdated={setLocations}
-          session={session}
-        />
+        <section id="rezervari" className="grid gap-3 scroll-mt-28">
+          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-focus-line pb-3">
+            <div>
+              <p className="text-xs font-black uppercase text-focus-yellow">Ocupare locatii</p>
+              <h2 className="font-display text-2xl font-black uppercase text-white">Rezervari si HOLD-uri</h2>
+            </div>
+            <p className="max-w-2xl text-sm text-slate-400">
+              Active, urmatoare si operationale. Pentru selectie si disponibilitate pe oferta foloseste Selector oferta.
+            </p>
+          </div>
+          <AdminReservationsPanel
+            locations={locations}
+            initialReservations={initialReservations}
+            operationReservations={operationReservations}
+            initialOfferRequests={initialOfferRequests}
+            onLocationsUpdated={setLocations}
+            session={session}
+          />
+        </section>
 
         {feedback ? <p className={`rounded-lg border px-4 py-3 text-sm font-bold ${feedback.tone === "ok" ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-100" : "border-red-400/40 bg-red-400/10 text-red-100"}`}>{feedback.text}</p> : null}
 
-        <div className="focus-card grid gap-3 rounded-lg p-4 md:grid-cols-[1fr_220px_220px]">
-          <label className="relative">
-            <Search className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-slate-400" />
-            <input
-              className="focus-input pl-10"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Cauta cod, adresa, oras, tip"
-            />
-          </label>
-          <select className="focus-input" value={category} onChange={(event) => setCategory(event.target.value)}>
-            <option value="">Toate categoriile</option>
-            {categories.map((item) => (
-              <option key={item.id} value={item.slug}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <select className="focus-input" value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="">Toate statusurile</option>
-            <option value="AVAILABLE">AVAILABLE</option>
-            <option value="AVAILABLE_FROM">AVAILABLE_FROM</option>
-            <option value="BOOKED">BOOKED</option>
-            <option value="RESERVED">RESERVED</option>
-            <option value="UNKNOWN">UNKNOWN</option>
-          </select>
-        </div>
+        <section id="locatii" className="grid gap-3 scroll-mt-28">
+          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-focus-line pb-3">
+            <div>
+              <p className="text-xs font-black uppercase text-focus-yellow">Administrare inventar</p>
+              <h2 className="font-display text-2xl font-black uppercase text-white">Inventar locatii</h2>
+            </div>
+            <p className="text-sm text-slate-400">{filtered.length} din {locations.length} locatii afisate.</p>
+          </div>
 
-        <div id="locatii" className="scroll-mt-28 overflow-x-auto rounded-lg border border-focus-line">
-          <table className="w-full min-w-[980px] border-collapse bg-focus-ink/70 text-sm">
-            <thead className="bg-focus-navy text-left text-xs uppercase text-focus-yellow">
-              <tr>
-                <Th>Cod</Th>
-                <Th>Locatie</Th>
-                <Th>Vizibilitate</Th>
-                <Th>Status calculat</Th>
-                <Th>Pret</Th>
-                <Th>Actiuni</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((location) => (
-                <tr
-                  key={location.id}
-                  className={`border-t border-focus-line ${focusedLocationParam && (location.id === focusedLocationParam || location.code === focusedLocationParam) ? "bg-focus-yellow/10 outline outline-1 outline-focus-yellow/50" : ""}`}
-                >
-                  <Td>
-                    <strong className="text-white">{location.code}</strong>
-                    <p className="text-xs text-slate-400">{location.categoryName}</p>
-                  </Td>
-                  <Td>
-                    <p className="font-bold">{location.address || "No address"}</p>
-                    <p className="text-xs text-slate-400">
-                      {location.city || "N/A"} | {location.type || "N/A"} | {location.sqm || 0} sqm
-                    </p>
-                  </Td>
-                  <Td>
-                    <div className="grid gap-1">
-                      <span className={`text-xs font-black uppercase ${location.showInPublic ? "text-emerald-200" : "text-slate-500"}`}>
-                        {location.showInPublic ? "Public" : "Ascunsa public"}
-                      </span>
-                      <span className="text-xs text-slate-400">
-                        Pret {location.showPricePublic ? "public" : "ascuns"} / montaj {location.showInstallationCostPublic ? "public" : "ascuns"}
-                      </span>
-                    </div>
-                  </Td>
-                  <Td>
-                    <StatusBadge status={location.status} publicStatus={location.publicStatus} availability={location.availabilityLabel} />
-                    <p className="mt-1 max-w-xs text-xs text-slate-400">{location.availabilityDetail || location.availabilityText || "Disponibilitatea este calculata din rezervari."}</p>
-                  </Td>
-                  <Td>
-                    <span className="font-bold text-white">{location.rateCard || (location.rateCardValue != null ? `${location.rateCardValue} EUR` : "-")}</span>
-                    {location.installationRemoval ? <small className="block text-slate-400">Montaj: {location.installationRemoval}</small> : null}
-                  </Td>
-                  <Td>
-                    <div className="flex flex-wrap gap-2">
-                      <button className="focus-button secondary" type="button" onClick={() => setDetailLocation(location)}>
-                        <Eye size={16} />
-                        Vezi detalii
-                      </button>
-                      {canManageLocations ? (
-                        <>
-                          <button className="focus-button secondary" type="button" onClick={() => setEditing(location)} title="Edit">
-                            <Edit size={16} />
-                            Editare
-                          </button>
-                          <LocationActionMenu
-                            location={location}
-                            onEdit={() => setEditing(location)}
-                            onDuplicate={() => duplicate(location)}
-                            onDelete={() => remove(location)}
-                          />
-                        </>
-                      ) : null}
-                    </div>
-                  </Td>
-                </tr>
+          <div className="focus-card grid gap-3 rounded-lg p-4 md:grid-cols-[1fr_220px_220px]">
+            <label className="relative">
+              <Search className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-slate-400" />
+              <input
+                className="focus-input pl-10"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Cauta cod, adresa, oras, tip"
+              />
+            </label>
+            <select className="focus-input" value={category} onChange={(event) => setCategory(event.target.value)}>
+              <option value="">Toate categoriile</option>
+              {categories.map((item) => (
+                <option key={item.id} value={item.slug}>
+                  {item.name}
+                </option>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </select>
+            <select className="focus-input" value={status} onChange={(event) => setStatus(event.target.value)}>
+              <option value="">Toate statusurile</option>
+              <option value="AVAILABLE">AVAILABLE</option>
+              <option value="AVAILABLE_FROM">AVAILABLE_FROM</option>
+              <option value="BOOKED">BOOKED</option>
+              <option value="RESERVED">RESERVED</option>
+              <option value="UNKNOWN">UNKNOWN</option>
+            </select>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-focus-line">
+            <table className="w-full min-w-[980px] border-collapse bg-focus-ink/70 text-sm">
+              <thead className="bg-focus-navy text-left text-xs uppercase text-focus-yellow">
+                <tr>
+                  <Th>Cod</Th>
+                  <Th>Locatie</Th>
+                  <Th>Vizibilitate</Th>
+                  <Th>Status calculat</Th>
+                  <Th>Pret</Th>
+                  <Th>Actiuni</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((location) => (
+                  <tr
+                    key={location.id}
+                    className={`border-t border-focus-line ${focusedLocationParam && (location.id === focusedLocationParam || location.code === focusedLocationParam) ? "bg-focus-yellow/10 outline outline-1 outline-focus-yellow/50" : ""}`}
+                  >
+                    <Td>
+                      <strong className="text-white">{location.code}</strong>
+                      <p className="text-xs text-slate-400">{location.categoryName}</p>
+                    </Td>
+                    <Td>
+                      <p className="font-bold">{location.address || "No address"}</p>
+                      <p className="text-xs text-slate-400">
+                        {location.city || "N/A"} | {location.type || "N/A"} | {location.sqm || 0} sqm
+                      </p>
+                    </Td>
+                    <Td>
+                      <div className="grid gap-1">
+                        <span className={`text-xs font-black uppercase ${location.showInPublic ? "text-emerald-200" : "text-slate-500"}`}>
+                          {location.showInPublic ? "Public" : "Ascunsa public"}
+                        </span>
+                        <span className="text-xs text-slate-400">
+                          Pret {location.showPricePublic ? "public" : "ascuns"} / montaj {location.showInstallationCostPublic ? "public" : "ascuns"}
+                        </span>
+                      </div>
+                    </Td>
+                    <Td>
+                      <StatusBadge status={location.status} publicStatus={location.publicStatus} availability={location.availabilityLabel} />
+                      <p className="mt-1 max-w-xs text-xs text-slate-400">{location.availabilityDetail || location.availabilityText || "Disponibilitatea este calculata din rezervari."}</p>
+                    </Td>
+                    <Td>
+                      <span className="font-bold text-white">{location.rateCard || (location.rateCardValue != null ? `${location.rateCardValue} EUR` : "-")}</span>
+                      {location.installationRemoval ? <small className="block text-slate-400">Montaj: {location.installationRemoval}</small> : null}
+                    </Td>
+                    <Td>
+                      <div className="flex flex-wrap gap-2">
+                        <button className="focus-button secondary" type="button" onClick={() => setDetailLocation(location)}>
+                          <Eye size={16} />
+                          Vezi detalii
+                        </button>
+                        {canManageLocations ? (
+                          <>
+                            <button className="focus-button secondary" type="button" onClick={() => setEditing(location)} title="Edit">
+                              <Edit size={16} />
+                              Editare
+                            </button>
+                            <LocationActionMenu
+                              location={location}
+                              onEdit={() => setEditing(location)}
+                              onDuplicate={() => duplicate(location)}
+                              onDelete={() => remove(location)}
+                            />
+                          </>
+                        ) : null}
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
       {canManageLocations && editing !== undefined ? (
@@ -293,6 +319,28 @@ function LocationActionMenu({
         <button className="rounded-md px-3 py-2 text-left text-sm font-bold text-red-100 hover:bg-red-500/10" type="button" onClick={onDelete}>
           <Trash2 className="mr-2 inline h-4 w-4" /> Sterge / arhiveaza
         </button>
+      </div>
+    </details>
+  );
+}
+
+function LocationToolsMenu() {
+  return (
+    <details className="relative">
+      <summary className="focus-button secondary cursor-pointer list-none">
+        <MoreHorizontal size={18} />
+        Mai multe
+      </summary>
+      <div className="absolute right-0 z-20 mt-2 grid min-w-60 gap-1 rounded-lg border border-focus-line bg-focus-navy p-2 shadow-2xl">
+        <a className="rounded-md px-3 py-2 text-left text-sm font-bold text-slate-100 hover:bg-focus-yellow/10" href="/api/export/json">
+          <Download className="mr-2 inline h-4 w-4" /> Export inventar JSON
+        </a>
+        <Link className="rounded-md px-3 py-2 text-left text-sm font-bold text-slate-100 hover:bg-focus-yellow/10" href="/admin/locatii/import">
+          <FileSpreadsheet className="mr-2 inline h-4 w-4" /> Import / actualizare
+        </Link>
+        <Link className="rounded-md px-3 py-2 text-left text-sm font-bold text-slate-100 hover:bg-focus-yellow/10" href="/admin/locatii/gps">
+          <Map className="mr-2 inline h-4 w-4" /> Audit GPS
+        </Link>
       </div>
     </details>
   );

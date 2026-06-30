@@ -9,6 +9,8 @@ function main() {
   rowDangerousActionsAreInMenu();
   locationEditorHasPracticalSections();
   publicImpactFieldsHaveWarning();
+  manualAvailabilityActionsAreClear();
+  costFieldsAreClarified();
   privateFieldsStayOutOfOverview();
   galleryPreviewIsPresent();
   numericBlankValuesRemainNull();
@@ -18,9 +20,12 @@ function main() {
     checked: [
       "locations table is scan-first, without inline row editing",
       "delete and duplicate are only inside action menu with confirmations",
-      "Export inventar JSON label remains",
+      "locations page focuses primary actions and demotes inventory tools",
+      "availability export is not exposed on /admin/locatii",
       "LocationEditor contains practical section labels",
       "public-impact fields include a warning",
+      "manual availability block actions are explicit",
+      "cost fields are clarified as supplier/financial context",
       "raw/private fields are not in Overview",
       "gallery preview and empty state exist",
       "blank numeric values remain null"
@@ -30,7 +35,8 @@ function main() {
 
 function adminLocationTableIsScanFirst() {
   const dashboard = read("src", "components", "admin", "AdminDashboard.tsx");
-  const tableBlock = blockFrom(dashboard, '<div id="locatii"', "</table>");
+  assert(dashboard.includes('<section id="locatii"'), "locations page should expose a dedicated inventory section anchor");
+  const tableBlock = blockFrom(dashboard, "<table", "</table>");
   assert(tableBlock.includes("<Th>Vizibilitate</Th>"), "table should show public/admin visibility summary");
   assert(tableBlock.includes("<Th>Status calculat</Th>"), "table should show computed availability/status label");
   assert(!tableBlock.includes("<Th>GPS</Th>"), "raw GPS column should be removed from first table view");
@@ -39,7 +45,17 @@ function adminLocationTableIsScanFirst() {
   assert(!tableBlock.includes("defaultValue={location.rateCard"), "table should not render inline rate card editors");
   assert(!tableBlock.includes("latReal?.toFixed"), "real/private coordinates should not render in first table view");
   assert(!dashboard.includes("ToggleMini"), "public toggles should not be direct row controls");
+  assert(dashboard.includes("Rezervari si HOLD-uri"), "locations page should foreground reservations and holds");
+  assert(dashboard.includes("Inventar locatii"), "locations page should have a dedicated inventory section");
+  assert(dashboard.includes("Selector oferta"), "locations page should cross-link to the sales selector");
   assert(dashboard.includes("Export inventar JSON"), "developer-ish Backup JSON label should remain renamed");
+  assert(dashboard.includes("Import / actualizare"), "inventory import should remain available as a secondary tool");
+  assert(dashboard.includes("Audit GPS"), "GPS audit should remain available as a secondary tool");
+  assert(!dashboard.includes("Exporta disponibil"), "availability export should move out of /admin/locatii");
+
+  const reservationsPanel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
+  assert(!reservationsPanel.includes("Disponibil pentru vanzari"), "availability export card should not remain in locations reservations panel");
+  assert(!reservationsPanel.includes("Exporta disponibil"), "availability export action should not remain in locations reservations panel");
 }
 
 function rowDangerousActionsAreInMenu() {
@@ -77,6 +93,23 @@ function publicImpactFieldsHaveWarning() {
   for (const field of ["showPricePublic", "showInstallationCostPublic", "showInPublic", "latDisplay", "lngDisplay"]) {
     assert(editor.includes(field), `${field} should remain editable in the appropriate section`);
   }
+}
+
+function manualAvailabilityActionsAreClear() {
+  const editor = read("src", "components", "admin", "LocationEditor.tsx");
+  assert(editor.includes("Nu folosi UNKNOWN pentru o locatie indisponibila"), "editor should warn against using UNKNOWN as unavailable");
+  assert(editor.includes("Marcheaza indisponibila"), "editor should expose a clear manual unavailable action");
+  assert(editor.includes("Marcheaza disponibila / activa"), "editor should expose a clear unblock/active action");
+  assert(editor.includes("Blocaj comercial manual"), "manual unavailable action should use block fields, not reservations");
+}
+
+function costFieldsAreClarified() {
+  const editor = read("src", "components", "admin", "LocationEditor.tsx");
+  assert(editor.includes("Cost furnizor / chirie locatie"), "supplier/rent cost label should be clear");
+  assert(editor.includes("Tip cost / acord"), "cost type label should describe agreement context");
+  assert(editor.includes("Furnizor / proprietar cost"), "cost supplier label should describe owner/supplier context");
+  assert(editor.includes("Note costuri / context financiar"), "cost notes label should explain financial context");
+  assert(editor.includes("chiria trebuie legata de acordul cu furnizorul"), "editor should document future supplier cost architecture");
 }
 
 function privateFieldsStayOutOfOverview() {

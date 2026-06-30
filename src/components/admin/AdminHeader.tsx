@@ -3,7 +3,23 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { BriefcaseBusiness, Building2, Download, FileSpreadsheet, Gauge, ListChecks, Map, MapPin, Shield, Truck, UserRoundCheck, Users } from "lucide-react";
+import {
+  BriefcaseBusiness,
+  Building2,
+  ChevronDown,
+  CircleDollarSign,
+  Download,
+  FileSpreadsheet,
+  Gauge,
+  ListChecks,
+  Map,
+  MapPin,
+  Settings,
+  Shield,
+  Truck,
+  UserRoundCheck,
+  Users
+} from "lucide-react";
 import { FocusLogo } from "@/components/brand/FocusLogo";
 import { LogoutButton } from "@/components/admin/LogoutButton";
 import { NotificationBell } from "@/components/admin/NotificationBell";
@@ -12,11 +28,17 @@ import { hasAnyPermission, hasPermission, ROLE_LABELS } from "@/lib/rbac";
 
 export function AdminHeader({ session }: { session: AuthSession }) {
   const pathname = usePathname() || "";
+  const canViewInventory = hasPermission(session.role, "inventory.view");
   const canManageInventory = hasPermission(session.role, "inventory.manage");
-  const canExportAvailability = hasAnyPermission(session.role, ["reports.view", "reports.view.own"]);
   const canExportSales = hasPermission(session.role, "reports.view");
   const canManageUsers = hasPermission(session.role, "users.manage");
-  const hasAdminMenu = canManageInventory || canManageUsers || canExportAvailability || canExportSales;
+  const canViewCrm = hasAnyPermission(session.role, ["leads.view", "leads.view.own"]);
+  const canViewClients = hasAnyPermission(session.role, ["clients.view", "clients.view.own", "campaigns.view", "campaigns.view.own", "finance.view"]);
+  const canViewCampaigns = hasAnyPermission(session.role, ["campaigns.view", "campaigns.view.own", "finance.view"]);
+  const canViewFinance = hasPermission(session.role, "finance.view");
+  const hasCommercialMenu = canViewInventory || canViewCrm || canViewClients || canViewCampaigns;
+  const hasFinanceMenu = canViewFinance || canExportSales;
+  const hasSettingsMenu = canManageInventory || canManageUsers;
 
   return (
     <header className="sticky top-0 z-40 border-b border-focus-line bg-focus-navy/95 backdrop-blur">
@@ -28,27 +50,44 @@ export function AdminHeader({ session }: { session: AuthSession }) {
             <p className="text-xs text-slate-400">{ROLE_LABELS[session.role]}</p>
           </div>
         </div>
-        <nav className="admin-nav flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-x-auto pb-1" aria-label="Navigatie administrare">
+        <nav className="admin-nav flex min-w-0 flex-1 flex-wrap items-center gap-2" aria-label="Navigatie administrare">
           <AdminNavLink href="/admin/dashboard" active={isActiveAdminPath(pathname, "/admin/dashboard")}><Gauge size={18} />Dashboard</AdminNavLink>
-          <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Vezi portal public</AdminNavLink>
-          {hasPermission(session.role, "inventory.view") ? <AdminNavLink href="/admin/locatii" active={isActiveAdminPath(pathname, "/admin/locatii")}><Shield size={18} />Locatii</AdminNavLink> : null}
-          {hasPermission(session.role, "inventory.view") ? <AdminNavLink href="/admin/selectie-locatii" active={isActiveAdminPath(pathname, "/admin/selectie-locatii")}><ListChecks size={18} />Selector oferta</AdminNavLink> : null}
-          {hasAnyPermission(session.role, ["leads.view", "leads.view.own"]) ? <AdminNavLink href="/admin/crm" active={isActiveAdminPath(pathname, "/admin/crm")}><UserRoundCheck size={18} />CRM</AdminNavLink> : null}
-          {hasAnyPermission(session.role, ["clients.view", "clients.view.own", "campaigns.view", "campaigns.view.own", "finance.view"]) ? <AdminNavLink href="/admin/clienti" active={isActiveAdminPath(pathname, "/admin/clienti")}><Building2 size={18} />Clienti</AdminNavLink> : null}
-          {hasAnyPermission(session.role, ["campaigns.view", "campaigns.view.own", "finance.view"]) ? <AdminNavLink href="/admin/campanii" active={isActiveAdminPath(pathname, "/admin/campanii")}><BriefcaseBusiness size={18} />Campanii</AdminNavLink> : null}
-          {hasPermission(session.role, "finance.view") ? <AdminNavLink href="/admin/furnizori" active={isActiveAdminPath(pathname, "/admin/furnizori")}><Truck size={18} />Furnizori</AdminNavLink> : null}
-          {hasAdminMenu ? (
-            <details className="admin-export-menu relative flex-none">
-              <summary className="focus-button secondary cursor-pointer list-none"><Shield size={18} />Admin</summary>
-              <div className="absolute right-0 top-full z-50 mt-2 grid min-w-56 gap-2 rounded-lg border border-focus-line bg-focus-navy p-2 shadow-2xl">
-                {canManageInventory ? <Link className="focus-button secondary" href="/admin/locatii/import"><FileSpreadsheet size={18} />Import</Link> : null}
-                {canManageInventory ? <Link className="focus-button secondary" href="/admin/locatii/gps"><Map size={18} />GPS</Link> : null}
-                {canManageUsers ? <Link className="focus-button secondary" href="/admin/utilizatori"><Users size={18} />Utilizatori</Link> : null}
-                {canExportAvailability ? <a className="focus-button" href="/api/admin/availability/excel"><Download size={18} />Disponibil</a> : null}
-                {canExportSales ? <a className="focus-button secondary" href="/api/admin/sales-report/excel"><Download size={18} />Vanzari</a> : null}
-              </div>
-            </details>
+          {hasCommercialMenu ? (
+            <AdminNavMenu
+              active={isActiveAnyAdminPath(pathname, ["/admin/selectie-locatii", "/admin/crm", "/admin/clienti", "/admin/campanii"])}
+              icon={<BriefcaseBusiness size={18} />}
+              label="Comercial"
+            >
+              {canViewInventory ? <AdminMenuLink href="/admin/selectie-locatii" active={isActiveAdminPath(pathname, "/admin/selectie-locatii")} icon={<ListChecks size={17} />} label="Selector oferta" /> : null}
+              {canViewCrm ? <AdminMenuLink href="/admin/crm" active={isActiveAdminPath(pathname, "/admin/crm")} icon={<UserRoundCheck size={17} />} label="CRM" /> : null}
+              {canViewClients ? <AdminMenuLink href="/admin/clienti" active={isActiveAdminPath(pathname, "/admin/clienti")} icon={<Building2 size={17} />} label="Clienti" /> : null}
+              {canViewCampaigns ? <AdminMenuLink href="/admin/campanii" active={isActiveAdminPath(pathname, "/admin/campanii")} icon={<BriefcaseBusiness size={17} />} label="Campanii in Clienti" /> : null}
+            </AdminNavMenu>
           ) : null}
+          {canViewInventory ? <AdminNavLink href="/admin/locatii" active={isActiveAdminPath(pathname, "/admin/locatii")}><Shield size={18} />Locatii</AdminNavLink> : null}
+          {hasFinanceMenu ? (
+            <AdminNavMenu
+              active={isActiveAnyAdminPath(pathname, ["/admin/furnizori"])}
+              icon={<CircleDollarSign size={18} />}
+              label="Financiar"
+            >
+              {canViewFinance ? <AdminMenuLink href="/admin/dashboard" active={false} icon={<CircleDollarSign size={17} />} label="SmartBill / rapoarte" /> : null}
+              {canViewFinance ? <AdminMenuLink href="/admin/furnizori" active={isActiveAdminPath(pathname, "/admin/furnizori")} icon={<Truck size={17} />} label="Furnizori" /> : null}
+              {canExportSales ? <AdminMenuAction href="/api/admin/sales-report/excel" icon={<Download size={17} />} label="Export vanzari" /> : null}
+            </AdminNavMenu>
+          ) : null}
+          {hasSettingsMenu ? (
+            <AdminNavMenu
+              active={isActiveAnyAdminPath(pathname, ["/admin/utilizatori", "/admin/locatii/import", "/admin/locatii/gps"])}
+              icon={<Settings size={18} />}
+              label="Setari"
+            >
+              {canManageInventory ? <AdminMenuLink href="/admin/locatii/import" active={isActiveAdminPath(pathname, "/admin/locatii/import")} icon={<FileSpreadsheet size={17} />} label="Import / actualizare" /> : null}
+              {canManageInventory ? <AdminMenuLink href="/admin/locatii/gps" active={isActiveAdminPath(pathname, "/admin/locatii/gps")} icon={<Map size={17} />} label="Audit GPS" /> : null}
+              {canManageUsers ? <AdminMenuLink href="/admin/utilizatori" active={isActiveAdminPath(pathname, "/admin/utilizatori")} icon={<Users size={17} />} label="Utilizatori" /> : null}
+            </AdminNavMenu>
+          ) : null}
+          <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Portal public</AdminNavLink>
         </nav>
         <div className="flex shrink-0 items-center gap-2">
           <NotificationBell />
@@ -64,6 +103,10 @@ export function AdminHeader({ session }: { session: AuthSession }) {
 export function isActiveAdminPath(pathname: string, href: string) {
   if (href === "/admin/dashboard") return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function isActiveAnyAdminPath(pathname: string, hrefs: string[]) {
+  return hrefs.some((href) => isActiveAdminPath(pathname, href));
 }
 
 function AdminNavLink({
@@ -85,5 +128,65 @@ function AdminNavLink({
     >
       {children}
     </Link>
+  );
+}
+
+function AdminNavMenu({
+  active,
+  icon,
+  label,
+  children
+}: {
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="group relative flex-none">
+      <summary
+        className={`focus-button cursor-pointer list-none ${active ? "" : "secondary"}`}
+        aria-current={active ? "page" : undefined}
+      >
+        {icon}
+        {label}
+        <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="absolute left-0 top-full z-50 mt-2 grid min-w-64 gap-1 rounded-lg border border-focus-line bg-focus-navy p-2 shadow-2xl">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+function AdminMenuLink({
+  href,
+  active,
+  icon,
+  label
+}: {
+  href: string;
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+}) {
+  return (
+    <Link
+      className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-black ${active ? "bg-focus-yellow text-focus-ink" : "text-slate-100 hover:bg-focus-yellow/10 hover:text-white"}`}
+      href={href}
+      aria-current={active ? "page" : undefined}
+    >
+      {icon}
+      {label}
+    </Link>
+  );
+}
+
+function AdminMenuAction({ href, icon, label }: { href: string; icon: ReactNode; label: string }) {
+  return (
+    <a className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-black text-slate-100 hover:bg-focus-yellow/10 hover:text-white" href={href}>
+      {icon}
+      {label}
+    </a>
   );
 }

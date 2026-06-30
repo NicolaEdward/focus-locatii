@@ -106,14 +106,14 @@ export function buildMediaPlanSeedFromSelection(selection: LocationSelectionPayl
 
 export function selectionQualityWarnings(selection: LocationSelectionPayload) {
   const warnings: string[] = [];
-  if (!selection.periodStart || !selection.periodEnd) warnings.push("Nu ai selectat perioada campaniei.");
-  if (!selection.selectedLocations.length) warnings.push("Selectia este goala.");
+  if (!selection.periodStart || !selection.periodEnd) warnings.push("Alege perioada pentru verificare exacta.");
+  if (!selection.selectedLocations.length) warnings.push("Nu ai selectat locatii.");
   const conflicts = selection.selectedLocations.filter((item) => item.availabilityState === "CONFLICT").length;
   if (conflicts) warnings.push(`${conflicts} locatii selectate au conflict in perioada aleasa.`);
   const missingImages = selection.selectedLocations.filter((item) => !item.snapshot.mainImage).length;
-  if (missingImages) warnings.push(`${missingImages} locatii nu au poza principala.`);
+  if (missingImages) warnings.push(`${missingImages} locatii nu au imagine.`);
   const missingPrices = selection.selectedLocations.filter((item) => item.suggestedBasePrice == null).length;
-  if (missingPrices) warnings.push(`${missingPrices} locatii nu au pret comercial setat.`);
+  if (missingPrices) warnings.push(`${missingPrices} locatii nu au pret setat.`);
   const byArea = new Map<string, number>();
   for (const item of selection.selectedLocations) {
     const area = item.snapshot.area || item.snapshot.city || "";

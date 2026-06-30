@@ -36,6 +36,15 @@ for (const status of ["CANCELLED", "EXPIRED", "LOST", "ARCHIVED"]) {
 }
 assert(files.availability.includes("periodStart: { lte: periodEnd }"), "availability must use inclusive overlap start check");
 assert(files.availability.includes("periodEnd: { gte: periodStart }"), "availability must use inclusive overlap end check");
+assert(files.availability.includes("buildNoPeriodAvailability"), "availability must provide useful no-period status");
+assert(files.availability.includes("Disponibil pana la"), "no-period future booking should show available-until label");
+assert(files.availability.includes("Disponibil din"), "current booking should show available-from label");
+assert(files.availability.includes("Conflict in perioada selectata"), "selected-period conflicts must be unambiguous");
+assert(files.availability.includes("Disponibil in perioada selectata"), "selected-period available state must be unambiguous");
+assert(files.availability.includes("isGenericAvailableNote"), "generic available notes must be suppressed when they contradict conflicts");
+assert(files.dto.includes("tone: LocationSelectionAvailabilityTone"), "availability DTO must include tone");
+assert(files.dto.includes("explanation: string"), "availability DTO must include explanation");
+assert(files.dto.includes("blockingIntervals"), "availability DTO must expose safe blocking intervals");
 
 for (const forbidden of [
   "latReal",
@@ -57,12 +66,19 @@ assert(files.service.includes('source: "ADMIN_LOCATION_SELECTOR"'), "seed helper
 assert(!/prisma\.(mediaPlan|offer|reservation)\.(create|update|upsert)/.test(files.service), "selector service must not create media plans, offers or reservations");
 assert(!files.builder.includes("/api/reservations"), "selector UI must not call reservation write APIs");
 assert(files.builder.includes("localStorage"), "active selection should be client-side persisted");
+assert(files.builder.includes("availabilityRequestRef"), "availability requests must guard stale responses");
+assert(files.builder.includes("AbortController"), "availability requests must be abortable");
+assert(files.builder.includes("allAvailabilityIdsKey"), "availability requests must use stable location id keys");
+assert(!files.builder.includes("[filteredLocations, selection.items, selection.periodEnd, selection.periodStart]"), "availability effect must not depend on availability-derived filtered rows");
+assert(files.builder.includes("const [showMap, setShowMap] = useState(false)"), "map should be collapsed by default");
 assert(files.builder.includes("Selecteaza rezultate vizibile"), "bulk select visible action should exist");
 assert(files.builder.includes("Adaugi ${candidates.length} locatii vizibile"), "bulk selecting more than 25 should ask for confirmation");
 assert(files.basket.includes("Continua catre Media Plan - urmatorul pas"), "future Media Plan CTA should be disabled placeholder");
 assert(files.basket.includes("disabled"), "future Media Plan CTA must not write in this batch");
 
 assert(files.results.includes("Adauga") && files.results.includes("Scoate"), "result rows need add/remove actions");
+assert(files.results.includes("availability?.explanation"), "result rows must use normalized availability explanation");
+assert(files.results.includes("w-[104px]"), "result action button should keep a stable visible width");
 assert(files.map.includes("scrollWheelZoom: false"), "selector map should not hijack page scroll");
 assert(files.map.includes("displayLat") && files.map.includes("displayLng"), "selector map must use display coordinates");
 assert(!files.map.includes("latReal") && !files.map.includes("lngReal"), "selector map must not use private coordinates");

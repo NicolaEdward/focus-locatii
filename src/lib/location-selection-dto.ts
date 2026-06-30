@@ -2,6 +2,7 @@ import type { CompanyEntity } from "@/lib/company-entities";
 import type { UserRole } from "@/lib/rbac";
 
 export type LocationSelectionAvailabilityState = "AVAILABLE" | "CONFLICT" | "PARTIAL" | "UNKNOWN";
+export type LocationSelectionAvailabilityTone = "green" | "red" | "yellow" | "gray";
 
 export type LocationSelectionSnapshot = {
   id: string;
@@ -100,12 +101,23 @@ export type LocationSelectionConflict = {
   sellerName: string | null;
 };
 
+export type LocationSelectionBlockingInterval = {
+  status: "HOLD" | "RESERVED" | "BOOKED" | string;
+  start: string;
+  end: string;
+};
+
 export type LocationSelectionAvailability = {
   locationId: string;
   state: LocationSelectionAvailabilityState;
   label: string;
+  tone: LocationSelectionAvailabilityTone;
+  explanation: string;
   warnings: string[];
   conflicts: LocationSelectionConflict[];
+  blockingIntervals: LocationSelectionBlockingInterval[];
+  availableUntil?: string | null;
+  availableFrom?: string | null;
 };
 
 export type LocationSelectionResponse = {

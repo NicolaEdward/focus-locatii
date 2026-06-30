@@ -98,7 +98,8 @@ export const LocationSelectionMap = memo(function LocationSelectionMap({
     const bounds: [number, number][] = [];
     for (const location of locations) {
       if (location.displayLat == null || location.displayLng == null) continue;
-      const state = availabilityById[location.id]?.state || "UNKNOWN";
+      const availability = availabilityById[location.id];
+      const state = availability?.state || "UNKNOWN";
       const selected = selectedIds.has(location.id);
       const hovered = hoveredId === location.id;
       const markerWidth = Math.max(40, Math.min(112, location.code.length * 7 + 22));
@@ -107,12 +108,12 @@ export const LocationSelectionMap = memo(function LocationSelectionMap({
         riseOffset: 1200,
         icon: L.divIcon({
           className: "",
-          html: `<span class="map-marker ${markerClass(state)} ${selected || hovered ? "selected" : ""}" title="${escapeHtml(location.code)}"><span class="map-marker-dot"></span><span>${escapeHtml(location.code)}</span></span>`,
+          html: `<span class="map-marker ${markerClass(availability)} ${selected || hovered ? "selected" : ""}" title="${escapeHtml(location.code)}"><span class="map-marker-dot"></span><span>${escapeHtml(location.code)}</span></span>`,
           iconSize: [markerWidth, 28],
           iconAnchor: [markerWidth / 2, 14]
         })
       });
-      (marker.options as import("leaflet").MarkerOptions & { statusClass?: string }).statusClass = markerClass(state);
+      (marker.options as import("leaflet").MarkerOptions & { statusClass?: string }).statusClass = markerClass(availability);
       marker.on("click", () => onSelect(location));
       marker.bindPopup(popupHtml(location, availabilityById[location.id], selected), { closeButton: false, maxWidth: 260 });
       layer.addLayer(marker);
@@ -157,10 +158,10 @@ export const LocationSelectionMap = memo(function LocationSelectionMap({
   );
 });
 
-function markerClass(state: string) {
-  if (state === "AVAILABLE") return "available";
-  if (state === "CONFLICT") return "booked";
-  if (state === "PARTIAL") return "reserved";
+function markerClass(availability?: LocationSelectionAvailability) {
+  if (availability?.tone === "green") return "available";
+  if (availability?.tone === "red") return "booked";
+  if (availability?.tone === "yellow") return "reserved";
   return "unknown";
 }
 

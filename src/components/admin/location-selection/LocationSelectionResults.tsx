@@ -30,15 +30,15 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
         <p className="text-sm font-bold text-slate-300">Lista densa pentru selectie rapida</p>
       </header>
       <div className="max-h-[760px] overflow-auto">
-        <table className="w-full min-w-[920px] text-left text-sm">
+        <table className="w-full min-w-[820px] table-fixed text-left text-sm">
           <thead className="sticky top-0 z-10 bg-focus-ink text-xs uppercase text-slate-300">
             <tr>
-              <th className="px-3 py-3">Locatie</th>
-              <th className="px-3 py-3">Zona</th>
-              <th className="px-3 py-3">Format</th>
-              <th className="px-3 py-3">Disponibilitate</th>
-              <th className="px-3 py-3">Pret</th>
-              <th className="px-3 py-3 text-right">Actiune</th>
+              <th className="w-[32%] px-3 py-3">Locatie</th>
+              <th className="w-[15%] px-3 py-3">Zona</th>
+              <th className="w-[16%] px-3 py-3">Format</th>
+              <th className="w-[22%] px-3 py-3">Disponibilitate</th>
+              <th className="w-[9%] px-3 py-3">Pret</th>
+              <th className="w-[116px] px-3 py-3 text-right">Actiune</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-focus-line">
@@ -82,20 +82,22 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
                   </td>
                   <td className="px-3 py-3">
                     <AvailabilityBadge availability={availability} />
-                    {availability?.warnings.length ? <p className="mt-1 max-w-[260px] truncate text-xs text-amber-100">{availability.warnings[0]}</p> : null}
+                    <p className={`mt-1 max-w-[260px] truncate text-xs ${availability?.state === "CONFLICT" ? "text-red-100" : availability?.tone === "yellow" ? "text-amber-100" : "text-slate-400"}`}>
+                      {availability?.explanation || "Alege perioada pentru verificare exacta."}
+                    </p>
                   </td>
                   <td className="px-3 py-3">
                     <p className="font-black text-white">{price(location)}</p>
                     {location.rateCard ? <p className="text-xs text-slate-400">{location.rateCard}</p> : null}
                   </td>
-                  <td className="px-3 py-3 text-right">
+                  <td className="px-3 py-3 text-right align-middle">
                     {selected ? (
-                      <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => onRemove(location.id)}>
+                      <button className="focus-button secondary !min-h-0 w-[104px] justify-center px-3 py-2 text-xs" type="button" onClick={() => onRemove(location.id)}>
                         <X size={15} />
                         Scoate
                       </button>
                     ) : (
-                      <button className="focus-button !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => onAdd(location)}>
+                      <button className="focus-button !min-h-0 w-[104px] justify-center px-3 py-2 text-xs" type="button" onClick={() => onAdd(location)}>
                         <Plus size={15} />
                         Adauga
                       </button>

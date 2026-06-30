@@ -29,6 +29,7 @@ export function LocationSelectionBasket({
   const totalSurface = items.reduce((sum, item) => sum + (item.snapshot.surface || 0), 0);
   const estimatedTotal = items.reduce((sum, item) => sum + (item.suggestedBasePrice || 0), 0);
   const warningCount = items.filter((item) => item.availabilityState === "CONFLICT" || item.availabilityWarnings.length).length;
+  const conflictCount = items.filter((item) => item.availabilityState === "CONFLICT").length;
 
   return (
     <aside className="sticky top-24 grid max-h-[calc(100vh-7rem)] min-w-0 content-start overflow-hidden rounded-lg border border-focus-line bg-focus-navy/90">
@@ -46,6 +47,11 @@ export function LocationSelectionBasket({
           <Metric label="Estimare" value={estimatedTotal ? `${estimatedTotal.toLocaleString("ro-RO")} EUR` : "-"} />
           <Metric label="Avertizari" value={String(warningCount)} />
         </div>
+        {conflictCount ? (
+          <p className="mt-3 rounded-md border border-red-300/35 bg-red-400/10 px-3 py-2 text-xs font-bold text-red-100">
+            {conflictCount} locatii selectate au conflict in perioada aleasa.
+          </p>
+        ) : null}
       </header>
 
       <div className="min-h-0 overflow-auto p-3">
@@ -110,8 +116,11 @@ function SelectedLocationRow({
     locationId: item.locationId,
     state: item.availabilityState,
     label: item.availabilityState === "CONFLICT" ? "Conflict" : item.availabilityState === "AVAILABLE" ? "Disponibil" : item.availabilityState === "PARTIAL" ? "Partial" : "Alege perioada",
+    tone: item.availabilityState === "CONFLICT" ? "red" : item.availabilityState === "AVAILABLE" ? "green" : item.availabilityState === "PARTIAL" ? "yellow" : "gray",
+    explanation: item.availabilityWarnings[0] || (item.availabilityState === "AVAILABLE" ? "Disponibil pentru contextul selectat." : "Alege perioada pentru verificare exacta."),
     warnings: item.availabilityWarnings,
-    conflicts: []
+    conflicts: [],
+    blockingIntervals: []
   };
 
   return (

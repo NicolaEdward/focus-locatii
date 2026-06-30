@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useDeferredValue } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import { AlertTriangle, CheckCircle2, Copy, Eraser, ListChecks, MapPin, Search, SlidersHorizontal } from "lucide-react";
 import { LocationSelectionBasket } from "@/components/admin/location-selection/LocationSelectionBasket";
 import { LocationSelectionFilters } from "@/components/admin/location-selection/LocationSelectionFilters";
@@ -60,6 +60,9 @@ export function AdminLocationSelectionPage({
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [fitKey, setFitKey] = useState("initial");
+  const [showMap, setShowMap] = useState(false);
+  const [availabilityRefreshKey, setAvailabilityRefreshKey] = useState(0);
+  const availabilityRequestRef = useRef(0);
 
   const selectedIds = useMemo(() => new Set(selection.items.map((item) => item.locationId)), [selection.items]);
   const selectedItemsById = useMemo(
@@ -68,9 +71,9 @@ export function AdminLocationSelectionPage({
   );
   const periodValid = Boolean(selection.periodStart && selection.periodEnd && selection.periodStart <= selection.periodEnd);
 
-  const filteredLocations = useMemo(() => {
+  const baseFilteredLocations = useMemo(() => {
     const normalizedSearch = normalizeSearch(deferredSearch);
-    let rows = initialData.locations.filter((location) => {
+    return initialData.locations.filter((location) => {
       if (normalizedSearch && !locationMatchesSearch(location, normalizedSearch)) return false;
       if (filters.city && location.city !== filters.city) return false;
       if (filters.area && location.area !== filters.area) return false;
@@ -82,6 +85,12 @@ export function AdminLocationSelectionPage({
       if (filters.maxPrice != null && (location.suggestedBasePrice == null || location.suggestedBasePrice > filters.maxPrice)) return false;
       if (filters.hasImage === true && !location.hasImage) return false;
       if (filters.hasPublicPrice === true && location.suggestedBasePrice == null) return false;
+      return true;
+    });
+  }, [deferredSearch, filters.area, filters.city, filters.hasImage, filters.hasPublicPrice, filters.maxPrice, filters.maxSurface, filters.mediaType, filters.minPrice, filters.minSurface, filters.status, initialData.locations]);
+
+  const filteredLocations = useMemo(() => {
+    let rows = baseFilteredLocations.filter((location) => {
       if (filters.availability && filters.availability !== "ALL") {
         const state = availabilityById[location.id]?.state || "UNKNOWN";
         if (filters.availability === "NO_PERIOD" && periodValid) return false;
@@ -92,7 +101,7 @@ export function AdminLocationSelectionPage({
 
     rows = sortLocations(rows, filters.sort, selectedIds, availabilityById);
     return rows;
-  }, [availabilityById, deferredSearch, filters, initialData.locations, periodValid, selectedIds]);
+  }, [availabilityById, baseFilteredLocations, filters.availability, filters.sort, periodValid, selectedIds]);
 
   const selectionPayload = useMemo(
     () => ({
@@ -123,7 +132,7 @@ export function AdminLocationSelectionPage({
       const items = current.items.map((item) => {
         const availability = availabilityById[item.locationId];
         if (!availability) return item;
-        const availabilityWarnings = [...availability.warnings, ...availability.conflicts.map(conflictWarning)];
+        const availabilityWarnings = availabilityMessages(availability);
         if (
           item.availabilityState === availability.state &&
           item.availabilityWarnings.join("\n") === availabilityWarnings.join("\n")
@@ -141,15 +150,28 @@ export function AdminLocationSelectionPage({
     });
   }, [availabilityById]);
 
+  const allAvailabilityIdsKey = useMemo(
+    () => initialData.locations.map((location) => location.id).sort().join("|"),
+    [initialData.locations]
+  );
+  const selectedAvailabilityIdsKey = useMemo(
+    () => selection.items.map((item) => item.locationId).sort().join("|"),
+    [selection.items]
+  );
+
   useEffect(() => {
-    const ids = [...new Set([...filteredLocations.map((location) => location.id), ...selection.items.map((item) => item.locationId)])];
+    const selectedIdsForAvailability = selectedAvailabilityIdsKey ? selectedAvailabilityIdsKey.split("|") : [];
+    const ids = [...new Set([...initialData.locations.map((location) => location.id), ...selectedIdsForAvailability])];
     if (!ids.length) return;
+    const requestId = ++availabilityRequestRef.current;
+    const controller = new AbortController();
     const timeout = window.setTimeout(() => {
       setAvailabilityLoading(true);
       setAvailabilityError(null);
       fetch("/api/admin/location-selection/availability", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           locationIds: ids,
           periodStart: selection.periodStart || null,
@@ -161,12 +183,24 @@ export function AdminLocationSelectionPage({
           if (!response.ok) throw new Error(payload?.error || "Disponibilitatea nu a putut fi verificata.");
           return payload.availabilityByLocationId as Record<string, LocationSelectionAvailability>;
         })
-        .then((payload) => setAvailabilityById((current) => ({ ...current, ...payload })))
-        .catch((error) => setAvailabilityError(error instanceof Error ? error.message : "Disponibilitatea nu a putut fi verificata."))
-        .finally(() => setAvailabilityLoading(false));
-    }, 180);
-    return () => window.clearTimeout(timeout);
-  }, [filteredLocations, selection.items, selection.periodEnd, selection.periodStart]);
+        .then((payload) => {
+          if (requestId === availabilityRequestRef.current) {
+            setAvailabilityById((current) => ({ ...current, ...payload }));
+          }
+        })
+        .catch((error) => {
+          if (controller.signal.aborted || requestId !== availabilityRequestRef.current) return;
+          setAvailabilityError(error instanceof Error ? error.message : "Disponibilitatea nu a putut fi verificata.");
+        })
+        .finally(() => {
+          if (requestId === availabilityRequestRef.current) setAvailabilityLoading(false);
+        });
+    }, 280);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [allAvailabilityIdsKey, availabilityRefreshKey, initialData.locations, selectedAvailabilityIdsKey, selection.periodEnd, selection.periodStart]);
 
   const updatePeriod = useCallback((patch: Partial<Pick<SelectionState, "periodStart" | "periodEnd" | "companyEntity">>) => {
     setSelection((current) => ({ ...current, ...patch }));
@@ -185,7 +219,7 @@ export function AdminLocationSelectionPage({
             sortOrder: current.items.length,
             snapshot: toSelectionSnapshot(location),
             availabilityState: availability?.state || "UNKNOWN",
-            availabilityWarnings: availability ? [...availability.warnings, ...availability.conflicts.map(conflictWarning)] : ["Alege perioada pentru disponibilitate."],
+            availabilityWarnings: availability ? availabilityMessages(availability) : ["Alege perioada pentru verificare exacta."],
             suggestedBasePrice: location.suggestedBasePrice,
             currency: location.currency,
             notes: null
@@ -223,7 +257,7 @@ export function AdminLocationSelectionPage({
             sortOrder: current.items.length + offset,
             snapshot: toSelectionSnapshot(location),
             availabilityState: availability?.state || "UNKNOWN",
-            availabilityWarnings: availability ? [...availability.warnings, ...availability.conflicts.map(conflictWarning)] : ["Alege perioada pentru disponibilitate."],
+            availabilityWarnings: availability ? availabilityMessages(availability) : ["Alege perioada pentru verificare exacta."],
             suggestedBasePrice: location.suggestedBasePrice,
             currency: location.currency,
             notes: null
@@ -302,14 +336,16 @@ export function AdminLocationSelectionPage({
             <Field label="Final campanie">
               <input className="focus-input" type="date" value={selection.periodEnd} onChange={(event) => updatePeriod({ periodEnd: event.target.value })} />
             </Field>
-            <div className="rounded-lg border border-focus-line bg-focus-navy/55 p-3 text-sm">
+            <div className="min-h-[66px] rounded-lg border border-focus-line bg-focus-navy/55 p-3 text-sm">
               <p className="font-black text-white">
-                {periodValid ? <CheckCircle2 className="mr-2 inline h-4 w-4 text-emerald-300" /> : <AlertTriangle className="mr-2 inline h-4 w-4 text-focus-yellow" />}
-                {periodValid ? "Disponibilitatea se verifica automat." : "Alege perioada pentru disponibilitate."}
+                {periodValid && !availabilityLoading ? <CheckCircle2 className="mr-2 inline h-4 w-4 text-emerald-300" /> : <AlertTriangle className="mr-2 inline h-4 w-4 text-focus-yellow" />}
+                {availabilityLoading ? "Verificare disponibilitate..." : periodValid ? "Disponibilitate actualizata." : "Disponibilitate generala incarcata."}
               </p>
               {periodError ? <p className="mt-1 font-bold text-red-100">{periodError}</p> : null}
               {availabilityError ? <p className="mt-1 font-bold text-red-100">{availabilityError}</p> : null}
-              {availabilityLoading ? <p className="mt-1 text-slate-400">Se actualizeaza disponibilitatea...</p> : null}
+              <p className="mt-1 text-slate-400">
+                {periodValid ? "Statusurile sunt calculate pentru perioada selectata." : "Alege perioada pentru verificare exacta pe campanie."}
+              </p>
             </div>
           </div>
         </div>
@@ -341,9 +377,19 @@ export function AdminLocationSelectionPage({
                 <Eraser size={16} />
                 Scoate vizibile selectate
               </button>
-              <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => setFitKey(String(Date.now()))}>
+              <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => setShowMap((value) => !value)}>
                 <MapPin size={16} />
-                Recentreaza pe rezultate
+                {showMap ? "Ascunde harta" : "Arata harta"}
+              </button>
+              {showMap ? (
+                <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => setFitKey(String(Date.now()))}>
+                  <MapPin size={16} />
+                  Recentreaza pe rezultate
+                </button>
+              ) : null}
+              <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => setAvailabilityRefreshKey((key) => key + 1)}>
+                <CheckCircle2 size={16} />
+                Reimprospateaza disponibilitatea
               </button>
               <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={copyCodes} disabled={!selection.items.length}>
                 <Copy size={16} />
@@ -354,15 +400,15 @@ export function AdminLocationSelectionPage({
 
           <SelectionQualityWarnings warnings={warnings} />
 
-          <div className="grid gap-4 2xl:grid-cols-[minmax(0,0.98fr)_minmax(360px,0.72fr)]">
-            <LocationSelectionResults
-              locations={filteredLocations}
-              availabilityById={availabilityById}
-              selectedIds={selectedIds}
-              onAdd={addLocation}
-              onRemove={removeLocation}
-              onHover={setHoveredId}
-            />
+          <LocationSelectionResults
+            locations={filteredLocations}
+            availabilityById={availabilityById}
+            selectedIds={selectedIds}
+            onAdd={addLocation}
+            onRemove={removeLocation}
+            onHover={setHoveredId}
+          />
+          {showMap ? (
             <LocationSelectionMap
               locations={filteredLocations}
               availabilityById={availabilityById}
@@ -374,7 +420,7 @@ export function AdminLocationSelectionPage({
                 else addLocation(location);
               }}
             />
-          </div>
+          ) : null}
         </section>
 
         <LocationSelectionBasket
@@ -401,9 +447,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function conflictWarning(conflict: LocationSelectionAvailability["conflicts"][number]) {
-  const dates = `${formatDate(conflict.periodStart)} - ${formatDate(conflict.periodEnd)}`;
-  return [conflict.status, dates, conflict.clientName, conflict.campaignName].filter(Boolean).join(" / ");
+function availabilityMessages(availability: LocationSelectionAvailability) {
+  return [...new Set([availability.explanation, ...availability.warnings].filter(Boolean))].slice(0, 8);
 }
 
 function sortLocations(

@@ -5,6 +5,7 @@ import type { AuthSession } from "@/lib/auth";
 import type {
   LocationSelectionAvailability,
   LocationSelectionAvailabilityState,
+  LocationSelectionBlockingInterval,
   LocationSelectionConflict
 } from "@/lib/location-selection-dto";
 
@@ -47,7 +48,29 @@ export async function getLocationSelectionAvailability(input: {
   });
 
   if (!periodStart || !periodEnd) {
-    return Object.fromEntries(locations.map((location) => [location.id, unknownAvailability(location, "Alege perioada pentru disponibilitate.")]));
+    const today = startOfUtcDay(new Date());
+    const futureReservations = await prisma.reservation.findMany({
+      where: {
+        locationId: { in: locationIds },
+        status: { in: [...LOCATION_SELECTION_BLOCKING_STATUSES] as ReservationStatus[] },
+        periodEnd: { gte: today }
+      },
+      include: {
+        client: { select: { companyName: true } },
+        campaign: { select: { campaignName: true } },
+        sellerUser: { select: { name: true } }
+      },
+      orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
+    });
+
+    return Object.fromEntries(
+      locations.map((location) => {
+        const intervals = futureReservations
+          .filter((reservation) => reservation.locationId === location.id)
+          .map((reservation) => serializeConflict(reservation, input.session));
+        return [location.id, buildNoPeriodAvailability(location, intervals, today)];
+      })
+    );
   }
 
   if (periodStart > periodEnd) {
@@ -103,23 +126,32 @@ function buildAvailability(input: {
   periodStart: Date;
   periodEnd: Date;
 }): LocationSelectionAvailability {
-  const warnings = locationWarnings(input.location, input.periodStart, input.periodEnd);
+  const baseWarnings = locationWarnings(input.location, input.periodStart, input.periodEnd);
   if (input.conflicts.length) {
+    const blockingIntervals = input.conflicts.map(toBlockingInterval);
+    const explanation = conflictExplanation(blockingIntervals);
     return {
       locationId: input.location.id,
       state: "CONFLICT",
-      label: availabilitySummary({ state: "CONFLICT", conflictCount: input.conflicts.length, warnings }),
-      warnings,
-      conflicts: input.conflicts
+      label: "Conflict in perioada selectata",
+      tone: "red",
+      explanation,
+      warnings: [explanation, ...baseWarnings.filter((warning) => !isGenericAvailableNote(warning))],
+      conflicts: input.conflicts,
+      blockingIntervals
     };
   }
 
+  const warnings = baseWarnings.filter((warning) => !isGenericAvailableNote(warning));
   return {
     locationId: input.location.id,
     state: "AVAILABLE",
-    label: availabilitySummary({ state: "AVAILABLE", conflictCount: 0, warnings }),
+    label: "Disponibil in perioada selectata",
+    tone: warnings.length ? "yellow" : "green",
+    explanation: warnings[0] || "Nu exista HOLD, RESERVED sau BOOKED suprapus.",
     warnings,
-    conflicts: []
+    conflicts: [],
+    blockingIntervals: []
   };
 }
 
@@ -127,9 +159,71 @@ function unknownAvailability(location: AvailabilityLocation, reason: string): Lo
   return {
     locationId: location.id,
     state: "UNKNOWN",
-    label: "Alege perioada",
+    label: "Disponibilitate necunoscuta",
+    tone: "gray",
+    explanation: reason,
     warnings: [reason],
-    conflicts: []
+    conflicts: [],
+    blockingIntervals: []
+  };
+}
+
+function buildNoPeriodAvailability(
+  location: AvailabilityLocation,
+  futureConflicts: LocationSelectionConflict[],
+  today: Date
+): LocationSelectionAvailability {
+  const intervals = futureConflicts.map(toBlockingInterval);
+  const current = futureConflicts.find((conflict) => new Date(conflict.periodStart) <= today && new Date(conflict.periodEnd) >= today);
+  const next = futureConflicts.find((conflict) => new Date(conflict.periodStart) > today);
+  const baseWarnings = locationWarnings(location, today, today).filter((warning) => !isGenericAvailableNote(warning));
+
+  if (current) {
+    const availableFrom = addDays(new Date(current.periodEnd), 1).toISOString();
+    const label = `Disponibil din ${formatDate(availableFrom)}`;
+    return {
+      locationId: location.id,
+      state: "CONFLICT",
+      label,
+      tone: "red",
+      explanation: `Ocupat acum: ${formatDate(current.periodStart)} - ${formatDate(current.periodEnd)}.`,
+      warnings: [`Ocupat acum pana la ${formatDate(current.periodEnd)}.`, ...baseWarnings],
+      conflicts: futureConflicts,
+      blockingIntervals: intervals,
+      availableFrom
+    };
+  }
+
+  if (next) {
+    const availableUntil = addDays(new Date(next.periodStart), -1).toISOString();
+    const hasMultipleFuture = futureConflicts.length > 1;
+    return {
+      locationId: location.id,
+      state: "AVAILABLE",
+      label: `Disponibil pana la ${formatDate(availableUntil)}`,
+      tone: "yellow",
+      explanation: hasMultipleFuture
+        ? `Verifica perioada - exista ${futureConflicts.length} rezervari viitoare.`
+        : `Urmatoarea ocupare incepe la ${formatDate(next.periodStart)}.`,
+      warnings: [
+        hasMultipleFuture ? `Exista ${futureConflicts.length} rezervari viitoare.` : `Rezervare viitoare din ${formatDate(next.periodStart)}.`,
+        ...baseWarnings
+      ],
+      conflicts: futureConflicts,
+      blockingIntervals: intervals,
+      availableUntil
+    };
+  }
+
+  return {
+    locationId: location.id,
+    state: "AVAILABLE",
+    label: "Disponibil",
+    tone: baseWarnings.length ? "yellow" : "green",
+    explanation: baseWarnings[0] || "Nu exista rezervari active sau viitoare.",
+    warnings: baseWarnings,
+    conflicts: [],
+    blockingIntervals: []
   };
 }
 
@@ -183,6 +277,24 @@ function locationWarnings(location: AvailabilityLocation, periodStart: Date, per
   return warnings;
 }
 
+function toBlockingInterval(conflict: LocationSelectionConflict): LocationSelectionBlockingInterval {
+  return {
+    status: conflict.status,
+    start: conflict.periodStart,
+    end: conflict.periodEnd
+  };
+}
+
+function conflictExplanation(intervals: LocationSelectionBlockingInterval[]) {
+  const first = intervals[0];
+  if (!first) return "Exista conflict in perioada selectata.";
+  return `Ocupat / rezervat intre ${formatDate(first.start)} - ${formatDate(first.end)}.`;
+}
+
+function isGenericAvailableNote(value: string) {
+  return /^Nota disponibilitate:\s*disponibil\.?$/i.test(value.trim());
+}
+
 function blockOverlaps(blockedFrom: Date | null, blockedUntil: Date | null, periodStart: Date, periodEnd: Date) {
   if (!blockedFrom && !blockedUntil) return true;
   const start = blockedFrom || new Date("1970-01-01T00:00:00.000Z");
@@ -198,4 +310,16 @@ function parseDate(value?: string | null) {
 
 function unique(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function startOfUtcDay(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function addDays(date: Date, days: number) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
+}
+
+function formatDate(value: string | Date) {
+  return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(value));
 }

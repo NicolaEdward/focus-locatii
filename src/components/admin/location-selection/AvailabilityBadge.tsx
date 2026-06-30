@@ -6,12 +6,13 @@ import type { LocationSelectionAvailability } from "@/lib/location-selection-dto
 export function AvailabilityBadge({ availability }: { availability?: LocationSelectionAvailability }) {
   const state = availability?.state || "UNKNOWN";
   const label = availability?.label || "Alege perioada";
+  const toneName = availability?.tone || (state === "AVAILABLE" ? "green" : state === "CONFLICT" ? "red" : state === "PARTIAL" ? "yellow" : "gray");
   const tone = {
-    AVAILABLE: "border-emerald-300/45 bg-emerald-400/10 text-emerald-100",
-    PARTIAL: "border-amber-300/45 bg-amber-400/10 text-amber-100",
-    CONFLICT: "border-red-300/45 bg-red-400/10 text-red-100",
-    UNKNOWN: "border-slate-500/50 bg-white/5 text-slate-200"
-  }[state];
+    green: "border-emerald-300/45 bg-emerald-400/10 text-emerald-100",
+    yellow: "border-amber-300/45 bg-amber-400/10 text-amber-100",
+    red: "border-red-300/45 bg-red-400/10 text-red-100",
+    gray: "border-slate-500/50 bg-white/5 text-slate-200"
+  }[toneName];
   const Icon = state === "AVAILABLE" ? CheckCircle2 : state === "CONFLICT" ? AlertTriangle : HelpCircle;
 
   return (

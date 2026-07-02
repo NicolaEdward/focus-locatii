@@ -19,7 +19,22 @@ type ReservationDbClient = typeof prisma | Prisma.TransactionClient;
 
 const reservationInclude = {
   location: { select: { code: true, address: true, city: true, type: true } },
-  priceSegments: { orderBy: { effectiveFrom: "asc" as const } }
+  priceSegments: { orderBy: { effectiveFrom: "asc" as const } },
+  changeLogs: {
+    orderBy: { createdAt: "desc" as const },
+    take: 8,
+    include: { createdBy: { select: { name: true } } }
+  },
+  billingItems: {
+    orderBy: { invoiceDate: "desc" as const },
+    take: 20,
+    select: {
+      id: true,
+      invoiceDate: true,
+      invoiceNumber: true,
+      receivables: { select: { id: true } }
+    }
+  }
 };
 
 const optionalNumber = z.preprocess((value) => {
@@ -90,7 +105,8 @@ export const reservationInputSchema = z.object({
   billingFrequency: optionalText,
   invoiceGenerationMode: optionalText,
   nextInvoiceDate: optionalDate,
-  billingNotes: optionalText
+  billingNotes: optionalText,
+  cancellationReason: optionalText
 });
 
 export const reservationPatchSchema = z.object({
@@ -128,7 +144,8 @@ export const reservationPatchSchema = z.object({
   billingFrequency: optionalText,
   invoiceGenerationMode: optionalText,
   nextInvoiceDate: optionalDate,
-  billingNotes: optionalText
+  billingNotes: optionalText,
+  cancellationReason: optionalText
 });
 
 export async function listReservations(filters: {
@@ -332,10 +349,15 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
       await assertNoReservationConflict(tx, next.locationId, next.periodStart, next.periodEnd, next.status, id);
     }
 
+    const patchData = reservationPatchData(parsed, rentalContext, nextStatusForClient, existing);
+    if (parsed.status === "CANCELLED" && parsed.cancellationReason) {
+      patchData.notes = appendReservationNote(existing.notes, `Anulare: ${parsed.cancellationReason}`);
+    }
+
     const updated = await tx.reservation.update({
       where: { id },
       data: {
-        ...reservationPatchData(parsed, rentalContext, nextStatusForClient, existing),
+        ...patchData,
         ...(rentalContext
           ? {
               clientId: rentalContext.client.id,
@@ -366,6 +388,8 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
       );
     }
 
+    await logRentalCorrection(tx, existing, updated, actor?.id || null);
+
     return updated;
   });
 
@@ -377,7 +401,12 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
   return serializeReservation(reservationWithSegments);
 }
 
-export async function updateReservationGroupStatus(id: string, inputStatus: unknown, actor?: AuthSession | null) {
+export async function updateReservationGroupStatus(
+  id: string,
+  inputStatus: unknown,
+  actor?: AuthSession | null,
+  options: { cancellationReason?: string | null } = {}
+) {
   await expireStaleHolds();
   const status = reservationStatusSchema.parse(inputStatus);
   const updated = await prisma.$transaction(async (tx) => {
@@ -406,9 +435,7 @@ export async function updateReservationGroupStatus(id: string, inputStatus: unkn
       );
     }
 
-    await tx.reservation.updateMany({
-      where: existing.contractGroupId ? { contractGroupId: existing.contractGroupId } : { id },
-      data: {
+    const statusData = {
         status,
         ...(status === "BOOKED" ? {
           currency: existing.currency || "EUR",
@@ -422,8 +449,24 @@ export async function updateReservationGroupStatus(id: string, inputStatus: unkn
           neutralizationDate: null
         } : {}),
         ...reservationLifecycleData(status, existing.bookedAt)
+      };
+
+    if (status === "CANCELLED" && options.cancellationReason) {
+      for (const reservation of reservations) {
+        await tx.reservation.update({
+          where: { id: reservation.id },
+          data: {
+            ...statusData,
+            notes: appendReservationNote(reservation.notes, `Anulare: ${options.cancellationReason}`)
+          }
+        });
       }
-    });
+    } else {
+      await tx.reservation.updateMany({
+        where: existing.contractGroupId ? { contractGroupId: existing.contractGroupId } : { id },
+        data: statusData
+      });
+    }
 
     return tx.reservation.findMany({
       where: existing.contractGroupId ? { contractGroupId: existing.contractGroupId } : { id },
@@ -483,10 +526,11 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
     }
 
     for (const item of prepared) {
+      const patchData = reservationPatchData(parsed, item.rentalContext, item.nextStatusForClient, item.reservation);
       const updatedReservation = await tx.reservation.update({
         where: { id: item.reservation.id },
         data: {
-          ...reservationPatchData(parsed, item.rentalContext, item.nextStatusForClient, item.reservation),
+          ...patchData,
           ...(item.rentalContext
             ? {
                 clientId: item.rentalContext.client.id,
@@ -519,6 +563,7 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
           actor?.id || null
         );
       }
+      await logRentalCorrection(tx, item.reservation, updatedReservation, actor?.id || null);
     }
 
     return tx.reservation.findMany({
@@ -1029,6 +1074,92 @@ async function ensureCurrentPriceSegment(
   });
 }
 
+async function logRentalCorrection(
+  client: ReservationDbClient,
+  previous: {
+    id: string;
+    status: string;
+    clientId: string | null;
+    campaignId: string | null;
+    clientName: string;
+    campaignName: string | null;
+    contractNumber: string | null;
+    amount: number | null;
+    monthlyRentTotal: number | null;
+    monthlyRentShare: number | null;
+    currency: string | null;
+    periodStart: Date;
+    periodEnd: Date;
+    installationDate: Date | null;
+    neutralizationDate: Date | null;
+  },
+  next: {
+    id: string;
+    status: string;
+    clientId: string | null;
+    campaignId: string | null;
+    clientName: string;
+    campaignName: string | null;
+    contractNumber: string | null;
+    amount: number | null;
+    monthlyRentTotal: number | null;
+    monthlyRentShare: number | null;
+    currency: string | null;
+    periodStart: Date;
+    periodEnd: Date;
+    installationDate: Date | null;
+    neutralizationDate: Date | null;
+  },
+  actorId: string | null
+) {
+  if (next.status !== "BOOKED") return;
+  const previousSnapshot = rentalCorrectionSnapshot(previous);
+  const nextSnapshot = rentalCorrectionSnapshot(next);
+  if (JSON.stringify(previousSnapshot) === JSON.stringify(nextSnapshot)) return;
+  await client.rentalChangeLog.create({
+    data: {
+      rentalId: next.id,
+      action: "rental_correction",
+      previousJson: previousSnapshot,
+      nextJson: nextSnapshot,
+      note: "Corectie inchiriere activa din admin.",
+      createdByUserId: actorId
+    }
+  });
+}
+
+function rentalCorrectionSnapshot(reservation: {
+  clientId: string | null;
+  campaignId: string | null;
+  clientName: string;
+  campaignName: string | null;
+  contractNumber: string | null;
+  amount: number | null;
+  monthlyRentTotal: number | null;
+  monthlyRentShare: number | null;
+  currency: string | null;
+  periodStart: Date;
+  periodEnd: Date;
+  installationDate: Date | null;
+  neutralizationDate: Date | null;
+}) {
+  return {
+    clientId: reservation.clientId,
+    campaignId: reservation.campaignId,
+    clientName: reservation.clientName,
+    campaignName: reservation.campaignName,
+    contractNumber: reservation.contractNumber,
+    amount: reservation.amount,
+    monthlyRentTotal: reservation.monthlyRentTotal,
+    monthlyRentShare: reservation.monthlyRentShare,
+    currency: reservation.currency,
+    periodStart: reservation.periodStart.toISOString(),
+    periodEnd: reservation.periodEnd.toISOString(),
+    installationDate: reservation.installationDate?.toISOString() || null,
+    neutralizationDate: reservation.neutralizationDate?.toISOString() || null
+  };
+}
+
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
@@ -1090,6 +1221,22 @@ function serializeReservation(
       currency: string;
       reason: string | null;
     }>;
+    changeLogs?: Array<{
+      id: string;
+      action: string;
+      note: string | null;
+      previousJson: unknown;
+      nextJson: unknown;
+      createdByUserId: string | null;
+      createdAt: Date;
+      createdBy?: { name: string } | null;
+    }>;
+    billingItems?: Array<{
+      id: string;
+      invoiceDate: Date;
+      invoiceNumber: string | null;
+      receivables: Array<{ id: string }>;
+    }>;
   }
 ): ReservationDTO {
   const neutralizationDate =
@@ -1147,7 +1294,25 @@ function serializeReservation(
       monthlyRent: Number(segment.monthlyRent || 0),
       currency: segment.currency,
       reason: segment.reason
-    }))
+    })),
+    changeLogs: reservation.changeLogs?.map((log) => ({
+      id: log.id,
+      action: log.action,
+      note: log.note,
+      previousJson: log.previousJson,
+      nextJson: log.nextJson,
+      createdByUserId: log.createdByUserId,
+      createdByName: log.createdBy?.name || null,
+      createdAt: log.createdAt.toISOString()
+    })),
+    billingSummary: reservation.billingItems?.length
+      ? {
+          billingItemCount: reservation.billingItems.length,
+          receivableCount: reservation.billingItems.reduce((total, item) => total + item.receivables.length, 0),
+          latestInvoiceDate: reservation.billingItems[0]?.invoiceDate.toISOString() || null,
+          latestInvoiceNumber: reservation.billingItems.find((item) => item.invoiceNumber)?.invoiceNumber || null
+        }
+      : undefined
   };
 }
 

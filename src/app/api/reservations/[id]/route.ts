@@ -23,9 +23,18 @@ export async function PATCH(request: NextRequest, context: Context) {
   try {
     const body = await request.json();
     if (body?.applyToGroup === true && body?.status) {
-      const reservations = await updateReservationGroupStatus(id, body.status, session);
+      const reservations = await updateReservationGroupStatus(id, body.status, session, {
+        cancellationReason: typeof body.cancellationReason === "string" ? body.cancellationReason : null
+      });
       const reservation = reservations.find((item) => item.id === id) || reservations[0];
-      await recordAudit({ actor: session, action: "reservation.status", entityType: "reservation", entityId: id, metadata: { status: body.status, applyToGroup: true }, request });
+      await recordAudit({
+        actor: session,
+        action: "reservation.status",
+        entityType: "reservation",
+        entityId: id,
+        metadata: { status: body.status, applyToGroup: true, hasCancellationReason: Boolean(body.cancellationReason) },
+        request
+      });
       return NextResponse.json({ reservation, reservations }, { headers: noStoreHeaders });
     }
 

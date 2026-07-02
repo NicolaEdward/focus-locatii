@@ -109,6 +109,22 @@ export type ReservationDTO = {
     currency: string;
     reason: string | null;
   }>;
+  changeLogs?: Array<{
+    id: string;
+    action: string;
+    note: string | null;
+    previousJson: unknown;
+    nextJson: unknown;
+    createdByUserId: string | null;
+    createdByName: string | null;
+    createdAt: string;
+  }>;
+  billingSummary?: {
+    billingItemCount: number;
+    receivableCount: number;
+    latestInvoiceDate: string | null;
+    latestInvoiceNumber: string | null;
+  };
 };
 
 export type OfferRequestDTO = {

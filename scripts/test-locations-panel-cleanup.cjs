@@ -16,6 +16,7 @@ function main() {
   productionSketchSupportUsesExistingImages();
   operationalWidgetsMovedToWorkspace();
   salesExportsBelongToFinance();
+  activeRentalsCanBeCorrectedSafely();
   numericBlankValuesRemainNull();
 
   console.log(JSON.stringify({
@@ -34,6 +35,7 @@ function main() {
       "production sketch is edited separately from public gallery",
       "operational widgets moved to /admin/operational",
       "sales export removed from /admin/locatii and kept under finance",
+      "active rental correction keeps client/campaign and cancellation safe",
       "blank numeric values remain null"
     ]
   }, null, 2));
@@ -174,6 +176,30 @@ function salesExportsBelongToFinance() {
   assert(header.includes('label="Export vanzari"'), "sales export should remain available under finance navigation");
   assert(salesReport.includes("sortSalesRows"), "sales export should have deterministic business sorting");
   assert(salesReport.includes("salesRowTimingRank"), "sales export should group active/upcoming/past rows");
+}
+
+function activeRentalsCanBeCorrectedSafely() {
+  const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
+  const reservations = read("src", "lib", "reservations.ts");
+  assert(panel.includes("clientId: reservation.clientId ||"), "edit dialog should start from the current booked client id");
+  assert(panel.includes("campaignId: reservation.campaignId ||"), "edit dialog should start from the current booked campaign id");
+  assert(panel.includes("clientId: editForm.clientId"), "reservation edit save should send the corrected client id");
+  assert(panel.includes("campaignId: editForm.campaignId"), "reservation edit save should send the corrected campaign id");
+  assert(panel.includes("Corectare client / campanie"), "booked rentals should expose a clear client/campaign correction area");
+  assert(panel.includes("Foloseste asta"), "client/campaign correction should explain when to use it");
+  assert(panel.includes("function requestCancellationDecision"), "cancel action should require a structured cancellation decision");
+  assert(panel.includes("Motiv obligatoriu"), "cancel action should require a cancellation reason");
+  assert(panel.includes("Doar locatia curenta"), "edit dialog should clearly support single-location corrections");
+  assert(panel.includes("Tot contractul grupat"), "edit dialog should clearly support grouped corrections");
+  assert(panel.includes("Impact comercial estimat"), "edit dialog should preview the commercial impact before saving");
+  assert(panel.includes("Istoric corectii"), "edit dialog should show visible correction history");
+  assert(panel.includes("Atentie financiar"), "edit dialog should warn when billing records are attached");
+  assert(panel.includes("Inchirieri active"), "locations workflow should expose active rentals separately from monthly sales");
+  assert(panel.includes("cancellationReason"), "cancel action should send the reason to the API");
+  assert(panel.includes("locatia devine disponibila"), "cancel confirmation should explain that availability is released");
+  assert(reservations.includes("rental_correction"), "backend should store a visible rental correction log");
+  assert(reservations.includes("billingSummary"), "backend should expose a safe billing summary for admin warnings");
+  assert(reservations.includes("resolveRentalContextForUpdate"), "backend should keep real client/campaign context as source of truth on booked updates");
 }
 
 function numericBlankValuesRemainNull() {

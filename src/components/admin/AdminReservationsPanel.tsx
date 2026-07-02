@@ -127,6 +127,8 @@ type ReservationForm = {
 };
 
 type ReservationEditForm = {
+  clientId: string;
+  campaignId: string;
   clientName: string;
   clientCompany: string;
   contractCompany: string;
@@ -258,7 +260,9 @@ export function AdminReservationsPanel({
   const [sellers, setSellers] = useState<SellerUser[]>([]);
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
+  const [editCampaigns, setEditCampaigns] = useState<CampaignOption[]>([]);
   const [clientSearch, setClientSearch] = useState("");
+  const [editClientSearch, setEditClientSearch] = useState("");
   const [assignOtherSeller, setAssignOtherSeller] = useState(false);
   const [locationSearch, setLocationSearch] = useState("");
   const [reservationSearch, setReservationSearch] = useState("");
@@ -356,6 +360,25 @@ export function AdminReservationsPanel({
     };
   }, [form.clientId]);
 
+  useEffect(() => {
+    if (!editForm?.clientId) {
+      setEditCampaigns([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/admin/campaigns?clientId=${encodeURIComponent(editForm.clientId)}`, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => {
+        if (!cancelled) setEditCampaigns(payload?.campaigns || []);
+      })
+      .catch(() => {
+        if (!cancelled) setEditCampaigns([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editForm?.clientId]);
+
   const locationsById = useMemo(() => new Map(locations.map((location) => [location.id, location])), [locations]);
 
   const sortedLocations = useMemo(
@@ -398,6 +421,18 @@ export function AdminReservationsPanel({
       .filter((client) => !search || client.companyName.toLowerCase().includes(search))
       .slice(0, 120);
   }, [clientSearch, clients]);
+
+  const editClientChoices = useMemo(() => {
+    const search = editClientSearch.trim().toLowerCase();
+    const filtered = clients
+      .filter((client) => !search || client.companyName.toLowerCase().includes(search))
+      .slice(0, 120);
+    const selected = clients.find((client) => client.id === editForm?.clientId);
+    if (selected && !filtered.some((client) => client.id === selected.id)) {
+      return [selected, ...filtered];
+    }
+    return filtered;
+  }, [clients, editClientSearch, editForm?.clientId]);
 
   const selectedClient = useMemo(
     () => clients.find((client) => client.id === form.clientId) || null,
@@ -475,6 +510,35 @@ export function AdminReservationsPanel({
     [reservations]
   );
 
+  const today = useMemo(() => startOfUtcDay(new Date()), []);
+
+  const activeRentals = useMemo(() => {
+    const search = reservationSearch.toLowerCase();
+    return reservations
+      .filter((reservation) => reservation.status === "BOOKED")
+      .filter((reservation) => new Date(reservation.periodStart) <= today && new Date(reservation.periodEnd) >= today)
+      .filter((reservation) => {
+        const location = locationsById.get(reservation.locationId);
+        const haystack = [
+          reservation.locationCode,
+          reservation.clientName,
+          reservation.clientCompany,
+          reservation.contractCompany,
+          reservation.campaignName,
+          reservation.contractNumber,
+          reservation.salesperson,
+          location?.city,
+          location?.county,
+          location?.address,
+          location?.type
+        ]
+          .join(" ")
+          .toLowerCase();
+        return !search || haystack.includes(search);
+      })
+      .sort((a, b) => new Date(a.periodEnd).getTime() - new Date(b.periodEnd).getTime());
+  }, [locationsById, reservationSearch, reservations, today]);
+
   const editingGroupCount = useMemo(() => {
     if (!editingReservation?.contractGroupId) return 1;
     return reservations.filter((reservation) => reservation.contractGroupId === editingReservation.contractGroupId).length;
@@ -496,7 +560,6 @@ export function AdminReservationsPanel({
 
   const operationalReservations = operationReservations?.length ? operationReservations : reservations;
 
-  const today = useMemo(() => startOfUtcDay(new Date()), []);
   const operationsWindowStart = useMemo(() => addDays(today, -OPERATION_HISTORY_DAYS), [today]);
   const decorationWindowEnd = useMemo(() => addDays(today, DECORATION_LOOKAHEAD_DAYS), [today]);
   const neutralizationWindowEnd = useMemo(() => addDays(today, NEUTRALIZATION_LOOKAHEAD_DAYS), [today]);
@@ -659,8 +722,11 @@ export function AdminReservationsPanel({
     setError(null);
     setMessage(null);
     setEditingReservation(reservation);
+    setEditClientSearch("");
     const decorationCost = operationCost(reservation.productionNotes, "decoration");
     setEditForm({
+      clientId: reservation.clientId || "",
+      campaignId: reservation.campaignId || "",
       clientName: reservation.clientName || "",
       clientCompany: reservation.clientCompany || "",
       contractCompany: normalizeCompanyEntity(reservation.contractCompany) || "",
@@ -719,6 +785,8 @@ export function AdminReservationsPanel({
       const buildBody = (reservation: ReservationDTO) => {
         return {
           clientName: editForm.clientName,
+          clientId: editForm.clientId,
+          campaignId: editForm.campaignId,
           clientCompany: editForm.clientCompany,
           clientEmail: editForm.clientEmail,
           clientPhone: editForm.clientPhone,
@@ -803,10 +871,21 @@ export function AdminReservationsPanel({
 
   async function updateReservationStatus(id: string, status: ReservationStatus) {
     setError(null);
+    const reservation = reservations.find((item) => item.id === id);
+    let applyToGroup = false;
+    let cancellationReason: string | null = null;
+    if (status === "CANCELLED") {
+      const decision = requestCancellationDecision(reservation || null);
+      if (!decision) return;
+      applyToGroup = decision.applyToGroup;
+      cancellationReason = decision.reason;
+    } else {
+      applyToGroup = Boolean(reservation?.contractGroupId);
+    }
     const response = await fetch(`/api/reservations/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status, applyToGroup: true })
+      body: JSON.stringify({ status, applyToGroup, cancellationReason })
     });
     const payload = await response.json();
 
@@ -845,16 +924,26 @@ export function AdminReservationsPanel({
 
   async function deleteReservation(id: string) {
     const reservation = reservations.find((item) => item.id === id);
-    const label = reservation
-      ? `${reservation.locationCode || reservation.locationId} / ${reservation.clientName || "fara client"}`
-      : id;
-    if (!confirm(`Anulezi rezervarea ${label}? Inregistrarea ramane in istoric.`)) return;
-    const response = await fetch(`/api/reservations/${id}`, { method: "DELETE" });
+    const decision = requestCancellationDecision(reservation || null);
+    if (!decision) return;
+    const response = await fetch(`/api/reservations/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "CANCELLED", applyToGroup: decision.applyToGroup, cancellationReason: decision.reason })
+    });
+    const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      setError("Rezervarea nu a putut fi stearsa.");
+      setError(payload?.error || "Inchirierea nu a putut fi anulata.");
       return;
     }
-    setReservations((current) => current.map((reservation) => reservation.id === id ? { ...reservation, status: "CANCELLED" } : reservation));
+    const updatedReservations = Array.isArray(payload?.reservations) ? payload.reservations : [payload?.reservation].filter(Boolean);
+    const updatesById = new Map<string, ReservationDTO>(
+      updatedReservations
+        .filter(Boolean)
+        .map((reservation: ReservationDTO) => [reservation.id, reservation] as [string, ReservationDTO])
+    );
+    setReservations((current) => current.map((reservation) => updatesById.get(reservation.id) || reservation));
+    setMessage(updatedReservations.length > 1 ? `Contractul a fost anulat pe ${updatedReservations.length} locatii.` : "Inchirierea a fost anulata.");
     await refreshLocations();
   }
 
@@ -1300,7 +1389,7 @@ export function AdminReservationsPanel({
             onStatusChange={updateReservationStatus}
             role={session.role}
             canEdit={canEditReservations}
-            canDelete={canManageAllReservations}
+            canDelete={canEditReservations}
             highlightedReservationId={focusedReservationId}
           />
         </AdminTableShell>
@@ -1389,6 +1478,29 @@ export function AdminReservationsPanel({
               </select>
             </div>
 
+            <div className="mt-5 rounded-lg border border-focus-line bg-focus-ink/35 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase text-focus-yellow">In lucru acum</p>
+                  <h3 className="font-display text-2xl font-black uppercase text-white">Inchirieri active ({activeRentals.length})</h3>
+                  <p className="mt-1 text-sm font-bold text-slate-300">
+                    Contracte BOOKED aflate in perioada curenta. De aici corectezi rapid clientul, campania, perioada sau pretul fara sa cauti dupa luna vanzarii.
+                  </p>
+                </div>
+              </div>
+              <ReservationsTable
+                reservations={activeRentals}
+                locationsById={locationsById}
+                onDelete={deleteReservation}
+                onEdit={openReservationEditor}
+                onStatusChange={updateReservationStatus}
+                role={session.role}
+                canEdit={canEditReservations}
+                canDelete={canEditReservations}
+                highlightedReservationId={focusedReservationId}
+              />
+            </div>
+
             <ReservationsTable
               reservations={monthlySales}
               locationsById={locationsById}
@@ -1397,7 +1509,7 @@ export function AdminReservationsPanel({
               onStatusChange={updateReservationStatus}
               role={session.role}
               canEdit={canEditReservations}
-              canDelete={canManageAllReservations}
+              canDelete={canEditReservations}
               highlightedReservationId={focusedReservationId}
             />
 
@@ -1415,7 +1527,7 @@ export function AdminReservationsPanel({
                 onStatusChange={updateReservationStatus}
                 role={session.role}
                 canEdit={canEditReservations}
-                canDelete={canManageAllReservations}
+                canDelete={canEditReservations}
                 highlightedReservationId={focusedReservationId}
               />
             </div>
@@ -1519,6 +1631,10 @@ export function AdminReservationsPanel({
           groupLocationIds={editingGroupLocationIds}
           saving={editing}
           canEditSalesperson={session.role !== "SALES_AGENT"}
+          clients={editClientChoices}
+          campaigns={editCampaigns}
+          clientSearch={editClientSearch}
+          onClientSearchChange={setEditClientSearch}
           sellers={sellers}
           onChange={setEditForm}
           onClose={closeReservationEditor}
@@ -1781,6 +1897,10 @@ function ReservationEditDialog({
   groupLocationIds,
   saving,
   canEditSalesperson,
+  clients,
+  campaigns,
+  clientSearch,
+  onClientSearchChange,
   sellers,
   onChange,
   onClose,
@@ -1793,6 +1913,10 @@ function ReservationEditDialog({
   groupLocationIds: string[];
   saving: boolean;
   canEditSalesperson: boolean;
+  clients: ClientOption[];
+  campaigns: CampaignOption[];
+  clientSearch: string;
+  onClientSearchChange: (value: string) => void;
   sellers: SellerUser[];
   onChange: React.Dispatch<React.SetStateAction<ReservationEditForm | null>>;
   onClose: () => void;
@@ -1801,6 +1925,7 @@ function ReservationEditDialog({
   const canApplyToGroup = Boolean(reservation.contractGroupId) && groupCount > 1;
   const calculatedShare = form.applyToGroup ? rentShareInputValue(form.monthlyRentTotal, groupCount) : null;
   const isBookedRental = reservation.status === "BOOKED";
+  const financialPreview = editFinancialPreview(reservation, form, form.applyToGroup ? groupCount : 1);
   const [periodPreview, setPeriodPreview] = useState<ReservationConflictPreview | null>(null);
   const [periodPreviewLoading, setPeriodPreviewLoading] = useState(false);
   const [periodPreviewError, setPeriodPreviewError] = useState<string | null>(null);
@@ -1812,6 +1937,7 @@ function ReservationEditDialog({
   const saveDisabled =
     saving ||
     Boolean(periodError) ||
+    (isBookedRental && (!form.clientId || !form.campaignId)) ||
     (mustPreviewPeriod && (!currentPeriodPreview || currentPeriodPreview.conflicts.length > 0));
   const updateField = (field: keyof ReservationEditForm, value: string | boolean) => {
     if (field === "periodStart" || field === "periodEnd" || field === "applyToGroup") {
@@ -1878,29 +2004,98 @@ function ReservationEditDialog({
 
         {canApplyToGroup ? (
           <div className="mt-4 rounded-lg border border-focus-line bg-focus-ink/45 p-3">
-            <label className="flex items-center justify-between gap-3 text-sm font-bold text-slate-200">
-              Aplica modificarile pe toate cele {groupCount} locatii din grup
-              <input
-                type="checkbox"
-                checked={form.applyToGroup}
-                onChange={(event) => updateField("applyToGroup", event.target.checked)}
-              />
-            </label>
+            <p className="text-xs font-black uppercase text-focus-yellow">Scop corectie</p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <button
+                className={`rounded-lg border px-3 py-2 text-left text-sm font-black transition ${!form.applyToGroup ? "border-focus-yellow bg-focus-yellow/15 text-white" : "border-focus-line bg-focus-navy/40 text-slate-300"}`}
+                type="button"
+                onClick={() => updateField("applyToGroup", false)}
+              >
+                Doar locatia curenta
+                <span className="mt-1 block text-xs font-bold text-slate-400">Corecteaza numai codul {reservation.locationCode || reservation.locationId}.</span>
+              </button>
+              <button
+                className={`rounded-lg border px-3 py-2 text-left text-sm font-black transition ${form.applyToGroup ? "border-focus-yellow bg-focus-yellow/15 text-white" : "border-focus-line bg-focus-navy/40 text-slate-300"}`}
+                type="button"
+                onClick={() => updateField("applyToGroup", true)}
+              >
+                Tot contractul grupat
+                <span className="mt-1 block text-xs font-bold text-slate-400">Aplica pe toate cele {groupCount} locatii din grup.</span>
+              </button>
+            </div>
             {form.applyToGroup ? (
               <div className="mt-3 rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100">
                 Schimbarile comerciale, perioada si datele operationale se aplica intregului grup: {groupLocationLabels.slice(0, 12).join(", ")}
                 {groupLocationLabels.length > 12 ? ` +${groupLocationLabels.length - 12} locatii` : ""}. Verifica atent intervalul si statusul inainte de salvare.
               </div>
-            ) : null}
+            ) : (
+              <div className="mt-3 rounded-md border border-focus-line bg-focus-navy/35 px-3 py-2 text-xs font-bold text-slate-300">
+                Restul locatiilor din acelasi grup raman neschimbate.
+              </div>
+            )}
           </div>
         ) : null}
 
+        <ReservationBillingWarning reservation={reservation} />
+
         <div className="mt-5 grid gap-3 md:grid-cols-2">
           {isBookedRental ? (
-            <>
-              <ReadOnlyField label="Client" value={reservation.clientName || "-"} />
-              <ReadOnlyField label="Campanie" value={reservation.campaignName || "-"} />
-            </>
+            <div className="grid gap-3 rounded-lg border border-focus-line bg-focus-navy/35 p-4 md:col-span-2">
+              <div>
+                <p className="text-xs font-black uppercase text-focus-yellow">Corectare client / campanie</p>
+                <p className="mt-1 text-xs font-bold text-slate-400">
+                  Foloseste asta cand o locatie a fost inchiriata pe clientul sau campania gresita. Salvarea actualizeaza legatura reala, iar datele comerciale vin din campania aleasa.
+                </p>
+              </div>
+              <InputField label="Cauta client" value={clientSearch} onChange={onClientSearchChange} />
+              <SelectField
+                label="Client"
+                value={form.clientId}
+                onChange={(clientId) => {
+                  const client = clients.find((item) => item.id === clientId);
+                  onChange((current) => current ? {
+                    ...current,
+                    clientId,
+                    campaignId: "",
+                    clientName: client?.companyName || current.clientName,
+                    clientCompany: client?.companyName || current.clientCompany
+                  } : current);
+                }}
+              >
+                <option value="">Alege clientul din baza de date</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>{client.companyName}</option>
+                ))}
+              </SelectField>
+              <SelectField
+                label="Campanie"
+                value={form.campaignId}
+                onChange={(campaignId) => {
+                  const campaign = campaigns.find((item) => item.id === campaignId);
+                  onChange((current) => current ? {
+                    ...current,
+                    campaignId,
+                    campaignName: campaign?.campaignName || current.campaignName,
+                    contractCompany: normalizeCompanyEntity(campaign?.companyEntity) || current.contractCompany,
+                    currency: campaign?.currency || current.currency,
+                    paymentTermType: campaign?.paymentTermType || current.paymentTermType,
+                    paymentTermDays: campaign?.paymentTermDays != null ? String(campaign.paymentTermDays) : current.paymentTermDays,
+                    billingRule: campaign?.billingRule || current.billingRule,
+                    billingFrequency: campaign?.billingFrequency || current.billingFrequency
+                  } : current);
+                }}
+              >
+                <option value="">{form.clientId ? "Alege campania clientului" : "Alege mai intai clientul"}</option>
+                {form.campaignId && !campaigns.some((campaign) => campaign.id === form.campaignId) ? (
+                  <option value={form.campaignId}>{form.campaignName || "Campania curenta"}</option>
+                ) : null}
+                {campaigns.map((campaign) => (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.campaignName} - {campaign.status}
+                  </option>
+                ))}
+              </SelectField>
+            </div>
           ) : (
             <>
               <InputField label="Client hold" value={form.clientName} onChange={(value) => updateField("clientName", value)} />
@@ -1908,10 +2103,14 @@ function ReservationEditDialog({
               <InputField label="Campanie estimata" value={form.campaignName} onChange={(value) => updateField("campaignName", value)} />
             </>
           )}
-          <SelectField label="Firma contract" value={form.contractCompany} onChange={(value) => updateField("contractCompany", value)}>
-            <option value="">Alege firma contractanta</option>
-            {companyEntities.map((entity) => <option key={entity.value} value={entity.value}>{entity.label}</option>)}
-          </SelectField>
+          {isBookedRental ? (
+            <ReadOnlyField label="Firma contract" value={form.contractCompany || "Se preia din campanie"} />
+          ) : (
+            <SelectField label="Firma contract" value={form.contractCompany} onChange={(value) => updateField("contractCompany", value)}>
+              <option value="">Alege firma contractanta</option>
+              {companyEntities.map((entity) => <option key={entity.value} value={entity.value}>{entity.label}</option>)}
+            </SelectField>
+          )}
           <InputField label="Numar contract / IO" value={form.contractNumber} onChange={(value) => updateField("contractNumber", value)} />
           {canEditSalesperson ? (
             <SellerSelect
@@ -1978,6 +2177,7 @@ function ReservationEditDialog({
             </p>
           </div>
           <InputField type="date" label="Data neutralizare" value={form.neutralizationDate} onChange={(value) => updateField("neutralizationDate", value)} />
+          <EditFinancialPreview preview={financialPreview} />
           <AdvancedSection title="Setari facturare / optional">
             <SelectField label="Termen plata" value={form.paymentTermType} onChange={(value) => onChange((current) => current ? { ...current, paymentTermType: value, paymentTermDays: defaultPaymentTermDays(value, current.paymentTermDays) } : current)}>
               <option value="advance">Plata in avans / 0 zile</option>
@@ -2019,6 +2219,8 @@ function ReservationEditDialog({
           </AdvancedSection>
         </div>
 
+        <ReservationCorrectionHistory reservation={reservation} />
+
         <div className="mt-5 flex flex-wrap items-center justify-end gap-3 border-t border-focus-line pt-4">
           <button className="focus-button secondary" type="button" onClick={onClose} disabled={saving}>
             Renunta
@@ -2059,6 +2261,104 @@ function EditPeriodPreviewResult({ preview }: { preview: ReservationConflictPrev
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ReservationBillingWarning({ reservation }: { reservation: ReservationDTO }) {
+  const summary = reservation.billingSummary;
+  if (!summary?.billingItemCount) return null;
+  return (
+    <div className="mt-4 rounded-lg border border-amber-300/40 bg-amber-400/10 p-3 text-sm font-bold text-amber-100">
+      <p className="font-black uppercase">Atentie financiar</p>
+      <p className="mt-1">
+        Aceasta inchiriere are {summary.billingItemCount} pozitie(i) de facturare
+        {summary.receivableCount ? ` si ${summary.receivableCount} incasare(i) asociate` : ""}.
+        Corectarea pretului sau perioadei poate cere ajustare in Financiar.
+      </p>
+      {summary.latestInvoiceDate ? (
+        <p className="mt-1 text-xs">
+          Ultima factura cunoscuta: {summary.latestInvoiceNumber || "fara numar"} / {dateLabel(summary.latestInvoiceDate)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function EditFinancialPreview({ preview }: { preview: ReturnType<typeof editFinancialPreview> }) {
+  if (!preview) return null;
+  const deltaClass = preview.delta >= 0 ? "text-emerald-200" : "text-red-100";
+  return (
+    <div className="grid gap-3 rounded-lg border border-focus-line bg-focus-navy/35 p-3 md:col-span-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-focus-yellow">Impact comercial estimat</p>
+          <p className="mt-1 text-xs font-bold text-slate-400">
+            Calcul lunar pentru {preview.affectedCount} cod(uri). TVA si prorata finala se verifica separat la facturare.
+          </p>
+        </div>
+        <span className={`rounded-full border border-focus-line px-3 py-1 text-xs font-black uppercase ${deltaClass}`}>
+          {preview.delta >= 0 ? "+" : ""}{moneyLabel(preview.delta)} {preview.currency}
+        </span>
+      </div>
+      <div className="grid gap-2 text-sm font-bold text-slate-200 md:grid-cols-3">
+        <span>Inainte: {moneyLabel(preview.previousTotal)} {preview.currency} / luna</span>
+        <span>Dupa: {moneyLabel(preview.nextTotal)} {preview.currency} / luna</span>
+        <span className={deltaClass}>Diferenta: {preview.delta >= 0 ? "+" : ""}{moneyLabel(preview.delta)} {preview.currency}</span>
+      </div>
+    </div>
+  );
+}
+
+function ReservationCorrectionHistory({ reservation }: { reservation: ReservationDTO }) {
+  const logs = reservation.changeLogs || [];
+  const segments = reservation.priceSegments || [];
+  if (!logs.length && !segments.length) return null;
+  return (
+    <div className="mt-5 rounded-lg border border-focus-line bg-focus-ink/45 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-focus-yellow">Istoric corectii</p>
+          <h3 className="font-display text-xl font-black uppercase text-white">Urme comerciale pastrate</h3>
+        </div>
+        <span className="rounded-full border border-focus-line px-3 py-1 text-xs font-black uppercase text-slate-300">
+          {logs.length + segments.length} inregistrari
+        </span>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {logs.length ? (
+          <div className="rounded-lg border border-focus-line bg-focus-navy/35 p-3">
+            <p className="text-xs font-black uppercase text-slate-300">Corectii salvate</p>
+            <div className="mt-2 grid gap-2">
+              {logs.slice(0, 5).map((log) => (
+                <div className="rounded-md border border-focus-line bg-focus-ink/45 px-3 py-2" key={log.id}>
+                  <p className="text-xs font-black uppercase text-white">{rentalChangeActionLabel(log.action)} - {dateTimeLabel(log.createdAt)}</p>
+                  <p className="mt-1 text-xs font-bold text-slate-300">{rentalChangeSummary(log)}</p>
+                  {log.createdByName ? <p className="mt-1 text-xs text-slate-500">Utilizator: {log.createdByName}</p> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {segments.length ? (
+          <div className="rounded-lg border border-focus-line bg-focus-navy/35 p-3">
+            <p className="text-xs font-black uppercase text-slate-300">Segmente pret</p>
+            <div className="mt-2 grid gap-2">
+              {segments.slice(-5).reverse().map((segment) => (
+                <div className="rounded-md border border-focus-line bg-focus-ink/45 px-3 py-2" key={segment.id}>
+                  <p className="text-xs font-black uppercase text-white">
+                    {moneyLabel(segment.monthlyRent)} {segment.currency} / luna
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-slate-300">
+                    {dateLabel(segment.effectiveFrom)} - {segment.effectiveTo ? dateLabel(segment.effectiveTo) : "prezent"}
+                  </p>
+                  {segment.reason ? <p className="mt-1 text-xs text-slate-500">{segment.reason}</p> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -2626,6 +2926,91 @@ function moneyInputValue(value: string) {
   if (!value.trim()) return null;
   const parsed = Number(value.replace(",", "."));
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function requestCancellationDecision(reservation: ReservationDTO | null) {
+  const label = reservation
+    ? `${reservation.locationCode || reservation.locationId} / ${reservation.clientName || "fara client"}`
+    : "inregistrarea selectata";
+  const applyToGroup = Boolean(reservation?.contractGroupId)
+    ? window.confirm(`Anulezi tot contractul grupat pentru ${label}?\n\nOK = tot grupul\nCancel = doar locatia curenta`)
+    : false;
+  const scopeLabel = applyToGroup ? "tot contractul grupat" : "locatia curenta";
+  const reason = window.prompt(`Motiv obligatoriu pentru anularea ${scopeLabel} (${label}):`);
+  const trimmedReason = reason?.trim();
+  if (!trimmedReason) {
+    window.alert("Anularea a fost oprita. Completeaza motivul ca sa ramana istoric clar.");
+    return null;
+  }
+  if (!window.confirm(`Confirmi anularea pentru ${scopeLabel}? Inregistrarea ramane in istoric, iar locatia devine disponibila.`)) {
+    return null;
+  }
+  return { applyToGroup, reason: trimmedReason };
+}
+
+function editFinancialPreview(reservation: ReservationDTO, form: ReservationEditForm, affectedCount: number) {
+  const currency = form.currency || reservation.currency || "EUR";
+  const previousPerCode =
+    reservation.amount ??
+    reservation.monthlyRentShare ??
+    (reservation.monthlyRentTotal != null && affectedCount > 0 ? reservation.monthlyRentTotal / affectedCount : null);
+  const nextPerCode =
+    (form.applyToGroup ? rentShareInputValue(form.monthlyRentTotal, affectedCount) : moneyInputValue(form.amount)) ??
+    moneyInputValue(form.monthlyRentShare) ??
+    moneyInputValue(form.monthlyRentTotal);
+  if (previousPerCode == null || nextPerCode == null) return null;
+  const previousTotal = Math.round(previousPerCode * affectedCount * 100) / 100;
+  const nextTotal = Math.round(nextPerCode * affectedCount * 100) / 100;
+  return {
+    affectedCount,
+    currency,
+    previousTotal,
+    nextTotal,
+    delta: Math.round((nextTotal - previousTotal) * 100) / 100
+  };
+}
+
+function rentalChangeActionLabel(action: string) {
+  if (action === "price_or_period_update") return "Pret / perioada";
+  if (action === "rental_correction") return "Corectie inchiriere";
+  return action.replaceAll("_", " ");
+}
+
+function rentalChangeSummary(log: NonNullable<ReservationDTO["changeLogs"]>[number]) {
+  const next = objectRecord(log.nextJson);
+  const previous = objectRecord(log.previousJson);
+  const pieces = [];
+  const nextClient = stringRecordValue(next, "clientName");
+  const previousClient = stringRecordValue(previous, "clientName");
+  if (nextClient && nextClient !== previousClient) pieces.push(`Client: ${previousClient || "-"} -> ${nextClient}`);
+  const nextCampaign = stringRecordValue(next, "campaignName");
+  const previousCampaign = stringRecordValue(previous, "campaignName");
+  if (nextCampaign && nextCampaign !== previousCampaign) pieces.push(`Campanie: ${previousCampaign || "-"} -> ${nextCampaign}`);
+  const nextAmount = numberRecordValue(next, "monthlyRentShare") ?? numberRecordValue(next, "amount") ?? numberRecordValue(next, "monthlyRent");
+  const previousAmount = numberRecordValue(previous, "monthlyRentShare") ?? numberRecordValue(previous, "amount") ?? numberRecordValue(previous, "monthlyRent");
+  if (nextAmount != null && nextAmount !== previousAmount) pieces.push(`Pret: ${previousAmount != null ? moneyLabel(previousAmount) : "-"} -> ${moneyLabel(nextAmount)}`);
+  const nextStart = stringRecordValue(next, "periodStart") || stringRecordValue(next, "effectiveFrom");
+  const nextEnd = stringRecordValue(next, "periodEnd") || stringRecordValue(next, "effectiveTo");
+  const previousStart = stringRecordValue(previous, "periodStart") || stringRecordValue(previous, "effectiveFrom");
+  const previousEnd = stringRecordValue(previous, "periodEnd") || stringRecordValue(previous, "effectiveTo");
+  if ((nextStart && nextStart !== previousStart) || (nextEnd && nextEnd !== previousEnd)) {
+    pieces.push(`Perioada: ${previousStart ? dateLabel(previousStart) : "-"} - ${previousEnd ? dateLabel(previousEnd) : "-"} -> ${nextStart ? dateLabel(nextStart) : "-"} - ${nextEnd ? dateLabel(nextEnd) : "-"}`);
+  }
+  return pieces.length ? pieces.join(" | ") : log.note || "Corectie salvata.";
+}
+
+function objectRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringRecordValue(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "string" ? value : null;
+}
+
+function numberRecordValue(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function defaultPaymentTermDays(type: string, current: string) {

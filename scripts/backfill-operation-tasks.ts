@@ -77,6 +77,7 @@ async function loadReservations(options: CliOptions): Promise<OperationTaskBackf
         clientId: true,
         campaignId: true,
         locationId: true,
+        status: true,
         periodStart: true,
         periodEnd: true,
         installationDate: true,

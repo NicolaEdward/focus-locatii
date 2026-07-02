@@ -205,6 +205,7 @@ export const bridgeReservationSelect = {
   id: true,
   campaignId: true,
   locationId: true,
+  status: true,
   periodStart: true,
   periodEnd: true,
   installationDate: true,

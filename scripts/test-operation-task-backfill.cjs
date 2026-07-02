@@ -22,7 +22,7 @@ async function main() {
     operationTaskTableAccessible: true
   });
 
-  assert.equal(plan.report.reservationsScanned, 3, "all fixture reservations should be scanned");
+  assert.equal(plan.report.reservationsScanned, 4, "all fixture reservations should be scanned");
   assert.equal(plan.report.derivedTaskCount, 5, "base plus legacy derived task count should match fixtures");
   assert.equal(plan.report.wouldCreateCount, 4, "existing dedupe key should be skipped");
   assert.equal(plan.report.wouldSkipExistingCount, 1, "one existing task should be skipped");
@@ -45,6 +45,7 @@ async function main() {
   assert.equal(plan.report.comparison.potentialDoubleCountRiskCount, 1, "existing dedupe overlap should be reported as a double-count risk");
   assert(plan.report.warnings.some((warning) => warning.code === "duplicate_dedupe_key"), "duplicate warning should be sampled");
   assert(plan.report.warnings.some((warning) => warning.code === "corrupted_legacy_metadata"), "corruption warning should be sampled");
+  assert(!plan.allDrafts.some((task) => task.reservationId === "hold-1"), "HOLD reservations must not create operation task drafts");
 
   const planAgain = buildOperationTaskBackfillPlan(fixtures, {
     existingDedupeKeys,
@@ -115,6 +116,7 @@ function reservations() {
       clientId: "client-1",
       campaignId: "campaign-1",
       locationId: "location-1",
+      status: "BOOKED",
       periodStart: "2026-01-01T00:00:00.000Z",
       periodEnd: "2026-01-31T00:00:00.000Z",
       installationDate: "2026-01-02T00:00:00.000Z",
@@ -146,6 +148,7 @@ function reservations() {
       clientId: null,
       campaignId: null,
       locationId: "location-2",
+      status: "BOOKED",
       periodStart: "2026-02-01T00:00:00.000Z",
       periodEnd: "2026-02-28T00:00:00.000Z",
       installationDate: null,
@@ -157,11 +160,34 @@ function reservations() {
       clientId: "client-3",
       campaignId: "campaign-3",
       locationId: null,
+      status: "BOOKED",
       periodStart: null,
       periodEnd: null,
       installationDate: null,
       neutralizationDate: null,
       productionNotes: null
+    },
+    {
+      id: "hold-1",
+      clientId: "client-hold",
+      campaignId: "campaign-hold",
+      locationId: "location-hold",
+      status: "HOLD",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      periodEnd: "2026-03-31T00:00:00.000Z",
+      installationDate: "2026-03-02T00:00:00.000Z",
+      neutralizationDate: "2026-03-30T00:00:00.000Z",
+      productionNotes: legacyMeta({
+        decorationStatus: "NEW",
+        neutralizationStatus: "NEW",
+        tasks: [{
+          id: "hold-red-1",
+          kind: "decoration",
+          status: "NEW",
+          taskType: "redecoration",
+          taskDate: "2026-03-12T00:00:00.000Z"
+        }]
+      })
     }
   ];
 }

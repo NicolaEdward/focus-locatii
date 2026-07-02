@@ -13,6 +13,7 @@ import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HIS
 
 const reservationStatusSchema = z.enum(["HOLD", "RESERVED", "BOOKED", "CANCELLED", "EXPIRED"]);
 const activeReservationStatuses = ["HOLD", "RESERVED", "BOOKED"] as const;
+const operationalReservationStatuses = ["BOOKED"] as const;
 type SellerPatch = { ownerId?: string | null; sellerUserId?: string | null; salesperson?: string | null };
 type ReservationDbClient = typeof prisma | Prisma.TransactionClient;
 
@@ -195,7 +196,7 @@ export async function listOperationReservations() {
 
   const reservations = await prisma.reservation.findMany({
     where: {
-      status: { in: [...activeReservationStatuses] },
+      status: { in: [...operationalReservationStatuses] },
       OR: [
         { installationDate: { gte: windowStart, lte: decorationWindowEnd } },
         { neutralizationDate: { gte: windowStart, lte: neutralizationWindowEnd } },

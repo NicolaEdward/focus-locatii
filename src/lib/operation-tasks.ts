@@ -52,6 +52,7 @@ export type OperationTaskReservationLike = {
   id?: string | null;
   campaignId?: string | null;
   locationId?: string | null;
+  status?: string | null;
   periodStart?: Date | string | null;
   periodEnd?: Date | string | null;
   installationDate?: Date | string | null;
@@ -114,6 +115,8 @@ export function normalizeLegacyOperationStatus(status: unknown): { status: Opera
 export function deriveBaseTasksFromReservation(reservation: OperationTaskReservationLike): OperationTaskDerivationResult {
   const reservationId = textValue(reservation.id);
   const issues: OperationTaskIssue[] = [];
+  if (hasExplicitNonBookedStatus(reservation)) return { tasks: [], issues };
+
   const legacy = readLegacyMeta(reservation.productionNotes, reservationId);
   issues.push(...legacy.issues);
 
@@ -176,6 +179,8 @@ export function deriveBaseTasksFromReservation(reservation: OperationTaskReserva
 export function parseLegacyOperationTasksForMigration(reservation: OperationTaskReservationLike): OperationTaskDerivationResult {
   const reservationId = textValue(reservation.id);
   const issues: OperationTaskIssue[] = [];
+  if (hasExplicitNonBookedStatus(reservation)) return { tasks: [], issues };
+
   const legacy = readLegacyMeta(reservation.productionNotes, reservationId);
   issues.push(...legacy.issues);
 
@@ -397,4 +402,8 @@ function coerceDate(value: unknown): Date | null {
 function textValue(value: unknown) {
   const text = String(value || "").trim();
   return text || null;
+}
+
+function hasExplicitNonBookedStatus(reservation: OperationTaskReservationLike) {
+  return reservation.status != null && reservation.status !== "BOOKED";
 }

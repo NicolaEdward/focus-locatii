@@ -17,6 +17,7 @@ async function main() {
   await relationalRowsWinWithLegacyFallback();
   await noDuplicateTasksForSameDedupeKey();
   await activeAndHistoryStatusRules();
+  await holdReservationsNeverProduceOperationalTasks();
   await legacyDecorationCostSurvivesFallback();
   await redecorationTaskAppearsCorrectly();
   await comparisonReportsZeroMismatchForMatchingFixtures();
@@ -35,6 +36,7 @@ async function main() {
       "DONE excluded from active",
       "ARCHIVED included in history",
       "CANCELLED excluded from active",
+      "HOLD reservations produce no operational tasks",
       "legacy decoration cost appears in fallback DTO",
       "redecoration task appears correctly",
       "matching fixtures compare cleanly",
@@ -42,6 +44,20 @@ async function main() {
       "DTO shape remains compatible"
     ]
   }, null, 2));
+}
+
+async function holdReservationsNeverProduceOperationalTasks() {
+  const reservation = bookedReservation({ status: "HOLD" });
+  const result = await adapter.listOperationalTasksWithFallback({
+    reservations: [reservation],
+    relationalTasks: [
+      relationalTask("task-decoration-hold", reservation, "DECORATION", "NEW", "2026-07-03T00:00:00.000Z")
+    ],
+    ...windowFilters()
+  });
+
+  assert.equal(result.active.length, 0, "HOLD reservations must not appear as active operation tasks");
+  assert.equal(result.tasks.length, 0, "HOLD reservations must not appear in merged operation task list");
 }
 
 async function flagSafetyAndDashboardBranch() {

@@ -56,6 +56,10 @@ function main() {
     "missing neutralization date should be reported"
   );
 
+  const holdBase = deriveBaseTasksFromReservation(reservation({ status: "HOLD" }));
+  assert.equal(holdBase.tasks.length, 0, "HOLD must not create base operation tasks");
+  assert.equal(holdBase.issues.length, 0, "HOLD should be ignored by operation task derivation without warnings");
+
   assert.equal(
     buildOperationTaskDedupeKey({ reservationId: "res-1", kind: "DECORATION", variant: "base" }),
     "reservation:res-1:DECORATION:base",
@@ -97,6 +101,20 @@ function main() {
   assert.equal(legacy.tasks[0].source, "LEGACY_PRODUCTION_NOTES", "legacy task source should be preserved");
   assert.equal(legacy.tasks[0].dedupeKey, "reservation:res-1:legacy-extra:legacy-red-1", "legacy task should use legacy dedupe key");
 
+  const holdLegacy = parseLegacyOperationTasksForMigration(reservation({
+    status: "HOLD",
+    productionNotes: legacyMeta({
+      tasks: [{
+        id: "hold-red-1",
+        kind: "decoration",
+        status: "NEW",
+        taskType: "redecoration",
+        taskDate: "2026-07-20T00:00:00.000Z"
+      }]
+    })
+  }));
+  assert.equal(holdLegacy.tasks.length, 0, "HOLD must not migrate legacy operation tasks");
+
   const legacyStatuses = deriveBaseTasksFromReservation(reservation({
     productionNotes: legacyMeta({
       decorationStatus: "DONE",
@@ -136,10 +154,12 @@ function main() {
       "decoration fallback to periodStart",
       "neutralization from neutralizationDate",
       "neutralization fallback to periodEnd",
+      "HOLD ignored by operation task derivation",
       "missing dates report issues",
       "stable dedupe keys",
       "dedupe repeated derivation",
       "legacy redecoration mapping",
+      "HOLD legacy tasks ignored",
       "legacy DONE and ARCHIVED mapping",
       "corrupted metadata safe",
       "phase-one validation rules"
@@ -152,6 +172,7 @@ function reservation(overrides = {}) {
     id: "res-1",
     campaignId: "campaign-1",
     locationId: "location-1",
+    status: "BOOKED",
     periodStart: "2026-07-01T00:00:00.000Z",
     periodEnd: "2026-08-31T00:00:00.000Z",
     installationDate: "2026-07-03T00:00:00.000Z",

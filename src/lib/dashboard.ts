@@ -216,7 +216,7 @@ export async function getDashboardData(session: AuthSession) {
         }) as Promise<CampaignRow[]>,
     prisma.reservation.findMany({
       where: {
-        status: { in: ["HOLD", "RESERVED", "BOOKED"] },
+        status: "BOOKED",
         OR: [
           { installationDate: { gte: operationWindowStart, lte: decorationWindowEnd } },
           { neutralizationDate: { gte: operationWindowStart, lte: neutralizationWindowEnd } },

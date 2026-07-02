@@ -232,6 +232,22 @@ function buildNoPeriodAvailability(
   const baseWarnings = locationWarnings(location).filter((warning) => !isGenericAvailableNote(warning));
 
   if (current) {
+    if (current.openEnded || isManualAvailabilityStatus(current.status)) {
+      const label = manualAvailabilityStatusLabel(current.status);
+      const explanation = current.openEnded
+        ? `Blocat din ${formatDate(current.periodStart)}.`
+        : `Blocat la data verificata: ${formatDate(current.periodStart)} - ${formatDate(current.periodEnd)}.`;
+      return {
+        locationId: location.id,
+        state: "CONFLICT",
+        label,
+        tone: "red",
+        explanation,
+        warnings: [explanation, ...baseWarnings],
+        conflicts: futureConflicts,
+        blockingIntervals: intervals
+      };
+    }
     const availableFrom = addDays(new Date(current.periodEnd), 1).toISOString();
     const label = `Disponibil din ${formatDate(availableFrom)}`;
     return {

@@ -31,42 +31,48 @@ export async function PATCH(request: NextRequest, context: Context) {
 
   try {
     const input = bodySchema.parse(await request.json());
-    const location = await prisma.location.update({
-      where: { id },
-      data: input.blocked
-        ? {
-            blockedReason: input.blockedReason || "Blocat operational",
-            blockedByUserId: session.id,
-            blockedFrom: parseDate(input.blockedFrom) || new Date(),
-            blockedUntil: parseDate(input.blockedUntil),
-            blockedNotes: input.blockedNotes || null
-          }
-        : {
-            blockedReason: null,
-            blockedByUserId: null,
-            blockedFrom: null,
-            blockedUntil: null,
-            blockedNotes: null
-          },
-      select: { id: true, code: true, blockedReason: true, blockedUntil: true, status: true }
-    });
+    const location = await prisma.$transaction(async (tx) => {
+      const updated = await tx.location.update({
+        where: { id },
+        data: input.blocked
+          ? {
+              blockedReason: input.blockedReason || "Blocat operational",
+              blockedByUserId: session.id,
+              blockedFrom: parseDate(input.blockedFrom) || new Date(),
+              blockedUntil: parseDate(input.blockedUntil),
+              blockedNotes: input.blockedNotes || null
+            }
+          : {
+              blockedReason: null,
+              blockedByUserId: null,
+              blockedFrom: null,
+              blockedUntil: null,
+              blockedNotes: null
+            },
+        select: { id: true, code: true, blockedReason: true, blockedUntil: true, status: true }
+      });
 
-    if (input.blocked) {
-      await createManualAvailabilityOverride({
-        locationId: id,
-        reason: input.blockedReason || "Blocat operational",
-        periodStart: parseDate(input.blockedFrom) || new Date(),
-        periodEnd: parseDate(input.blockedUntil),
-        notes: input.blockedNotes || null,
-        createdByUserId: session.id
-      });
-    } else {
-      await clearManualAvailabilityOverrides({
-        locationId: id,
-        clearedByUserId: session.id,
-        type: "COMMERCIAL_BLOCK"
-      });
-    }
+      if (input.blocked) {
+        await createManualAvailabilityOverride({
+          db: tx,
+          locationId: id,
+          reason: input.blockedReason || "Blocat operational",
+          periodStart: parseDate(input.blockedFrom) || new Date(),
+          periodEnd: parseDate(input.blockedUntil),
+          notes: input.blockedNotes || null,
+          createdByUserId: session.id
+        });
+      } else {
+        await clearManualAvailabilityOverrides({
+          db: tx,
+          locationId: id,
+          clearedByUserId: session.id,
+          type: "COMMERCIAL_BLOCK"
+        });
+      }
+
+      return updated;
+    });
 
     await recordAudit({
       actor: session,

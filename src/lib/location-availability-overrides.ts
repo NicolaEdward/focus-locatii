@@ -6,6 +6,7 @@ import type { LocationSelectionConflict } from "@/lib/location-selection-dto";
 export const LOCATION_AVAILABILITY_OVERRIDE_TYPES = ["COMMERCIAL_BLOCK", "MAINTENANCE", "INTERNAL_HOLD"] as const;
 
 const FAR_FUTURE_DATE = new Date("2099-12-31T00:00:00.000Z");
+type AvailabilityOverrideStore = Pick<typeof prisma, "locationAvailabilityOverride">;
 
 export type LegacyManualBlockLocation = {
   id: string;
@@ -21,12 +22,14 @@ export async function listLocationAvailabilityOverrideConflicts(input: {
   periodEnd?: Date | null;
   referenceDate?: Date | null;
   session: AuthSession;
+  db?: AvailabilityOverrideStore;
 }): Promise<LocationSelectionConflict[]> {
   if (!input.locationIds.length) return [];
   const periodWhere = overridePeriodWhere(input.periodStart, input.periodEnd, input.referenceDate);
+  const db = input.db || prisma;
 
   try {
-    const rows = await prisma.locationAvailabilityOverride.findMany({
+    const rows = await db.locationAvailabilityOverride.findMany({
       where: {
         locationId: { in: input.locationIds },
         clearedAt: null,
@@ -50,9 +53,11 @@ export async function createManualAvailabilityOverride(input: {
   notes?: string | null;
   createdByUserId?: string | null;
   type?: LocationAvailabilityOverrideType;
+  db?: AvailabilityOverrideStore;
 }) {
+  const db = input.db || prisma;
   try {
-    await prisma.locationAvailabilityOverride.updateMany({
+    await db.locationAvailabilityOverride.updateMany({
       where: {
         locationId: input.locationId,
         clearedAt: null,
@@ -64,7 +69,7 @@ export async function createManualAvailabilityOverride(input: {
       }
     });
 
-    return await prisma.locationAvailabilityOverride.create({
+    return await db.locationAvailabilityOverride.create({
       data: {
         locationId: input.locationId,
         type: input.type || "COMMERCIAL_BLOCK",
@@ -85,9 +90,11 @@ export async function clearManualAvailabilityOverrides(input: {
   locationId: string;
   clearedByUserId?: string | null;
   type?: LocationAvailabilityOverrideType;
+  db?: AvailabilityOverrideStore;
 }) {
+  const db = input.db || prisma;
   try {
-    return await prisma.locationAvailabilityOverride.updateMany({
+    return await db.locationAvailabilityOverride.updateMany({
       where: {
         locationId: input.locationId,
         clearedAt: null,

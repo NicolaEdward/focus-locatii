@@ -41,6 +41,8 @@ assert(overrides.includes("clearManualAvailabilityOverrides"), "manual unblock r
 assert(selectionAvailability.includes("listLocationAvailabilityOverrideConflicts"), "selector availability must read override conflicts");
 assert(selectionAvailability.includes("legacyManualBlockConflict"), "selector availability must include legacy block fields");
 assert(selectionAvailability.includes("isManualAvailabilityStatus"), "selector labels should distinguish manual blocks from reservations");
+assert(selectionAvailability.includes("current.openEnded || isManualAvailabilityStatus(current.status)"), "open-ended manual blocks must not become fake available-from dates");
+assert(selectionAvailability.includes("Blocat din"), "open-ended manual blocks should show a block label, not an artificial availability date");
 assert(!selectionAvailability.includes("Locatie blocata: ${location.blockedReason}"), "manual block must not be a duplicate warning beside conflict state");
 
 assert(availability.includes("manualAvailabilityIntervals"), "shared availability calculator must treat manual blocks as occupied intervals");
@@ -49,6 +51,7 @@ assert(availability.includes("Locatie inactiva"), "inactive lifecycle status sho
 
 assert(!blockRoute.includes('status: "UNKNOWN"'), "block route must not abuse UNKNOWN for unavailable locations");
 assert(!blockRoute.includes('status: "AVAILABLE"'), "unblock route must not overwrite legacy availability status");
+assert(blockRoute.includes("prisma.$transaction"), "block route should update legacy fields and override records atomically");
 assert(blockRoute.includes("createManualAvailabilityOverride"), "block route must sync the new override model");
 assert(blockRoute.includes("clearManualAvailabilityOverrides"), "unblock route must clear override model entries");
 

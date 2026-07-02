@@ -2,6 +2,12 @@ import type { ReservationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { hasGlobalDataAccess } from "@/lib/rbac";
 import type { AuthSession } from "@/lib/auth";
+import {
+  isManualAvailabilityStatus,
+  legacyManualBlockConflict,
+  listLocationAvailabilityOverrideConflicts,
+  manualAvailabilityStatusLabel
+} from "@/lib/location-availability-overrides";
 import type {
   LocationSelectionAvailability,
   LocationSelectionAvailabilityState,
@@ -49,25 +55,38 @@ export async function getLocationSelectionAvailability(input: {
 
   if (!periodStart || !periodEnd) {
     const referenceDate = periodStart || periodEnd || startOfUtcDay(new Date());
-    const futureReservations = await prisma.reservation.findMany({
-      where: {
-        locationId: { in: locationIds },
-        status: { in: [...LOCATION_SELECTION_BLOCKING_STATUSES] as ReservationStatus[] },
-        periodEnd: { gte: referenceDate }
-      },
-      include: {
-        client: { select: { companyName: true } },
-        campaign: { select: { campaignName: true } },
-        sellerUser: { select: { name: true } }
-      },
-      orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
-    });
+    const [futureReservations, overrideConflicts] = await Promise.all([
+      prisma.reservation.findMany({
+        where: {
+          locationId: { in: locationIds },
+          status: { in: [...LOCATION_SELECTION_BLOCKING_STATUSES] as ReservationStatus[] },
+          periodEnd: { gte: referenceDate }
+        },
+        include: {
+          client: { select: { companyName: true } },
+          campaign: { select: { campaignName: true } },
+          sellerUser: { select: { name: true } }
+        },
+        orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
+      }),
+      listLocationAvailabilityOverrideConflicts({
+        locationIds,
+        referenceDate,
+        session: input.session
+      })
+    ]);
 
     return Object.fromEntries(
       locations.map((location) => {
-        const intervals = futureReservations
+        const reservationConflicts = futureReservations
           .filter((reservation) => reservation.locationId === location.id)
           .map((reservation) => serializeConflict(reservation, input.session));
+        const legacyBlock = legacyManualBlockConflict(location, { referenceDate });
+        const intervals = [
+          ...reservationConflicts,
+          ...overrideConflicts.filter((conflict) => conflict.locationId === location.id),
+          ...(legacyBlock ? [legacyBlock] : [])
+        ].sort(compareConflicts);
         return [location.id, buildNoPeriodAvailability(location, intervals, referenceDate)];
       })
     );
@@ -77,29 +96,45 @@ export async function getLocationSelectionAvailability(input: {
     return Object.fromEntries(locations.map((location) => [location.id, unknownAvailability(location, "Perioada selectata nu este valida.")]));
   }
 
-  const conflicts = await prisma.reservation.findMany({
-    where: {
-      locationId: { in: locationIds },
-      status: { in: [...LOCATION_SELECTION_BLOCKING_STATUSES] as ReservationStatus[] },
-      periodStart: { lte: periodEnd },
-      periodEnd: { gte: periodStart }
-    },
-    include: {
-      client: { select: { companyName: true } },
-      campaign: { select: { campaignName: true } },
-      sellerUser: { select: { name: true } }
-    },
-    orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
-  });
+  const [conflicts, overrideConflicts] = await Promise.all([
+    prisma.reservation.findMany({
+      where: {
+        locationId: { in: locationIds },
+        status: { in: [...LOCATION_SELECTION_BLOCKING_STATUSES] as ReservationStatus[] },
+        periodStart: { lte: periodEnd },
+        periodEnd: { gte: periodStart }
+      },
+      include: {
+        client: { select: { companyName: true } },
+        campaign: { select: { campaignName: true } },
+        sellerUser: { select: { name: true } }
+      },
+      orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
+    }),
+    listLocationAvailabilityOverrideConflicts({
+      locationIds,
+      periodStart,
+      periodEnd,
+      session: input.session
+    })
+  ]);
 
   return Object.fromEntries(
     locations.map((location) => {
-      const locationConflicts = conflicts.filter((conflict) => conflict.locationId === location.id);
+      const reservationConflicts = conflicts
+        .filter((conflict) => conflict.locationId === location.id)
+        .map((conflict) => serializeConflict(conflict, input.session));
+      const legacyBlock = legacyManualBlockConflict(location, { periodStart, periodEnd });
+      const locationConflicts = [
+        ...reservationConflicts,
+        ...overrideConflicts.filter((conflict) => conflict.locationId === location.id),
+        ...(legacyBlock ? [legacyBlock] : [])
+      ].sort(compareConflicts);
       return [
         location.id,
         buildAvailability({
           location,
-          conflicts: locationConflicts.map((conflict) => serializeConflict(conflict, input.session)),
+          conflicts: locationConflicts,
           periodStart,
           periodEnd
         })
@@ -126,7 +161,7 @@ function buildAvailability(input: {
   periodStart: Date;
   periodEnd: Date;
 }): LocationSelectionAvailability {
-  const baseWarnings = locationWarnings(input.location, input.periodStart, input.periodEnd);
+  const baseWarnings = locationWarnings(input.location);
   if (input.conflicts.length) {
     const blockingIntervals = input.conflicts.map(toBlockingInterval);
     const coverage = selectedPeriodCoverage(blockingIntervals, input.periodStart, input.periodEnd);
@@ -194,7 +229,7 @@ function buildNoPeriodAvailability(
   const intervals = futureConflicts.map(toBlockingInterval);
   const current = futureConflicts.find((conflict) => new Date(conflict.periodStart) <= referenceDate && new Date(conflict.periodEnd) >= referenceDate);
   const next = futureConflicts.find((conflict) => new Date(conflict.periodStart) > referenceDate);
-  const baseWarnings = locationWarnings(location, referenceDate, referenceDate).filter((warning) => !isGenericAvailableNote(warning));
+  const baseWarnings = locationWarnings(location).filter((warning) => !isGenericAvailableNote(warning));
 
   if (current) {
     const availableFrom = addDays(new Date(current.periodEnd), 1).toISOString();
@@ -281,13 +316,10 @@ function serializeConflict(
   };
 }
 
-function locationWarnings(location: AvailabilityLocation, periodStart: Date, periodEnd: Date) {
+function locationWarnings(location: AvailabilityLocation) {
   const warnings: string[] = [];
   if (!["AVAILABLE", "AVAILABLE_FROM"].includes(location.status)) {
     warnings.push(`Status inventar: ${location.status}. Verifica disponibilitatea comerciala.`);
-  }
-  if (location.blockedReason && blockOverlaps(location.blockedFrom, location.blockedUntil, periodStart, periodEnd)) {
-    warnings.push(`Locatie blocata: ${location.blockedReason}`);
   }
   if (location.availabilityText) {
     warnings.push(`Nota disponibilitate: ${location.availabilityText}`);
@@ -299,23 +331,33 @@ function toBlockingInterval(conflict: LocationSelectionConflict): LocationSelect
   return {
     status: conflict.status,
     start: conflict.periodStart,
-    end: conflict.periodEnd
+    end: conflict.periodEnd,
+    openEnded: conflict.openEnded
   };
 }
 
 function conflictExplanation(intervals: LocationSelectionBlockingInterval[]) {
   const first = intervals[0];
   if (!first) return "Exista conflict in perioada selectata.";
-  return `Ocupat in perioada ${formatDate(first.start)} - ${formatDate(first.end)}.`;
+  if (isManualAvailabilityStatus(first.status)) {
+    return first.openEnded
+      ? `Blocat din ${formatDate(first.start)}.`
+      : `Blocat in perioada ${formatDate(first.start)} - ${formatDate(first.end)}.`;
+  }
+  return first.openEnded
+    ? `Ocupat din ${formatDate(first.start)}.`
+    : `Ocupat in perioada ${formatDate(first.start)} - ${formatDate(first.end)}.`;
 }
 
 function partialExplanation(coverage: SelectedPeriodCoverage) {
   const firstBlocked = coverage.mergedIntervals[0];
   const firstAvailable = coverage.availableSegments[0];
+  const blockedAction = firstBlocked && isManualAvailabilityStatus(firstBlocked.status) ? "Blocat" : "Ocupat";
+  const blockedLabel = firstBlocked ? manualAvailabilityStatusLabel(firstBlocked.status) : null;
   const blockedText = firstBlocked
     ? coverage.mergedIntervals.length > 1
-      ? `Ocupat in ${coverage.mergedIntervals.length} intervale; primul: ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}.`
-      : `Ocupat ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}.`
+      ? `${blockedAction} in ${coverage.mergedIntervals.length} intervale; primul: ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}.`
+      : `${blockedAction} ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}${blockedLabel ? ` (${blockedLabel})` : ""}.`
     : "Exista ocupare partiala.";
   const availableText = firstAvailable
     ? coverage.availableSegments.length > 1
@@ -340,12 +382,13 @@ function selectedPeriodCoverage(
     .map((interval) => ({
       status: interval.status,
       start: maxDate(new Date(interval.start), periodStart),
-      end: minDate(new Date(interval.end), periodEnd)
+      end: minDate(new Date(interval.end), periodEnd),
+      openEnded: interval.openEnded
     }))
     .filter((interval) => interval.start <= interval.end)
     .sort((left, right) => left.start.getTime() - right.start.getTime() || left.end.getTime() - right.end.getTime());
 
-  const merged: Array<{ status: string; start: Date; end: Date }> = [];
+  const merged: Array<{ status: string; start: Date; end: Date; openEnded?: boolean }> = [];
   for (const interval of clamped) {
     const last = merged[merged.length - 1];
     if (!last || interval.start > addDays(last.end, 1)) {
@@ -353,6 +396,7 @@ function selectedPeriodCoverage(
       continue;
     }
     if (interval.end > last.end) last.end = interval.end;
+    last.openEnded = Boolean(last.openEnded || interval.openEnded);
   }
 
   const availableSegments: Array<{ start: Date; end: Date }> = [];
@@ -377,7 +421,8 @@ function selectedPeriodCoverage(
     mergedIntervals: merged.map((interval) => ({
       status: interval.status,
       start: interval.start.toISOString(),
-      end: interval.end.toISOString()
+      end: interval.end.toISOString(),
+      openEnded: interval.openEnded
     })),
     availableSegments,
     coversEntirePeriod
@@ -386,13 +431,6 @@ function selectedPeriodCoverage(
 
 function isGenericAvailableNote(value: string) {
   return /^Nota disponibilitate:\s*disponibil\.?$/i.test(value.trim());
-}
-
-function blockOverlaps(blockedFrom: Date | null, blockedUntil: Date | null, periodStart: Date, periodEnd: Date) {
-  if (!blockedFrom && !blockedUntil) return true;
-  const start = blockedFrom || new Date("1970-01-01T00:00:00.000Z");
-  const end = blockedUntil || new Date("9999-12-31T00:00:00.000Z");
-  return start <= periodEnd && end >= periodStart;
 }
 
 function parseDate(value?: string | null) {
@@ -419,6 +457,10 @@ function maxDate(left: Date, right: Date) {
 
 function minDate(left: Date, right: Date) {
   return left < right ? left : right;
+}
+
+function compareConflicts(left: LocationSelectionConflict, right: LocationSelectionConflict) {
+  return new Date(left.periodStart).getTime() - new Date(right.periodStart).getTime() || new Date(left.periodEnd).getTime() - new Date(right.periodEnd).getTime();
 }
 
 function formatDate(value: string | Date) {

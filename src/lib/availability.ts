@@ -7,6 +7,17 @@ type AvailabilityInput = {
   availableUntil?: Date | string | null;
   bookedFrom?: Date | string | null;
   bookedUntil?: Date | string | null;
+  blockedReason?: string | null;
+  blockedFrom?: Date | string | null;
+  blockedUntil?: Date | string | null;
+  lifecycleStatus?: string | null;
+  availabilityOverrides?: Array<{
+    type?: string | null;
+    reason?: string | null;
+    periodStart?: Date | string | null;
+    periodEnd?: Date | string | null;
+    clearedAt?: Date | string | null;
+  }>;
   reservations?: Array<{
     status?: string | null;
     periodStart?: Date | string | null;
@@ -124,11 +135,22 @@ export function calculateAvailability(
   requestedEndDate?: Date | string | null
 ): CalculatedAvailability {
   const status = String(input.status || "UNKNOWN").toUpperCase();
+  const lifecycleStatus = String(input.lifecycleStatus || "ACTIVE").toUpperCase();
   const requestedStart = toDate(requestedStartDate) || startOfDay(new Date());
   const requestedEnd = toDate(requestedEndDate) || requestedStart;
   const from = requestedStart <= requestedEnd ? requestedStart : requestedEnd;
   const to = requestedStart <= requestedEnd ? requestedEnd : requestedStart;
   const normalizedReservations = normalizeReservations(input.reservations);
+
+  if (lifecycleStatus === "INACTIVE" || lifecycleStatus === "ARCHIVED" || lifecycleStatus === "MAINTENANCE") {
+    return {
+      status: "SUSPENDED",
+      publicStatus: "UNKNOWN",
+      label: lifecycleStatus === "MAINTENANCE" ? "In mentenanta" : "Locatie inactiva",
+      detail: null,
+      windows: []
+    };
+  }
 
   if (status === "UNKNOWN") {
     return {
@@ -146,6 +168,7 @@ export function calculateAvailability(
       to: reservation.periodEnd,
       status: reservation.status
     })),
+    ...manualAvailabilityIntervals(input, from, to),
     ...legacyOccupiedIntervals(input, from, to, status)
   ]
     .map((interval) => ({
@@ -238,6 +261,36 @@ function legacyOccupiedIntervals(input: AvailabilityInput, from: Date, to: Date,
     intervals.push({ from, to: bookedUntil, status });
   } else if (status === "AVAILABLE_FROM" && availableFrom && availableFrom > from) {
     intervals.push({ from, to: minDate(addDays(availableFrom, -1), to), status: "BOOKED" });
+  }
+
+  return intervals;
+}
+
+function manualAvailabilityIntervals(input: AvailabilityInput, from: Date, to: Date) {
+  const intervals: Array<{ from: Date; to: Date; status: string }> = [];
+  const blockedFrom = toDate(input.blockedFrom) || from;
+  const blockedUntil = toDate(input.blockedUntil) || to;
+
+  if (input.blockedReason && blockedFrom <= to && blockedUntil >= from) {
+    intervals.push({
+      from: blockedFrom,
+      to: blockedUntil,
+      status: "COMMERCIAL_BLOCK"
+    });
+  }
+
+  for (const override of input.availabilityOverrides || []) {
+    if (toDate(override.clearedAt)) continue;
+    const periodStart = toDate(override.periodStart);
+    if (!periodStart) continue;
+    const periodEnd = toDate(override.periodEnd) || to;
+    if (periodStart <= to && periodEnd >= from) {
+      intervals.push({
+        from: periodStart,
+        to: periodEnd,
+        status: String(override.type || "COMMERCIAL_BLOCK").toUpperCase()
+      });
+    }
   }
 
   return intervals;

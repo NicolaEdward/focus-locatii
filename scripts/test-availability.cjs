@@ -97,6 +97,45 @@ const cases = [
     expectedLabelIncludes: "Suspendata"
   },
   {
+    name: "lifecycle inactiv suspenda disponibilitatea",
+    input: { status: "AVAILABLE", lifecycleStatus: "INACTIVE", reservations: [] },
+    from: "2026-06-01",
+    to: "2026-07-31",
+    expectedStatus: "SUSPENDED",
+    expectedLabelIncludes: "Locatie inactiva"
+  },
+  {
+    name: "blocaj comercial legacy blocheaza perioada",
+    input: {
+      status: "AVAILABLE",
+      blockedReason: "Reparatie fatada",
+      blockedFrom: "2026-06-01",
+      blockedUntil: "2026-06-30",
+      reservations: []
+    },
+    from: "2026-06-01",
+    to: "2026-06-30",
+    expectedStatus: "UNAVAILABLE",
+    expectedLabelIncludes: "Ocupata"
+  },
+  {
+    name: "override manual blocheaza perioada",
+    input: {
+      status: "AVAILABLE",
+      availabilityOverrides: [{
+        type: "MAINTENANCE",
+        reason: "Interventie",
+        periodStart: "2026-06-15",
+        periodEnd: "2026-06-20"
+      }],
+      reservations: []
+    },
+    from: "2026-06-01",
+    to: "2026-06-30",
+    expectedStatus: "PARTIAL",
+    expectedLabelIncludes: "Disponibila"
+  },
+  {
     name: "rezervare suprapusa cu perioada ceruta",
     input: {
       status: "AVAILABLE",

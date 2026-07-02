@@ -78,6 +78,7 @@ export async function duplicateLocation(id: string) {
       bookedFrom: original.bookedFrom,
       bookedUntil: original.bookedUntil,
       status: original.status,
+      lifecycleStatus: original.lifecycleStatus,
       latReal: original.latReal,
       lngReal: original.lngReal,
       latDisplay: original.latDisplay,

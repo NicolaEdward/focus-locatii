@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
+import { clearManualAvailabilityOverrides, createManualAvailabilityOverride } from "@/lib/location-availability-overrides";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -38,19 +39,34 @@ export async function PATCH(request: NextRequest, context: Context) {
             blockedByUserId: session.id,
             blockedFrom: parseDate(input.blockedFrom) || new Date(),
             blockedUntil: parseDate(input.blockedUntil),
-            blockedNotes: input.blockedNotes || null,
-            status: "UNKNOWN"
+            blockedNotes: input.blockedNotes || null
           }
         : {
             blockedReason: null,
             blockedByUserId: null,
             blockedFrom: null,
             blockedUntil: null,
-            blockedNotes: null,
-            status: "AVAILABLE"
+            blockedNotes: null
           },
       select: { id: true, code: true, blockedReason: true, blockedUntil: true, status: true }
     });
+
+    if (input.blocked) {
+      await createManualAvailabilityOverride({
+        locationId: id,
+        reason: input.blockedReason || "Blocat operational",
+        periodStart: parseDate(input.blockedFrom) || new Date(),
+        periodEnd: parseDate(input.blockedUntil),
+        notes: input.blockedNotes || null,
+        createdByUserId: session.id
+      });
+    } else {
+      await clearManualAvailabilityOverrides({
+        locationId: id,
+        clearedByUserId: session.id,
+        type: "COMMERCIAL_BLOCK"
+      });
+    }
 
     await recordAudit({
       actor: session,

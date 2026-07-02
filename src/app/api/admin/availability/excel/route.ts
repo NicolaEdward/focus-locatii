@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mapsHref } from "@/lib/gps";
 import { getLocationSelectionAvailability } from "@/lib/location-selection-availability";
+import { isManualAvailabilityStatus, manualAvailabilityStatusLabel } from "@/lib/location-availability-overrides";
 import { listAdminLocations } from "@/lib/locations";
 import { sortOperationalLocations } from "@/lib/location-order";
 import { requireAnyPermission } from "@/lib/auth";
@@ -187,7 +188,11 @@ function occupiedIntervalsLabel(availability: LocationSelectionAvailability) {
   if (!availability.blockingIntervals.length) return "";
   return availability.blockingIntervals
     .slice(0, 3)
-    .map((interval) => `Ocupat: ${formatDate(new Date(interval.start))} - ${formatDate(new Date(interval.end))}`)
+    .map((interval) => {
+      const action = isManualAvailabilityStatus(interval.status) ? manualAvailabilityStatusLabel(interval.status) : "Ocupat";
+      const end = interval.openEnded ? "" : ` - ${formatDate(new Date(interval.end))}`;
+      return `${action}: ${formatDate(new Date(interval.start))}${end}`;
+    })
     .join("; ");
 }
 

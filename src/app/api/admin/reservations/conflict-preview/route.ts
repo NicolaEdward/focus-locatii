@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAnyPermission, type AuthSession } from "@/lib/auth";
 import { hasAnyPermission } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { legacyManualBlockConflict, listLocationAvailabilityOverrideConflicts } from "@/lib/location-availability-overrides";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Alege cel putin o locatie pentru verificare." }, { status: 400, headers: noStoreHeaders });
     }
 
-    const [locations, conflicts] = await Promise.all([
+    const [locations, conflicts, overrideConflicts] = await Promise.all([
       prisma.location.findMany({
         where: { id: { in: locationIds } },
         select: {
@@ -96,24 +97,58 @@ export async function POST(request: NextRequest) {
           location: { select: { code: true } }
         },
         orderBy: [{ periodStart: "asc" }]
+      }),
+      listLocationAvailabilityOverrideConflicts({
+        locationIds,
+        periodStart,
+        periodEnd,
+        session
       })
     ]);
 
-    const warnings = locations.flatMap((location) => locationWarnings(location, periodStart, periodEnd));
+    const warnings = locations.flatMap((location) => locationWarnings(location));
+    const legacyBlockConflicts = locations.flatMap((location) => {
+      const conflict = legacyManualBlockConflict(location, { periodStart, periodEnd });
+      return conflict ? [conflict] : [];
+    });
 
     return NextResponse.json({
       ok: true,
       checkedLocationIds: locationIds,
-      conflicts: conflicts.map((conflict) => ({
-        reservationId: conflict.id,
-        locationId: conflict.locationId,
-        locationCode: conflict.location?.code || null,
-        clientName: conflict.clientName || null,
-        campaignName: conflict.campaignName || null,
-        status: conflict.status,
-        periodStart: conflict.periodStart.toISOString(),
-        periodEnd: conflict.periodEnd.toISOString()
-      })),
+      conflicts: [
+        ...conflicts.map((conflict) => ({
+          reservationId: conflict.id,
+          locationId: conflict.locationId,
+          locationCode: conflict.location?.code || null,
+          clientName: conflict.clientName || null,
+          campaignName: conflict.campaignName || null,
+          status: conflict.status,
+          periodStart: conflict.periodStart.toISOString(),
+          periodEnd: conflict.periodEnd.toISOString()
+        })),
+        ...overrideConflicts.map((conflict) => ({
+          reservationId: conflict.reservationId,
+          locationId: conflict.locationId,
+          locationCode: locations.find((location) => location.id === conflict.locationId)?.code || null,
+          clientName: null,
+          campaignName: conflict.campaignName,
+          status: conflict.status,
+          periodStart: conflict.periodStart,
+          periodEnd: conflict.periodEnd,
+          openEnded: conflict.openEnded
+        })),
+        ...legacyBlockConflicts.map((conflict) => ({
+          reservationId: conflict.reservationId,
+          locationId: conflict.locationId,
+          locationCode: locations.find((location) => location.id === conflict.locationId)?.code || null,
+          clientName: null,
+          campaignName: conflict.campaignName,
+          status: conflict.status,
+          periodStart: conflict.periodStart,
+          periodEnd: conflict.periodEnd,
+          openEnded: conflict.openEnded
+        }))
+      ],
       warnings
     }, { headers: noStoreHeaders });
   } catch (error) {
@@ -150,9 +185,7 @@ function locationWarnings(
     blockedFrom: Date | null;
     blockedUntil: Date | null;
     availabilityText: string | null;
-  },
-  periodStart: Date,
-  periodEnd: Date
+  }
 ) {
   const warnings = [];
   if (location.status !== "AVAILABLE" && location.status !== "AVAILABLE_FROM") {
@@ -160,13 +193,6 @@ function locationWarnings(
       locationId: location.id,
       locationCode: location.code,
       message: `Status inventar: ${location.status}. Verifica daca este corect pentru noua perioada.`
-    });
-  }
-  if (location.blockedReason && blockOverlaps(location.blockedFrom, location.blockedUntil, periodStart, periodEnd)) {
-    warnings.push({
-      locationId: location.id,
-      locationCode: location.code,
-      message: `Locatie blocata: ${location.blockedReason}`
     });
   }
   if (location.availabilityText) {
@@ -177,11 +203,4 @@ function locationWarnings(
     });
   }
   return warnings;
-}
-
-function blockOverlaps(blockedFrom: Date | null, blockedUntil: Date | null, periodStart: Date, periodEnd: Date) {
-  if (!blockedFrom && !blockedUntil) return true;
-  const start = blockedFrom || new Date("1970-01-01T00:00:00.000Z");
-  const end = blockedUntil || new Date("9999-12-31T00:00:00.000Z");
-  return start < periodEnd && end > periodStart;
 }

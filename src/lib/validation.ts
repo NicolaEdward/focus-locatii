@@ -8,6 +8,13 @@ export const locationStatusSchema = z.enum([
   "UNKNOWN"
 ]);
 
+export const locationLifecycleStatusSchema = z.enum([
+  "ACTIVE",
+  "INACTIVE",
+  "ARCHIVED",
+  "MAINTENANCE"
+]);
+
 export const gpsAuditStatusSchema = z.enum([
   "OK",
   "CORRECTED",
@@ -55,6 +62,7 @@ export const locationInputSchema = z.object({
   bookedFrom: optionalDate,
   bookedUntil: optionalDate,
   status: locationStatusSchema.default("UNKNOWN"),
+  lifecycleStatus: locationLifecycleStatusSchema.default("ACTIVE"),
   latReal: optionalNumber,
   lngReal: optionalNumber,
   latDisplay: optionalNumber,

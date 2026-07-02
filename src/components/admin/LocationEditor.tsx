@@ -3,7 +3,7 @@
 import { Ban, CheckCircle2, Save, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { MEDIA_TYPE_OPTIONS } from "@/lib/format";
-import type { CategoryDTO, GpsAuditStatus, LocationDTO, LocationStatus } from "@/types/location";
+import type { CategoryDTO, GpsAuditStatus, LocationDTO, LocationLifecycleStatus, LocationStatus } from "@/types/location";
 
 type EditorState = {
   id?: string;
@@ -27,6 +27,7 @@ type EditorState = {
   bookedFrom: string;
   bookedUntil: string;
   status: LocationStatus;
+  lifecycleStatus: LocationLifecycleStatus;
   latReal: string;
   lngReal: string;
   latDisplay: string;
@@ -96,7 +97,7 @@ export function LocationEditor({
   function clearCommercialBlock() {
     setState((current) => ({
       ...current,
-      status: "AVAILABLE",
+      lifecycleStatus: "ACTIVE",
       blockedReason: "",
       blockedFrom: "",
       blockedUntil: "",
@@ -218,7 +219,16 @@ export function LocationEditor({
           </div>
           <div className="grid gap-4 md:grid-cols-3">
             <label className="grid gap-2">
-              <span className="text-sm font-bold">Status locatie</span>
+              <span className="text-sm font-bold">Stare locatie</span>
+              <select className="focus-input" value={state.lifecycleStatus} onChange={(event) => update("lifecycleStatus", event.target.value as LocationLifecycleStatus)}>
+                <option value="ACTIVE">Activa</option>
+                <option value="INACTIVE">Inactiva</option>
+                <option value="ARCHIVED">Arhivata</option>
+                <option value="MAINTENANCE">Mentenanta</option>
+              </select>
+            </label>
+            <label className="grid gap-2">
+              <span className="text-sm font-bold">Status disponibilitate vechi</span>
               <select className="focus-input" value={state.status} onChange={(event) => update("status", event.target.value as LocationStatus)}>
                 <option value="AVAILABLE">AVAILABLE</option>
                 <option value="AVAILABLE_FROM">AVAILABLE_FROM</option>
@@ -232,6 +242,9 @@ export function LocationEditor({
             <Text label="Inchiriat/rezervat din" type="date" value={state.bookedFrom} onChange={(value) => update("bookedFrom", value)} />
             <Text label="Inchiriat/rezervat pana la" type="date" value={state.bookedUntil} onChange={(value) => update("bookedUntil", value)} />
           </div>
+          <p className="text-xs font-semibold text-slate-400">
+            Statusul vechi ramane pentru compatibilitate cu importurile si datele existente. Disponibilitatea reala pentru vanzari se calculeaza din rezervari si blocaje.
+          </p>
           <Textarea label="Text disponibilitate" value={state.availabilityText} onChange={(value) => update("availabilityText", value)} />
           <div className="grid gap-4 md:grid-cols-2">
             <Textarea label="Motiv blocare" value={state.blockedReason} onChange={(value) => update("blockedReason", value)} />
@@ -447,6 +460,7 @@ function toEditorState(location: LocationDTO | null | undefined, fallbackCategor
     bookedFrom: toDateInput(location?.bookedFrom),
     bookedUntil: toDateInput(location?.bookedUntil),
     status: location?.status || "UNKNOWN",
+    lifecycleStatus: location?.lifecycleStatus || "ACTIVE",
     latReal: location?.latReal?.toString() || "",
     lngReal: location?.lngReal?.toString() || "",
     latDisplay: location?.latDisplay?.toString() || "",
@@ -506,6 +520,7 @@ function toPayload(state: EditorState) {
     bookedFrom: dateOrNull(state.bookedFrom),
     bookedUntil: dateOrNull(state.bookedUntil),
     status: state.status,
+    lifecycleStatus: state.lifecycleStatus,
     latReal: numberOrNull(state.latReal),
     lngReal: numberOrNull(state.lngReal),
     latDisplay: numberOrNull(state.latDisplay),

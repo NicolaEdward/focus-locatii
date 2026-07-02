@@ -5,6 +5,12 @@ export type LocationStatus =
   | "RESERVED"
   | "UNKNOWN";
 
+export type LocationLifecycleStatus =
+  | "ACTIVE"
+  | "INACTIVE"
+  | "ARCHIVED"
+  | "MAINTENANCE";
+
 export type PublicAvailabilityStatus =
   | "AVAILABLE"
   | "BOOKED"
@@ -152,6 +158,7 @@ export type LocationDTO = {
   bookedFrom: string | null;
   bookedUntil: string | null;
   status: LocationStatus;
+  lifecycleStatus: LocationLifecycleStatus;
   publicStatus: PublicAvailabilityStatus;
   availabilityLabel: string;
   availabilityDetail: string | null;

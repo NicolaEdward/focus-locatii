@@ -162,9 +162,16 @@ function rateCardLabel(location: LocationSelectionLocationDTO) {
 function blockingText(availability: LocationSelectionAvailability) {
   const first = availability.blockingIntervals[0];
   if (!first) return "";
-  return `${first.status}: ${formatDate(first.start)} - ${formatDate(first.end)}`;
+  return `${blockingStatusLabel(first.status)}: ${formatDate(first.start)}${first.openEnded ? "" : ` - ${formatDate(first.end)}`}`;
 }
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(value));
+}
+
+function blockingStatusLabel(status: string) {
+  if (status === "COMMERCIAL_BLOCK") return "Blocaj comercial";
+  if (status === "MAINTENANCE") return "Mentenanta";
+  if (status === "INTERNAL_HOLD") return "Hold intern";
+  return status;
 }

@@ -103,12 +103,14 @@ export type LocationSelectionConflict = {
   clientName: string | null;
   campaignName: string | null;
   sellerName: string | null;
+  openEnded?: boolean;
 };
 
 export type LocationSelectionBlockingInterval = {
   status: "HOLD" | "RESERVED" | "BOOKED" | string;
   start: string;
   end: string;
+  openEnded?: boolean;
 };
 
 export type LocationSelectionAvailability = {

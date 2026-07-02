@@ -24,6 +24,7 @@ assert.equal("internalNotes" in visible, false, "Internal notes key must not be 
 assert.equal("monthlyCost" in visible, false, "Internal cost key must not be exposed publicly.");
 assert.equal("showPricePublic" in visible, false, "Internal price visibility flag must not be exposed publicly.");
 assert.equal("showInstallationCostPublic" in visible, false, "Internal installation visibility flag must not be exposed publicly.");
+assert.equal("lifecycleStatus" in visible, false, "Internal lifecycle status key must not be exposed publicly.");
 
 const hidden = serializeLocation(location({
   showPricePublic: false,
@@ -112,6 +113,7 @@ function location(overrides = {}) {
     bookedFrom: null,
     bookedUntil: null,
     status: "AVAILABLE",
+    lifecycleStatus: "ACTIVE",
     latReal: 44.44,
     lngReal: 26.11,
     latDisplay: 44.43,

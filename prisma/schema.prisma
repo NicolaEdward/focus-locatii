@@ -15,6 +15,19 @@ enum LocationStatus {
   UNKNOWN
 }
 
+enum LocationLifecycleStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+  MAINTENANCE
+}
+
+enum LocationAvailabilityOverrideType {
+  COMMERCIAL_BLOCK
+  MAINTENANCE
+  INTERNAL_HOLD
+}
+
 enum GpsAuditStatus {
   OK
   CORRECTED
@@ -104,6 +117,7 @@ model Location {
   bookedFrom                 DateTime?
   bookedUntil                DateTime?
   status                     LocationStatus  @default(UNKNOWN)
+  lifecycleStatus            LocationLifecycleStatus @default(ACTIVE)
   latReal                    Float?
   lngReal                    Float?
   latDisplay                 Float?
@@ -146,10 +160,12 @@ model Location {
   images   Image[]
   audits   GpsAuditLog[]
   reservations Reservation[]
+  availabilityOverrides LocationAvailabilityOverride[]
   operationTasks OperationTask[]
 
   @@index([categoryId])
   @@index([status])
+  @@index([lifecycleStatus])
   @@index([city])
   @@index([showInPublic])
   @@index([gpsAuditStatus])
@@ -158,6 +174,32 @@ model Location {
   @@index([locationGroupOrder])
   @@index([blockedByUserId])
   @@map("portfolio_locations")
+}
+
+model LocationAvailabilityOverride {
+  id              String                           @id @default(cuid())
+  locationId      String
+  type            LocationAvailabilityOverrideType @default(COMMERCIAL_BLOCK)
+  reason          String                           @db.Text
+  periodStart     DateTime
+  periodEnd       DateTime?
+  notes           String?                          @db.Text
+  createdByUserId String?
+  clearedByUserId String?
+  clearedAt       DateTime?
+  createdAt       DateTime                         @default(now())
+  updatedAt       DateTime                         @updatedAt
+
+  location  Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  createdBy User?    @relation("LocationAvailabilityOverrideCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  clearedBy User?    @relation("LocationAvailabilityOverrideClearedBy", fields: [clearedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([locationId, periodStart, periodEnd])
+  @@index([type])
+  @@index([clearedAt])
+  @@index([createdByUserId])
+  @@index([clearedByUserId])
+  @@map("portfolio_location_availability_overrides")
 }
 
 model Reservation {
@@ -285,6 +327,8 @@ model User {
   notifications AppNotification[]
   reviewedNotifications AppNotification[] @relation("NotificationResolver")
   uploadedDocuments ClientDocument[] @relation("DocumentUploader")
+  createdAvailabilityOverrides LocationAvailabilityOverride[] @relation("LocationAvailabilityOverrideCreatedBy")
+  clearedAvailabilityOverrides LocationAvailabilityOverride[] @relation("LocationAvailabilityOverrideClearedBy")
   ownedCampaigns Campaign[] @relation("CampaignAccountOwner")
   soldCampaigns Campaign[] @relation("CampaignSeller")
   createdCampaigns Campaign[] @relation("CampaignCreator")

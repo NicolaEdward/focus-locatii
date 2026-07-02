@@ -18,11 +18,11 @@ CREATE TABLE `portfolio_location_availability_overrides` (
   `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
 
-  INDEX `portfolio_location_availability_overrides_locationId_periodStart_periodEnd_idx`(`locationId`, `periodStart`, `periodEnd`),
-  INDEX `portfolio_location_availability_overrides_type_idx`(`type`),
-  INDEX `portfolio_location_availability_overrides_clearedAt_idx`(`clearedAt`),
-  INDEX `portfolio_location_availability_overrides_createdByUserId_idx`(`createdByUserId`),
-  INDEX `portfolio_location_availability_overrides_clearedByUserId_idx`(`clearedByUserId`),
+  INDEX `loc_avail_override_period_idx`(`locationId`, `periodStart`, `periodEnd`),
+  INDEX `loc_avail_override_type_idx`(`type`),
+  INDEX `loc_avail_override_cleared_idx`(`clearedAt`),
+  INDEX `loc_avail_override_created_by_idx`(`createdByUserId`),
+  INDEX `loc_avail_override_cleared_by_idx`(`clearedByUserId`),
   PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 

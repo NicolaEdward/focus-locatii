@@ -194,11 +194,11 @@ model LocationAvailabilityOverride {
   createdBy User?    @relation("LocationAvailabilityOverrideCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   clearedBy User?    @relation("LocationAvailabilityOverrideClearedBy", fields: [clearedByUserId], references: [id], onDelete: SetNull)
 
-  @@index([locationId, periodStart, periodEnd])
-  @@index([type])
-  @@index([clearedAt])
-  @@index([createdByUserId])
-  @@index([clearedByUserId])
+  @@index([locationId, periodStart, periodEnd], map: "loc_avail_override_period_idx")
+  @@index([type], map: "loc_avail_override_type_idx")
+  @@index([clearedAt], map: "loc_avail_override_cleared_idx")
+  @@index([createdByUserId], map: "loc_avail_override_created_by_idx")
+  @@index([clearedByUserId], map: "loc_avail_override_cleared_by_idx")
   @@map("portfolio_location_availability_overrides")
 }
 

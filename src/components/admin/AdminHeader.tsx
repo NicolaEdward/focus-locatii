@@ -46,7 +46,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
     <header className="sticky top-0 z-40 border-b border-focus-line bg-focus-navy/95 backdrop-blur">
       <div className="focus-container flex min-h-20 items-center gap-3 py-3">
         <div className="flex shrink-0 items-center gap-4">
-          <FocusLogo href="/admin/dashboard" />
+          <FocusLogo href="/admin/dashboard" prefetch={false} />
           <div className="hidden border-l border-focus-line pl-4 lg:block">
             <p className="text-sm font-bold text-white">{session.name}</p>
             <p className="text-xs text-slate-400">{ROLE_LABELS[session.role]}</p>
@@ -128,6 +128,7 @@ function AdminNavLink({
       className={`focus-button ${active ? "" : "secondary"} ${quiet ? "opacity-80" : ""}`}
       aria-current={active ? "page" : undefined}
       href={href}
+      prefetch={false}
     >
       {children}
     </Link>
@@ -177,6 +178,7 @@ function AdminMenuLink({
     <Link
       className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-black ${active ? "bg-focus-yellow text-focus-ink" : "text-slate-100 hover:bg-focus-yellow/10 hover:text-white"}`}
       href={href}
+      prefetch={false}
       aria-current={active ? "page" : undefined}
     >
       {icon}

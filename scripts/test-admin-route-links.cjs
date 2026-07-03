@@ -33,6 +33,8 @@ const header = read("src/components/admin/AdminHeader.tsx");
 assert.match(header, /usePathname/, "AdminHeader should derive active page state from the current pathname.");
 assert.match(header, /aria-current=\{active \? "page" : undefined\}/, "Active admin nav item should expose aria-current.");
 assert.match(header, /Portal public/, "Admin public link should use the clearer label.");
+assert.match(header, /<FocusLogo href="\/admin\/dashboard" prefetch=\{false\} \/>/, "Admin logo should not prefetch the dashboard shell.");
+assert.match(header, /prefetch=\{false\}/, "Admin navigation links should disable automatic Next.js prefetching.");
 assert.match(header, /label="Comercial"/, "AdminHeader should group sales workflows under Comercial.");
 assert(
   header.indexOf('label="Comercial"') < header.indexOf('href="/admin/selectie-locatii"'),

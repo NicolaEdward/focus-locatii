@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createLocation } from "@/lib/location-mutations";
-import { listAdminLocations, listPublicLocations, serializeLocation } from "@/lib/locations";
+import { listAdminLocations, listCachedPublicLocations, serializeLocation } from "@/lib/locations";
 import { requirePermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 
@@ -16,6 +16,10 @@ const noStoreHeaders = {
   "Surrogate-Control": "no-store"
 };
 
+const publicCacheHeaders = {
+  "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120"
+};
+
 export async function GET(request: NextRequest) {
   const scope = request.nextUrl.searchParams.get("scope");
 
@@ -25,7 +29,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ locations: await listAdminLocations() }, { headers: noStoreHeaders });
   }
 
-  return NextResponse.json({ locations: await listPublicLocations() }, { headers: noStoreHeaders });
+  return NextResponse.json({ locations: await listCachedPublicLocations() }, { headers: publicCacheHeaders });
 }
 
 export async function POST(request: NextRequest) {

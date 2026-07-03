@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { publicAvailability } from "@/lib/availability";
 import { arrayFromJson, makeSlug, normalizeMediaType, statusFromAvailabilityText } from "@/lib/format";
@@ -349,6 +350,12 @@ export async function listPublicLocations() {
   return locations.map((location) => serializeLocation(location)).sort(sortOperationalLocations);
 }
 
+export const listCachedPublicLocations = unstable_cache(
+  async () => listPublicLocations(),
+  ["public-locations-v3"],
+  { revalidate: 60 }
+);
+
 export async function listAdminLocations() {
   await expireStaleHolds();
   const locations = await prisma.location.findMany({
@@ -399,3 +406,9 @@ export async function listCategories() {
     sortOrder: category.sortOrder
   }));
 }
+
+export const listCachedCategories = unstable_cache(
+  async () => listCategories(),
+  ["public-categories-v1"],
+  { revalidate: 300 }
+);

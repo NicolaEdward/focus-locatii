@@ -9,7 +9,9 @@ import { expireStaleHolds } from "@/lib/reservation-lifecycle";
 import { sortOperationalLocations } from "@/lib/location-order";
 import type { CategoryDTO, LocationDTO } from "@/types/location";
 
-const locationInclude = {
+const blockingReservationStatuses = ["BOOKED", "HOLD", "RESERVED"] as const;
+
+const adminLocationInclude = {
   category: true,
   images: {
     orderBy: [{ isMain: "desc" as const }, { sortOrder: "asc" as const }]
@@ -19,9 +21,56 @@ const locationInclude = {
   }
 };
 
-type LocationWithRelations = Prisma.LocationGetPayload<{
-  include: typeof locationInclude;
+function publicLocationInclude(today: Date) {
+  return {
+    category: true,
+    images: {
+      select: {
+        id: true,
+        url: true,
+        alt: true,
+        sortOrder: true,
+        isMain: true
+      },
+      orderBy: [{ isMain: "desc" as const }, { sortOrder: "asc" as const }]
+    },
+    reservations: {
+      where: {
+        status: { in: [...blockingReservationStatuses] },
+        periodEnd: { gte: today }
+      },
+      select: {
+        status: true,
+        periodStart: true,
+        periodEnd: true
+      },
+      orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
+    }
+  };
+}
+
+type AdminLocationWithRelations = Prisma.LocationGetPayload<{
+  include: typeof adminLocationInclude;
 }>;
+
+type PublicLocationWithRelations = Prisma.LocationGetPayload<{
+  include: { category: true };
+}> & {
+  images: Array<{
+    id: string;
+    url: string;
+    alt: string | null;
+    sortOrder: number;
+    isMain: boolean;
+  }>;
+  reservations: Array<{
+    status: string;
+    periodStart: Date;
+    periodEnd: Date;
+  }>;
+};
+
+type LocationWithRelations = AdminLocationWithRelations | PublicLocationWithRelations;
 
 type SerializeLocationOptions = {
   includeHiddenCommercials?: boolean;
@@ -45,7 +94,7 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
   const exposePrivateFields = Boolean(options.includePrivateFields);
   const normalizedStatus = statusFromAvailabilityText(location.status, location.availabilityText);
   const availabilityReservations = location.reservations.filter((reservation) =>
-    ["BOOKED", "HOLD", "RESERVED"].includes(reservation.status)
+    blockingReservationStatuses.includes(reservation.status as (typeof blockingReservationStatuses)[number])
   );
   const availability = publicAvailability({
     status: normalizedStatus,
@@ -135,7 +184,7 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
       isMain: image.isMain
     })),
     reservations: exposePrivateFields
-      ? location.reservations.map((reservation) => ({
+      ? (location.reservations as AdminLocationWithRelations["reservations"]).map((reservation) => ({
           id: reservation.id,
           locationId: reservation.locationId,
           clientId: reservation.clientId,
@@ -290,9 +339,10 @@ export async function getOrCreateCategory(name: string, sortOrder = 0) {
 
 export async function listPublicLocations() {
   await expireStaleHolds();
+  const today = startOfUtcDay(new Date());
   const locations = await prisma.location.findMany({
     where: { showInPublic: true },
-    include: locationInclude,
+    include: publicLocationInclude(today),
     orderBy: [{ isFeatured: "desc" }, { category: { sortOrder: "asc" } }, { code: "asc" }]
   });
 
@@ -302,7 +352,7 @@ export async function listPublicLocations() {
 export async function listAdminLocations() {
   await expireStaleHolds();
   const locations = await prisma.location.findMany({
-    include: locationInclude,
+    include: adminLocationInclude,
     orderBy: [{ updatedAt: "desc" }]
   });
 
@@ -313,9 +363,10 @@ export async function listAdminLocations() {
 
 export async function getPublicLocation(id: string) {
   await expireStaleHolds();
+  const today = startOfUtcDay(new Date());
   const location = await prisma.location.findFirst({
     where: { id, showInPublic: true },
-    include: locationInclude
+    include: publicLocationInclude(today)
   });
 
   return location ? serializeLocation(location) : null;
@@ -325,10 +376,14 @@ export async function getAdminLocation(id: string) {
   await expireStaleHolds();
   const location = await prisma.location.findUnique({
     where: { id },
-    include: locationInclude
+    include: adminLocationInclude
   });
 
   return location ? serializeLocation(location, { includeHiddenCommercials: true, includePrivateFields: true }) : null;
+}
+
+function startOfUtcDay(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
 export async function listCategories() {

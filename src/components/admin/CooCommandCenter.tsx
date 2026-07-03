@@ -188,8 +188,8 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
             </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 xl:w-[460px]">
-            <Link className="focus-button" href={adminNewReservationHref()}><BriefcaseBusiness size={18} /> Creeaza rezervare</Link>
-            <Link className="focus-button secondary" href="/admin/locatii"><MapPinned size={18} /> Adauga locatie</Link>
+            <Link className="focus-button" href={adminNewReservationHref()} prefetch={false}><BriefcaseBusiness size={18} /> Creeaza rezervare</Link>
+            <Link className="focus-button secondary" href="/admin/locatii" prefetch={false}><MapPinned size={18} /> Adauga locatie</Link>
             <a className="focus-button secondary" href={coo.reports.availabilityUrl}><FileSpreadsheet size={18} /> Export disponibil</a>
             <a className="focus-button secondary" href={coo.reports.salesUrl}><Download size={18} /> Export vanzari</a>
           </div>
@@ -234,7 +234,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
 
             {activeTab === "overview" ? (
               <div className="grid gap-5">
-                <Panel title="Stare operationala" icon={<ShieldAlert size={18} />} action={<Link className="text-xs font-black text-focus-yellow" href="/admin/locatii">Inventar</Link>}>
+                <Panel title="Stare operationala" icon={<ShieldAlert size={18} />} action={<Link className="text-xs font-black text-focus-yellow" href="/admin/locatii" prefetch={false}>Inventar</Link>}>
                   <div className="grid gap-3 md:grid-cols-4">
                     <Metric label="Ocupate" value={coo.health.occupiedLocations} />
                     <Metric label="Blocate" value={coo.health.blockedLocations} tone="red" />
@@ -339,8 +339,8 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                   <a className="focus-button" href={coo.reports.availabilityUrl}><FileSpreadsheet size={18} /> Disponibil complet</a>
                   <a className="focus-button secondary" href={coo.reports.salesUrl}><Download size={18} /> Situatie vanzari</a>
                   <a className="focus-button secondary" href={coo.reports.billingUrl}><Download size={18} /> Financiar manual</a>
-                  <Link className="focus-button secondary" href={adminReservationsHref()}><ClipboardList size={18} /> Solicitari</Link>
-                  <Link className="focus-button secondary" href="/admin/locatii/gps"><MapPinned size={18} /> Audit GPS</Link>
+                  <Link className="focus-button secondary" href={adminReservationsHref()} prefetch={false}><ClipboardList size={18} /> Solicitari</Link>
+                  <Link className="focus-button secondary" href="/admin/locatii/gps" prefetch={false}><MapPinned size={18} /> Audit GPS</Link>
                 </div>
               </Panel>
             ) : null}
@@ -349,10 +349,10 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
               <div className="grid gap-5">
                 <Panel title="Administrare rapida" icon={<Users size={18} />}>
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <Link className="focus-button" href="/admin/utilizatori"><UserPlus size={18} /> Creeaza utilizator</Link>
-                    <Link className="focus-button secondary" href="/admin/locatii"><MapPinned size={18} /> Admin locatii</Link>
-                    <Link className="focus-button secondary" href="/admin/locatii/import"><FileSpreadsheet size={18} /> Import Excel</Link>
-                    <Link className="focus-button secondary" href="/admin/locatii/gps"><ShieldAlert size={18} /> Conflicte GPS</Link>
+                    <Link className="focus-button" href="/admin/utilizatori" prefetch={false}><UserPlus size={18} /> Creeaza utilizator</Link>
+                    <Link className="focus-button secondary" href="/admin/locatii" prefetch={false}><MapPinned size={18} /> Admin locatii</Link>
+                    <Link className="focus-button secondary" href="/admin/locatii/import" prefetch={false}><FileSpreadsheet size={18} /> Import Excel</Link>
+                    <Link className="focus-button secondary" href="/admin/locatii/gps" prefetch={false}><ShieldAlert size={18} /> Conflicte GPS</Link>
                   </div>
                 </Panel>
               </div>
@@ -456,7 +456,7 @@ function ReservationMini({
         </>
       ) : null}
       <ActionMenu>
-        <Link href={adminReservationHref(row.id)}>Vezi detalii</Link>
+        <Link href={adminReservationHref(row.id)} prefetch={false}>Vezi detalii</Link>
         {canChangePeriod ? <button type="button" onClick={() => onChangePeriod(row)}>Schimba perioada</button> : null}
         {isActiveHold ? <button type="button" onClick={() => onCommand(row.id, "markLost", {}, "Hold-ul a fost marcat ca pierdut.")}>Marcheaza pierdut</button> : null}
         {canOperate ? <button type="button" onClick={() => onCommand(row.id, "createTask", { kind: "decoration", status: "NEW", note: "Follow-up operational pentru hold." })}>Creeaza task</button> : null}
@@ -507,12 +507,12 @@ function TaskPanel({
               <div className="flex flex-wrap gap-2">
                 <button className="focus-button secondary" type="button" disabled={busy === `operationStatus-${row.reservationId}`} onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "IN_PROGRESS"), "Taskul este in lucru.")}>In lucru</button>
                 <button className="focus-button" type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "DONE"), "Taskul a fost finalizat.")}>Finalizat</button>
-                <ActionMenu><button type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "ARCHIVED"), "Taskul a fost arhivat.")}>Arhiveaza</button><Link href={adminReservationHref(row.reservationId)}>Vezi contract</Link></ActionMenu>
+                <ActionMenu><button type="button" onClick={() => onCommand(row.reservationId, "operationStatus", operationStatusBody(row, "ARCHIVED"), "Taskul a fost arhivat.")}>Arhiveaza</button><Link href={adminReservationHref(row.reservationId)} prefetch={false}>Vezi contract</Link></ActionMenu>
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
                 <span className="text-xs font-bold text-slate-500">Doar vizualizare</span>
-                <Link className="text-xs font-black text-focus-yellow hover:text-white" href={adminReservationHref(row.reservationId)}>Vezi contract</Link>
+                <Link className="text-xs font-black text-focus-yellow hover:text-white" href={adminReservationHref(row.reservationId)} prefetch={false}>Vezi contract</Link>
               </div>
             )}
           </td>

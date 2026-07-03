@@ -69,8 +69,24 @@ assert.match(reservationsPanel, /panelAllowedInWorkspace\(requestedPanel, worksp
 
 const operationalPage = read("src/app/admin/operational/page.tsx");
 assert.match(operationalPage, /"dashboard\.operations\.view"/, "Operational page should allow dedicated operations-only accounts.");
-assert.match(operationalPage, /session\.role === "FIELD_OPERATOR"/, "Operational page should branch for field-operator data minimization.");
+assert.equal(operationalPage.includes("listAdminLocations"), false, "Operational page should not load the full inventory list.");
+assert.equal(operationalPage.includes("listReservations"), false, "Operational page should not load the full reservations list.");
+assert.match(operationalPage, /initialReservations=\{operationReservations\}/, "Operational page should use the focused operational reservation set.");
 assert.match(operationalPage, /initialOfferRequests=\{\[\]\}/, "Operational page should not load public offer requests for the operational workspace.");
+
+for (const file of [
+  "src/components/admin/AdminDashboard.tsx",
+  "src/components/admin/RoleDashboard.tsx",
+  "src/components/admin/CooCommandCenter.tsx",
+  "src/components/admin/DashboardHoldActions.tsx"
+]) {
+  const source = read(file);
+  assert.equal(
+    /<Link(?![^>]*prefetch=)/s.test(source),
+    false,
+    `${file} should disable automatic prefetch for admin dashboard links.`
+  );
+}
 
 const clientsPage = read("src/app/admin/clienti/page.tsx");
 assert.match(clientsPage, /hasAnyPermission\(session\.role, \["clients\.view", "clients\.view\.own", "campaigns\.view", "campaigns\.view\.own", "finance\.view"\]\)/, "Clients page should guard direct access by commercial/finance permissions.");

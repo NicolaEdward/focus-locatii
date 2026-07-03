@@ -41,10 +41,10 @@ export function RoleDashboard({ session, data }: { session: AuthSession; data: D
             <p className="mt-2 text-sm text-slate-400">Date actualizate pentru {data.monthLabel}.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link className="focus-button" href="/admin/locatii">
+            <Link className="focus-button" href="/admin/locatii" prefetch={false}>
               <MapPinned size={18} /> Vezi inventarul
             </Link>
-            <Link className="focus-button secondary" href={adminNewReservationHref()}>
+            <Link className="focus-button secondary" href={adminNewReservationHref()} prefetch={false}>
               <BriefcaseBusiness size={18} /> Actiune comerciala
             </Link>
           </div>
@@ -151,7 +151,7 @@ function OperationsPreview({ data, compact = false }: { data: DashboardData["coo
           <p className="mt-1 text-xs font-bold text-slate-400">Vizibil pentru toata echipa, ca sa fie clar ce urmeaza operational.</p>
         </div>
         {!compact ? (
-          <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href={adminOperationalHref()}>
+          <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href={adminOperationalHref()} prefetch={false}>
             Vezi toate <ArrowRight size={14} />
           </Link>
         ) : null}
@@ -188,15 +188,15 @@ function DashboardTable({ title, rows, compact = false }: { title: string; rows:
   return <section className="overflow-hidden rounded-lg border border-focus-line bg-focus-ink/70">
     <div className="flex items-center justify-between border-b border-focus-line px-5 py-4">
       <h2 className="text-sm font-black uppercase text-focus-yellow">{title}</h2>
-      <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href={adminReservationsHref()}>Deschide lista <ArrowRight size={14} /></Link>
+      <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href={adminReservationsHref()} prefetch={false}>Deschide lista <ArrowRight size={14} /></Link>
     </div>
-    {rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-focus-navy/70 text-left text-xs uppercase text-slate-400"><tr><th className="px-4 py-3">Cod</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Perioada</th><th className="px-4 py-3">Status</th>{compact ? null : <th className="px-4 py-3">Vanzator</th>}<th className="px-4 py-3">Actiune</th></tr></thead><tbody>{rows.map((row) => <tr className="border-t border-focus-line" key={row.id}><td className="px-4 py-3 font-black text-white">{row.code}</td><td className="px-4 py-3">{row.clientName}<span className="block text-xs text-slate-400">{row.campaignName || row.city || "-"}</span></td><td className="px-4 py-3 text-xs">{date(row.periodStart)} - {date(row.periodEnd)}</td><td className="px-4 py-3"><span className="rounded border border-focus-line px-2 py-1 text-xs font-black">{row.status}</span></td>{compact ? null : <td className="px-4 py-3 text-slate-400">{row.salesperson || "-"}</td>}<td className="px-4 py-3"><Link className="text-xs font-black text-focus-yellow hover:text-white" href={row.campaignId ? adminCampaignHref(row.campaignId) : adminReservationHref(row.reservationId || row.id)}>Deschide</Link></td></tr>)}</tbody></table></div> : <p className="p-6 text-sm text-slate-400">Nu exista inregistrari pentru acest interval.</p>}
+    {rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-focus-navy/70 text-left text-xs uppercase text-slate-400"><tr><th className="px-4 py-3">Cod</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Perioada</th><th className="px-4 py-3">Status</th>{compact ? null : <th className="px-4 py-3">Vanzator</th>}<th className="px-4 py-3">Actiune</th></tr></thead><tbody>{rows.map((row) => <tr className="border-t border-focus-line" key={row.id}><td className="px-4 py-3 font-black text-white">{row.code}</td><td className="px-4 py-3">{row.clientName}<span className="block text-xs text-slate-400">{row.campaignName || row.city || "-"}</span></td><td className="px-4 py-3 text-xs">{date(row.periodStart)} - {date(row.periodEnd)}</td><td className="px-4 py-3"><span className="rounded border border-focus-line px-2 py-1 text-xs font-black">{row.status}</span></td>{compact ? null : <td className="px-4 py-3 text-slate-400">{row.salesperson || "-"}</td>}<td className="px-4 py-3"><Link className="text-xs font-black text-focus-yellow hover:text-white" href={row.campaignId ? adminCampaignHref(row.campaignId) : adminReservationHref(row.reservationId || row.id)} prefetch={false}>Deschide</Link></td></tr>)}</tbody></table></div> : <p className="p-6 text-sm text-slate-400">Nu exista inregistrari pentru acest interval.</p>}
   </section>;
 }
 
 function Pipeline({ data }: { data: Record<string, number> }) { const entries = Object.entries(data); return <section className="rounded-lg border border-focus-line bg-focus-ink/70 p-5"><h2 className="text-sm font-black uppercase text-focus-yellow">Pipeline solicitari</h2>{entries.length ? <div className="mt-4 grid grid-cols-2 gap-3">{entries.map(([label, value]) => <div className="border-l-2 border-focus-yellow pl-3" key={label}><strong className="text-xl">{value}</strong><span className="block text-xs text-slate-400">{label}</span></div>)}</div> : <p className="mt-4 text-sm text-slate-400">Nu exista solicitari.</p>}</section>; }
 function Ranking({ title, rows }: { title: string; rows: DashboardData["agentPerformance"] }) { return <section className="rounded-lg border border-focus-line bg-focus-ink/70 p-5"><h2 className="text-sm font-black uppercase text-focus-yellow">{title}</h2>{rows.length ? <div className="mt-4 grid gap-3">{rows.map((row) => <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-focus-line pb-2 text-sm" key={row.label}><span>{row.label}<small className="block text-slate-400">{row.campaigns} campanii</small></span><strong>{euro(row.revenue)}</strong></div>)}</div> : <p className="mt-4 text-sm text-slate-400">Nu exista date in perioada curenta.</p>}</section>; }
-function UsersSummary({ data }: { data: Record<string, number> }) { return <section className="rounded-lg border border-focus-line bg-focus-ink/70 p-5"><div className="flex items-center justify-between"><h2 className="text-sm font-black uppercase text-focus-yellow">Utilizatori</h2><Link className="text-xs font-bold" href="/admin/utilizatori">Gestioneaza</Link></div><div className="mt-4 grid grid-cols-2 gap-2">{Object.entries(data).map(([role, count]) => <div className="border-l-2 border-focus-yellow pl-3" key={role}><strong>{count}</strong><span className="block text-xs text-slate-400">{role}</span></div>)}</div></section>; }
+function UsersSummary({ data }: { data: Record<string, number> }) { return <section className="rounded-lg border border-focus-line bg-focus-ink/70 p-5"><div className="flex items-center justify-between"><h2 className="text-sm font-black uppercase text-focus-yellow">Utilizatori</h2><Link className="text-xs font-bold" href="/admin/utilizatori" prefetch={false}>Gestioneaza</Link></div><div className="mt-4 grid grid-cols-2 gap-2">{Object.entries(data).map(([role, count]) => <div className="border-l-2 border-focus-yellow pl-3" key={role}><strong>{count}</strong><span className="block text-xs text-slate-400">{role}</span></div>)}</div></section>; }
 function euro(value: number) { return `${new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 0 }).format(value)} EUR`; }
 function date(value: string) { return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(value)); }
 function formatDateTime(value: string) { return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }

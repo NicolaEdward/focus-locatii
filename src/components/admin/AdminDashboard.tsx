@@ -110,7 +110,7 @@ export function AdminDashboard({
                 Adauga locatie
               </button>
             ) : null}
-            <Link className="focus-button secondary" href="/admin/selectie-locatii">
+            <Link className="focus-button secondary" href="/admin/selectie-locatii" prefetch={false}>
               <ListChecks size={18} />
               Deschide Selector oferta
             </Link>
@@ -335,10 +335,10 @@ function LocationToolsMenu() {
         <a className="rounded-md px-3 py-2 text-left text-sm font-bold text-slate-100 hover:bg-focus-yellow/10" href="/api/export/json">
           <Download className="mr-2 inline h-4 w-4" /> Export inventar JSON
         </a>
-        <Link className="rounded-md px-3 py-2 text-left text-sm font-bold text-slate-100 hover:bg-focus-yellow/10" href="/admin/locatii/import">
+        <Link className="rounded-md px-3 py-2 text-left text-sm font-bold text-slate-100 hover:bg-focus-yellow/10" href="/admin/locatii/import" prefetch={false}>
           <FileSpreadsheet className="mr-2 inline h-4 w-4" /> Import / actualizare
         </Link>
-        <Link className="rounded-md px-3 py-2 text-left text-sm font-bold text-slate-100 hover:bg-focus-yellow/10" href="/admin/locatii/gps">
+        <Link className="rounded-md px-3 py-2 text-left text-sm font-bold text-slate-100 hover:bg-focus-yellow/10" href="/admin/locatii/gps" prefetch={false}>
           <Map className="mr-2 inline h-4 w-4" /> Audit GPS
         </Link>
       </div>

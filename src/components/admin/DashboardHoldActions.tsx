@@ -73,7 +73,7 @@ export function DashboardHoldActions({
               : "Actiuni rapide pentru holdurile care asteapta decizie comerciala."}
           </p>
         </div>
-        <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href={adminReservationsHref()}>
+        <Link className="inline-flex items-center gap-1 text-xs font-bold text-slate-300 hover:text-white" href={adminReservationsHref()} prefetch={false}>
           Vezi lista completa <ArrowRight size={14} />
         </Link>
       </div>
@@ -127,7 +127,7 @@ export function DashboardHoldActions({
               ) : (
                 <span className="rounded border border-focus-line px-3 py-2 text-xs font-black text-slate-400">Fara actiuni de hold pentru statusul curent</span>
               )}
-              <Link className="focus-button secondary" href={adminReservationHref(row.id)}>
+              <Link className="focus-button secondary" href={adminReservationHref(row.id)} prefetch={false}>
                 Detalii
               </Link>
             </div>

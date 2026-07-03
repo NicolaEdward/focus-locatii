@@ -2,8 +2,7 @@ import { redirect } from "next/navigation";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { AdminReservationsPanel } from "@/components/admin/AdminReservationsPanel";
 import { getAdminSession } from "@/lib/auth";
-import { listAdminLocations } from "@/lib/locations";
-import { listOperationReservations, listReservations } from "@/lib/reservations";
+import { listOperationReservations } from "@/lib/reservations";
 import { hasAnyPermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
@@ -15,14 +14,7 @@ export default async function AdminOperationalPage() {
     redirect("/admin/dashboard");
   }
 
-  const isFieldOperator = session.role === "FIELD_OPERATOR";
   const operationReservations = await listOperationReservations();
-  const [locations, reservations] = isFieldOperator
-    ? [[], operationReservations]
-    : await Promise.all([
-        listAdminLocations(),
-        listReservations({}, session)
-      ]);
 
   return (
     <>
@@ -39,8 +31,8 @@ export default async function AdminOperationalPage() {
             </div>
           </div>
           <AdminReservationsPanel
-            locations={locations}
-            initialReservations={reservations}
+            locations={[]}
+            initialReservations={operationReservations}
             operationReservations={operationReservations}
             initialOfferRequests={[]}
             session={session}

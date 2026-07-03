@@ -46,6 +46,7 @@ assert(
 assert.match(header, /label="Setari"/, "AdminHeader should expose Setari instead of a vague Admin button.");
 assert.match(header, /href="\/admin\/operational"/, "AdminHeader should expose a dedicated Operational workspace.");
 assert.match(header, /session\.role === "FIELD_OPERATOR"/, "AdminHeader should treat field operators as a restricted navigation role.");
+assert.match(header, /!\s*isFieldOperator \? <NotificationBell \/> : null/, "Field operators should not load generic admin notifications.");
 assert.match(header, /"dashboard\.operations\.view"/, "Operational navigation should include the dedicated operations dashboard permission.");
 assert.equal(header.includes('<AdminNavLink href="/admin/campanii"'), false, "Campanii should not be a misleading top-level nav item.");
 assert.equal(header.includes('<AdminNavLink href="/admin/furnizori"'), false, "Furnizori should not clutter top-level navigation.");
@@ -67,6 +68,18 @@ const operationalPage = read("src/app/admin/operational/page.tsx");
 assert.match(operationalPage, /"dashboard\.operations\.view"/, "Operational page should allow dedicated operations-only accounts.");
 assert.match(operationalPage, /session\.role === "FIELD_OPERATOR"/, "Operational page should branch for field-operator data minimization.");
 assert.match(operationalPage, /initialOfferRequests=\{\[\]\}/, "Operational page should not load public offer requests for the operational workspace.");
+
+const clientsPage = read("src/app/admin/clienti/page.tsx");
+assert.match(clientsPage, /hasAnyPermission\(session\.role, \["clients\.view", "clients\.view\.own", "campaigns\.view", "campaigns\.view\.own", "finance\.view"\]\)/, "Clients page should guard direct access by commercial/finance permissions.");
+
+const campaignsPage = read("src/app/admin/campanii/page.tsx");
+assert.match(campaignsPage, /hasAnyPermission\(session\.role, \["campaigns\.view", "campaigns\.view\.own", "clients\.view", "clients\.view\.own", "finance\.view"\]\)/, "Campaigns page should guard direct access by commercial/finance permissions.");
+
+const clientCampaignsApi = read("src/app/api/admin/client-campaigns/route.ts");
+assert.match(clientCampaignsApi, /requireAnyPermission\(request, \["clients\.view", "clients\.view\.own", "campaigns\.view", "campaigns\.view\.own", "finance\.view"\]\)/, "Client/campaign API should not be available to generic operations-only accounts.");
+
+const auth = read("src/lib/auth.ts");
+assert.equal(auth.includes('"dashboard.operations.view",\n    "dashboard.agent.view"'), false, "Operations-only permission should not satisfy generic admin API access.");
 
 const coo = read("src/components/admin/CooCommandCenter.tsx");
 assert.equal(coo.includes("Marcheaza rezolvat"), false, "COO conflict note-only resolve button should not be visible.");

@@ -93,7 +93,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           {!isFieldOperator ? <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Portal public</AdminNavLink> : null}
         </nav>
         <div className="flex shrink-0 items-center gap-2">
-          <NotificationBell />
+          {!isFieldOperator ? <NotificationBell /> : null}
           <div className="relative z-50">
             <LogoutButton />
           </div>

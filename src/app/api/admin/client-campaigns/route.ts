@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireAnyPermission } from "@/lib/auth";
 import { getClientCampaignsData } from "@/lib/client-campaigns";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ const noStoreHeaders = {
 };
 
 export async function GET(request: NextRequest) {
-  const { session, response } = await requireAdmin(request);
+  const { session, response } = await requireAnyPermission(request, ["clients.view", "clients.view.own", "campaigns.view", "campaigns.view.own", "finance.view"]);
   if (response || !session) return response;
   const query = request.nextUrl.searchParams.get("q") || "";
   const data = await getClientCampaignsData(session, query);

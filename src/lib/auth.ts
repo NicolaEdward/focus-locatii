@@ -138,7 +138,6 @@ export async function requireAdmin(request: NextRequest) {
     "dashboard.admin.view",
     "dashboard.executive.view",
     "dashboard.sales.view",
-    "dashboard.operations.view",
     "dashboard.agent.view",
     "dashboard.finance.view"
   ]);

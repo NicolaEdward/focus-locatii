@@ -254,6 +254,7 @@ export function AdminReservationsPanel({
   const canUpdateOperationStatus = hasPermission(session.role, "campaigns.operate");
   const canManageLeads = hasAnyPermission(session.role, ["leads.manage", "leads.manage.own"]);
   const canEditReservations = hasAnyPermission(session.role, ["reservations.manage", "reservations.manage.own"]);
+  const shouldLoadReservationOptions = !isOperationalWorkspace && canEditReservations;
   const canCreateBookedReservation = canEditReservations || canApproveReservations;
   const canEditOperationTask = useCallback(
     (reservation: ReservationDTO) => canEditOperationalReservation(reservation, session),
@@ -295,6 +296,11 @@ export function AdminReservationsPanel({
   const [cancellationTarget, setCancellationTarget] = useState<ReservationDTO | null>(null);
 
   useEffect(() => {
+    if (!shouldLoadReservationOptions) {
+      setSellers([]);
+      setClients([]);
+      return;
+    }
     let cancelled = false;
     Promise.all([
       fetch("/api/admin/sellers", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
@@ -314,7 +320,7 @@ export function AdminReservationsPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [shouldLoadReservationOptions]);
 
   useEffect(() => {
     if (requestedPanel && panelAllowedInWorkspace(requestedPanel, workspace, isFieldOperator)) {

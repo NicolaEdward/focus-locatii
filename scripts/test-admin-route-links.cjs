@@ -61,6 +61,7 @@ assert.match(reservationsPanel, /reservationId/, "Reservations panel should unde
 assert.match(reservationsPanel, /newReservation/, "Reservations panel should understand newReservation focus query params.");
 assert.match(reservationsPanel, /highlightedReservationId/, "Reservation tables should highlight focused reservations.");
 assert.match(reservationsPanel, /isFieldOperator/, "Operational panel should have a field-operator read-only mode.");
+assert.match(reservationsPanel, /shouldLoadReservationOptions = !isOperationalWorkspace && canEditReservations/, "Operational/read-only pages should not fetch reservation form clients/sellers.");
 assert.match(reservationsPanel, /showCost=\{!isFieldOperator\}/, "Field operators should not see operational billing cost details.");
 assert.match(reservationsPanel, /panelAllowedInWorkspace\(requestedPanel, workspace, isFieldOperator\)/, "Field operators should not be switched into hidden commercial panels.");
 

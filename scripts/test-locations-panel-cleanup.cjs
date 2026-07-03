@@ -187,7 +187,8 @@ function activeRentalsCanBeCorrectedSafely() {
   assert(panel.includes("campaignId: editForm.campaignId"), "reservation edit save should send the corrected campaign id");
   assert(panel.includes("Corectare client / campanie"), "booked rentals should expose a clear client/campaign correction area");
   assert(panel.includes("Foloseste asta"), "client/campaign correction should explain when to use it");
-  assert(panel.includes("function requestCancellationDecision"), "cancel action should require a structured cancellation decision");
+  assert(panel.includes("function ReservationCancellationConfirmDialog"), "cancel action should require a structured cancellation decision");
+  assert(panel.includes("onConfirm({ applyToGroup, reason: trimmedReason })"), "cancel dialog should send structured cancellation scope and reason");
   assert(panel.includes("Motiv obligatoriu"), "cancel action should require a cancellation reason");
   assert(panel.includes("Doar locatia curenta"), "edit dialog should clearly support single-location corrections");
   assert(panel.includes("Tot contractul grupat"), "edit dialog should clearly support grouped corrections");

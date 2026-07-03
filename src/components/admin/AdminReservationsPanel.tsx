@@ -181,6 +181,11 @@ type ReservationConflictPreview = {
   }>;
 };
 
+type ReservationCancellationDecision = {
+  applyToGroup: boolean;
+  reason: string;
+};
+
 const emptyForm: ReservationForm = {
   locationIds: [],
   clientId: "",
@@ -238,6 +243,7 @@ export function AdminReservationsPanel({
 }) {
   const searchParams = useSearchParams();
   const isOperationalWorkspace = workspace === "operational";
+  const isFieldOperator = session.role === "FIELD_OPERATOR";
   const focusedReservationId = searchParams.get("reservationId");
   const requestedPanel = panelFromQuery(searchParams.get("panel"));
   const shouldFocusNewReservation = searchParams.get("newReservation") === "1";
@@ -253,7 +259,9 @@ export function AdminReservationsPanel({
     (reservation: ReservationDTO) => canEditOperationalReservation(reservation, session),
     [session]
   );
-  const [activePanel, setActivePanel] = useState<AdminPanel>(isOperationalWorkspace ? "future" : "sales");
+  const [activePanel, setActivePanel] = useState<AdminPanel>(
+    isOperationalWorkspace ? (isFieldOperator ? "decorations" : "future") : "sales"
+  );
   const [reservations, setReservations] = useState(initialReservations);
   const [offerRequests, setOfferRequests] = useState(initialOfferRequests);
   const [form, setForm] = useState<ReservationForm>(initialForm);
@@ -283,6 +291,8 @@ export function AdminReservationsPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [archiveOfferRequestId, setArchiveOfferRequestId] = useState<string | null>(null);
+  const [cancellationTarget, setCancellationTarget] = useState<ReservationDTO | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -307,10 +317,10 @@ export function AdminReservationsPanel({
   }, []);
 
   useEffect(() => {
-    if (requestedPanel && panelAllowedInWorkspace(requestedPanel, workspace)) {
+    if (requestedPanel && panelAllowedInWorkspace(requestedPanel, workspace, isFieldOperator)) {
       setActivePanel(requestedPanel);
     }
-  }, [requestedPanel, workspace]);
+  }, [isFieldOperator, requestedPanel, workspace]);
 
   useEffect(() => {
     if (!shouldFocusNewReservation || isOperationalWorkspace) return;
@@ -875,10 +885,12 @@ export function AdminReservationsPanel({
     let applyToGroup = false;
     let cancellationReason: string | null = null;
     if (status === "CANCELLED") {
-      const decision = requestCancellationDecision(reservation || null);
-      if (!decision) return;
-      applyToGroup = decision.applyToGroup;
-      cancellationReason = decision.reason;
+      if (!reservation) {
+        setError("Inregistrarea nu mai este disponibila.");
+        return;
+      }
+      setCancellationTarget(reservation);
+      return;
     } else {
       applyToGroup = Boolean(reservation?.contractGroupId);
     }
@@ -922,11 +934,18 @@ export function AdminReservationsPanel({
     setMessage(status === "DONE" ? "Taskul a fost marcat ca finalizat." : "Statusul operational a fost actualizat.");
   }
 
-  async function deleteReservation(id: string) {
+  function deleteReservation(id: string) {
     const reservation = reservations.find((item) => item.id === id);
-    const decision = requestCancellationDecision(reservation || null);
-    if (!decision) return;
-    const response = await fetch(`/api/reservations/${id}`, {
+    if (!reservation) {
+      setError("Inregistrarea nu mai este disponibila.");
+      return;
+    }
+    setCancellationTarget(reservation);
+  }
+
+  async function confirmReservationCancellation(decision: ReservationCancellationDecision) {
+    if (!cancellationTarget) return;
+    const response = await fetch(`/api/reservations/${cancellationTarget.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status: "CANCELLED", applyToGroup: decision.applyToGroup, cancellationReason: decision.reason })
@@ -936,6 +955,7 @@ export function AdminReservationsPanel({
       setError(payload?.error || "Inchirierea nu a putut fi anulata.");
       return;
     }
+    setCancellationTarget(null);
     const updatedReservations = Array.isArray(payload?.reservations) ? payload.reservations : [payload?.reservation].filter(Boolean);
     const updatesById = new Map<string, ReservationDTO>(
       updatedReservations
@@ -960,11 +980,19 @@ export function AdminReservationsPanel({
   }
 
   async function softDeleteOfferRequest(id: string) {
-    if (!confirm("Stergi solicitarea din lista activa? Va ramane arhivata pentru istoric.")) return;
+    setArchiveOfferRequestId(id);
+  }
+
+  async function confirmSoftDeleteOfferRequest() {
+    if (!archiveOfferRequestId) return;
+    const id = archiveOfferRequestId;
     const response = await fetch(`/api/offer-requests/${id}`, { method: "DELETE" });
     const payload = await response.json().catch(() => null);
     if (response.ok && payload?.request) {
       setOfferRequests((current) => current.map((request) => (request.id === id ? payload.request : request)));
+      setArchiveOfferRequestId(null);
+    } else {
+      setError(payload?.error || "Solicitarea nu a putut fi arhivata.");
     }
   }
 
@@ -1039,20 +1067,24 @@ export function AdminReservationsPanel({
           </button> : null}
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-5">
-          <MiniStat label="Total locatii" value={locationStats.total.toString()} />
-          <MiniStat label="Libere acum" value={locationStats.available.toString()} tone="green" />
-          <MiniStat label="Libere temporar" value={locationStats.futureBooked.toString()} tone="yellow" />
-          <MiniStat label="Hold activ" value={locationStats.holds.toString()} tone="yellow" />
-          <MiniStat label="Ocupate" value={locationStats.occupied.toString()} tone="red" />
-        </div>
+        {!isFieldOperator ? (
+          <div className="mt-5 grid gap-3 md:grid-cols-5">
+            <MiniStat label="Total locatii" value={locationStats.total.toString()} />
+            <MiniStat label="Libere acum" value={locationStats.available.toString()} tone="green" />
+            <MiniStat label="Libere temporar" value={locationStats.futureBooked.toString()} tone="yellow" />
+            <MiniStat label="Hold activ" value={locationStats.holds.toString()} tone="yellow" />
+            <MiniStat label="Ocupate" value={locationStats.occupied.toString()} tone="red" />
+          </div>
+        ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
           {isOperationalWorkspace ? (
             <>
-              <PanelButton active={activePanel === "future"} icon={<ClipboardList size={18} />} onClick={() => setActivePanel("future")}>
-                Inchirieri viitoare
-              </PanelButton>
+              {!isFieldOperator ? (
+                <PanelButton active={activePanel === "future"} icon={<ClipboardList size={18} />} onClick={() => setActivePanel("future")}>
+                  Inchirieri viitoare
+                </PanelButton>
+              ) : null}
               <PanelButton active={activePanel === "decorations"} icon={<Hammer size={18} />} onClick={() => setActivePanel("decorations")}>
                 Decorari
               </PanelButton>
@@ -1069,7 +1101,12 @@ export function AdminReservationsPanel({
 
         {isOperationalWorkspace ? (
           <div className="mt-4">
-            <QuickOperationsSummary future={futureReservations.length} decorations={decorationTasks.length} neutralizations={neutralizationTasks.length} />
+            <QuickOperationsSummary
+              future={futureReservations.length}
+              decorations={decorationTasks.length}
+              neutralizations={neutralizationTasks.length}
+              showFuture={!isFieldOperator}
+            />
           </div>
         ) : null}
 
@@ -1409,6 +1446,7 @@ export function AdminReservationsPanel({
             locationsById={locationsById}
             month={decorationBillingMonth}
             onMonthChange={setDecorationBillingMonth}
+            visible={!isFieldOperator}
           />
           <OperationsTable
             tasks={decorationTasks}
@@ -1417,6 +1455,7 @@ export function AdminReservationsPanel({
             today={today}
             onStatusChange={updateOperationStatus}
             canEditTask={canEditOperationTask}
+            showCost={!isFieldOperator}
           />
         </AdminTableShell>
       ) : null}
@@ -1437,6 +1476,7 @@ export function AdminReservationsPanel({
             today={today}
             onStatusChange={updateOperationStatus}
             canEditTask={canEditOperationTask}
+            showCost={!isFieldOperator}
           />
         </AdminTableShell>
       ) : null}
@@ -1647,6 +1687,20 @@ export function AdminReservationsPanel({
           onConfirm={resetReservationForm}
         />
       ) : null}
+      {cancellationTarget ? (
+        <ReservationCancellationConfirmDialog
+          reservation={cancellationTarget}
+          onCancel={() => setCancellationTarget(null)}
+          onConfirm={confirmReservationCancellation}
+        />
+      ) : null}
+      {archiveOfferRequestId ? (
+        <OfferRequestArchiveConfirmDialog
+          request={offerRequests.find((request) => request.id === archiveOfferRequestId) || null}
+          onCancel={() => setArchiveOfferRequestId(null)}
+          onConfirm={confirmSoftDeleteOfferRequest}
+        />
+      ) : null}
     </section>
   );
 }
@@ -1731,18 +1785,20 @@ function SelectedLocationsCard({
 function QuickOperationsSummary({
   future,
   decorations,
-  neutralizations
+  neutralizations,
+  showFuture = true
 }: {
   future: number;
   decorations: number;
   neutralizations: number;
+  showFuture?: boolean;
 }) {
   return (
     <div className="focus-card rounded-lg p-5">
       <p className="text-xs font-black uppercase text-focus-yellow">Operatiuni</p>
       <h2 className="font-display text-3xl font-black uppercase text-white">De urmarit</h2>
       <div className="mt-4 grid gap-3">
-        <MiniStat label="Inchirieri viitoare" value={future.toString()} />
+        {showFuture ? <MiniStat label="Inchirieri viitoare" value={future.toString()} /> : null}
         <MiniStat label="Decorari" value={decorations.toString()} tone="yellow" />
         <MiniStat label="Neutralizari" value={neutralizations.toString()} tone="green" />
       </div>
@@ -1848,6 +1904,100 @@ function ReservationResetConfirmDialog({
           </button>
           <button className="focus-button" type="button" onClick={onConfirm}>
             Curata formularul
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReservationCancellationConfirmDialog({
+  reservation,
+  onCancel,
+  onConfirm
+}: {
+  reservation: ReservationDTO;
+  onCancel: () => void;
+  onConfirm: (decision: ReservationCancellationDecision) => void;
+}) {
+  const [applyToGroup, setApplyToGroup] = useState(Boolean(reservation.contractGroupId));
+  const [reason, setReason] = useState("");
+  const trimmedReason = reason.trim();
+  const label = `${reservation.locationCode || reservation.locationId} / ${reservation.clientName || "fara client"}`;
+  const scopeLabel = applyToGroup ? "tot contractul grupat" : "locatia curenta";
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="focus-card w-full max-w-xl rounded-lg p-5 shadow-2xl">
+        <p className="text-xs font-black uppercase text-focus-yellow">Anulare cu istoric</p>
+        <h2 className="font-display mt-1 text-2xl font-black uppercase text-white">Anuleaza inregistrarea</h2>
+        <p className="mt-2 text-sm font-bold leading-6 text-slate-300">
+          {label}. Inregistrarea ramane in istoric, iar locatia devine disponibila.
+        </p>
+        {reservation.contractGroupId ? (
+          <div className="mt-4 grid gap-2 rounded-lg border border-focus-line bg-focus-navy/35 p-3">
+            <p className="text-xs font-black uppercase text-slate-300">Alege scopul anularii</p>
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-200">
+              <input type="radio" checked={!applyToGroup} onChange={() => setApplyToGroup(false)} />
+              Doar locatia curenta
+            </label>
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-200">
+              <input type="radio" checked={applyToGroup} onChange={() => setApplyToGroup(true)} />
+              Tot contractul grupat
+            </label>
+          </div>
+        ) : null}
+        <label className="mt-4 block">
+          <span className="mb-1 block text-sm font-bold text-slate-200">Motiv obligatoriu pentru anularea {scopeLabel}</span>
+          <textarea
+            className="focus-input min-h-24"
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Ex: locatie inchiriata gresit, client retras, perioada introdusa gresit"
+          />
+        </label>
+        {!trimmedReason ? <p className="mt-2 text-xs font-bold text-amber-200">Motivul este obligatoriu pentru istoric clar.</p> : null}
+        <div className="mt-5 flex flex-wrap justify-end gap-3 border-t border-focus-line pt-4">
+          <button className="focus-button secondary" type="button" onClick={onCancel}>
+            Renunta
+          </button>
+          <button
+            className="focus-button"
+            type="button"
+            disabled={!trimmedReason}
+            onClick={() => onConfirm({ applyToGroup, reason: trimmedReason })}
+          >
+            Confirma anularea
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OfferRequestArchiveConfirmDialog({
+  request,
+  onCancel,
+  onConfirm
+}: {
+  request: OfferRequestDTO | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="focus-card w-full max-w-lg rounded-lg p-5 shadow-2xl">
+        <p className="text-xs font-black uppercase text-focus-yellow">Arhivare solicitare</p>
+        <h2 className="font-display mt-1 text-2xl font-black uppercase text-white">Sterge din lista activa</h2>
+        <p className="mt-2 text-sm font-bold leading-6 text-slate-300">
+          {request?.clientName || "Solicitarea selectata"} va fi arhivata si ramane disponibila pentru istoric.
+        </p>
+        <div className="mt-5 flex flex-wrap justify-end gap-3 border-t border-focus-line pt-4">
+          <button className="focus-button secondary" type="button" onClick={onCancel}>
+            Renunta
+          </button>
+          <button className="focus-button" type="button" onClick={onConfirm}>
+            Arhiveaza solicitarea
           </button>
         </div>
       </div>
@@ -2499,13 +2649,17 @@ function DecorationBillingSummary({
   report,
   locationsById,
   month,
-  onMonthChange
+  onMonthChange,
+  visible = true
 }: {
   report: DecorationBillingReport;
   locationsById: Map<string, LocationDTO>;
   month: string;
   onMonthChange: (value: string) => void;
+  visible?: boolean;
 }) {
+  if (!visible) return null;
+
   const totalLabel = Object.entries(report.totals)
     .map(([currency, value]) => `${moneyLabel(value)} ${currency}`)
     .join(" / ") || "0";
@@ -2599,7 +2753,8 @@ function OperationsTable({
   type,
   today,
   onStatusChange,
-  canEditTask
+  canEditTask,
+  showCost = true
 }: {
   tasks: OperationTableTask[];
   locationsById: Map<string, LocationDTO>;
@@ -2607,6 +2762,7 @@ function OperationsTable({
   today: Date;
   onStatusChange: (id: string, kind: OperationKind, status: OperationStatus, taskId?: string | null) => void;
   canEditTask: (reservation: ReservationDTO) => boolean;
+  showCost?: boolean;
 }) {
   return (
     <div className="mt-4 overflow-auto">
@@ -2652,7 +2808,7 @@ function OperationsTable({
                       ? stripOperationMeta(reservation.productionNotes) || reservation.notes || "De montat conform campaniei."
                       : stripOperationMeta(reservation.productionNotes) || reservation.notes || "Neutralizare la final de contract.")}
                   </p>
-                  {cost != null ? <p className="mt-1 text-xs font-black uppercase text-focus-yellow">Cost: {moneyLabel(cost)} {currency || ""}</p> : null}
+                  {showCost && cost != null ? <p className="mt-1 text-xs font-black uppercase text-focus-yellow">Cost: {moneyLabel(cost)} {currency || ""}</p> : null}
                 </Td>
                 <Td>{reservation.salesperson || "-"}</Td>
                 <Td>
@@ -2928,26 +3084,6 @@ function moneyInputValue(value: string) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function requestCancellationDecision(reservation: ReservationDTO | null) {
-  const label = reservation
-    ? `${reservation.locationCode || reservation.locationId} / ${reservation.clientName || "fara client"}`
-    : "inregistrarea selectata";
-  const applyToGroup = Boolean(reservation?.contractGroupId)
-    ? window.confirm(`Anulezi tot contractul grupat pentru ${label}?\n\nOK = tot grupul\nCancel = doar locatia curenta`)
-    : false;
-  const scopeLabel = applyToGroup ? "tot contractul grupat" : "locatia curenta";
-  const reason = window.prompt(`Motiv obligatoriu pentru anularea ${scopeLabel} (${label}):`);
-  const trimmedReason = reason?.trim();
-  if (!trimmedReason) {
-    window.alert("Anularea a fost oprita. Completeaza motivul ca sa ramana istoric clar.");
-    return null;
-  }
-  if (!window.confirm(`Confirmi anularea pentru ${scopeLabel}? Inregistrarea ramane in istoric, iar locatia devine disponibila.`)) {
-    return null;
-  }
-  return { applyToGroup, reason: trimmedReason };
-}
-
 function editFinancialPreview(reservation: ReservationDTO, form: ReservationEditForm, affectedCount: number) {
   const currency = form.currency || reservation.currency || "EUR";
   const previousPerCode =
@@ -3141,8 +3277,11 @@ function panelFromQuery(value?: string | null): AdminPanel | null {
   return null;
 }
 
-function panelAllowedInWorkspace(panel: AdminPanel, workspace: ReservationsWorkspace) {
-  if (workspace === "operational") return panel === "future" || panel === "decorations" || panel === "neutralizations";
+function panelAllowedInWorkspace(panel: AdminPanel, workspace: ReservationsWorkspace, fieldOperator = false) {
+  if (workspace === "operational") {
+    if (fieldOperator) return panel === "decorations" || panel === "neutralizations";
+    return panel === "future" || panel === "decorations" || panel === "neutralizations";
+  }
   return panel === "sales";
 }
 

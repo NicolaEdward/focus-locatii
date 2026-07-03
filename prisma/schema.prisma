@@ -59,6 +59,7 @@ enum UserRole {
   SALES_DIRECTOR
   SALES_AGENT
   FINANCE_OPERATOR
+  FIELD_OPERATOR
 }
 
 enum OperationTaskKind {

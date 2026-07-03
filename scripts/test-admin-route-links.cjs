@@ -45,6 +45,8 @@ assert(
 );
 assert.match(header, /label="Setari"/, "AdminHeader should expose Setari instead of a vague Admin button.");
 assert.match(header, /href="\/admin\/operational"/, "AdminHeader should expose a dedicated Operational workspace.");
+assert.match(header, /session\.role === "FIELD_OPERATOR"/, "AdminHeader should treat field operators as a restricted navigation role.");
+assert.match(header, /"dashboard\.operations\.view"/, "Operational navigation should include the dedicated operations dashboard permission.");
 assert.equal(header.includes('<AdminNavLink href="/admin/campanii"'), false, "Campanii should not be a misleading top-level nav item.");
 assert.equal(header.includes('<AdminNavLink href="/admin/furnizori"'), false, "Furnizori should not clutter top-level navigation.");
 assert.equal(header.includes("/api/admin/availability/excel"), false, "Availability export should not be exposed from the global admin header.");
@@ -57,6 +59,14 @@ const reservationsPanel = read("src/components/admin/AdminReservationsPanel.tsx"
 assert.match(reservationsPanel, /reservationId/, "Reservations panel should understand reservationId focus query params.");
 assert.match(reservationsPanel, /newReservation/, "Reservations panel should understand newReservation focus query params.");
 assert.match(reservationsPanel, /highlightedReservationId/, "Reservation tables should highlight focused reservations.");
+assert.match(reservationsPanel, /isFieldOperator/, "Operational panel should have a field-operator read-only mode.");
+assert.match(reservationsPanel, /showCost=\{!isFieldOperator\}/, "Field operators should not see operational billing cost details.");
+assert.match(reservationsPanel, /panelAllowedInWorkspace\(requestedPanel, workspace, isFieldOperator\)/, "Field operators should not be switched into hidden commercial panels.");
+
+const operationalPage = read("src/app/admin/operational/page.tsx");
+assert.match(operationalPage, /"dashboard\.operations\.view"/, "Operational page should allow dedicated operations-only accounts.");
+assert.match(operationalPage, /session\.role === "FIELD_OPERATOR"/, "Operational page should branch for field-operator data minimization.");
+assert.match(operationalPage, /initialOfferRequests=\{\[\]\}/, "Operational page should not load public offer requests for the operational workspace.");
 
 const coo = read("src/components/admin/CooCommandCenter.tsx");
 assert.equal(coo.includes("Marcheaza rezolvat"), false, "COO conflict note-only resolve button should not be visible.");

@@ -1,4 +1,4 @@
-export const USER_ROLES = ["SUPER_ADMIN", "COO", "SALES_DIRECTOR", "SALES_AGENT", "FINANCE_OPERATOR"] as const;
+export const USER_ROLES = ["SUPER_ADMIN", "COO", "SALES_DIRECTOR", "SALES_AGENT", "FINANCE_OPERATOR", "FIELD_OPERATOR"] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
 
@@ -129,6 +129,9 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "finance.view",
     "finance.upload",
     "finance.validate"
+  ],
+  FIELD_OPERATOR: [
+    "dashboard.operations.view"
   ]
 };
 
@@ -137,7 +140,8 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   COO: "COO",
   SALES_DIRECTOR: "Director de vanzari",
   SALES_AGENT: "Agent de vanzari",
-  FINANCE_OPERATOR: "Operator financiar"
+  FINANCE_OPERATOR: "Operator financiar",
+  FIELD_OPERATOR: "Alpinist / montaj"
 };
 
 export function isUserRole(value: unknown): value is UserRole {
@@ -157,9 +161,10 @@ export function hasAnyPermission(role: UserRole, permissions: readonly Permissio
 }
 
 export function dashboardPathForRole(role: UserRole) {
+  if (role === "FIELD_OPERATOR") return "/admin/operational";
   return "/admin/dashboard";
 }
 
 export function hasGlobalDataAccess(role: UserRole) {
-  return role !== "SALES_AGENT" && role !== "FINANCE_OPERATOR";
+  return role !== "SALES_AGENT" && role !== "FINANCE_OPERATOR" && role !== "FIELD_OPERATOR";
 }

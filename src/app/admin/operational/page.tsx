@@ -3,7 +3,6 @@ import { AdminHeader } from "@/components/admin/AdminHeader";
 import { AdminReservationsPanel } from "@/components/admin/AdminReservationsPanel";
 import { getAdminSession } from "@/lib/auth";
 import { listAdminLocations } from "@/lib/locations";
-import { listOfferRequests } from "@/lib/offer-requests";
 import { listOperationReservations, listReservations } from "@/lib/reservations";
 import { hasAnyPermission } from "@/lib/rbac";
 
@@ -12,16 +11,18 @@ export const dynamic = "force-dynamic";
 export default async function AdminOperationalPage() {
   const session = await getAdminSession();
   if (!session) redirect("/admin/login");
-  if (!hasAnyPermission(session.role, ["campaigns.operate", "reservations.view", "reservations.view.own", "inventory.view"])) {
+  if (!hasAnyPermission(session.role, ["dashboard.operations.view", "campaigns.operate", "reservations.view", "reservations.view.own", "inventory.view"])) {
     redirect("/admin/dashboard");
   }
 
-  const [locations, reservations, operationReservations, offerRequests] = await Promise.all([
-    listAdminLocations(),
-    listReservations({}, session),
-    listOperationReservations(),
-    listOfferRequests(session)
-  ]);
+  const isFieldOperator = session.role === "FIELD_OPERATOR";
+  const operationReservations = await listOperationReservations();
+  const [locations, reservations] = isFieldOperator
+    ? [[], operationReservations]
+    : await Promise.all([
+        listAdminLocations(),
+        listReservations({}, session)
+      ]);
 
   return (
     <>
@@ -41,7 +42,7 @@ export default async function AdminOperationalPage() {
             locations={locations}
             initialReservations={reservations}
             operationReservations={operationReservations}
-            initialOfferRequests={offerRequests}
+            initialOfferRequests={[]}
             session={session}
             workspace="operational"
           />

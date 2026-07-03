@@ -28,6 +28,7 @@ import { hasAnyPermission, hasPermission, ROLE_LABELS } from "@/lib/rbac";
 
 export function AdminHeader({ session }: { session: AuthSession }) {
   const pathname = usePathname() || "";
+  const isFieldOperator = session.role === "FIELD_OPERATOR";
   const canViewInventory = hasPermission(session.role, "inventory.view");
   const canManageInventory = hasPermission(session.role, "inventory.manage");
   const canExportSales = hasPermission(session.role, "reports.view");
@@ -36,7 +37,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
   const canViewClients = hasAnyPermission(session.role, ["clients.view", "clients.view.own", "campaigns.view", "campaigns.view.own", "finance.view"]);
   const canViewCampaigns = hasAnyPermission(session.role, ["campaigns.view", "campaigns.view.own", "finance.view"]);
   const canViewFinance = hasPermission(session.role, "finance.view");
-  const canViewOperational = hasAnyPermission(session.role, ["campaigns.operate", "reservations.view", "reservations.view.own", "inventory.view"]);
+  const canViewOperational = hasAnyPermission(session.role, ["dashboard.operations.view", "campaigns.operate", "reservations.view", "reservations.view.own", "inventory.view"]);
   const hasCommercialMenu = canViewInventory || canViewCrm || canViewClients || canViewCampaigns;
   const hasFinanceMenu = canViewFinance || canExportSales;
   const hasSettingsMenu = canManageInventory || canManageUsers;
@@ -52,7 +53,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           </div>
         </div>
         <nav className="admin-nav flex min-w-0 flex-1 flex-wrap items-center gap-2" aria-label="Navigatie administrare">
-          <AdminNavLink href="/admin/dashboard" active={isActiveAdminPath(pathname, "/admin/dashboard")}><Gauge size={18} />Dashboard</AdminNavLink>
+          {!isFieldOperator ? <AdminNavLink href="/admin/dashboard" active={isActiveAdminPath(pathname, "/admin/dashboard")}><Gauge size={18} />Dashboard</AdminNavLink> : null}
           {hasCommercialMenu ? (
             <AdminNavMenu
               active={isActiveAnyAdminPath(pathname, ["/admin/selectie-locatii", "/admin/crm", "/admin/clienti", "/admin/campanii"])}
@@ -89,7 +90,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
               {canManageUsers ? <AdminMenuLink href="/admin/utilizatori" active={isActiveAdminPath(pathname, "/admin/utilizatori")} icon={<Users size={17} />} label="Utilizatori" /> : null}
             </AdminNavMenu>
           ) : null}
-          <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Portal public</AdminNavLink>
+          {!isFieldOperator ? <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Portal public</AdminNavLink> : null}
         </nav>
         <div className="flex shrink-0 items-center gap-2">
           <NotificationBell />

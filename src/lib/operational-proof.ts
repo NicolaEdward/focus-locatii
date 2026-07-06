@@ -109,6 +109,14 @@ export function canAccessOperationalReservation(
   return reservation.sellerUserId === session.id || reservation.ownerId === session.id || Boolean(!reservation.ownerId && legacyOwner);
 }
 
+export function canViewOperationalProofPhoto(
+  session: AuthSession,
+  reservation: Pick<ReservationDTO, "status" | "ownerId" | "sellerUserId" | "salesperson">
+) {
+  if (["SUPER_ADMIN", "COO", "SALES_DIRECTOR", "SALES_AGENT"].includes(session.role)) return true;
+  return canAccessOperationalReservation(session, reservation);
+}
+
 export function canCompleteOperationalReservation(
   session: AuthSession,
   reservation: Pick<ReservationDTO, "status" | "ownerId" | "sellerUserId" | "salesperson">

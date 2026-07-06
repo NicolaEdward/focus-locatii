@@ -3,7 +3,7 @@ import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import {
   OPERATIONAL_PROOF_DOCUMENT_TYPE,
-  canAccessOperationalReservation,
+  canViewOperationalProofPhoto,
   isOperationalProofActive
 } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
@@ -23,6 +23,9 @@ export async function GET(request: NextRequest, context: Context) {
   const { session, response } = await requireAnyPermission(request, [
     "dashboard.operations.view",
     "campaigns.operate",
+    "campaigns.view",
+    "campaigns.view.own",
+    "reservations.view",
     "reservations.view.own"
   ]);
   if (response || !session) return response;
@@ -46,7 +49,7 @@ export async function GET(request: NextRequest, context: Context) {
   if (!document || document.documentType !== OPERATIONAL_PROOF_DOCUMENT_TYPE || !document.reservation || !isOperationalProofActive(document)) {
     return NextResponse.json({ error: "Poza dovada nu exista." }, { status: 404, headers: noStoreHeaders });
   }
-  if (!canAccessOperationalReservation(session, document.reservation)) {
+  if (!canViewOperationalProofPhoto(session, document.reservation)) {
     return NextResponse.json({ error: "Nu ai acces la aceasta poza dovada." }, { status: 403, headers: noStoreHeaders });
   }
 

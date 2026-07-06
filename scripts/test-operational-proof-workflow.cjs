@@ -74,8 +74,12 @@ function completionRouteIsScopedAndDoesNotCreateReservations() {
 
 function proofPhotoRouteIsPrivate() {
   const source = read("src", "app", "api", "admin", "operational", "proof-photos", "[id]", "route.ts");
+  const rules = read("src", "lib", "operational-proof.ts");
   assert(source.includes("requireAnyPermission"), "proof photos must require auth");
-  assert(source.includes("canAccessOperationalReservation"), "proof photos must be scoped to allowed operational users");
+  assert(source.includes("canViewOperationalProofPhoto"), "proof photos must use dedicated view access rules");
+  assert(source.includes('"campaigns.view"'), "sales roles should be able to request proof photos through campaign view permissions");
+  assert(rules.includes("canViewOperationalProofPhoto"), "proof photo view access should be separate from completion access");
+  assert(rules.includes('"SALES_AGENT"'), "sales agents should be able to view operational proof photos");
   assert(source.includes("OPERATIONAL_PROOF_DOCUMENT_TYPE"), "proof route must only serve proof photo documents");
   assert(source.includes("isOperationalProofActive"), "expired/deleted proof photos must not be served");
   assert(source.includes('searchParams.get("preview") === "1"'), "proof route should support authenticated preview mode");
@@ -107,6 +111,11 @@ function operationalUiShowsCompletionWorkflow() {
   assert(source.includes("Incarca cel putin o poza dovada pentru finalizare."), "field installer completion should require proof photos");
   assert(source.includes("ProofPhotosDialog"), "authorized users should be able to view/download proof photos");
   assert(source.includes("?preview=1"), "proof photo viewer should use authenticated inline previews");
+  assert(source.includes("SelectedProofFilePreviews"), "completion upload should preview selected local photos before saving");
+  assert(source.includes("URL.createObjectURL"), "selected proof photo previews should use local browser previews");
+  assert(source.includes("URL.revokeObjectURL"), "selected proof photo previews should clean up object URLs");
+  assert(source.includes("Scoate"), "selected proof photos should be removable before upload");
+  assert(source.includes("[...files, ...selected.slice(0, remainingPhotoSlots)]"), "additional selected photos should append instead of replacing prior selections");
 }
 
 function operationalUiRemovesTechnicalStatusDropdown() {
@@ -141,7 +150,7 @@ function sellerDashboardShowsScopedProofPhotos() {
   const dashboard = read("src", "lib", "dashboard.ts");
   const roleDashboard = read("src", "components", "admin", "RoleDashboard.tsx");
   assert(dashboard.includes("OPERATIONAL_PROOF_DOCUMENT_TYPE"), "dashboard should fetch only operational proof documents");
-  assert(dashboard.includes("canAccessOperationalReservation(viewer"), "dashboard proof photos must be scoped by seller/admin access");
+  assert(dashboard.includes("canViewOperationalProofPhoto(viewer"), "dashboard proof photos must use sales-wide proof view access");
   assert(dashboard.includes("operationalProofDownloadPath(document.id)"), "dashboard proof photos should use authenticated admin download URLs");
   assert(roleDashboard.includes("row.proofPhotos?.length"), "role dashboard should render proof photo availability when authorized");
   assert(roleDashboard.includes("poze dovada"), "seller dashboard should clearly label proof photos");

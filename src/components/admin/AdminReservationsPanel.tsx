@@ -47,7 +47,7 @@ import { hasAnyPermission, hasPermission } from "@/lib/rbac";
 import { allowedReservationTransitions } from "@/lib/reservation-workflow";
 import { companyEntities, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
-import { canCompleteOperationalReservation, canRescheduleOperationalReservation } from "@/lib/operational-proof";
+import { OPERATIONAL_PROOF_MAX_FILES_PER_TASK, canCompleteOperationalReservation, canRescheduleOperationalReservation } from "@/lib/operational-proof";
 import { calculateProrata } from "@/lib/prorata";
 import {
   buildDecorationBillingReport,
@@ -2061,6 +2061,19 @@ function OperationCompletionDialog({
 }) {
   const title = target.type === "decoration" ? "Decorare finalizata" : "Neutralizare finalizata";
   const existingPhotos = proofPhotosForTask(target.reservation, target.type, target.taskId);
+  const remainingPhotoSlots = Math.max(0, OPERATIONAL_PROOF_MAX_FILES_PER_TASK - existingPhotos.length - files.length);
+  const canAddMorePhotos = remainingPhotoSlots > 0;
+
+  function addSelectedFiles(fileList: FileList | null) {
+    const selected = Array.from(fileList || []);
+    if (!selected.length || !remainingPhotoSlots) return;
+    onFilesChange([...files, ...selected.slice(0, remainingPhotoSlots)]);
+  }
+
+  function removeSelectedFile(index: number) {
+    onFilesChange(files.filter((_, fileIndex) => fileIndex !== index));
+  }
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
       <div className="focus-card max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg p-5 shadow-2xl">
@@ -2079,7 +2092,7 @@ function OperationCompletionDialog({
 
         <div className="mt-4 rounded-lg border border-focus-line bg-focus-ink/40 p-4">
           <p className="text-sm font-bold text-slate-200">
-            Incarca poze de pe teren si marcheaza lucrarea ca finalizata. Pozele sunt pastrate 30 de zile si sunt vizibile doar utilizatorilor autorizati.
+            Incarca poze de pe teren si marcheaza lucrarea ca finalizata. Pozele sunt pastrate 30 de zile si sunt vizibile echipei de vanzari si utilizatorilor operationali autorizati.
           </p>
           {existingPhotos.length ? (
             <p className="mt-2 text-xs font-bold text-emerald-200">
@@ -2098,21 +2111,19 @@ function OperationCompletionDialog({
             type="file"
             accept="image/jpeg,image/png,image/webp"
             multiple
-            disabled={saving}
-            onChange={(event) => onFilesChange(Array.from(event.target.files || []))}
+            disabled={saving || !canAddMorePhotos}
+            onChange={(event) => {
+              addSelectedFiles(event.currentTarget.files);
+              event.currentTarget.value = "";
+            }}
           />
-          <span className="mt-2 block text-xs font-bold text-slate-400">JPG, PNG sau WebP, maximum 10 MB per poza.</span>
+          <span className="mt-2 block text-xs font-bold text-slate-400">
+            JPG, PNG sau WebP, maximum 10 MB per poza. Mai poti adauga {remainingPhotoSlots} poza/poze la aceasta lucrare.
+          </span>
         </label>
 
         {files.length ? (
-          <div className="mt-3 grid gap-2">
-            {files.map((file) => (
-              <div key={`${file.name}-${file.size}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-focus-line bg-focus-ink/35 px-3 py-2 text-sm font-bold text-slate-200">
-                <span>{file.name}</span>
-                <span className="text-xs text-slate-400">{formatBytes(file.size)}</span>
-              </div>
-            ))}
-          </div>
+          <SelectedProofFilePreviews files={files} onRemove={removeSelectedFile} disabled={saving} />
         ) : null}
 
         <label className="mt-4 block">
@@ -2136,6 +2147,54 @@ function OperationCompletionDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SelectedProofFilePreviews({
+  files,
+  onRemove,
+  disabled
+}: {
+  files: File[];
+  onRemove: (index: number) => void;
+  disabled: boolean;
+}) {
+  const [previews, setPreviews] = useState<Array<{ key: string; file: File; url: string }>>([]);
+
+  useEffect(() => {
+    const nextPreviews = files.map((file, index) => ({
+      key: `${file.name}-${file.size}-${file.lastModified}-${index}`,
+      file,
+      url: URL.createObjectURL(file)
+    }));
+    setPreviews(nextPreviews);
+    return () => {
+      nextPreviews.forEach((preview) => URL.revokeObjectURL(preview.url));
+    };
+  }, [files]);
+
+  return (
+    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      {previews.map((preview, index) => (
+        <article key={preview.key} className="rounded-lg border border-focus-line bg-focus-ink/35 p-3">
+          <img
+            alt={`Previzualizare ${preview.file.name}`}
+            className="aspect-[4/3] w-full rounded-md border border-focus-line object-cover"
+            src={preview.url}
+          />
+          <div className="mt-3 flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-black text-white" title={preview.file.name}>{preview.file.name}</p>
+              <p className="mt-1 text-xs font-bold text-slate-400">{formatBytes(preview.file.size)}</p>
+            </div>
+            <button className="focus-button secondary" type="button" onClick={() => onRemove(index)} disabled={disabled}>
+              <Trash2 className="h-4 w-4" />
+              Scoate
+            </button>
+          </div>
+        </article>
+      ))}
     </div>
   );
 }

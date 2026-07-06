@@ -18,7 +18,7 @@ import {
 } from "@/lib/operation-task-read-adapter";
 import {
   OPERATIONAL_PROOF_DOCUMENT_TYPE,
-  canAccessOperationalReservation,
+  canViewOperationalProofPhoto,
   isOperationalProofActive,
   operationalProofDownloadPath,
   parseOperationalProofNotes
@@ -704,7 +704,7 @@ function operationTasks(items: CampaignRow[], kind: OperationKind, now: Date, wi
 }
 
 function operationalDashboardProofPhotos(item: CampaignRow, kind: OperationKind, taskId: string | null, viewer: AuthSession) {
-  if (!canAccessOperationalReservation(viewer, {
+  if (!canViewOperationalProofPhoto(viewer, {
     status: item.status as never,
     ownerId: item.ownerId,
     sellerUserId: item.sellerUserId,

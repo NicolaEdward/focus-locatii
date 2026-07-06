@@ -241,7 +241,8 @@ export async function listOperationReservations() {
         { installationDate: { gte: windowStart, lte: decorationWindowEnd } },
         { neutralizationDate: { gte: windowStart, lte: neutralizationWindowEnd } },
         { installationDate: null, periodStart: { gte: windowStart, lte: decorationWindowEnd } },
-        { neutralizationDate: null, periodEnd: { gte: windowStart, lte: neutralizationWindowEnd } }
+        { neutralizationDate: null, periodEnd: { gte: windowStart, lte: neutralizationWindowEnd } },
+        { periodStart: { lte: neutralizationWindowEnd }, periodEnd: { gte: windowStart } }
       ]
     },
     include: reservationInclude,

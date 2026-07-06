@@ -12,6 +12,7 @@ function main() {
   operationalUiShowsCompletionWorkflow();
   operationalUiRemovesTechnicalStatusDropdown();
   operationalUiHidesCompletedSectionsAndSyncButtons();
+  operationalDashboardKeepsDelayedWorkVisible();
   sellerDashboardShowsScopedProofPhotos();
   operationalDateDelayWorkflowIsAudited();
   completionRefreshesLocalState();
@@ -32,6 +33,7 @@ function main() {
       "operational UI exposes completion proof workflow",
       "operational UI removes technical status dropdown",
       "completed decoration billing list is collapsed and technical references are hidden",
+      "operational dashboard keeps overdue unfinished work visible",
       "reservation sync buttons are not exposed in admin UI",
       "seller dashboard can show scoped proof photos",
       "delayed operational date changes require reason and audit metadata",
@@ -149,6 +151,18 @@ function operationalUiHidesCompletedSectionsAndSyncButtons() {
   assert(!billing.includes('"Referinta"'), "decoration billing CSV must not export technical reference ids");
   assert(billing.includes("new Date(right.finalizationDate).getTime() - new Date(left.finalizationDate).getTime()"), "completed decorations should sort newest finalization first");
   assert(billing.includes('campaignReference: task.reservation.contractNumber || ""'), "internal reservation ids must not be used as visible decoration references");
+}
+
+function operationalDashboardKeepsDelayedWorkVisible() {
+  const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
+  const reservations = read("src", "lib", "reservations.ts");
+  assert(panel.includes("isOperationTaskVisible(taskDate, status, decorationWindowEnd, showOperationHistory)"), "decoration task visibility should use the dedicated helper");
+  assert(panel.includes("isOperationTaskVisible(taskDate, status, neutralizationWindowEnd, showOperationHistory)"), "neutralization task visibility should use the dedicated helper");
+  assert(panel.includes("return isOperationActive(status) && taskTime <= windowEnd.getTime();"), "active operational tasks should include overdue unfinished work before the current window");
+  assert(!panel.includes("new Date(taskDate) >= operationsWindowStart"), "active operational rows must not hide delayed work older than the history window");
+  assert(panel.includes("Campanii operationale"), "operational workspace should show operational counters instead of empty location inventory counters");
+  assert(panel.includes("operationalStats.reservations.toString()"), "operational counters should be based on operational reservations");
+  assert(reservations.includes("{ periodStart: { lte: neutralizationWindowEnd }, periodEnd: { gte: windowStart } }"), "operational query should include active booked campaigns, not only rows with operation dates in the narrow window");
 }
 
 function sellerDashboardShowsScopedProofPhotos() {

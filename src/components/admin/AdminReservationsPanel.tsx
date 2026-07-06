@@ -46,7 +46,7 @@ import type { AuthSession } from "@/lib/auth";
 import { hasAnyPermission, hasPermission } from "@/lib/rbac";
 import { allowedReservationTransitions } from "@/lib/reservation-workflow";
 import { companyEntities, normalizeCompanyEntity } from "@/lib/company-entities";
-import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
+import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS } from "@/lib/operation-schedule";
 import { OPERATIONAL_PROOF_MAX_FILES_PER_TASK, canCompleteOperationalReservation, canRescheduleOperationalReservation } from "@/lib/operational-proof";
 import { calculateProrata } from "@/lib/prorata";
 import {
@@ -606,7 +606,6 @@ export function AdminReservationsPanel({
 
   const operationalReservations = isOperationalWorkspace ? reservations : operationReservations?.length ? operationReservations : reservations;
 
-  const operationsWindowStart = useMemo(() => addDays(today, -OPERATION_HISTORY_DAYS), [today]);
   const decorationWindowEnd = useMemo(() => addDays(today, DECORATION_LOOKAHEAD_DAYS), [today]);
   const neutralizationWindowEnd = useMemo(() => addDays(today, NEUTRALIZATION_LOOKAHEAD_DAYS), [today]);
 
@@ -629,12 +628,10 @@ export function AdminReservationsPanel({
         .filter(
           ({ reservation, taskDate, operationStatus: status }) =>
             activeReservationStatuses.includes(reservation.status) &&
-            (showOperationHistory
-              ? !isOperationActive(status)
-              : isOperationActive(status) && new Date(taskDate) >= operationsWindowStart && new Date(taskDate) <= decorationWindowEnd)
+            isOperationTaskVisible(taskDate, status, decorationWindowEnd, showOperationHistory)
         )
         .sort((a, b) => compareOperationTaskDates(a, b, showOperationHistory)),
-    [allDecorationTasks, decorationWindowEnd, operationsWindowStart, showOperationHistory]
+    [allDecorationTasks, decorationWindowEnd, showOperationHistory]
   );
 
   const decorationBillingReport = useMemo(
@@ -642,7 +639,7 @@ export function AdminReservationsPanel({
     [allDecorationTasks, decorationBillingMonth]
   );
 
-  const neutralizationTasks = useMemo(
+  const allNeutralizationTasks = useMemo(
     () =>
       operationalReservations
         .flatMap((reservation): OperationTableTask[] => {
@@ -657,16 +654,41 @@ export function AdminReservationsPanel({
             },
             ...operationExtraTasks(reservation.productionNotes, "neutralization").map((task) => extraOperationTask(reservation, task))
           ];
-        })
+        }),
+    [operationalReservations]
+  );
+
+  const neutralizationTasks = useMemo(
+    () =>
+      allNeutralizationTasks
         .filter(
           ({ reservation, taskDate, operationStatus: status }) =>
             activeReservationStatuses.includes(reservation.status) &&
-            (showOperationHistory
-              ? !isOperationActive(status)
-              : isOperationActive(status) && new Date(taskDate) >= operationsWindowStart && new Date(taskDate) <= neutralizationWindowEnd)
+            isOperationTaskVisible(taskDate, status, neutralizationWindowEnd, showOperationHistory)
         )
         .sort((a, b) => compareOperationTaskDates(a, b, showOperationHistory)),
-    [neutralizationWindowEnd, operationalReservations, operationsWindowStart, showOperationHistory]
+    [allNeutralizationTasks, neutralizationWindowEnd, showOperationHistory]
+  );
+
+  const operationalStats = useMemo(
+    () => ({
+      reservations: operationalReservations.length,
+      future: futureReservations.length,
+      decorations: allDecorationTasks.filter(
+        ({ reservation, taskDate, operationStatus: status }) =>
+          activeReservationStatuses.includes(reservation.status) &&
+          isOperationTaskVisible(taskDate, status, decorationWindowEnd, false)
+      ).length,
+      neutralizations: allNeutralizationTasks.filter(
+        ({ reservation, taskDate, operationStatus: status }) =>
+          activeReservationStatuses.includes(reservation.status) &&
+          isOperationTaskVisible(taskDate, status, neutralizationWindowEnd, false)
+      ).length,
+      completed:
+        allDecorationTasks.filter(({ operationStatus: status }) => !isOperationActive(status)).length +
+        allNeutralizationTasks.filter(({ operationStatus: status }) => !isOperationActive(status)).length
+    }),
+    [allDecorationTasks, allNeutralizationTasks, decorationWindowEnd, futureReservations.length, neutralizationWindowEnd, operationalReservations.length]
   );
 
   const toggleLocation = useCallback((location: LocationDTO) => {
@@ -1168,11 +1190,23 @@ export function AdminReservationsPanel({
 
         {!isFieldOperator ? (
           <div className="mt-5 grid gap-3 md:grid-cols-5">
-            <MiniStat label="Total locatii" value={locationStats.total.toString()} />
-            <MiniStat label="Libere acum" value={locationStats.available.toString()} tone="green" />
-            <MiniStat label="Libere temporar" value={locationStats.futureBooked.toString()} tone="yellow" />
-            <MiniStat label="Hold activ" value={locationStats.holds.toString()} tone="yellow" />
-            <MiniStat label="Ocupate" value={locationStats.occupied.toString()} tone="red" />
+            {isOperationalWorkspace ? (
+              <>
+                <MiniStat label="Campanii operationale" value={operationalStats.reservations.toString()} />
+                <MiniStat label="Inchirieri viitoare" value={operationalStats.future.toString()} tone="green" />
+                <MiniStat label="Decorari de urmarit" value={operationalStats.decorations.toString()} tone="yellow" />
+                <MiniStat label="Neutralizari de urmarit" value={operationalStats.neutralizations.toString()} tone="yellow" />
+                <MiniStat label="Finalizate" value={operationalStats.completed.toString()} tone="green" />
+              </>
+            ) : (
+              <>
+                <MiniStat label="Total locatii" value={locationStats.total.toString()} />
+                <MiniStat label="Libere acum" value={locationStats.available.toString()} tone="green" />
+                <MiniStat label="Libere temporar" value={locationStats.futureBooked.toString()} tone="yellow" />
+                <MiniStat label="Hold activ" value={locationStats.holds.toString()} tone="yellow" />
+                <MiniStat label="Ocupate" value={locationStats.occupied.toString()} tone="red" />
+              </>
+            )}
           </div>
         ) : null}
 
@@ -1975,6 +2009,13 @@ function extraOperationTask(reservation: ReservationDTO, task: OperationExtraTas
     finalizationDate: task.status === "DONE" ? task.completedAt || task.updatedAt || task.taskDate : null,
     dedupeKey: task.id ? `reservation:${reservation.id}:task:${task.id}` : undefined
   };
+}
+
+function isOperationTaskVisible(taskDate: string, status: OperationStatus, windowEnd: Date, showHistory: boolean) {
+  const taskTime = Date.parse(taskDate);
+  if (!Number.isFinite(taskTime)) return false;
+  if (showHistory) return !isOperationActive(status);
+  return isOperationActive(status) && taskTime <= windowEnd.getTime();
 }
 
 function compareOperationTaskDates(left: OperationTableTask, right: OperationTableTask, newestFirst: boolean) {

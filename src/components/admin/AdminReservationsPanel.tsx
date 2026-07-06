@@ -265,7 +265,6 @@ export function AdminReservationsPanel({
   const requestedPanel = panelFromQuery(searchParams.get("panel"));
   const shouldFocusNewReservation = searchParams.get("newReservation") === "1";
   const initialForm = { ...emptyForm, salesperson: session.name, sellerUserId: session.id };
-  const canManageAllReservations = hasPermission(session.role, "reservations.manage");
   const canAssignOtherSeller = ["SALES_DIRECTOR", "COO", "SUPER_ADMIN"].includes(session.role);
   const canApproveReservations = hasPermission(session.role, "proposals.approve") || session.role === "COO" || session.role === "SUPER_ADMIN";
   const canUpdateOperationStatus = hasPermission(session.role, "campaigns.operate");
@@ -282,7 +281,7 @@ export function AdminReservationsPanel({
     [session]
   );
   const [activePanel, setActivePanel] = useState<AdminPanel>(
-    isOperationalWorkspace ? (isFieldOperator ? "decorations" : "future") : "sales"
+    isOperationalWorkspace ? "decorations" : "sales"
   );
   const [reservations, setReservations] = useState(initialReservations);
   const [offerRequests, setOfferRequests] = useState(initialOfferRequests);
@@ -308,8 +307,6 @@ export function AdminReservationsPanel({
   const [editingReservation, setEditingReservation] = useState<ReservationDTO | null>(null);
   const [editForm, setEditForm] = useState<ReservationEditForm | null>(null);
   const [editing, setEditing] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncSummary, setSyncSummary] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
@@ -1144,45 +1141,6 @@ export function AdminReservationsPanel({
     if (Array.isArray(payload.locations)) onLocationsUpdated(payload.locations);
   }
 
-  async function syncReservations() {
-    setSyncing(true);
-    setError(null);
-    setMessage(null);
-    setSyncSummary(null);
-
-    try {
-      const response = await fetch("/api/admin/reservations/sync", {
-        method: "POST",
-        headers: { "content-type": "application/json" }
-      });
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Sincronizarea nu a putut fi rulata.");
-      }
-
-      if (Array.isArray(payload.reservations)) {
-        setReservations(payload.reservations);
-      }
-
-      const summary = payload.summary;
-      if (summary?.disabled) {
-        setSyncSummary(summary.message || "Sincronizarea legacy este dezactivata.");
-        setMessage("Sincronizarea legacy este oprita pentru noua logica manuala.");
-      } else {
-        setSyncSummary(
-          `Scanate ${summary.scanned}, noi ${summary.created}, actualizate ${summary.updated}, sarite ${summary.skipped}, conflicte ${summary.conflicts || 0}, anulate ${summary.cancelledMissing}.`
-        );
-        setMessage("Rezervarile si inchirierile au fost sincronizate cu baza de date.");
-      }
-      await refreshLocations();
-    } catch (syncError) {
-      setError(syncError instanceof Error ? syncError.message : "Sincronizarea nu a putut fi rulata.");
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   const visibleOfferRequests = offerRequests.filter((request) => {
     if (requestStatusFilter && request.status !== requestStatusFilter) return false;
     if (requestOwnerFilter && !String(request.salesperson || "").toLowerCase().includes(requestOwnerFilter.toLowerCase())) return false;
@@ -1199,10 +1157,6 @@ export function AdminReservationsPanel({
               {isOperationalWorkspace ? "Decorari, neutralizari si implementare" : "Rezervari si HOLD-uri"}
             </h2>
           </div>
-          {canManageAllReservations ? <button className="focus-button secondary" type="button" onClick={syncReservations} disabled={syncing}>
-            <RefreshCcw size={18} />
-            {syncing ? "Sincronizeaza..." : "Sync inchirieri"}
-          </button> : null}
         </div>
 
         {!isFieldOperator ? (
@@ -1254,7 +1208,6 @@ export function AdminReservationsPanel({
             {message}
           </p>
         ) : null}
-        {syncSummary ? <p className="mt-2 text-sm font-bold text-slate-300">{syncSummary}</p> : null}
         {error ? (
           <p className="mt-4 flex items-center gap-2 text-sm font-bold text-red-200">
             <XCircle size={16} />
@@ -2939,6 +2892,7 @@ function DecorationBillingSummary({
   onMonthChange: (value: string) => void;
   visible?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
   if (!visible) return null;
 
   const totalLabel = Object.entries(report.totals)
@@ -2975,16 +2929,22 @@ function DecorationBillingSummary({
         <p className="text-xs font-bold text-slate-300">
           {report.rows.length} montaj(e) finalizate in luna selectata. Doar statusul Finalizata intra in total.
         </p>
-        <button className="focus-button secondary" type="button" onClick={exportCsv} disabled={!report.rows.length}>
-          <FileSpreadsheet size={18} /> Export CSV
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className="focus-button secondary" type="button" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            {expanded ? "Ascunde lista" : "Vezi lista"}
+          </button>
+          <button className="focus-button secondary" type="button" onClick={exportCsv} disabled={!report.rows.length}>
+            <FileSpreadsheet size={18} /> Export CSV
+          </button>
+        </div>
       </div>
       {report.missingCostRows.length ? (
         <div className="mt-3 rounded-md border border-amber-300/40 bg-amber-400/10 px-3 py-2 text-sm font-bold text-amber-100">
           {report.missingCostRows.length} montaj(e) finalizate nu au cost completat si trebuie verificate inainte de facturare.
         </div>
       ) : null}
-      <div className="mt-3 overflow-auto">
+      {expanded ? <div className="mt-3 overflow-auto">
         <table className="w-full min-w-[1120px] border-collapse text-sm">
           <thead className="bg-focus-navy text-left text-xs uppercase text-focus-yellow">
             <tr>
@@ -2992,7 +2952,6 @@ function DecorationBillingSummary({
               <Th>Locatie</Th>
               <Th>Client</Th>
               <Th>Campanie</Th>
-              <Th>Referinta</Th>
               <Th>Status</Th>
               <Th>Cost</Th>
             </tr>
@@ -3006,7 +2965,6 @@ function DecorationBillingSummary({
                   <Td>{row.location || location?.code || "N/A"}</Td>
                   <Td>{row.client}</Td>
                   <Td>{row.campaign}</Td>
-                  <Td>{row.campaignReference}</Td>
                   <Td>{operationStatusLabel(row.status)}</Td>
                   <Td>
                     {row.cost != null ? `${moneyLabel(row.cost)} ${row.currency}` : <span className="text-amber-200">Fara cost</span>}
@@ -3016,14 +2974,14 @@ function DecorationBillingSummary({
             })}
             {!report.rows.length ? (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-sm font-bold text-slate-400">
+                <td colSpan={6} className="px-4 py-6 text-center text-sm font-bold text-slate-400">
                   Nu exista decorari finalizate in luna selectata.
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
-      </div>
+      </div> : null}
     </div>
   );
 }

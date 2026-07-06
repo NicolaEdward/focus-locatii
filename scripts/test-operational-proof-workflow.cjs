@@ -11,6 +11,8 @@ function main() {
   cronIsProtectedAndLimitedToProofPhotos();
   operationalUiShowsCompletionWorkflow();
   operationalUiRemovesTechnicalStatusDropdown();
+  operationalUiHidesCompletedSectionsAndSyncButtons();
+  sellerDashboardShowsScopedProofPhotos();
   operationalDateDelayWorkflowIsAudited();
   completionRefreshesLocalState();
   reservationDtoExposesMetadataOnly();
@@ -29,6 +31,9 @@ function main() {
       "cron deletes only operational proof photos",
       "operational UI exposes completion proof workflow",
       "operational UI removes technical status dropdown",
+      "completed decoration billing list is collapsed and technical references are hidden",
+      "reservation sync buttons are not exposed in admin UI",
+      "seller dashboard can show scoped proof photos",
       "delayed operational date changes require reason and audit metadata",
       "completion updates the local operational state without manual refresh",
       "reservation DTO exposes metadata links only, not raw file contents",
@@ -111,6 +116,35 @@ function operationalUiRemovesTechnicalStatusDropdown() {
   assert(tableBlock.includes("OperationTaskStatusBadge"), "operational task status should be shown as a badge");
   assert(tableBlock.includes("Modifica data"), "delayed operational rows should expose a date modification action");
   assert(tableBlock.includes("Vezi poze"), "proof photos should be visible from the operational row");
+}
+
+function operationalUiHidesCompletedSectionsAndSyncButtons() {
+  const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
+  const billingBlock = blockFrom(panel, "function DecorationBillingSummary", "function OperationsTable");
+  assert(billingBlock.includes("const [expanded, setExpanded] = useState(false)"), "completed monthly decorations should be collapsed by default");
+  assert(billingBlock.includes("Vezi lista"), "completed monthly decorations should open only when requested");
+  assert(billingBlock.includes("Ascunde lista"), "completed monthly decorations should be collapsible again");
+  assert(!billingBlock.includes("<Th>Referinta</Th>"), "completed monthly decorations table must not show technical reference ids");
+  assert(!panel.includes("Sync inchirieri"), "reservation sync button must not be exposed in admin UI");
+  assert(!panel.includes("/api/admin/reservations/sync"), "admin UI must not call the legacy reservation sync endpoint");
+
+  const smoke = read("scripts", "smoke-http.cjs");
+  assert(!smoke.includes("/api/admin/reservations/sync"), "smoke checks must not call the legacy reservation sync endpoint");
+
+  const billing = read("src", "lib", "decoration-billing.ts");
+  assert(!billing.includes('"Referinta"'), "decoration billing CSV must not export technical reference ids");
+  assert(billing.includes("left.scheduledDate || left.finalizationDate"), "completed decorations should sort by scheduled decoration date first");
+  assert(billing.includes('campaignReference: task.reservation.contractNumber || ""'), "internal reservation ids must not be used as visible decoration references");
+}
+
+function sellerDashboardShowsScopedProofPhotos() {
+  const dashboard = read("src", "lib", "dashboard.ts");
+  const roleDashboard = read("src", "components", "admin", "RoleDashboard.tsx");
+  assert(dashboard.includes("OPERATIONAL_PROOF_DOCUMENT_TYPE"), "dashboard should fetch only operational proof documents");
+  assert(dashboard.includes("canAccessOperationalReservation(viewer"), "dashboard proof photos must be scoped by seller/admin access");
+  assert(dashboard.includes("operationalProofDownloadPath(document.id)"), "dashboard proof photos should use authenticated admin download URLs");
+  assert(roleDashboard.includes("row.proofPhotos?.length"), "role dashboard should render proof photo availability when authorized");
+  assert(roleDashboard.includes("poze dovada"), "seller dashboard should clearly label proof photos");
 }
 
 function operationalDateDelayWorkflowIsAudited() {

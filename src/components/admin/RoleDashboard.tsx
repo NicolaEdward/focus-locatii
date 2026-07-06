@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, BriefcaseBusiness, Building2, CalendarClock, CircleDollarSign, Hammer, MapPinned, ShieldCheck, Undo2, Users } from "lucide-react";
+import { AlertTriangle, ArrowRight, BriefcaseBusiness, Building2, CalendarClock, CircleDollarSign, Download, Hammer, Image as ImageIcon, MapPinned, ShieldCheck, Undo2, Users } from "lucide-react";
 import type { DashboardData } from "@/lib/dashboard";
 import type { AuthSession } from "@/lib/auth";
 import { ROLE_LABELS } from "@/lib/rbac";
@@ -169,6 +169,18 @@ function OperationsPreview({ data, compact = false }: { data: DashboardData["coo
                   {row.code} | {row.clientName}
                 </p>
                 <p className="text-xs text-slate-400">{[row.campaignName, row.city, row.salesperson].filter(Boolean).join(" | ") || "-"}</p>
+                {row.proofPhotos?.length ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-bold text-emerald-100">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/40 bg-emerald-400/10 px-2 py-1">
+                      <ImageIcon className="h-3.5 w-3.5" />
+                      {row.proofPhotos.length} poze dovada
+                    </span>
+                    <a className="inline-flex items-center gap-1 text-focus-yellow hover:text-white" href={row.proofPhotos[0].downloadUrl}>
+                      <Download className="h-3.5 w-3.5" />
+                      Descarca
+                    </a>
+                  </div>
+                ) : null}
               </div>
               <div className="text-left md:text-right">
                 <p className={row.overdue ? "font-black text-red-100" : "font-black text-focus-yellow"}>{date(row.taskDate)}</p>

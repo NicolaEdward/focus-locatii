@@ -16,6 +16,13 @@ import {
   operationTaskReadsEnabled,
   reportOperationTaskReadComparison
 } from "@/lib/operation-task-read-adapter";
+import {
+  OPERATIONAL_PROOF_DOCUMENT_TYPE,
+  canAccessOperationalReservation,
+  isOperationalProofActive,
+  operationalProofDownloadPath,
+  parseOperationalProofNotes
+} from "@/lib/operational-proof";
 
 type CampaignRow = {
   id: string;
@@ -64,6 +71,16 @@ type CampaignRow = {
     monthlyCost: number | null;
     costCurrency: string | null;
   };
+  documents?: Array<{
+    id: string;
+    fileName: string | null;
+    fileType: string | null;
+    uploadedAt: Date;
+    expiryDate: Date | null;
+    notes: string | null;
+    status: string;
+    uploadedBy: { name: string | null } | null;
+  }>;
 };
 
 type LocationRow = {
@@ -225,6 +242,21 @@ export async function getDashboardData(session: AuthSession) {
         ]
       },
       include: {
+        documents: {
+          where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active" },
+          orderBy: { uploadedAt: "desc" },
+          take: 40,
+          select: {
+            id: true,
+            fileName: true,
+            fileType: true,
+            uploadedAt: true,
+            expiryDate: true,
+            notes: true,
+            status: true,
+            uploadedBy: { select: { name: true } }
+          }
+        },
         sellerUser: { select: { id: true, name: true, email: true, role: true } },
         location: {
           select: {
@@ -325,8 +357,8 @@ export async function getDashboardData(session: AuthSession) {
   const agentPerformance = groupPerformance(monthlySales, sellerName);
   const cityPerformance = groupPerformance(monthlySales, (item) => item.location.city || "Fara oras");
   const topClients = groupPerformance(monthlySales, (item) => item.clientName || "Fara client");
-  const legacyDecorationTasks = operationTasks(operationCampaigns, "decoration", now, operationWindowStart, decorationWindowEnd);
-  const legacyNeutralizationTasks = operationTasks(operationCampaigns, "neutralization", now, operationWindowStart, neutralizationWindowEnd);
+  const legacyDecorationTasks = operationTasks(operationCampaigns, "decoration", now, operationWindowStart, decorationWindowEnd, session);
+  const legacyNeutralizationTasks = operationTasks(operationCampaigns, "neutralization", now, operationWindowStart, neutralizationWindowEnd, session);
   const operationTaskReadResult = operationTaskReadsEnabled()
     ? await listOperationalTasksWithFallback({
         reservations: operationCampaigns,
@@ -338,10 +370,10 @@ export async function getDashboardData(session: AuthSession) {
     : null;
   if (operationTaskReadResult) reportOperationTaskReadComparison(operationTaskReadResult.comparison);
   const decorationTasks = operationTaskReadResult
-    ? operationTaskReadResult.active.filter((task) => task.kind === "decoration")
+    ? operationTaskReadResult.active.filter((task) => task.kind === "decoration").map(withoutDashboardProofPhotos)
     : legacyDecorationTasks;
   const neutralizationTasks = operationTaskReadResult
-    ? operationTaskReadResult.active.filter((task) => task.kind === "neutralization")
+    ? operationTaskReadResult.active.filter((task) => task.kind === "neutralization").map(withoutDashboardProofPhotos)
     : legacyNeutralizationTasks;
   const overdueTasks = [...decorationTasks, ...neutralizationTasks].filter((task) => task.overdue);
   const operations = {
@@ -628,7 +660,7 @@ function serializeConflict(first: CampaignRow, second: CampaignRow) {
   };
 }
 
-function operationTasks(items: CampaignRow[], kind: OperationKind, now: Date, windowStart: Date, windowEnd: Date) {
+function operationTasks(items: CampaignRow[], kind: OperationKind, now: Date, windowStart: Date, windowEnd: Date, viewer: AuthSession) {
   return items
     .filter((item) => item.status === "BOOKED")
     .flatMap((item) => {
@@ -649,7 +681,8 @@ function operationTasks(items: CampaignRow[], kind: OperationKind, now: Date, wi
         campaignName: item.campaignName,
         salesperson: sellerName(item),
         periodStart: item.periodStart.toISOString(),
-        periodEnd: item.periodEnd.toISOString()
+        periodEnd: item.periodEnd.toISOString(),
+        proofPhotos: operationalDashboardProofPhotos(item, kind, null, viewer)
       };
       const extraTasks = operationExtraTasks(item.productionNotes, kind).map((task) => ({
         ...baseTask,
@@ -658,7 +691,8 @@ function operationTasks(items: CampaignRow[], kind: OperationKind, now: Date, wi
         status: task.status,
         taskDate: task.taskDate,
         overdue: isOperationActive(task.status) && new Date(task.taskDate) < now,
-        note: task.note || null
+        note: task.note || null,
+        proofPhotos: operationalDashboardProofPhotos(item, kind, task.id, viewer)
       }));
       return [baseTask, ...extraTasks];
     })
@@ -667,6 +701,34 @@ function operationTasks(items: CampaignRow[], kind: OperationKind, now: Date, wi
       return isOperationActive(item.status as OperationStatus) && taskDate >= windowStart && taskDate <= windowEnd;
     })
     .sort((a, b) => new Date(a.taskDate).getTime() - new Date(b.taskDate).getTime());
+}
+
+function operationalDashboardProofPhotos(item: CampaignRow, kind: OperationKind, taskId: string | null, viewer: AuthSession) {
+  if (!canAccessOperationalReservation(viewer, {
+    status: item.status as never,
+    ownerId: item.ownerId,
+    sellerUserId: item.sellerUserId,
+    salesperson: item.salesperson
+  })) return [];
+  return (item.documents || [])
+    .filter((document) => {
+      if (!isOperationalProofActive(document)) return false;
+      const notes = parseOperationalProofNotes(document.notes);
+      return notes?.kind === kind && (notes.taskId || null) === (taskId || null);
+    })
+    .map((document) => ({
+      id: document.id,
+      fileName: document.fileName || "poza-dovada",
+      uploadedAt: document.uploadedAt.toISOString(),
+      expiryDate: document.expiryDate?.toISOString() || null,
+      uploadedBy: document.uploadedBy?.name || "Utilizator",
+      downloadUrl: operationalProofDownloadPath(document.id)
+    }))
+    .slice(0, 10);
+}
+
+function withoutDashboardProofPhotos<T extends object>(task: T) {
+  return { ...task, proofPhotos: [] as Array<never> };
 }
 
 function serializeCrmLead(request: OfferRequestRow, campaigns: CampaignRow[]) {

@@ -68,6 +68,7 @@ export function buildDecorationBillingReport(tasks: DecorationBillingTaskLike[],
   }
 
   const rows = [...deduped.values()].sort((left, right) =>
+    new Date(left.scheduledDate || left.finalizationDate).getTime() - new Date(right.scheduledDate || right.finalizationDate).getTime() ||
     new Date(left.finalizationDate).getTime() - new Date(right.finalizationDate).getTime() ||
     left.location.localeCompare(right.location) ||
     left.client.localeCompare(right.client)
@@ -93,7 +94,6 @@ export function decorationBillingCsv(report: DecorationBillingReport) {
     "Client",
     "Campanie",
     "Locatie",
-    "Referinta",
     "Tip montaj",
     "Status",
     "Cost",
@@ -106,7 +106,6 @@ export function decorationBillingCsv(report: DecorationBillingReport) {
     row.client,
     row.campaign,
     row.location,
-    row.campaignReference,
     taskTypeLabel(row.taskType),
     row.status,
     row.cost == null ? "" : String(row.cost),
@@ -149,7 +148,7 @@ function decorationBillingRow(task: DecorationBillingTaskLike, range: { from: Da
     key: task.dedupeKey || decorationBillingDedupeKey(task),
     reservationId: task.reservation.id,
     locationId: task.reservation.locationId || null,
-    campaignReference: task.reservation.contractNumber || task.reservation.campaignId || task.reservation.id,
+    campaignReference: task.reservation.contractNumber || "",
     client: task.reservation.clientName || "Client nesetat",
     campaign: task.reservation.campaignName || "Campanie nesetata",
     location: [task.reservation.locationCode, task.reservation.locationName].filter(Boolean).join(" - ") || task.reservation.locationId || "Locatie nesetata",

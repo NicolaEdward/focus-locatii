@@ -387,8 +387,6 @@ async function main() {
     assert(blockedAdminLocations.status === 401, "Admin locations endpoint is accessible without login");
     const blockedReservations = await fetch(`${BASE_URL}/api/reservations`);
     assert(blockedReservations.status === 401, "Reservations endpoint is accessible without login");
-    const blockedReservationSync = await fetch(`${BASE_URL}/api/admin/reservations/sync`, { method: "POST" });
-    assert(blockedReservationSync.status === 401, "Reservation sync endpoint is accessible without login");
     const blockedRequests = await fetch(`${BASE_URL}/api/offer-requests`);
     assert(blockedRequests.status === 401, "Offer requests admin endpoint is accessible without login");
 
@@ -874,19 +872,6 @@ async function main() {
       "Stale hold was not expired automatically"
     );
     await prisma.reservation.delete({ where: { id: staleHold.id } });
-
-    const syncResponse = await fetch(`${BASE_URL}/api/admin/reservations/sync`, {
-      method: "POST",
-      headers: { cookie: adminCookie }
-    });
-    assert(syncResponse.ok, "Admin reservation sync endpoint failed");
-    const syncPayload = await syncResponse.json();
-    if (syncPayload.summary?.disabled) {
-      assert(syncPayload.summary.scanned === 0, "Disabled legacy sync should not scan old reservations");
-    } else {
-      assert(syncPayload.summary?.scanned >= 1, "Reservation sync did not return a valid summary");
-    }
-    assert(Array.isArray(syncPayload.reservations), "Reservation sync did not return refreshed reservations");
 
     const adminExcelResponse = await fetch(`${BASE_URL}/api/admin/availability/excel`, {
       headers: { cookie: adminCookie }

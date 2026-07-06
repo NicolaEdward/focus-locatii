@@ -14,12 +14,9 @@ export function PortfolioHero({
   onOpenShortlist: () => void;
 }) {
   const available = locations.filter((location) => location.publicStatus === "AVAILABLE").length;
-  const rented = locations.filter((location) => location.publicStatus === "BOOKED").length;
   const contactSubject = "Cerere portofoliu Focus Media";
   const stats = [
-    { label: "Locatii", value: locations.length.toString() },
-    { label: "Disponibile", value: available.toString() },
-    { label: "Inchiriate", value: rented.toString() },
+    { label: "Locatii libere", value: available.toString() },
     { label: "Selectie client", value: selectedCount.toString() }
   ];
 
@@ -74,7 +71,7 @@ export function PortfolioHero({
             ))}
           </div>
 
-          <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4 md:mt-8">
+          <div className="mt-6 grid grid-cols-2 gap-2 md:mt-8">
             {stats.map((stat) => (
               <HeroStat key={stat.label} label={stat.label} value={stat.value} />
             ))}
@@ -102,9 +99,9 @@ export function PortfolioHero({
             <div className="portfolio-billboard-leg" />
           </div>
           <div className="portfolio-hero-mini-card">
-            <p className="text-[10px] font-black uppercase text-focus-yellow">Portofoliu activ</p>
-            <p className="mt-1 font-display text-3xl font-black uppercase text-white">{locations.length}</p>
-            <p className="text-xs font-bold text-slate-300">locatii disponibile in catalog</p>
+            <p className="text-[10px] font-black uppercase text-focus-yellow">Disponibile acum</p>
+            <p className="mt-1 font-display text-3xl font-black uppercase text-white">{available}</p>
+            <p className="text-xs font-bold text-slate-300">locatii libere pentru selectie</p>
           </div>
           <div className="portfolio-road-lines" />
           <div className="portfolio-skyline" aria-hidden="true">

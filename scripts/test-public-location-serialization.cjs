@@ -5,6 +5,7 @@ const { loadTsModule } = require("./load-ts-module.cjs");
 const { serializeLocation } = loadTsModule(path.join(process.cwd(), "src", "lib", "locations.ts"), {
   "@/lib/prisma": { prisma: {} }
 });
+const fs = require("node:fs");
 
 const visible = serializeLocation(location({
   showPricePublic: true,
@@ -76,6 +77,12 @@ const cancelledAndArchived = serializeLocation(location({
 }));
 assert.equal(cancelledAndArchived.publicStatus, "AVAILABLE", "Cancelled/archived reservations must not block public availability.");
 
+const portfolioHero = fs.readFileSync(path.join(process.cwd(), "src", "components", "public", "PortfolioHero.tsx"), "utf8");
+assert(portfolioHero.includes('label: "Locatii libere"'), "Public hero should show free locations count.");
+assert(!portfolioHero.includes('{ label: "Locatii",'), "Public hero must not expose total location count label.");
+assert(!portfolioHero.includes('{ label: "Inchiriate",'), "Public hero must not expose rented/reserved count label.");
+assert(!portfolioHero.includes("locations.length.toString()"), "Public hero must not expose total location count value.");
+
 console.log(JSON.stringify({
   ok: true,
   checked: [
@@ -83,6 +90,7 @@ console.log(JSON.stringify({
     "installation cost visible/hidden",
     "display coordinates exposed",
     "production sketch exposed as a deliberate public/commercial asset",
+    "public hero shows only free locations count",
     "private coordinates hidden",
     "BOOKED blocks with or without client/campaign",
     "CANCELLED/ARCHIVED ignored"

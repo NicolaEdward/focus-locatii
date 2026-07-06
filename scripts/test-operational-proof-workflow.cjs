@@ -139,13 +139,15 @@ function operationalUiHidesCompletedSectionsAndSyncButtons() {
   assert(!billingBlock.includes("<Th>Referinta</Th>"), "completed monthly decorations table must not show technical reference ids");
   assert(!panel.includes("Sync inchirieri"), "reservation sync button must not be exposed in admin UI");
   assert(!panel.includes("/api/admin/reservations/sync"), "admin UI must not call the legacy reservation sync endpoint");
+  assert(panel.includes("compareOperationTaskDates(a, b, showOperationHistory)"), "completed operational history should use dedicated date sorting");
+  assert(panel.includes("direction = newestFirst ? -1 : 1"), "completed operational history should be newest first");
 
   const smoke = read("scripts", "smoke-http.cjs");
   assert(!smoke.includes("/api/admin/reservations/sync"), "smoke checks must not call the legacy reservation sync endpoint");
 
   const billing = read("src", "lib", "decoration-billing.ts");
   assert(!billing.includes('"Referinta"'), "decoration billing CSV must not export technical reference ids");
-  assert(billing.includes("left.scheduledDate || left.finalizationDate"), "completed decorations should sort by scheduled decoration date first");
+  assert(billing.includes("new Date(right.finalizationDate).getTime() - new Date(left.finalizationDate).getTime()"), "completed decorations should sort newest finalization first");
   assert(billing.includes('campaignReference: task.reservation.contractNumber || ""'), "internal reservation ids must not be used as visible decoration references");
 }
 
@@ -178,6 +180,7 @@ function completionRefreshesLocalState() {
   const source = read("src", "components", "admin", "AdminReservationsPanel.tsx");
   assert(source.includes("const operationalReservations = isOperationalWorkspace ? reservations"), "operational workspace should render from local state after completion");
   assert(source.includes("reservation.id === completionTarget.reservation.id ? payload.reservation : reservation"), "completion should update the completed reservation in-place");
+  assert(source.includes("router.refresh();"), "operational mutations should refresh server-derived operational data");
   assert(source.includes("completionSaving"), "completion button should be disabled while saving");
   const route = read("src", "app", "api", "admin", "operational", "tasks", "complete", "route.ts");
   assert(route.includes("alreadyCompleted"), "completion route should treat harmless duplicate completion as idempotent");

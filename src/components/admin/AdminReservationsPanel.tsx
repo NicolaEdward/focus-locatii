@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Building2,
   CalendarDays,
@@ -258,6 +258,7 @@ export function AdminReservationsPanel({
   session: AuthSession;
   workspace?: ReservationsWorkspace;
 }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const isOperationalWorkspace = workspace === "operational";
   const isFieldOperator = session.role === "FIELD_OPERATOR";
@@ -319,6 +320,10 @@ export function AdminReservationsPanel({
   const [rescheduleTarget, setRescheduleTarget] = useState<OperationCompletionTarget | null>(null);
   const [rescheduleSaving, setRescheduleSaving] = useState(false);
   const [proofTarget, setProofTarget] = useState<OperationCompletionTarget | null>(null);
+
+  useEffect(() => {
+    setReservations(initialReservations);
+  }, [initialReservations]);
 
   useEffect(() => {
     if (!shouldLoadReservationOptions) {
@@ -628,7 +633,7 @@ export function AdminReservationsPanel({
               ? !isOperationActive(status)
               : isOperationActive(status) && new Date(taskDate) >= operationsWindowStart && new Date(taskDate) <= decorationWindowEnd)
         )
-        .sort((a, b) => new Date(a.taskDate).getTime() - new Date(b.taskDate).getTime()),
+        .sort((a, b) => compareOperationTaskDates(a, b, showOperationHistory)),
     [allDecorationTasks, decorationWindowEnd, operationsWindowStart, showOperationHistory]
   );
 
@@ -660,7 +665,7 @@ export function AdminReservationsPanel({
               ? !isOperationActive(status)
               : isOperationActive(status) && new Date(taskDate) >= operationsWindowStart && new Date(taskDate) <= neutralizationWindowEnd)
         )
-        .sort((a, b) => new Date(a.taskDate).getTime() - new Date(b.taskDate).getTime()),
+        .sort((a, b) => compareOperationTaskDates(a, b, showOperationHistory)),
     [neutralizationWindowEnd, operationalReservations, operationsWindowStart, showOperationHistory]
   );
 
@@ -1014,6 +1019,7 @@ export function AdminReservationsPanel({
         return;
       }
       setReservations((current) => current.map((reservation) => (reservation.id === rescheduleTarget.reservation.id ? payload.reservation : reservation)));
+      router.refresh();
       setMessage(payload.financeReviewRequired
         ? "Data a fost modificata. Exista impact financiar: verifica manual facturile."
         : "Data a fost modificata si motivul a fost salvat.");
@@ -1054,6 +1060,7 @@ export function AdminReservationsPanel({
       }
 
       setReservations((current) => current.map((reservation) => (reservation.id === completionTarget.reservation.id ? payload.reservation : reservation)));
+      router.refresh();
       setMessage(
         completionFiles.length
           ? `Lucrarea a fost finalizata cu ${completionFiles.length} poza/poze dovada.`
@@ -1968,6 +1975,21 @@ function extraOperationTask(reservation: ReservationDTO, task: OperationExtraTas
     finalizationDate: task.status === "DONE" ? task.completedAt || task.updatedAt || task.taskDate : null,
     dedupeKey: task.id ? `reservation:${reservation.id}:task:${task.id}` : undefined
   };
+}
+
+function compareOperationTaskDates(left: OperationTableTask, right: OperationTableTask, newestFirst: boolean) {
+  const leftTime = Date.parse(left.finalizationDate || left.taskDate);
+  const rightTime = Date.parse(right.finalizationDate || right.taskDate);
+  const direction = newestFirst ? -1 : 1;
+  return (
+    direction * (safeTime(leftTime) - safeTime(rightTime)) ||
+    String(left.reservation.locationCode || "").localeCompare(String(right.reservation.locationCode || ""), "ro") ||
+    String(left.reservation.clientName || "").localeCompare(String(right.reservation.clientName || ""), "ro")
+  );
+}
+
+function safeTime(value: number) {
+  return Number.isFinite(value) ? value : 0;
 }
 
 function canEditOperationalReservation(_reservation: ReservationDTO, session: AuthSession) {

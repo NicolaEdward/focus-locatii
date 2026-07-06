@@ -68,8 +68,8 @@ export function buildDecorationBillingReport(tasks: DecorationBillingTaskLike[],
   }
 
   const rows = [...deduped.values()].sort((left, right) =>
-    new Date(left.scheduledDate || left.finalizationDate).getTime() - new Date(right.scheduledDate || right.finalizationDate).getTime() ||
-    new Date(left.finalizationDate).getTime() - new Date(right.finalizationDate).getTime() ||
+    new Date(right.finalizationDate).getTime() - new Date(left.finalizationDate).getTime() ||
+    new Date(right.scheduledDate || right.finalizationDate).getTime() - new Date(left.scheduledDate || left.finalizationDate).getTime() ||
     left.location.localeCompare(right.location) ||
     left.client.localeCompare(right.client)
   );

@@ -44,6 +44,7 @@
     "test:reservation-lifecycle": "node scripts/test-reservation-lifecycle.cjs",
     "test:reservation-write-classification": "node scripts/test-reservation-write-classification.cjs",
     "test:operation-tasks": "node scripts/test-operation-tasks.cjs",
+    "test:operational-proof": "node scripts/test-operational-proof-workflow.cjs",
     "test:operation-task-backfill": "node scripts/test-operation-task-backfill.cjs",
     "test:operation-route-bridge": "node scripts/test-operation-route-bridge.cjs",
     "test:command-center-operation-bridge": "node scripts/test-command-center-operation-bridge.cjs",

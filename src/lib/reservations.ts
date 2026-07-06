@@ -10,6 +10,12 @@ import { resolveSellerForMutation } from "@/lib/seller-users";
 import { paymentTermDays } from "@/lib/billing";
 import { companyEntityOrThrow, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
+import {
+  OPERATIONAL_PROOF_DOCUMENT_TYPE,
+  isOperationalProofActive,
+  operationalProofDownloadPath,
+  parseOperationalProofNotes
+} from "@/lib/operational-proof";
 
 const reservationStatusSchema = z.enum(["HOLD", "RESERVED", "BOOKED", "CANCELLED", "EXPIRED"]);
 const activeReservationStatuses = ["HOLD", "RESERVED", "BOOKED"] as const;
@@ -33,6 +39,22 @@ const reservationInclude = {
       invoiceDate: true,
       invoiceNumber: true,
       receivables: { select: { id: true } }
+    }
+  },
+  documents: {
+    where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active" },
+    orderBy: { uploadedAt: "desc" as const },
+    take: 40,
+    select: {
+      id: true,
+      fileName: true,
+      fileType: true,
+      fileSize: true,
+      uploadedAt: true,
+      expiryDate: true,
+      notes: true,
+      status: true,
+      uploadedBy: { select: { name: true } }
     }
   }
 };
@@ -1237,6 +1259,17 @@ function serializeReservation(
       invoiceNumber: string | null;
       receivables: Array<{ id: string }>;
     }>;
+    documents?: Array<{
+      id: string;
+      fileName: string;
+      fileType: string | null;
+      fileSize: number | null;
+      uploadedAt: Date;
+      expiryDate: Date | null;
+      notes: string | null;
+      status: string | null;
+      uploadedBy?: { name: string } | null;
+    }>;
   }
 ): ReservationDTO {
   const neutralizationDate =
@@ -1312,7 +1345,24 @@ function serializeReservation(
           latestInvoiceDate: reservation.billingItems[0]?.invoiceDate.toISOString() || null,
           latestInvoiceNumber: reservation.billingItems.find((item) => item.invoiceNumber)?.invoiceNumber || null
         }
-      : undefined
+      : undefined,
+    operationProofPhotos: reservation.documents
+      ?.filter(isOperationalProofActive)
+      .map((document) => {
+        const notes = parseOperationalProofNotes(document.notes);
+        return {
+          id: document.id,
+          fileName: document.fileName,
+          fileType: document.fileType,
+          fileSize: document.fileSize,
+          uploadedAt: document.uploadedAt.toISOString(),
+          expiresAt: document.expiryDate?.toISOString() || null,
+          uploadedByName: document.uploadedBy?.name || null,
+          kind: notes?.kind || "decoration",
+          taskId: notes?.taskId || null,
+          downloadUrl: operationalProofDownloadPath(document.id)
+        };
+      })
   };
 }
 

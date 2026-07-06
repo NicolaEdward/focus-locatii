@@ -4,10 +4,14 @@ export type OperationStatus = "NEW" | "IN_PROGRESS" | "DONE" | "ARCHIVED";
 export type OperationMeta = {
   decorationStatus?: OperationStatus;
   decorationUpdatedAt?: string;
+  decorationCompletedByUserId?: string | null;
+  decorationCompletionNote?: string | null;
   decorationCost?: number | null;
   decorationCurrency?: "RON" | "EUR" | string | null;
   neutralizationStatus?: OperationStatus;
   neutralizationUpdatedAt?: string;
+  neutralizationCompletedByUserId?: string | null;
+  neutralizationCompletionNote?: string | null;
   tasks?: OperationExtraTask[];
 };
 
@@ -28,6 +32,8 @@ export type OperationExtraTask = {
   createdAt?: string | null;
   updatedAt?: string | null;
   completedAt?: string | null;
+  completedByUserId?: string | null;
+  completionNote?: string | null;
 };
 
 const META_PATTERN = /<!--focus-ops:([\s\S]*?)-->/;
@@ -41,10 +47,14 @@ export function parseOperationMeta(value?: string | null): OperationMeta {
     return {
       decorationStatus: normalizeStatus(parsed.decorationStatus),
       decorationUpdatedAt: parsed.decorationUpdatedAt,
+      decorationCompletedByUserId: parsed.decorationCompletedByUserId || null,
+      decorationCompletionNote: parsed.decorationCompletionNote || null,
       decorationCost: normalizeCost(parsed.decorationCost),
       decorationCurrency: parsed.decorationCurrency || null,
       neutralizationStatus: normalizeStatus(parsed.neutralizationStatus),
       neutralizationUpdatedAt: parsed.neutralizationUpdatedAt,
+      neutralizationCompletedByUserId: parsed.neutralizationCompletedByUserId || null,
+      neutralizationCompletionNote: parsed.neutralizationCompletionNote || null,
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(normalizeTask).filter(Boolean) as OperationExtraTask[] : []
     };
   } catch {
@@ -102,6 +112,34 @@ export function withOperationStatus(value: string | null | undefined, kind: Oper
   return text ? `${text}\n${metaText}` : metaText;
 }
 
+export function withOperationCompletion(
+  value: string | null | undefined,
+  kind: OperationKind,
+  input: { completedByUserId?: string | null; completionNote?: string | null }
+) {
+  const text = stripOperationMeta(value);
+  const meta = parseOperationMeta(value);
+  const now = new Date().toISOString();
+  const nextMeta: OperationMeta =
+    kind === "decoration"
+      ? {
+          ...meta,
+          decorationStatus: "DONE",
+          decorationUpdatedAt: now,
+          decorationCompletedByUserId: input.completedByUserId || null,
+          decorationCompletionNote: input.completionNote || null
+        }
+      : {
+          ...meta,
+          neutralizationStatus: "DONE",
+          neutralizationUpdatedAt: now,
+          neutralizationCompletedByUserId: input.completedByUserId || null,
+          neutralizationCompletionNote: input.completionNote || null
+        };
+  const metaText = `<!--focus-ops:${JSON.stringify(nextMeta)}-->`;
+  return text ? `${text}\n${metaText}` : metaText;
+}
+
 export function withOperationCost(
   value: string | null | undefined,
   kind: OperationKind,
@@ -152,6 +190,30 @@ export function withOperationTaskStatus(value: string | null | undefined, taskId
   return text ? `${text}\n${metaText}` : metaText;
 }
 
+export function withOperationTaskCompletion(
+  value: string | null | undefined,
+  taskId: string,
+  input: { completedByUserId?: string | null; completionNote?: string | null }
+) {
+  const text = stripOperationMeta(value);
+  const meta = parseOperationMeta(value);
+  const now = new Date().toISOString();
+  const tasks = (meta.tasks || []).map((task) =>
+    task.id === taskId
+      ? {
+          ...task,
+          status: "DONE" as OperationStatus,
+          updatedAt: now,
+          completedAt: task.completedAt || now,
+          completedByUserId: input.completedByUserId || null,
+          completionNote: input.completionNote || null
+        }
+      : task
+  );
+  const metaText = `<!--focus-ops:${JSON.stringify({ ...meta, tasks })}-->`;
+  return text ? `${text}\n${metaText}` : metaText;
+}
+
 function normalizeStatus(value: unknown): OperationStatus | undefined {
   if (value === "NEW" || value === "IN_PROGRESS" || value === "DONE" || value === "ARCHIVED") return value;
   return undefined;
@@ -186,6 +248,8 @@ function normalizeTask(value: unknown): OperationExtraTask | null {
     createdByName: task.createdByName || null,
     createdAt: task.createdAt || null,
     updatedAt: task.updatedAt || null,
-    completedAt: task.completedAt || null
+    completedAt: task.completedAt || null,
+    completedByUserId: task.completedByUserId || null,
+    completionNote: task.completionNote || null
   };
 }

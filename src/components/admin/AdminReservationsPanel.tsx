@@ -11,6 +11,7 @@ import {
   ClipboardList,
   FileSpreadsheet,
   Hammer,
+  Image as ImageIcon,
   MapPinned,
   Pencil,
   RefreshCcw,
@@ -18,6 +19,7 @@ import {
   Search,
   Trash2,
   Undo2,
+  Upload,
   XCircle
 } from "lucide-react";
 import { AdminSalesMap } from "@/components/admin/AdminSalesMap";
@@ -42,6 +44,7 @@ import { hasAnyPermission, hasPermission } from "@/lib/rbac";
 import { allowedReservationTransitions } from "@/lib/reservation-workflow";
 import { companyEntities, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
+import { canCompleteOperationalReservation } from "@/lib/operational-proof";
 import {
   buildDecorationBillingReport,
   decorationBillingCsv,
@@ -90,6 +93,10 @@ type OperationTableTask = {
   currency?: string | null;
   finalizationDate?: string | null;
   dedupeKey?: string | null;
+};
+
+type OperationCompletionTarget = OperationTableTask & {
+  type: OperationKind;
 };
 
 type ReservationForm = {
@@ -294,6 +301,10 @@ export function AdminReservationsPanel({
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [archiveOfferRequestId, setArchiveOfferRequestId] = useState<string | null>(null);
   const [cancellationTarget, setCancellationTarget] = useState<ReservationDTO | null>(null);
+  const [completionTarget, setCompletionTarget] = useState<OperationCompletionTarget | null>(null);
+  const [completionFiles, setCompletionFiles] = useState<File[]>([]);
+  const [completionNote, setCompletionNote] = useState("");
+  const [completionSaving, setCompletionSaving] = useState(false);
 
   useEffect(() => {
     if (!shouldLoadReservationOptions) {
@@ -940,6 +951,59 @@ export function AdminReservationsPanel({
     setMessage(status === "DONE" ? "Taskul a fost marcat ca finalizat." : "Statusul operational a fost actualizat.");
   }
 
+  function openOperationCompletion(target: OperationCompletionTarget) {
+    setCompletionTarget(target);
+    setCompletionFiles([]);
+    setCompletionNote("");
+    setError(null);
+  }
+
+  function closeOperationCompletion() {
+    if (completionSaving) return;
+    setCompletionTarget(null);
+    setCompletionFiles([]);
+    setCompletionNote("");
+  }
+
+  async function completeOperationWithProof() {
+    if (!completionTarget) return;
+    setCompletionSaving(true);
+    setError(null);
+    const body = new FormData();
+    body.set("reservationId", completionTarget.reservation.id);
+    body.set("kind", completionTarget.type);
+    if (completionTarget.taskId) body.set("taskId", completionTarget.taskId);
+    if (completionNote.trim()) body.set("completionNote", completionNote.trim());
+    for (const file of completionFiles) body.append("files", file);
+
+    try {
+      const response = await fetch("/api/admin/operational/tasks/complete", {
+        method: "POST",
+        body
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setError(payload.error || "Lucrarea nu a putut fi finalizata.");
+        return;
+      }
+
+      setReservations((current) => current.map((reservation) => (reservation.id === completionTarget.reservation.id ? payload.reservation : reservation)));
+      setMessage(
+        completionFiles.length
+          ? `Lucrarea a fost finalizata cu ${completionFiles.length} poza/poze dovada.`
+          : "Lucrarea a fost marcata ca finalizata."
+      );
+      setCompletionTarget(null);
+      setCompletionFiles([]);
+      setCompletionNote("");
+    } catch (completeError) {
+      setError(completeError instanceof Error ? completeError.message : "Lucrarea nu a putut fi finalizata.");
+    } finally {
+      setCompletionSaving(false);
+    }
+  }
+
   function deleteReservation(id: string) {
     const reservation = reservations.find((item) => item.id === id);
     if (!reservation) {
@@ -1460,7 +1524,9 @@ export function AdminReservationsPanel({
             type="decoration"
             today={today}
             onStatusChange={updateOperationStatus}
+            onOpenCompletion={openOperationCompletion}
             canEditTask={canEditOperationTask}
+            canChangeStatusDirectly={canUpdateOperationStatus}
             showCost={!isFieldOperator}
           />
         </AdminTableShell>
@@ -1481,7 +1547,9 @@ export function AdminReservationsPanel({
             type="neutralization"
             today={today}
             onStatusChange={updateOperationStatus}
+            onOpenCompletion={openOperationCompletion}
             canEditTask={canEditOperationTask}
+            canChangeStatusDirectly={canUpdateOperationStatus}
             showCost={!isFieldOperator}
           />
         </AdminTableShell>
@@ -1707,6 +1775,18 @@ export function AdminReservationsPanel({
           onConfirm={confirmSoftDeleteOfferRequest}
         />
       ) : null}
+      {completionTarget ? (
+        <OperationCompletionDialog
+          target={completionTarget}
+          files={completionFiles}
+          note={completionNote}
+          saving={completionSaving}
+          onFilesChange={setCompletionFiles}
+          onNoteChange={setCompletionNote}
+          onClose={closeOperationCompletion}
+          onComplete={completeOperationWithProof}
+        />
+      ) : null}
     </section>
   );
 }
@@ -1848,7 +1928,7 @@ function extraOperationTask(reservation: ReservationDTO, task: OperationExtraTas
 }
 
 function canEditOperationalReservation(_reservation: ReservationDTO, session: AuthSession) {
-  return hasPermission(session.role, "campaigns.operate");
+  return canCompleteOperationalReservation(session, _reservation);
 }
 
 function AdminTableShell({
@@ -1915,6 +1995,111 @@ function ReservationResetConfirmDialog({
       </div>
     </div>
   );
+}
+
+function OperationCompletionDialog({
+  target,
+  files,
+  note,
+  saving,
+  onFilesChange,
+  onNoteChange,
+  onClose,
+  onComplete
+}: {
+  target: OperationCompletionTarget;
+  files: File[];
+  note: string;
+  saving: boolean;
+  onFilesChange: (files: File[]) => void;
+  onNoteChange: (value: string) => void;
+  onClose: () => void;
+  onComplete: () => void;
+}) {
+  const title = target.type === "decoration" ? "Decorare finalizata" : "Neutralizare finalizata";
+  const existingPhotos = proofPhotosForTask(target.reservation, target.type, target.taskId);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="focus-card max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg p-5 shadow-2xl">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase text-focus-yellow">Dovada operationala</p>
+            <h2 className="font-display text-2xl font-black uppercase text-white">{title}</h2>
+            <p className="mt-2 text-sm font-bold text-slate-300">
+              {target.reservation.locationCode || "Locatie"} · {target.reservation.clientName} · {dateLabel(target.taskDate)}
+            </p>
+          </div>
+          <button className="focus-button secondary" type="button" onClick={onClose} disabled={saving}>
+            Inchide
+          </button>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-focus-line bg-focus-ink/40 p-4">
+          <p className="text-sm font-bold text-slate-200">
+            Incarca poze de pe teren si marcheaza lucrarea ca finalizata. Pozele sunt pastrate 30 de zile si sunt vizibile doar utilizatorilor autorizati.
+          </p>
+          {existingPhotos.length ? (
+            <p className="mt-2 text-xs font-bold text-emerald-200">
+              Exista deja {existingPhotos.length} poza/poze dovada pentru aceasta lucrare.
+            </p>
+          ) : null}
+        </div>
+
+        <label className="mt-4 block rounded-lg border border-dashed border-focus-line bg-focus-navy/35 p-4">
+          <span className="flex items-center gap-2 text-sm font-black uppercase text-focus-yellow">
+            <Upload className="h-4 w-4" />
+            Poze dovada
+          </span>
+          <input
+            className="mt-3 block w-full text-sm font-bold text-slate-300 file:mr-4 file:rounded-md file:border-0 file:bg-focus-yellow file:px-4 file:py-2 file:text-sm file:font-black file:text-focus-navy"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            disabled={saving}
+            onChange={(event) => onFilesChange(Array.from(event.target.files || []))}
+          />
+          <span className="mt-2 block text-xs font-bold text-slate-400">JPG, PNG sau WebP, maximum 10 MB per poza.</span>
+        </label>
+
+        {files.length ? (
+          <div className="mt-3 grid gap-2">
+            {files.map((file) => (
+              <div key={`${file.name}-${file.size}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-focus-line bg-focus-ink/35 px-3 py-2 text-sm font-bold text-slate-200">
+                <span>{file.name}</span>
+                <span className="text-xs text-slate-400">{formatBytes(file.size)}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <label className="mt-4 block">
+          <span className="mb-1 block text-sm font-bold text-slate-200">Nota optionala</span>
+          <textarea
+            className="focus-input min-h-24"
+            value={note}
+            onChange={(event) => onNoteChange(event.target.value)}
+            placeholder="Ex: montaj finalizat, vizual verificat, acces normal."
+            disabled={saving}
+          />
+        </label>
+
+        <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
+          <button className="focus-button secondary" type="button" onClick={onClose} disabled={saving}>
+            Renunta
+          </button>
+          <button className="focus-button" type="button" onClick={onComplete} disabled={saving}>
+            <CheckCircle2 className="h-4 w-4" />
+            {saving ? "Se salveaza..." : "Marcheaza finalizat"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatBytes(value: number) {
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function ReservationCancellationConfirmDialog({
@@ -2759,7 +2944,9 @@ function OperationsTable({
   type,
   today,
   onStatusChange,
+  onOpenCompletion,
   canEditTask,
+  canChangeStatusDirectly,
   showCost = true
 }: {
   tasks: OperationTableTask[];
@@ -2767,7 +2954,9 @@ function OperationsTable({
   type: "decoration" | "neutralization";
   today: Date;
   onStatusChange: (id: string, kind: OperationKind, status: OperationStatus, taskId?: string | null) => void;
+  onOpenCompletion: (target: OperationCompletionTarget) => void;
   canEditTask: (reservation: ReservationDTO) => boolean;
+  canChangeStatusDirectly: boolean;
   showCost?: boolean;
 }) {
   return (
@@ -2786,15 +2975,17 @@ function OperationsTable({
           </tr>
         </thead>
         <tbody>
-          {tasks.map(({ reservation, taskDate, operationStatus: status, taskId, taskType, note, cost, currency }) => {
+          {tasks.map(({ reservation, taskDate, operationStatus: status, taskId, taskType, note, cost, currency, finalizationDate, dedupeKey }) => {
             const location = locationsById.get(reservation.locationId);
             const overdue = isOperationActive(status) && new Date(taskDate) < today;
             const canEdit = canEditTask(reservation);
+            const proofPhotos = proofPhotosForTask(reservation, type, taskId);
             return (
               <tr key={`${type}-${reservation.id}-${taskId || "base"}`} className="border-t border-focus-line">
                 <Td>
                   <p className={overdue ? "font-black text-red-100" : "font-black text-white"}>{dateLabel(taskDate)}</p>
                   {overdue ? <p className="text-xs font-bold uppercase text-red-200">Intarziat</p> : null}
+                  {status === "DONE" && finalizationDate ? <p className="mt-1 text-xs font-bold text-emerald-200">Finalizat: {dateLabel(finalizationDate)}</p> : null}
                 </Td>
                 <Td>
                   <strong className="text-white">{reservation.locationCode || location?.code || "N/A"}</strong>
@@ -2815,13 +3006,14 @@ function OperationsTable({
                       : stripOperationMeta(reservation.productionNotes) || reservation.notes || "Neutralizare la final de contract.")}
                   </p>
                   {showCost && cost != null ? <p className="mt-1 text-xs font-black uppercase text-focus-yellow">Cost: {moneyLabel(cost)} {currency || ""}</p> : null}
+                  <ProofPhotoSummary photos={proofPhotos} />
                 </Td>
                 <Td>{reservation.salesperson || "-"}</Td>
                 <Td>
                   <select
                     className="focus-input"
                     value={status}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !canChangeStatusDirectly}
                     onChange={(event) => onStatusChange(reservation.id, type, event.target.value as OperationStatus, taskId)}
                   >
                     {operationalStatuses.map((item) => (
@@ -2834,17 +3026,36 @@ function OperationsTable({
                 <Td>
                   {canEdit ? (
                     <div className="flex flex-wrap gap-2">
-                      {status !== "IN_PROGRESS" ? (
+                      {canChangeStatusDirectly && status !== "IN_PROGRESS" ? (
                         <button className="focus-button secondary" type="button" onClick={() => onStatusChange(reservation.id, type, "IN_PROGRESS", taskId)}>
                           In lucru
                         </button>
                       ) : null}
                       {status !== "DONE" ? (
-                        <button className="focus-button" type="button" onClick={() => onStatusChange(reservation.id, type, "DONE", taskId)}>
-                          {type === "decoration" ? "Marcheaza decorata" : "Marcheaza neutralizata"}
+                        <button
+                          className="focus-button"
+                          type="button"
+                          onClick={() =>
+                            onOpenCompletion({
+                              reservation,
+                              taskDate,
+                              operationStatus: status,
+                              taskId,
+                              taskType,
+                              note,
+                              cost,
+                              currency,
+                              finalizationDate,
+                              dedupeKey,
+                              type
+                            })
+                          }
+                        >
+                          <Upload className="h-4 w-4" />
+                          Finalizeaza + poze
                         </button>
                       ) : null}
-                      {status !== "ARCHIVED" ? (
+                      {canChangeStatusDirectly && status !== "ARCHIVED" ? (
                         <button className="focus-button secondary" type="button" onClick={() => onStatusChange(reservation.id, type, "ARCHIVED", taskId)}>
                           Arhiveaza
                         </button>
@@ -2868,6 +3079,38 @@ function OperationsTable({
       </table>
     </div>
   );
+}
+
+function ProofPhotoSummary({ photos }: { photos: NonNullable<ReservationDTO["operationProofPhotos"]> }) {
+  if (!photos.length) {
+    return (
+      <p className="mt-2 inline-flex items-center gap-1 rounded-full border border-focus-line px-2 py-1 text-[11px] font-black uppercase text-slate-400">
+        <ImageIcon className="h-3.5 w-3.5" />
+        Fara poze dovada
+      </p>
+    );
+  }
+  const firstExpiry = photos.find((photo) => photo.expiresAt)?.expiresAt || null;
+  return (
+    <div className="mt-2 rounded-lg border border-emerald-300/30 bg-emerald-400/10 px-3 py-2">
+      <p className="inline-flex items-center gap-2 text-xs font-black uppercase text-emerald-100">
+        <ImageIcon className="h-4 w-4" />
+        {photos.length} poza/poze dovada
+      </p>
+      {firstExpiry ? <p className="mt-1 text-[11px] font-bold text-emerald-200">Valabile pana la {dateLabel(firstExpiry)}</p> : null}
+      <div className="mt-1 flex flex-wrap gap-2">
+        {photos.slice(0, 3).map((photo) => (
+          <a key={photo.id} className="text-xs font-bold text-focus-yellow underline-offset-4 hover:underline" href={photo.downloadUrl} target="_blank" rel="noreferrer">
+            {photo.fileName}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function proofPhotosForTask(reservation: ReservationDTO, kind: OperationKind, taskId?: string | null) {
+  return (reservation.operationProofPhotos || []).filter((photo) => photo.kind === kind && (photo.taskId || null) === (taskId || null));
 }
 
 function PanelButton({

@@ -125,6 +125,20 @@ export type ReservationDTO = {
     latestInvoiceDate: string | null;
     latestInvoiceNumber: string | null;
   };
+  operationProofPhotos?: OperationProofPhotoDTO[];
+};
+
+export type OperationProofPhotoDTO = {
+  id: string;
+  fileName: string;
+  fileType: string | null;
+  fileSize: number | null;
+  uploadedAt: string;
+  expiresAt: string | null;
+  uploadedByName: string | null;
+  kind: "decoration" | "neutralization";
+  taskId: string | null;
+  downloadUrl: string;
 };
 
 export type OfferRequestDTO = {

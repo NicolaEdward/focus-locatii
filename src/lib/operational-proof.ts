@@ -116,3 +116,12 @@ export function canCompleteOperationalReservation(
   if (reservation.status !== "BOOKED") return false;
   return canAccessOperationalReservation(session, reservation);
 }
+
+export function canRescheduleOperationalReservation(
+  session: AuthSession,
+  reservation: Pick<ReservationDTO, "status" | "ownerId" | "sellerUserId" | "salesperson">
+) {
+  if (reservation.status !== "BOOKED") return false;
+  if (session.role === "FIELD_OPERATOR") return false;
+  return canAccessOperationalReservation(session, reservation);
+}

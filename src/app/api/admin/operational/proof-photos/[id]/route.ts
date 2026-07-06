@@ -54,11 +54,12 @@ export async function GET(request: NextRequest, context: Context) {
     const match = document.storageUrl.match(/^data:([^;]+);base64,(.+)$/);
     if (!match) return NextResponse.json({ error: "Fisier invalid." }, { status: 400, headers: noStoreHeaders });
     const body = Buffer.from(match[2], "base64");
+    const disposition = request.nextUrl.searchParams.get("preview") === "1" ? "inline" : "attachment";
     return new NextResponse(body, {
       headers: {
         ...noStoreHeaders,
         "content-type": document.fileType || match[1],
-        "content-disposition": `attachment; filename="${sanitizeFileName(document.fileName)}"`
+        "content-disposition": `${disposition}; filename="${sanitizeFileName(document.fileName)}"`
       }
     });
   }

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
-import { withOperationCompletion, withOperationTaskCompletion, type OperationKind } from "@/lib/operation-status";
+import {
+  operationExtraTasks,
+  operationStatus,
+  withOperationCompletion,
+  withOperationTaskCompletion,
+  type OperationKind
+} from "@/lib/operation-status";
 import {
   OPERATIONAL_PROOF_DOCUMENT_TYPE,
   OPERATIONAL_PROOF_MAX_FILES_PER_TASK,
@@ -81,6 +87,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: `Lucrarea poate avea maximum ${OPERATIONAL_PROOF_MAX_FILES_PER_TASK} poze dovada active.` },
         { status: 400, headers: noStoreHeaders }
+      );
+    }
+    if (session.role === "FIELD_OPERATOR" && activeProofCount + files.length < 1) {
+      return NextResponse.json(
+        { error: "Incarca cel putin o poza dovada pentru finalizare." },
+        { status: 400, headers: noStoreHeaders }
+      );
+    }
+
+    const currentStatus = taskId
+      ? operationExtraTasks(existing.productionNotes, kind as OperationKind).find((task) => task.id === taskId)?.status || "NEW"
+      : operationStatus(existing.productionNotes, kind as OperationKind);
+    if (currentStatus === "DONE" && files.length === 0) {
+      const reservation = await updateReservationProductionNotesWithClient(prisma, reservationId, existing.productionNotes || "", session);
+      return NextResponse.json(
+        {
+          reservation,
+          proofPhotoCount: activeProofCount,
+          alreadyCompleted: true,
+          proofPhotos: reservation.operationProofPhotos?.map((photo) => ({
+            id: photo.id,
+            fileName: photo.fileName,
+            downloadUrl: operationalProofDownloadPath(photo.id)
+          })) || []
+        },
+        { headers: noStoreHeaders }
       );
     }
 

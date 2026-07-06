@@ -13,6 +13,23 @@ export type OperationMeta = {
   neutralizationCompletedByUserId?: string | null;
   neutralizationCompletionNote?: string | null;
   tasks?: OperationExtraTask[];
+  delayChanges?: OperationDelayChange[];
+};
+
+export type OperationDelayChange = {
+  id: string;
+  kind: OperationKind;
+  taskId?: string | null;
+  oldStartDate: string;
+  newStartDate: string;
+  oldTaskDate?: string | null;
+  newTaskDate?: string | null;
+  reason: string;
+  note?: string | null;
+  changedByUserId?: string | null;
+  changedAt: string;
+  financeReviewRequired?: boolean;
+  source: "OPERATIONAL_DELAY_CHANGE";
 };
 
 export type OperationExtraTask = {
@@ -55,7 +72,10 @@ export function parseOperationMeta(value?: string | null): OperationMeta {
       neutralizationUpdatedAt: parsed.neutralizationUpdatedAt,
       neutralizationCompletedByUserId: parsed.neutralizationCompletedByUserId || null,
       neutralizationCompletionNote: parsed.neutralizationCompletionNote || null,
-      tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(normalizeTask).filter(Boolean) as OperationExtraTask[] : []
+      tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(normalizeTask).filter(Boolean) as OperationExtraTask[] : [],
+      delayChanges: Array.isArray(parsed.delayChanges)
+        ? parsed.delayChanges.map(normalizeDelayChange).filter(Boolean) as OperationDelayChange[]
+        : []
     };
   } catch {
     return {};
@@ -165,6 +185,44 @@ export function operationExtraTasks(value: string | null | undefined, kind?: Ope
   return kind ? tasks.filter((task) => task.kind === kind) : tasks;
 }
 
+export function operationDelayChanges(value: string | null | undefined, kind?: OperationKind, taskId?: string | null) {
+  const changes = parseOperationMeta(value).delayChanges || [];
+  return changes.filter((change) => {
+    if (kind && change.kind !== kind) return false;
+    if (taskId !== undefined && (change.taskId || null) !== (taskId || null)) return false;
+    return true;
+  });
+}
+
+export function latestOperationDelayChange(value: string | null | undefined, kind: OperationKind, taskId?: string | null) {
+  return operationDelayChanges(value, kind, taskId)
+    .slice()
+    .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())[0] || null;
+}
+
+export function withOperationDelayChange(
+  value: string | null | undefined,
+  change: Omit<OperationDelayChange, "source" | "changedAt"> & { changedAt?: string; source?: "OPERATIONAL_DELAY_CHANGE" }
+) {
+  const text = stripOperationMeta(value);
+  const meta = parseOperationMeta(value);
+  const nextChange: OperationDelayChange = {
+    ...change,
+    taskId: change.taskId || null,
+    note: change.note || null,
+    changedByUserId: change.changedByUserId || null,
+    changedAt: change.changedAt || new Date().toISOString(),
+    financeReviewRequired: Boolean(change.financeReviewRequired),
+    source: "OPERATIONAL_DELAY_CHANGE"
+  };
+  const nextMeta: OperationMeta = {
+    ...meta,
+    delayChanges: [...(meta.delayChanges || []), nextChange]
+  };
+  const metaText = `<!--focus-ops:${JSON.stringify(nextMeta)}-->`;
+  return text ? `${text}\n${metaText}` : metaText;
+}
+
 export function withOperationTask(value: string | null | undefined, task: OperationExtraTask) {
   const text = stripOperationMeta(value);
   const meta = parseOperationMeta(value);
@@ -251,5 +309,27 @@ function normalizeTask(value: unknown): OperationExtraTask | null {
     completedAt: task.completedAt || null,
     completedByUserId: task.completedByUserId || null,
     completionNote: task.completionNote || null
+  };
+}
+
+function normalizeDelayChange(value: unknown): OperationDelayChange | null {
+  if (!value || typeof value !== "object") return null;
+  const change = value as Partial<OperationDelayChange>;
+  const kind = change.kind === "decoration" || change.kind === "neutralization" ? change.kind : null;
+  if (!change.id || !kind || !change.oldStartDate || !change.newStartDate || !change.reason || !change.changedAt) return null;
+  return {
+    id: String(change.id),
+    kind,
+    taskId: change.taskId || null,
+    oldStartDate: String(change.oldStartDate),
+    newStartDate: String(change.newStartDate),
+    oldTaskDate: change.oldTaskDate || null,
+    newTaskDate: change.newTaskDate || null,
+    reason: String(change.reason),
+    note: change.note || null,
+    changedByUserId: change.changedByUserId || null,
+    changedAt: String(change.changedAt),
+    financeReviewRequired: Boolean(change.financeReviewRequired),
+    source: "OPERATIONAL_DELAY_CHANGE"
   };
 }

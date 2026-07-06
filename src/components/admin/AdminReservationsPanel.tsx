@@ -9,6 +9,8 @@ import {
   ChevronUp,
   CheckCircle2,
   ClipboardList,
+  Download,
+  Eye,
   FileSpreadsheet,
   Hammer,
   Image as ImageIcon,
@@ -30,6 +32,7 @@ import {
   isOperationActive,
   operationExtraTasks,
   operationCost,
+  latestOperationDelayChange,
   operationStatus,
   operationStatusLabel,
   operationUpdatedAt,
@@ -44,7 +47,8 @@ import { hasAnyPermission, hasPermission } from "@/lib/rbac";
 import { allowedReservationTransitions } from "@/lib/reservation-workflow";
 import { companyEntities, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
-import { canCompleteOperationalReservation } from "@/lib/operational-proof";
+import { canCompleteOperationalReservation, canRescheduleOperationalReservation } from "@/lib/operational-proof";
+import { calculateProrata } from "@/lib/prorata";
 import {
   buildDecorationBillingReport,
   decorationBillingCsv,
@@ -97,6 +101,13 @@ type OperationTableTask = {
 
 type OperationCompletionTarget = OperationTableTask & {
   type: OperationKind;
+};
+
+type OperationRescheduleInput = {
+  newStartDate: string;
+  reason: string;
+  note?: string | null;
+  confirmed: boolean;
 };
 
 type ReservationForm = {
@@ -229,7 +240,6 @@ const emptyForm: ReservationForm = {
 
 const activeReservationStatuses: ReservationStatus[] = ["HOLD", "RESERVED", "BOOKED"];
 const requestStatuses: OfferRequestStatus[] = ["NEW", "CONTACTED", "ARCHIVED"];
-const operationalStatuses: OperationStatus[] = ["NEW", "IN_PROGRESS", "DONE", "ARCHIVED"];
 
 export function AdminReservationsPanel({
   locations,
@@ -265,6 +275,10 @@ export function AdminReservationsPanel({
   const canCreateBookedReservation = canEditReservations || canApproveReservations;
   const canEditOperationTask = useCallback(
     (reservation: ReservationDTO) => canEditOperationalReservation(reservation, session),
+    [session]
+  );
+  const canRescheduleOperationTask = useCallback(
+    (reservation: ReservationDTO) => canRescheduleOperationalReservation(session, reservation),
     [session]
   );
   const [activePanel, setActivePanel] = useState<AdminPanel>(
@@ -305,6 +319,9 @@ export function AdminReservationsPanel({
   const [completionFiles, setCompletionFiles] = useState<File[]>([]);
   const [completionNote, setCompletionNote] = useState("");
   const [completionSaving, setCompletionSaving] = useState(false);
+  const [rescheduleTarget, setRescheduleTarget] = useState<OperationCompletionTarget | null>(null);
+  const [rescheduleSaving, setRescheduleSaving] = useState(false);
+  const [proofTarget, setProofTarget] = useState<OperationCompletionTarget | null>(null);
 
   useEffect(() => {
     if (!shouldLoadReservationOptions) {
@@ -585,7 +602,7 @@ export function AdminReservationsPanel({
       .map((reservation) => reservation.locationId);
   }, [editingReservation, reservations]);
 
-  const operationalReservations = operationReservations?.length ? operationReservations : reservations;
+  const operationalReservations = isOperationalWorkspace ? reservations : operationReservations?.length ? operationReservations : reservations;
 
   const operationsWindowStart = useMemo(() => addDays(today, -OPERATION_HISTORY_DAYS), [today]);
   const decorationWindowEnd = useMemo(() => addDays(today, DECORATION_LOOKAHEAD_DAYS), [today]);
@@ -965,8 +982,59 @@ export function AdminReservationsPanel({
     setCompletionNote("");
   }
 
+  function openOperationProofPhotos(target: OperationCompletionTarget) {
+    setProofTarget(target);
+    setError(null);
+  }
+
+  function openOperationReschedule(target: OperationCompletionTarget) {
+    setRescheduleTarget(target);
+    setError(null);
+  }
+
+  async function rescheduleOperation(input: OperationRescheduleInput) {
+    if (!rescheduleTarget) return;
+    setRescheduleSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/admin/operational/tasks/reschedule", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          reservationId: rescheduleTarget.reservation.id,
+          kind: rescheduleTarget.type,
+          taskId: rescheduleTarget.taskId || null,
+          newStartDate: input.newStartDate,
+          reason: input.reason,
+          note: input.note || null,
+          confirmed: input.confirmed
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setError(payload.error || "Data operationala nu a putut fi modificata.");
+        return;
+      }
+      setReservations((current) => current.map((reservation) => (reservation.id === rescheduleTarget.reservation.id ? payload.reservation : reservation)));
+      setMessage(payload.financeReviewRequired
+        ? "Data a fost modificata. Exista impact financiar: verifica manual facturile."
+        : "Data a fost modificata si motivul a fost salvat.");
+      setRescheduleTarget(null);
+    } catch (rescheduleError) {
+      setError(rescheduleError instanceof Error ? rescheduleError.message : "Data operationala nu a putut fi modificata.");
+    } finally {
+      setRescheduleSaving(false);
+    }
+  }
+
   async function completeOperationWithProof() {
     if (!completionTarget) return;
+    const existingPhotos = proofPhotosForTask(completionTarget.reservation, completionTarget.type, completionTarget.taskId);
+    if (isFieldOperator && !existingPhotos.length && !completionFiles.length) {
+      setError("Incarca cel putin o poza dovada pentru finalizare.");
+      return;
+    }
     setCompletionSaving(true);
     setError(null);
     const body = new FormData();
@@ -1525,7 +1593,10 @@ export function AdminReservationsPanel({
             today={today}
             onStatusChange={updateOperationStatus}
             onOpenCompletion={openOperationCompletion}
+            onOpenReschedule={openOperationReschedule}
+            onOpenProofPhotos={openOperationProofPhotos}
             canEditTask={canEditOperationTask}
+            canRescheduleTask={canRescheduleOperationTask}
             canChangeStatusDirectly={canUpdateOperationStatus}
             showCost={!isFieldOperator}
           />
@@ -1548,7 +1619,10 @@ export function AdminReservationsPanel({
             today={today}
             onStatusChange={updateOperationStatus}
             onOpenCompletion={openOperationCompletion}
+            onOpenReschedule={openOperationReschedule}
+            onOpenProofPhotos={openOperationProofPhotos}
             canEditTask={canEditOperationTask}
+            canRescheduleTask={canRescheduleOperationTask}
             canChangeStatusDirectly={canUpdateOperationStatus}
             showCost={!isFieldOperator}
           />
@@ -1785,6 +1859,22 @@ export function AdminReservationsPanel({
           onNoteChange={setCompletionNote}
           onClose={closeOperationCompletion}
           onComplete={completeOperationWithProof}
+        />
+      ) : null}
+      {rescheduleTarget ? (
+        <OperationRescheduleDialog
+          target={rescheduleTarget}
+          saving={rescheduleSaving}
+          onClose={() => {
+            if (!rescheduleSaving) setRescheduleTarget(null);
+          }}
+          onConfirm={rescheduleOperation}
+        />
+      ) : null}
+      {proofTarget ? (
+        <ProofPhotosDialog
+          target={proofTarget}
+          onClose={() => setProofTarget(null)}
         />
       ) : null}
     </section>
@@ -2945,7 +3035,10 @@ function OperationsTable({
   today,
   onStatusChange,
   onOpenCompletion,
+  onOpenReschedule,
+  onOpenProofPhotos,
   canEditTask,
+  canRescheduleTask,
   canChangeStatusDirectly,
   showCost = true
 }: {
@@ -2955,7 +3048,10 @@ function OperationsTable({
   today: Date;
   onStatusChange: (id: string, kind: OperationKind, status: OperationStatus, taskId?: string | null) => void;
   onOpenCompletion: (target: OperationCompletionTarget) => void;
+  onOpenReschedule: (target: OperationCompletionTarget) => void;
+  onOpenProofPhotos: (target: OperationCompletionTarget) => void;
   canEditTask: (reservation: ReservationDTO) => boolean;
+  canRescheduleTask: (reservation: ReservationDTO) => boolean;
   canChangeStatusDirectly: boolean;
   showCost?: boolean;
 }) {
@@ -2979,13 +3075,29 @@ function OperationsTable({
             const location = locationsById.get(reservation.locationId);
             const overdue = isOperationActive(status) && new Date(taskDate) < today;
             const canEdit = canEditTask(reservation);
+            const canReschedule = canRescheduleTask(reservation);
             const proofPhotos = proofPhotosForTask(reservation, type, taskId);
+            const latestDelay = latestOperationDelayChange(reservation.productionNotes, type, taskId);
+            const target: OperationCompletionTarget = {
+              reservation,
+              taskDate,
+              operationStatus: status,
+              taskId,
+              taskType,
+              note,
+              cost,
+              currency,
+              finalizationDate,
+              dedupeKey,
+              type
+            };
             return (
               <tr key={`${type}-${reservation.id}-${taskId || "base"}`} className="border-t border-focus-line">
                 <Td>
                   <p className={overdue ? "font-black text-red-100" : "font-black text-white"}>{dateLabel(taskDate)}</p>
                   {overdue ? <p className="text-xs font-bold uppercase text-red-200">Intarziat</p> : null}
                   {status === "DONE" && finalizationDate ? <p className="mt-1 text-xs font-bold text-emerald-200">Finalizat: {dateLabel(finalizationDate)}</p> : null}
+                  {latestDelay ? <p className="mt-1 text-xs font-bold text-focus-yellow">Reprogramat: {dateLabel(latestDelay.newTaskDate || latestDelay.newStartDate)}</p> : null}
                 </Td>
                 <Td>
                   <strong className="text-white">{reservation.locationCode || location?.code || "N/A"}</strong>
@@ -3007,25 +3119,36 @@ function OperationsTable({
                   </p>
                   {showCost && cost != null ? <p className="mt-1 text-xs font-black uppercase text-focus-yellow">Cost: {moneyLabel(cost)} {currency || ""}</p> : null}
                   <ProofPhotoSummary photos={proofPhotos} />
+                  {latestDelay ? (
+                    <div className="mt-2 rounded-lg border border-focus-yellow/30 bg-focus-yellow/10 px-3 py-2 text-xs font-bold text-yellow-50">
+                      <p className="font-black uppercase text-focus-yellow">Motiv reprogramare</p>
+                      <p className="mt-1">{latestDelay.reason}</p>
+                      <p className="mt-1 text-slate-300">
+                        {dateLabel(latestDelay.oldTaskDate || latestDelay.oldStartDate)} -&gt; {dateLabel(latestDelay.newTaskDate || latestDelay.newStartDate)}
+                      </p>
+                      {latestDelay.financeReviewRequired ? <p className="mt-1 text-amber-100">Necesita verificare financiara.</p> : null}
+                    </div>
+                  ) : null}
                 </Td>
                 <Td>{reservation.salesperson || "-"}</Td>
                 <Td>
-                  <select
-                    className="focus-input"
-                    value={status}
-                    disabled={!canEdit || !canChangeStatusDirectly}
-                    onChange={(event) => onStatusChange(reservation.id, type, event.target.value as OperationStatus, taskId)}
-                  >
-                    {operationalStatuses.map((item) => (
-                      <option key={item} value={item}>
-                        {operationStatusLabel(item)}
-                      </option>
-                    ))}
-                  </select>
+                  <OperationTaskStatusBadge status={status} overdue={overdue} />
                 </Td>
                 <Td>
                   {canEdit ? (
                     <div className="flex flex-wrap gap-2">
+                      {proofPhotos.length ? (
+                        <button className="focus-button secondary" type="button" onClick={() => onOpenProofPhotos(target)}>
+                          <Eye className="h-4 w-4" />
+                          Vezi poze
+                        </button>
+                      ) : null}
+                      {overdue && canReschedule ? (
+                        <button className="focus-button secondary" type="button" onClick={() => onOpenReschedule(target)}>
+                          <CalendarDays className="h-4 w-4" />
+                          Modifica data
+                        </button>
+                      ) : null}
                       {canChangeStatusDirectly && status !== "IN_PROGRESS" ? (
                         <button className="focus-button secondary" type="button" onClick={() => onStatusChange(reservation.id, type, "IN_PROGRESS", taskId)}>
                           In lucru
@@ -3035,21 +3158,7 @@ function OperationsTable({
                         <button
                           className="focus-button"
                           type="button"
-                          onClick={() =>
-                            onOpenCompletion({
-                              reservation,
-                              taskDate,
-                              operationStatus: status,
-                              taskId,
-                              taskType,
-                              note,
-                              cost,
-                              currency,
-                              finalizationDate,
-                              dedupeKey,
-                              type
-                            })
-                          }
+                          onClick={() => onOpenCompletion(target)}
                         >
                           <Upload className="h-4 w-4" />
                           Finalizeaza + poze
@@ -3104,6 +3213,185 @@ function ProofPhotoSummary({ photos }: { photos: NonNullable<ReservationDTO["ope
             {photo.fileName}
           </a>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function OperationTaskStatusBadge({ status, overdue }: { status: OperationStatus; overdue: boolean }) {
+  const className =
+    status === "DONE"
+      ? "border-emerald-300/40 bg-emerald-400/10 text-emerald-100"
+      : overdue
+        ? "border-red-300/40 bg-red-500/10 text-red-100"
+        : status === "IN_PROGRESS"
+          ? "border-focus-yellow/40 bg-focus-yellow/10 text-focus-yellow"
+          : "border-focus-line bg-focus-navy/45 text-slate-200";
+  const label = overdue && status !== "DONE" ? "Intarziat" : operationStatusLabel(status);
+  return (
+    <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-black uppercase ${className}`}>
+      {label}
+    </span>
+  );
+}
+
+function ProofPhotosDialog({
+  target,
+  onClose
+}: {
+  target: OperationCompletionTarget;
+  onClose: () => void;
+}) {
+  const photos = proofPhotosForTask(target.reservation, target.type, target.taskId);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="focus-card max-h-[92vh] w-full max-w-4xl overflow-auto rounded-lg p-5 shadow-2xl">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase text-focus-yellow">Dovezi lucrare</p>
+            <h2 className="font-display text-2xl font-black uppercase text-white">Poze dovada</h2>
+            <p className="mt-2 text-sm font-bold text-slate-300">
+              {target.reservation.locationCode || "Locatie"} · {target.reservation.clientName}. Pozele sunt disponibile 30 de zile.
+            </p>
+          </div>
+          <button className="focus-button secondary" type="button" onClick={onClose}>
+            Inchide
+          </button>
+        </div>
+
+        {photos.length ? (
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {photos.map((photo) => (
+              <article key={photo.id} className="rounded-lg border border-focus-line bg-focus-navy/35 p-3">
+                <img
+                  alt={`Dovada ${photo.fileName}`}
+                  className="aspect-[4/3] w-full rounded-md border border-focus-line object-cover"
+                  src={`${photo.downloadUrl}?preview=1`}
+                />
+                <div className="mt-3 grid gap-1 text-xs font-bold text-slate-300">
+                  <p className="font-black text-white">{photo.fileName}</p>
+                  <p>Incarcata: {dateTimeLabel(photo.uploadedAt)}</p>
+                  <p>De: {photo.uploadedByName || "utilizator operational"}</p>
+                  <p>Expira: {photo.expiresAt ? dateLabel(photo.expiresAt) : "dupa 30 zile"}</p>
+                </div>
+                <a className="focus-button secondary mt-3 w-full justify-center" href={photo.downloadUrl}>
+                  <Download className="h-4 w-4" />
+                  Descarca
+                </a>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-5 rounded-lg border border-focus-line bg-focus-navy/35 p-4 text-sm font-bold text-slate-300">
+            Nu exista poze dovada active pentru aceasta lucrare.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OperationRescheduleDialog({
+  target,
+  saving,
+  onClose,
+  onConfirm
+}: {
+  target: OperationCompletionTarget;
+  saving: boolean;
+  onClose: () => void;
+  onConfirm: (input: OperationRescheduleInput) => void;
+}) {
+  const [newStartDate, setNewStartDate] = useState(dateInputValue(target.taskDate));
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const trimmedReason = reason.trim();
+  const validationError = !newStartDate
+    ? "Alege data noua."
+    : !trimmedReason
+      ? "Motivul intarzierii este obligatoriu."
+      : target.type === "decoration" && newStartDate > dateInputValue(target.reservation.periodEnd)
+        ? "Noua data nu poate fi dupa finalul campaniei."
+        : !confirmed
+          ? "Confirma impactul asupra perioadei si pro-rata."
+          : null;
+  const preview = operationDelayProrataPreview(target.reservation, newStartDate, target.type);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="focus-card max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg p-5 shadow-2xl">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase text-focus-yellow">Reprogramare operationala</p>
+            <h2 className="font-display text-2xl font-black uppercase text-white">Modifica data de start</h2>
+            <p className="mt-2 text-sm font-bold text-slate-300">
+              {target.reservation.locationCode || "Locatie"} · {target.reservation.clientName}
+            </p>
+          </div>
+          <button className="focus-button secondary" type="button" onClick={onClose} disabled={saving}>
+            Inchide
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <ReadOnlyField label="Data curenta" value={dateLabel(target.taskDate)} />
+          <InputField type="date" label="Data noua" value={newStartDate} onChange={setNewStartDate} />
+        </div>
+
+        {preview ? (
+          <div className="mt-4 rounded-lg border border-focus-line bg-focus-navy/35 p-3 text-sm font-bold text-slate-200">
+            <p className="text-xs font-black uppercase text-focus-yellow">Preview pro-rata</p>
+            <div className="mt-2 grid gap-2 md:grid-cols-3">
+              <span>Perioada veche: {dateLabel(target.reservation.periodStart)} - {dateLabel(target.reservation.periodEnd)}</span>
+              <span>Perioada noua: {dateLabel(newStartDate)} - {dateLabel(target.reservation.periodEnd)}</span>
+              <span className={preview.delta >= 0 ? "text-emerald-200" : "text-red-100"}>
+                Diferenta estimata: {preview.delta >= 0 ? "+" : ""}{moneyLabel(preview.delta)} {preview.currency}
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        {target.reservation.billingSummary?.billingItemCount ? (
+          <div className="mt-4 rounded-lg border border-amber-300/40 bg-amber-400/10 p-3 text-sm font-bold text-amber-100">
+            Exista pozitii de facturare sau incasari asociate. SmartBill nu se modifica automat; Financiar trebuie sa verifice manual impactul.
+          </div>
+        ) : null}
+
+        <label className="mt-4 block">
+          <span className="mb-1 block text-sm font-bold text-slate-200">Motiv intarziere</span>
+          <textarea
+            className="focus-input min-h-24"
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Ex: acces intarziat, material lipsa, vreme nefavorabila."
+            disabled={saving}
+          />
+        </label>
+        <label className="mt-4 block">
+          <span className="mb-1 block text-sm font-bold text-slate-200">Nota interna optionala</span>
+          <textarea className="focus-input min-h-20" value={note} onChange={(event) => setNote(event.target.value)} disabled={saving} />
+        </label>
+        <label className="mt-4 flex items-start gap-3 rounded-lg border border-focus-line bg-focus-navy/35 p-3 text-sm font-bold text-slate-200">
+          <input className="mt-1" type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} disabled={saving} />
+          Confirm ca aceasta modificare afecteaza perioada campaniei si calculul pro-rata.
+        </label>
+
+        {validationError ? <p className="mt-3 text-sm font-bold text-red-100">{validationError}</p> : null}
+
+        <div className="mt-5 flex flex-wrap justify-end gap-3">
+          <button className="focus-button secondary" type="button" onClick={onClose} disabled={saving}>
+            Renunta
+          </button>
+          <button
+            className="focus-button"
+            type="button"
+            disabled={saving || Boolean(validationError)}
+            onClick={() => onConfirm({ newStartDate, reason: trimmedReason, note: note.trim() || null, confirmed })}
+          >
+            {saving ? "Se salveaza..." : "Salveaza data"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -3352,6 +3640,20 @@ function editFinancialPreview(reservation: ReservationDTO, form: ReservationEdit
     previousTotal,
     nextTotal,
     delta: Math.round((nextTotal - previousTotal) * 100) / 100
+  };
+}
+
+function operationDelayProrataPreview(reservation: ReservationDTO, newStartDate: string, kind: OperationKind) {
+  if (kind !== "decoration" || !newStartDate) return null;
+  const monthlyAmount = reservation.amount ?? reservation.monthlyRentShare ?? reservation.monthlyRentTotal;
+  if (monthlyAmount == null || monthlyAmount <= 0) return null;
+  const previous = calculateProrata(monthlyAmount, reservation.periodStart, reservation.periodEnd, reservation.periodStart, reservation.periodEnd);
+  const next = calculateProrata(monthlyAmount, newStartDate, reservation.periodEnd, newStartDate, reservation.periodEnd);
+  return {
+    currency: reservation.currency || "EUR",
+    previousAmount: previous.amount,
+    nextAmount: next.amount,
+    delta: Math.round((next.amount - previous.amount) * 100) / 100
   };
 }
 

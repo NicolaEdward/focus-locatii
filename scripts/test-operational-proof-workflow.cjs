@@ -10,6 +10,9 @@ function main() {
   proofPhotoRouteIsPrivate();
   cronIsProtectedAndLimitedToProofPhotos();
   operationalUiShowsCompletionWorkflow();
+  operationalUiRemovesTechnicalStatusDropdown();
+  operationalDateDelayWorkflowIsAudited();
+  completionRefreshesLocalState();
   reservationDtoExposesMetadataOnly();
   publicApiDoesNotExposeProofPhotos();
   operationTaskFlagsRemainDisabled();
@@ -25,6 +28,9 @@ function main() {
       "cron requires CRON_SECRET",
       "cron deletes only operational proof photos",
       "operational UI exposes completion proof workflow",
+      "operational UI removes technical status dropdown",
+      "delayed operational date changes require reason and audit metadata",
+      "completion updates the local operational state without manual refresh",
       "reservation DTO exposes metadata links only, not raw file contents",
       "public APIs do not expose proof photos",
       "OperationTask flags remain untouched"
@@ -42,6 +48,7 @@ function proofLibraryDefinesSafeRetention() {
     assert(source.includes(mimeType), `${mimeType} should be accepted`);
   }
   assert(source.includes("canCompleteOperationalReservation"), "completion access helper should be centralized");
+  assert(source.includes("canRescheduleOperationalReservation"), "reschedule access helper should be centralized");
   assert(source.includes('reservation.status !== "BOOKED"'), "completion must only apply to active booked operational work");
 }
 
@@ -66,6 +73,7 @@ function proofPhotoRouteIsPrivate() {
   assert(source.includes("canAccessOperationalReservation"), "proof photos must be scoped to allowed operational users");
   assert(source.includes("OPERATIONAL_PROOF_DOCUMENT_TYPE"), "proof route must only serve proof photo documents");
   assert(source.includes("isOperationalProofActive"), "expired/deleted proof photos must not be served");
+  assert(source.includes('searchParams.get("preview") === "1"'), "proof route should support authenticated preview mode");
   assert(source.includes('"SUPER_ADMIN", "COO"'), "manual delete should be limited to admin/COO");
 }
 
@@ -91,6 +99,41 @@ function operationalUiShowsCompletionWorkflow() {
   assert(source.includes("proofPhotosForTask"), "UI should show proof photo metadata per task");
   assert(source.includes("canChangeStatusDirectly"), "field installer should not get direct technical status controls");
   assert(source.includes("canCompleteOperationalReservation"), "UI editability should use scoped operational completion access");
+  assert(source.includes("Incarca cel putin o poza dovada pentru finalizare."), "field installer completion should require proof photos");
+  assert(source.includes("ProofPhotosDialog"), "authorized users should be able to view/download proof photos");
+  assert(source.includes("?preview=1"), "proof photo viewer should use authenticated inline previews");
+}
+
+function operationalUiRemovesTechnicalStatusDropdown() {
+  const source = read("src", "components", "admin", "AdminReservationsPanel.tsx");
+  const tableBlock = blockFrom(source, "function OperationsTable", "function ProofPhotoSummary");
+  assert(!tableBlock.includes("<select"), "operational decoration/neutralization table must not expose a technical status dropdown");
+  assert(tableBlock.includes("OperationTaskStatusBadge"), "operational task status should be shown as a badge");
+  assert(tableBlock.includes("Modifica data"), "delayed operational rows should expose a date modification action");
+  assert(tableBlock.includes("Vezi poze"), "proof photos should be visible from the operational row");
+}
+
+function operationalDateDelayWorkflowIsAudited() {
+  const route = read("src", "app", "api", "admin", "operational", "tasks", "reschedule", "route.ts");
+  const status = read("src", "lib", "operation-status.ts");
+  assert(route.includes("Motivul intarzierii este obligatoriu."), "date delay route must require a delay reason");
+  assert(route.includes("Confirma impactul asupra perioadei si pro-rata."), "date delay route must require explicit impact confirmation");
+  assert(route.includes("canRescheduleOperationalReservation"), "date delay route must enforce scoped reschedule access");
+  assert(route.includes("updateReservation("), "date delay route should use existing reservation update safety logic");
+  assert(route.includes("financeReviewRequired"), "date delay route must flag finance review when billing exists");
+  assert(route.includes("operation.delay.reschedule"), "date delay route must write an audit log");
+  assert(!route.toLowerCase().includes("smartbill"), "date delay route must not change SmartBill");
+  assert(status.includes("withOperationDelayChange"), "operation metadata should store delay reason/history without a migration");
+  assert(status.includes("OPERATIONAL_DELAY_CHANGE"), "delay reason history should have an explicit source");
+}
+
+function completionRefreshesLocalState() {
+  const source = read("src", "components", "admin", "AdminReservationsPanel.tsx");
+  assert(source.includes("const operationalReservations = isOperationalWorkspace ? reservations"), "operational workspace should render from local state after completion");
+  assert(source.includes("reservation.id === completionTarget.reservation.id ? payload.reservation : reservation"), "completion should update the completed reservation in-place");
+  assert(source.includes("completionSaving"), "completion button should be disabled while saving");
+  const route = read("src", "app", "api", "admin", "operational", "tasks", "complete", "route.ts");
+  assert(route.includes("alreadyCompleted"), "completion route should treat harmless duplicate completion as idempotent");
 }
 
 function reservationDtoExposesMetadataOnly() {

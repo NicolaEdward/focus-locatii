@@ -193,7 +193,7 @@ export async function getClientCampaignsData(session: AuthSession, query = ""): 
   });
 
   const clientWhere = {
-    ...(canViewAll ? { status: { notIn: ["merged", "archived"] } } : { accountOwnerUserId: session.id, status: { notIn: ["merged", "archived"] } }),
+    status: { notIn: ["merged", "archived"] },
     ...(search ? {
       OR: [
         { companyName: { contains: search } },
@@ -257,7 +257,10 @@ export async function getClientCampaignsData(session: AuthSession, query = ""): 
         accountOwner: { select: { id: true, name: true, email: true, role: true } },
         contacts: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }], take: 8 },
         documents: {
-          where: { status: "active" },
+          where: {
+            status: "active",
+            ...(session.role === "SALES_AGENT" ? { client: { is: { accountOwnerUserId: session.id } } } : {})
+          },
           include: { uploadedBy: { select: { name: true, email: true } } },
           orderBy: { uploadedAt: "desc" },
           take: 20
@@ -293,6 +296,7 @@ export async function getClientCampaignsData(session: AuthSession, query = ""): 
 
   for (const client of clients) {
     const normalizedName = normalizeClientName(client.companyName);
+    const canViewClientDetails = session.role !== "SALES_AGENT" || client.accountOwnerUserId === session.id;
     groups.set(clientKey(client.id, client.companyName), {
       key: clientKey(client.id, client.companyName),
       clientId: client.id,
@@ -302,17 +306,17 @@ export async function getClientCampaignsData(session: AuthSession, query = ""): 
       status: client.status,
       taxId: client.taxId,
       registryNumber: client.registryNumber,
-      billingAddress: client.billingAddress,
-      generalEmail: client.generalEmail,
-      generalPhone: client.generalPhone,
+      billingAddress: canViewClientDetails ? client.billingAddress : null,
+      generalEmail: canViewClientDetails ? client.generalEmail : null,
+      generalPhone: canViewClientDetails ? client.generalPhone : null,
       website: client.website,
       accountOwnerUserId: client.accountOwnerUserId,
       accountOwnerName: client.accountOwner?.name || null,
       accountOwnerEmail: client.accountOwner?.email || null,
-      notes: client.notes,
+      notes: canViewClientDetails ? client.notes : null,
       source: "client",
-      contacts: client.contacts.map(serializeContact),
-      documents: client.documents.map(serializeDocument),
+      contacts: canViewClientDetails ? client.contacts.map(serializeContact) : [],
+      documents: canViewClientDetails ? client.documents.map(serializeDocument) : [],
       campaigns: [],
       receivables: [],
       nextDueDate: null,

@@ -88,6 +88,7 @@ export type ReservationDTO = {
   holdExpiresAt: string | null;
   ownerId: string | null;
   sellerUserId: string | null;
+  clientAccountOwnerUserId?: string | null;
   currency: string | null;
   paymentTermType: string | null;
   paymentTermDays: number | null;

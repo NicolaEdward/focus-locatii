@@ -97,38 +97,37 @@ export function isOperationalProofActive(document: { status?: string | null; exp
   return !Number.isNaN(expiry.getTime()) && expiry.getTime() >= Date.now();
 }
 
-export function canAccessOperationalReservation(
-  session: AuthSession,
-  reservation: Pick<ReservationDTO, "status" | "ownerId" | "sellerUserId" | "salesperson">
-) {
+type OperationalReservationAccess = Pick<ReservationDTO, "status" | "ownerId" | "sellerUserId" | "salesperson"> & {
+  clientAccountOwnerUserId?: string | null;
+  client?: { accountOwnerUserId: string | null } | null;
+};
+
+export function canAccessOperationalReservation(session: AuthSession, reservation: OperationalReservationAccess) {
   if (["SUPER_ADMIN", "COO", "SALES_DIRECTOR"].includes(session.role)) return true;
   if (session.role === "FIELD_OPERATOR") return reservation.status === "BOOKED";
   if (session.role !== "SALES_AGENT") return false;
 
   const legacyOwner = reservation.salesperson === session.name || reservation.salesperson === session.email;
-  return reservation.sellerUserId === session.id || reservation.ownerId === session.id || Boolean(!reservation.ownerId && legacyOwner);
+  const clientOwnerUserId = reservation.clientAccountOwnerUserId ?? reservation.client?.accountOwnerUserId ?? null;
+  return (
+    reservation.sellerUserId === session.id ||
+    reservation.ownerId === session.id ||
+    clientOwnerUserId === session.id ||
+    Boolean(!reservation.ownerId && legacyOwner)
+  );
 }
 
-export function canViewOperationalProofPhoto(
-  session: AuthSession,
-  reservation: Pick<ReservationDTO, "status" | "ownerId" | "sellerUserId" | "salesperson">
-) {
+export function canViewOperationalProofPhoto(session: AuthSession, reservation: OperationalReservationAccess) {
   if (["SUPER_ADMIN", "COO", "SALES_DIRECTOR", "SALES_AGENT"].includes(session.role)) return true;
   return canAccessOperationalReservation(session, reservation);
 }
 
-export function canCompleteOperationalReservation(
-  session: AuthSession,
-  reservation: Pick<ReservationDTO, "status" | "ownerId" | "sellerUserId" | "salesperson">
-) {
+export function canCompleteOperationalReservation(session: AuthSession, reservation: OperationalReservationAccess) {
   if (reservation.status !== "BOOKED") return false;
   return canAccessOperationalReservation(session, reservation);
 }
 
-export function canRescheduleOperationalReservation(
-  session: AuthSession,
-  reservation: Pick<ReservationDTO, "status" | "ownerId" | "sellerUserId" | "salesperson">
-) {
+export function canRescheduleOperationalReservation(session: AuthSession, reservation: OperationalReservationAccess) {
   if (reservation.status !== "BOOKED") return false;
   if (session.role === "FIELD_OPERATOR") return false;
   return canAccessOperationalReservation(session, reservation);

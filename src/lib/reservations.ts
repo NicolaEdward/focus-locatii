@@ -24,6 +24,7 @@ type SellerPatch = { ownerId?: string | null; sellerUserId?: string | null; sale
 type ReservationDbClient = typeof prisma | Prisma.TransactionClient;
 
 const reservationInclude = {
+  client: { select: { accountOwnerUserId: true } },
   location: { select: { code: true, address: true, city: true, type: true } },
   priceSegments: { orderBy: { effectiveFrom: "asc" as const } },
   changeLogs: {
@@ -608,7 +609,10 @@ export async function updateReservationProductionNotesWithClient(
   productionNotes: string,
   actor?: AuthSession | null
 ) {
-  const existing = await client.reservation.findUniqueOrThrow({ where: { id } });
+  const existing = await client.reservation.findUniqueOrThrow({
+    where: { id },
+    include: { client: { select: { accountOwnerUserId: true } } }
+  });
   assertReservationOwnership(existing, actor);
   const reservation = await client.reservation.update({
     where: { id },
@@ -786,12 +790,24 @@ function appendReservationNote(current: string | null | undefined, note?: string
 }
 
 function assertReservationOwnership(
-  reservation: { ownerId: string | null; sellerUserId?: string | null; salesperson: string | null },
+  reservation: {
+    ownerId: string | null;
+    sellerUserId?: string | null;
+    salesperson: string | null;
+    clientAccountOwnerUserId?: string | null;
+    client?: { accountOwnerUserId: string | null } | null;
+  },
   actor?: AuthSession | null
 ) {
   if (!actor || actor.role !== "SALES_AGENT") return;
   const legacyOwner = [actor.name, actor.email].includes(reservation.salesperson || "");
-  if (reservation.sellerUserId !== actor.id && reservation.ownerId !== actor.id && !(reservation.ownerId == null && legacyOwner)) {
+  const clientOwnerUserId = reservation.clientAccountOwnerUserId ?? reservation.client?.accountOwnerUserId ?? null;
+  if (
+    reservation.sellerUserId !== actor.id &&
+    reservation.ownerId !== actor.id &&
+    clientOwnerUserId !== actor.id &&
+    !(reservation.ownerId == null && legacyOwner)
+  ) {
     throw new Error("Poti modifica doar rezervarile si inchirierile proprii.");
   }
 }
@@ -1221,6 +1237,7 @@ function serializeReservation(
     holdExpiresAt: Date | null;
     ownerId: string | null;
     sellerUserId: string | null;
+    client?: { accountOwnerUserId: string | null } | null;
     currency: string | null;
     paymentTermType: string | null;
     paymentTermDays: number | null;
@@ -1307,6 +1324,7 @@ function serializeReservation(
     holdExpiresAt: reservation.holdExpiresAt?.toISOString() || null,
     ownerId: reservation.ownerId,
     sellerUserId: reservation.sellerUserId || reservation.ownerId,
+    clientAccountOwnerUserId: reservation.client?.accountOwnerUserId || null,
     currency: reservation.currency,
     paymentTermType: reservation.paymentTermType,
     paymentTermDays: reservation.paymentTermDays,

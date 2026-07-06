@@ -682,6 +682,7 @@ export function ClientCampaignsWorkspace({
                 form={clientForm}
                 contactForm={contactForm}
                 accountOwners={data.accountOwners}
+                session={session}
                 canManageClients={canManageClients}
                 canManageCampaigns={canManageCampaigns}
                 canChangeOwner={canChangeOwner}
@@ -724,7 +725,15 @@ export function ClientCampaignsWorkspace({
           ) : null}
 
           {activeTab === "documents" ? (
-            <DocumentsTab selected={selected} onDocumentTarget={setDocumentTarget} />
+            <DocumentsTab
+              selected={selected}
+              canUploadDocument={
+                canManageClients &&
+                Boolean(selected?.clientId) &&
+                (session.role !== "SALES_AGENT" || selected?.accountOwnerUserId === session.id)
+              }
+              onDocumentTarget={setDocumentTarget}
+            />
           ) : null}
         </section>
       </section>
@@ -761,6 +770,7 @@ function ClientTab({
   form,
   contactForm,
   accountOwners,
+  session,
   canManageClients,
   canManageCampaigns,
   canChangeOwner,
@@ -784,6 +794,7 @@ function ClientTab({
   form: ClientForm;
   contactForm: ContactForm;
   accountOwners: AccountOwnerOption[];
+  session: AuthSession;
   canManageClients: boolean;
   canManageCampaigns: boolean;
   canChangeOwner: boolean;
@@ -803,6 +814,12 @@ function ClientTab({
   onRedecorate: (campaign: ClientCampaignRow, rental: ClientCampaignRow["rentals"][number]) => void;
   onDocumentTarget: (target: DocumentTarget) => void;
 }) {
+  const canEditClient =
+    canManageClients &&
+    Boolean(client.clientId) &&
+    (session.role !== "SALES_AGENT" || client.accountOwnerUserId === session.id);
+  const canEditClientCampaigns = canManageCampaigns && canEditClient;
+
   return (
     <>
       <ClientEditor
@@ -811,10 +828,15 @@ function ClientTab({
         accountOwners={accountOwners}
         canChangeOwner={canChangeOwner}
         busy={busy}
-        disabled={!canManageClients || !client.clientId}
+        disabled={!canEditClient}
         onChange={onFormChange}
         onSave={onSave}
       />
+      {!canEditClient && session.role === "SALES_AGENT" ? (
+        <p className="rounded-lg border border-focus-line bg-focus-navy/35 p-3 text-sm text-slate-300">
+          Client vizibil pentru verificare si evitare duplicate. Modificarile sunt disponibile doar owner-ului clientului.
+        </p>
+      ) : null}
       <div className="grid gap-4 lg:grid-cols-3">
         <Metric icon={<CircleDollarSign size={18} />} label="Rest RON" value={money(client.remainingRon, "RON")} detail={client.overdueRon ? `${money(client.overdueRon, "RON")} depasit` : "In lucru"} />
         <Metric icon={<CircleDollarSign size={18} />} label="Rest EUR" value={money(client.remainingEur, "EUR")} detail={client.overdueEur ? `${money(client.overdueEur, "EUR")} depasit` : "Import vechi"} />
@@ -822,7 +844,7 @@ function ClientTab({
       </div>
       <TableShell title="Campanii client">
         <div className="mb-3 flex justify-end">
-          {canManageCampaigns && client.clientId ? (
+          {canEditClientCampaigns && client.clientId ? (
             <button className="focus-button" type="button" onClick={onToggleCampaignForm}>
               <PlusCircle size={18} /> Campanie noua
             </button>
@@ -840,7 +862,7 @@ function ClientTab({
         ) : null}
         <CampaignsTable
           campaigns={client.campaigns}
-          canManageCampaigns={canManageCampaigns}
+          canManageCampaigns={canEditClientCampaigns}
           onDocumentTarget={onDocumentTarget}
           onEditCampaign={onEditCampaign}
           onArchiveCampaign={onArchiveCampaign}
@@ -865,7 +887,7 @@ function ClientTab({
               </tbody>
             </table>
           </div>
-          {canManageClients ? (
+          {canEditClient ? (
             <div className="rounded-lg border border-focus-line bg-focus-navy/35 p-4">
               <h4 className="text-sm font-black uppercase text-focus-yellow">Adauga contact</h4>
               <div className="mt-3 grid gap-3">
@@ -882,7 +904,7 @@ function ClientTab({
       </TableShell>
       <TableShell title="Documente client">
         <div className="mb-3 flex justify-end">
-          {client.clientId ? <button className="focus-button secondary" type="button" onClick={() => onDocumentTarget({ clientId: client.clientId, label: client.companyName })}><Upload size={18} /> Incarca document</button> : null}
+          {canEditClient && client.clientId ? <button className="focus-button secondary" type="button" onClick={() => onDocumentTarget({ clientId: client.clientId, label: client.companyName })}><Upload size={18} /> Incarca document</button> : null}
         </div>
         <DocumentsList documents={client.documents} />
       </TableShell>
@@ -1301,12 +1323,20 @@ function CleanupTab({
   );
 }
 
-function DocumentsTab({ selected, onDocumentTarget }: { selected: ClientCampaignSummary | null; onDocumentTarget: (target: DocumentTarget) => void }) {
+function DocumentsTab({
+  selected,
+  canUploadDocument,
+  onDocumentTarget
+}: {
+  selected: ClientCampaignSummary | null;
+  canUploadDocument: boolean;
+  onDocumentTarget: (target: DocumentTarget) => void;
+}) {
   if (!selected) return <EmptyState text="Alege un client pentru documente." />;
   return (
     <TableShell title={`Arhiva documente: ${selected.companyName}`}>
       <div className="mb-3 flex justify-end">
-        {selected.clientId ? <button className="focus-button" type="button" onClick={() => onDocumentTarget({ clientId: selected.clientId, label: selected.companyName })}><Upload size={18} /> Incarca document client</button> : null}
+        {canUploadDocument && selected.clientId ? <button className="focus-button" type="button" onClick={() => onDocumentTarget({ clientId: selected.clientId, label: selected.companyName })}><Upload size={18} /> Incarca document client</button> : null}
       </div>
       <DocumentsList documents={selected.documents} />
     </TableShell>

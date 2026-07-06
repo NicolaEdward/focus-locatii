@@ -65,7 +65,8 @@ export async function POST(request: NextRequest) {
         productionNotes: true,
         ownerId: true,
         sellerUserId: true,
-        salesperson: true
+        salesperson: true,
+        client: { select: { accountOwnerUserId: true } }
       }
     });
 

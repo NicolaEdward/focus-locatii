@@ -54,6 +54,8 @@ function proofLibraryDefinesSafeRetention() {
   }
   assert(source.includes("canCompleteOperationalReservation"), "completion access helper should be centralized");
   assert(source.includes("canRescheduleOperationalReservation"), "reschedule access helper should be centralized");
+  assert(source.includes("clientAccountOwnerUserId"), "sales operational access should include the owning client account");
+  assert(source.includes("reservation.client?.accountOwnerUserId"), "operational access should accept Prisma client owner selects");
   assert(source.includes('reservation.status !== "BOOKED"'), "completion must only apply to active booked operational work");
 }
 
@@ -62,6 +64,7 @@ function completionRouteIsScopedAndDoesNotCreateReservations() {
   assert(source.includes("requireAnyPermission"), "completion API must require authenticated admin permissions");
   assert(source.includes('"dashboard.operations.view"'), "field installer operational permission should be supported");
   assert(source.includes("canCompleteOperationalReservation"), "completion API must enforce scoped operational access");
+  assert(source.includes("client: { select: { accountOwnerUserId: true } }"), "completion API must load client owner for seller access checks");
   assert(source.includes("validateOperationalProofFile"), "completion API must validate uploaded files");
   assert(source.includes("clientDocument.create"), "proof photos should be stored as internal documents");
   assert(source.includes("withOperationCompletion"), "base operation completion should use operation metadata");
@@ -162,6 +165,7 @@ function operationalDateDelayWorkflowIsAudited() {
   assert(route.includes("Motivul intarzierii este obligatoriu."), "date delay route must require a delay reason");
   assert(route.includes("Confirma impactul asupra perioadei si pro-rata."), "date delay route must require explicit impact confirmation");
   assert(route.includes("canRescheduleOperationalReservation"), "date delay route must enforce scoped reschedule access");
+  assert(route.includes("client: { select: { accountOwnerUserId: true } }"), "date delay route must load client owner for seller access checks");
   assert(route.includes("updateReservation("), "date delay route should use existing reservation update safety logic");
   assert(route.includes("financeReviewRequired"), "date delay route must flag finance review when billing exists");
   assert(route.includes("operation.delay.reschedule"), "date delay route must write an audit log");
@@ -183,9 +187,12 @@ function reservationDtoExposesMetadataOnly() {
   const reservations = read("src", "lib", "reservations.ts");
   const types = read("src", "types", "location.ts");
   assert(reservations.includes("documents: {"), "reservation include should fetch proof document metadata");
+  assert(reservations.includes("client: { select: { accountOwnerUserId: true } }"), "reservation DTO should include client owner metadata for operational access");
+  assert(reservations.includes("clientAccountOwnerUserId: reservation.client?.accountOwnerUserId || null"), "serialized reservations should expose client owner metadata");
   assert(reservations.includes("OPERATIONAL_PROOF_DOCUMENT_TYPE"), "reservation include should be limited to proof photos");
   assert(!blockFrom(reservations, "documents: {", "}") .includes("storageUrl"), "reservation DTO must not include raw proof photo data");
   assert(types.includes("operationProofPhotos"), "ReservationDTO should expose proof photo metadata");
+  assert(types.includes("clientAccountOwnerUserId"), "ReservationDTO should expose client owner id for internal RBAC");
   assert(types.includes("downloadUrl"), "ReservationDTO should expose an authenticated proof photo download URL");
 }
 

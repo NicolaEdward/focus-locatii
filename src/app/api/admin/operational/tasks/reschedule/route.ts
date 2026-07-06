@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
         ownerId: true,
         sellerUserId: true,
         salesperson: true,
+        client: { select: { accountOwnerUserId: true } },
         billingItems: { select: { id: true }, take: 1 }
       }
     });

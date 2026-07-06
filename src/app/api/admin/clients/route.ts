@@ -37,7 +37,6 @@ export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim() || "";
   const clients = await prisma.clientAccount.findMany({
     where: {
-      ...(session.role === "SALES_AGENT" ? { accountOwnerUserId: session.id } : {}),
       status: { notIn: ["merged", "archived"] },
       ...(query ? {
         OR: [
@@ -54,7 +53,19 @@ export async function GET(request: NextRequest) {
     orderBy: { companyName: "asc" },
     take: 5000
   });
-  return NextResponse.json({ clients }, { headers: noStoreHeaders });
+  const visibleClients = clients.map((client) => {
+    const isOwnClient = session.role !== "SALES_AGENT" || client.accountOwnerUserId === session.id;
+    if (isOwnClient) return client;
+    return {
+      ...client,
+      billingAddress: null,
+      generalEmail: null,
+      generalPhone: null,
+      notes: null,
+      contacts: []
+    };
+  });
+  return NextResponse.json({ clients: visibleClients }, { headers: noStoreHeaders });
 }
 
 export async function POST(request: NextRequest) {

@@ -23,6 +23,7 @@ import {
 import { FocusLogo } from "@/components/brand/FocusLogo";
 import { LogoutButton } from "@/components/admin/LogoutButton";
 import { NotificationBell } from "@/components/admin/NotificationBell";
+import { SalesReportExportButton } from "@/components/admin/SalesReportExportButton";
 import type { AuthSession } from "@/lib/auth";
 import { hasAnyPermission, hasPermission, ROLE_LABELS } from "@/lib/rbac";
 
@@ -76,7 +77,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
             >
               {canViewFinance ? <AdminMenuLink href="/admin/dashboard" active={false} icon={<CircleDollarSign size={17} />} label="SmartBill / rapoarte" /> : null}
               {canViewFinance ? <AdminMenuLink href="/admin/furnizori" active={isActiveAdminPath(pathname, "/admin/furnizori")} icon={<Truck size={17} />} label="Furnizori" /> : null}
-              {canExportSales ? <AdminMenuAction href="/api/admin/sales-report/excel" icon={<Download size={17} />} label="Export vanzari" /> : null}
+              {canExportSales ? <SalesReportExportButton variant="menu" icon={<Download size={17} />} label="Export vanzari" /> : null}
             </AdminNavMenu>
           ) : null}
           {hasSettingsMenu ? (
@@ -102,7 +103,6 @@ export function AdminHeader({ session }: { session: AuthSession }) {
     </header>
   );
 }
-
 export function isActiveAdminPath(pathname: string, href: string) {
   if (href === "/admin/dashboard") return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -184,14 +184,5 @@ function AdminMenuLink({
       {icon}
       {label}
     </Link>
-  );
-}
-
-function AdminMenuAction({ href, icon, label }: { href: string; icon: ReactNode; label: string }) {
-  return (
-    <a className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-black text-slate-100 hover:bg-focus-yellow/10 hover:text-white" href={href}>
-      {icon}
-      {label}
-    </a>
   );
 }

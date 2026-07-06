@@ -23,6 +23,7 @@ import { FinancialDashboardPanel } from "@/components/admin/FinancialDashboardPa
 import { adminNewReservationHref, adminReservationHref, adminReservationsHref } from "@/lib/admin-routes";
 import { hasPermission } from "@/lib/rbac";
 import { ReservationPeriodChangeDialog, type ReservationPeriodChangeTarget } from "@/components/admin/ReservationPeriodChangeDialog";
+import { SalesReportExportButton } from "@/components/admin/SalesReportExportButton";
 
 type CooData = DashboardData["coo"];
 type CooTab = "overview" | "issues" | "sales" | "crm" | "operations" | "inventory" | "financial" | "exports" | "admin";
@@ -191,7 +192,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
             <Link className="focus-button" href={adminNewReservationHref()} prefetch={false}><BriefcaseBusiness size={18} /> Creeaza rezervare</Link>
             <Link className="focus-button secondary" href="/admin/locatii" prefetch={false}><MapPinned size={18} /> Adauga locatie</Link>
             <a className="focus-button secondary" href={coo.reports.availabilityUrl}><FileSpreadsheet size={18} /> Export disponibil</a>
-            <a className="focus-button secondary" href={coo.reports.salesUrl}><Download size={18} /> Export vanzari</a>
+            <SalesReportExportButton icon={<Download size={18} />} label="Export vanzari" />
           </div>
         </section>
 
@@ -337,7 +338,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
               <Panel title="Rapoarte rapide" icon={<FileSpreadsheet size={18} />}>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <a className="focus-button" href={coo.reports.availabilityUrl}><FileSpreadsheet size={18} /> Disponibil complet</a>
-                  <a className="focus-button secondary" href={coo.reports.salesUrl}><Download size={18} /> Situatie vanzari</a>
+                  <SalesReportExportButton icon={<Download size={18} />} label="Situatie vanzari" />
                   <a className="focus-button secondary" href={coo.reports.billingUrl}><Download size={18} /> Financiar manual</a>
                   <Link className="focus-button secondary" href={adminReservationsHref()} prefetch={false}><ClipboardList size={18} /> Solicitari</Link>
                   <Link className="focus-button secondary" href="/admin/locatii/gps" prefetch={false}><MapPinned size={18} /> Audit GPS</Link>

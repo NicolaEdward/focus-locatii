@@ -172,8 +172,16 @@ function operationalWidgetsMovedToWorkspace() {
 
 function salesExportsBelongToFinance() {
   const header = read("src", "components", "admin", "AdminHeader.tsx");
+  const cooCommandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
+  const salesExportButton = read("src", "components", "admin", "SalesReportExportButton.tsx");
   const salesReport = read("src", "app", "api", "admin", "sales-report", "excel", "route.ts");
   assert(header.includes('label="Export vanzari"'), "sales export should remain available under finance navigation");
+  assert(header.includes("SalesReportExportButton"), "finance navigation should ask for a period before exporting sales");
+  assert(!header.includes('href="/api/admin/sales-report/excel"'), "finance navigation should not download the default sales export directly");
+  assert(cooCommandCenter.includes("SalesReportExportButton"), "COO quick sales exports should ask for a period before exporting");
+  assert(salesExportButton.includes('type="date"'), "sales export dialog should collect a date range");
+  assert(salesExportButton.includes("new URLSearchParams({ from, to })"), "sales export should send selected from/to parameters");
+  assert(salesExportButton.includes("Data de final trebuie sa fie dupa data de inceput."), "sales export dialog should validate date order");
   assert(salesReport.includes("sortSalesRows"), "sales export should have deterministic business sorting");
   assert(salesReport.includes("salesRowTimingRank"), "sales export should group active/upcoming/past rows");
 }

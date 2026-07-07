@@ -162,7 +162,7 @@ function rateCardLabel(location: LocationSelectionLocationDTO) {
 function blockingText(availability: LocationSelectionAvailability) {
   const first = availability.blockingIntervals[0];
   if (!first) return "";
-  return `${blockingStatusLabel(first.status)}: ${formatDate(first.start)}${first.openEnded ? "" : ` - ${formatDate(first.end)}`}`;
+  return `${blockingStatusLabel(first.status)}: ${formatDate(first.start)}${first.openEnded ? "" : ` - ${formatDate(first.end)}`}${holdRemainingSuffix(first)}`;
 }
 
 function formatDate(value: string) {
@@ -173,5 +173,15 @@ function blockingStatusLabel(status: string) {
   if (status === "COMMERCIAL_BLOCK") return "Blocaj comercial";
   if (status === "MAINTENANCE") return "Mentenanta";
   if (status === "INTERNAL_HOLD") return "Hold intern";
+  if (status === "HOLD" || status === "RESERVED") return "Rezervat";
+  if (status === "BOOKED") return "Ocupat";
   return status;
+}
+
+function holdRemainingSuffix(interval: { status: string; holdExpiresAt?: string | null }) {
+  if (interval.status !== "HOLD" && interval.status !== "RESERVED") return "";
+  if (!interval.holdExpiresAt) return "";
+  const days = Math.ceil((new Date(interval.holdExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+  if (days <= 0) return " (expira astazi)";
+  return ` (mai are ${days} ${days === 1 ? "zi" : "zile"})`;
 }

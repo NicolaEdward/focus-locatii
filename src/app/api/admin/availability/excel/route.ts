@@ -178,7 +178,10 @@ function availabilityStyle(availability?: LocationSelectionAvailability) {
 
 function availabilityLabelForExport(availability?: LocationSelectionAvailability) {
   if (!availability) return "Disponibilitate necunoscuta";
-  const parts = [availability.label, availability.explanation, occupiedIntervalsLabel(availability)]
+  const includeIntervals =
+    availability.blockingIntervals.length > 1 ||
+    (availability.state === "AVAILABLE" && availability.blockingIntervals.length > 0);
+  const parts = [availability.label, availability.explanation, includeIntervals ? occupiedIntervalsLabel(availability) : ""]
     .map((part) => part.trim())
     .filter(Boolean);
   return [...new Set(parts)].join(" | ");
@@ -189,11 +192,25 @@ function occupiedIntervalsLabel(availability: LocationSelectionAvailability) {
   return availability.blockingIntervals
     .slice(0, 3)
     .map((interval) => {
-      const action = isManualAvailabilityStatus(interval.status) ? manualAvailabilityStatusLabel(interval.status) : "Ocupat";
+      const action = intervalActionLabel(interval.status);
       const end = interval.openEnded ? "" : ` - ${formatDate(new Date(interval.end))}`;
-      return `${action}: ${formatDate(new Date(interval.start))}${end}`;
+      return `${action}: ${formatDate(new Date(interval.start))}${end}${holdRemainingSuffix(interval)}`;
     })
     .join("; ");
+}
+
+function intervalActionLabel(status: string) {
+  if (isManualAvailabilityStatus(status)) return manualAvailabilityStatusLabel(status);
+  if (status === "HOLD" || status === "RESERVED") return "Rezervat";
+  return "Ocupat";
+}
+
+function holdRemainingSuffix(interval: { status: string; holdExpiresAt?: string | null }) {
+  if (interval.status !== "HOLD" && interval.status !== "RESERVED") return "";
+  if (!interval.holdExpiresAt) return "";
+  const days = Math.ceil((new Date(interval.holdExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+  if (days <= 0) return " (expira astazi)";
+  return ` (mai are ${days} ${days === 1 ? "zi" : "zile"})`;
 }
 
 function formatDate(date: Date) {

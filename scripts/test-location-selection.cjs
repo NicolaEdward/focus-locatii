@@ -44,7 +44,7 @@ assert(files.availability.includes("periodEnd: { gte: referenceDate }"), "start-
 assert(files.availability.includes("Disponibil pana la"), "no-period future booking should show available-until label");
 assert(files.availability.includes("Disponibil din"), "current booking should show available-from label");
 assert(files.availability.includes("label: \"Indisponibil\""), "selected-period conflicts must be labelled unavailable");
-assert(files.availability.includes("Ocupat in perioada"), "selected-period conflicts must explain occupied period");
+assert(files.availability.includes("reservationIntervalAction(first.status)"), "selected-period conflicts must explain occupied/reserved period through normalized reservation labels");
 assert(files.availability.includes("Disponibil in perioada selectata"), "selected-period available state must be unambiguous");
 assert(files.availability.includes("selectedPeriodCoverage"), "selected-period availability must calculate partial coverage");
 assert(files.availability.includes('state: "PARTIAL"'), "selected-period partial overlaps must be marked as partial, not full conflict");
@@ -52,9 +52,12 @@ assert(files.availability.includes("Disponibil partial"), "selected-period parti
 assert(files.availability.includes("availableFrom: firstAvailable.start.toISOString()"), "partial availability should expose the first available start date");
 assert(files.availability.includes("availableUntil: firstAvailable.end.toISOString()"), "partial availability should expose the first available end date");
 assert(files.availability.includes("isGenericAvailableNote"), "generic available notes must be suppressed when they contradict conflicts");
+assert(files.availability.includes("holdExpiresAt: reservation.holdExpiresAt?.toISOString() || null"), "availability should carry hold expiry metadata for admin-safe reservation labels");
+assert(files.availability.includes('if (status === "HOLD" || status === "RESERVED") return "Rezervat"'), "HOLD/RESERVED availability should be labelled as reserved");
 assert(files.dto.includes("tone: LocationSelectionAvailabilityTone"), "availability DTO must include tone");
 assert(files.dto.includes("explanation: string"), "availability DTO must include explanation");
 assert(files.dto.includes("blockingIntervals"), "availability DTO must expose safe blocking intervals");
+assert(files.dto.includes("holdExpiresAt?: string | null"), "availability DTO should expose hold expiry metadata for admin-only selector/export labels");
 assert(files.dto.includes("mediaTypes?: string[]"), "selector filters should support multiple media formats");
 assert(files.dto.includes("productionSketchUrl"), "selector DTO should expose safe production sketch links");
 
@@ -125,6 +128,9 @@ assert(files.availabilityExport.includes("getLocationSelectionAvailability"), "a
 assert(files.availabilityExport.includes("availabilityLabelForExport"), "availability export should use normalized labels");
 assert(files.availabilityExport.includes('"Schita"'), "availability export should include production sketch column");
 assert(files.availabilityExport.includes("mapsHref(null, location.latDisplay, location.lngDisplay)"), "availability export should use display coordinates only");
+assert(files.availabilityExport.includes("availability.blockingIntervals.length > 1"), "availability export should list blocking intervals only when multiple intervals need explicit detail");
+assert(files.availabilityExport.includes('return "Rezervat"'), "availability export should label HOLD/RESERVED as reserved, not occupied");
+assert(files.availabilityExport.includes("mai are"), "availability export should show remaining hold days when expiry is available");
 
 assert(files.publicCard.includes("Adauga in selectie") || files.publicCard.includes("Adaugă în selecție"), "public card must keep selection wording");
 assert(files.publicDrawer.includes("Selectia ta de locatii") || files.publicDrawer.includes("Selecția ta de locații"), "public drawer must keep selection wording");

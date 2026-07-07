@@ -103,6 +103,7 @@ export type LocationSelectionConflict = {
   clientName: string | null;
   campaignName: string | null;
   sellerName: string | null;
+  holdExpiresAt?: string | null;
   openEnded?: boolean;
 };
 
@@ -110,6 +111,7 @@ export type LocationSelectionBlockingInterval = {
   status: "HOLD" | "RESERVED" | "BOOKED" | string;
   start: string;
   end: string;
+  holdExpiresAt?: string | null;
   openEnded?: boolean;
 };
 

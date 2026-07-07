@@ -250,13 +250,15 @@ function buildNoPeriodAvailability(
     }
     const availableFrom = addDays(new Date(current.periodEnd), 1).toISOString();
     const label = `Disponibil din ${formatDate(availableFrom)}`;
+    const action = reservationIntervalAction(current.status);
+    const remaining = reservationHoldRemainingSuffix({ status: current.status, holdExpiresAt: current.holdExpiresAt });
     return {
       locationId: location.id,
       state: "CONFLICT",
       label,
       tone: "red",
-      explanation: `Ocupat la data verificata: ${formatDate(current.periodStart)} - ${formatDate(current.periodEnd)}.`,
-      warnings: [`Ocupat pana la ${formatDate(current.periodEnd)}.`, ...baseWarnings],
+      explanation: `${action} la data verificata: ${formatDate(current.periodStart)} - ${formatDate(current.periodEnd)}${remaining}.`,
+      warnings: [`${action} pana la ${formatDate(current.periodEnd)}${remaining}.`, ...baseWarnings],
       conflicts: futureConflicts,
       blockingIntervals: intervals,
       availableFrom
@@ -303,6 +305,7 @@ function serializeConflict(
     status: string;
     periodStart: Date;
     periodEnd: Date;
+    holdExpiresAt: Date | null;
     clientName: string;
     campaignName: string | null;
     salesperson: string | null;
@@ -326,6 +329,7 @@ function serializeConflict(
     status: reservation.status,
     periodStart: reservation.periodStart.toISOString(),
     periodEnd: reservation.periodEnd.toISOString(),
+    holdExpiresAt: reservation.holdExpiresAt?.toISOString() || null,
     clientName: canSeeDetails ? reservation.client?.companyName || reservation.clientName : null,
     campaignName: canSeeDetails ? reservation.campaign?.campaignName || reservation.campaignName : null,
     sellerName: canSeeDetails ? reservation.sellerUser?.name || reservation.salesperson : null
@@ -348,6 +352,7 @@ function toBlockingInterval(conflict: LocationSelectionConflict): LocationSelect
     status: conflict.status,
     start: conflict.periodStart,
     end: conflict.periodEnd,
+    holdExpiresAt: conflict.holdExpiresAt,
     openEnded: conflict.openEnded
   };
 }
@@ -360,20 +365,23 @@ function conflictExplanation(intervals: LocationSelectionBlockingInterval[]) {
       ? `Blocat din ${formatDate(first.start)}.`
       : `Blocat in perioada ${formatDate(first.start)} - ${formatDate(first.end)}.`;
   }
+  const action = reservationIntervalAction(first.status);
+  const remaining = reservationHoldRemainingSuffix(first);
   return first.openEnded
-    ? `Ocupat din ${formatDate(first.start)}.`
-    : `Ocupat in perioada ${formatDate(first.start)} - ${formatDate(first.end)}.`;
+    ? `${action} din ${formatDate(first.start)}${remaining}.`
+    : `${action} in perioada ${formatDate(first.start)} - ${formatDate(first.end)}${remaining}.`;
 }
 
 function partialExplanation(coverage: SelectedPeriodCoverage) {
   const firstBlocked = coverage.mergedIntervals[0];
   const firstAvailable = coverage.availableSegments[0];
-  const blockedAction = firstBlocked && isManualAvailabilityStatus(firstBlocked.status) ? "Blocat" : "Ocupat";
-  const blockedLabel = firstBlocked ? manualAvailabilityStatusLabel(firstBlocked.status) : null;
+  const blockedAction = firstBlocked && isManualAvailabilityStatus(firstBlocked.status) ? "Blocat" : firstBlocked ? reservationIntervalAction(firstBlocked.status) : "Ocupat";
+  const blockedLabel = firstBlocked && isManualAvailabilityStatus(firstBlocked.status) ? manualAvailabilityStatusLabel(firstBlocked.status) : null;
+  const remaining = firstBlocked ? reservationHoldRemainingSuffix(firstBlocked) : "";
   const blockedText = firstBlocked
     ? coverage.mergedIntervals.length > 1
-      ? `${blockedAction} in ${coverage.mergedIntervals.length} intervale; primul: ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}.`
-      : `${blockedAction} ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}${blockedLabel ? ` (${blockedLabel})` : ""}.`
+      ? `${blockedAction} in ${coverage.mergedIntervals.length} intervale; primul: ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}${remaining}.`
+      : `${blockedAction} ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}${blockedLabel ? ` (${blockedLabel})` : remaining}.`
     : "Exista ocupare partiala.";
   const availableText = firstAvailable
     ? coverage.availableSegments.length > 1
@@ -399,12 +407,13 @@ function selectedPeriodCoverage(
       status: interval.status,
       start: maxDate(new Date(interval.start), periodStart),
       end: minDate(new Date(interval.end), periodEnd),
+      holdExpiresAt: interval.holdExpiresAt,
       openEnded: interval.openEnded
     }))
     .filter((interval) => interval.start <= interval.end)
     .sort((left, right) => left.start.getTime() - right.start.getTime() || left.end.getTime() - right.end.getTime());
 
-  const merged: Array<{ status: string; start: Date; end: Date; openEnded?: boolean }> = [];
+  const merged: Array<{ status: string; start: Date; end: Date; holdExpiresAt?: string | null; openEnded?: boolean }> = [];
   for (const interval of clamped) {
     const last = merged[merged.length - 1];
     if (!last || interval.start > addDays(last.end, 1)) {
@@ -412,6 +421,7 @@ function selectedPeriodCoverage(
       continue;
     }
     if (interval.end > last.end) last.end = interval.end;
+    last.holdExpiresAt = last.holdExpiresAt || interval.holdExpiresAt;
     last.openEnded = Boolean(last.openEnded || interval.openEnded);
   }
 
@@ -438,11 +448,25 @@ function selectedPeriodCoverage(
       status: interval.status,
       start: interval.start.toISOString(),
       end: interval.end.toISOString(),
+      holdExpiresAt: interval.holdExpiresAt,
       openEnded: interval.openEnded
     })),
     availableSegments,
     coversEntirePeriod
   };
+}
+
+function reservationIntervalAction(status: string) {
+  if (status === "HOLD" || status === "RESERVED") return "Rezervat";
+  return "Ocupat";
+}
+
+function reservationHoldRemainingSuffix(interval: Pick<LocationSelectionBlockingInterval, "status" | "holdExpiresAt">) {
+  if (interval.status !== "HOLD" && interval.status !== "RESERVED") return "";
+  if (!interval.holdExpiresAt) return "";
+  const days = Math.ceil((new Date(interval.holdExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+  if (days <= 0) return " (expira astazi)";
+  return ` (mai are ${days} ${days === 1 ? "zi" : "zile"})`;
 }
 
 function isGenericAvailableNote(value: string) {

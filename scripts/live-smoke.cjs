@@ -35,9 +35,7 @@ async function main() {
   const health = await fetch(`${BASE_URL}/api/health/db`).then((response) => response.json());
   assert(health.ok === true || health.status === "ok", "Live database health failed");
 
-  const payload = await fetch(`${BASE_URL}/api/locations?ts=${Date.now()}`, {
-    cache: "no-store"
-  }).then((response) => response.json());
+  const payload = await fetch(`${BASE_URL}/api/locations`).then((response) => response.json());
   const locations = Array.isArray(payload) ? payload : payload.locations || [];
   assert(locations.length >= 1, `Live public locations are missing: ${locations.length}`);
   assert(

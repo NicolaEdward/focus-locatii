@@ -78,10 +78,16 @@ const cancelledAndArchived = serializeLocation(location({
 assert.equal(cancelledAndArchived.publicStatus, "AVAILABLE", "Cancelled/archived reservations must not block public availability.");
 
 const portfolioHero = fs.readFileSync(path.join(process.cwd(), "src", "components", "public", "PortfolioHero.tsx"), "utf8");
+const locationExplorer = fs.readFileSync(path.join(process.cwd(), "src", "components", "public", "LocationExplorer.tsx"), "utf8");
+const publicLocationRoute = fs.readFileSync(path.join(process.cwd(), "src", "app", "api", "locations", "[id]", "route.ts"), "utf8");
 assert(portfolioHero.includes('label: "Locatii libere"'), "Public hero should show free locations count.");
 assert(!portfolioHero.includes('{ label: "Locatii",'), "Public hero must not expose total location count label.");
 assert(!portfolioHero.includes('{ label: "Inchiriate",'), "Public hero must not expose rented/reserved count label.");
 assert(!portfolioHero.includes("locations.length.toString()"), "Public hero must not expose total location count value.");
+assert(!locationExplorer.includes("Date.now()"), "Public catalog refresh must not cache-bust /api/locations on every load.");
+assert(!locationExplorer.includes('cache: "no-store"'), "Public catalog refresh should allow /api/locations edge cache.");
+assert(publicLocationRoute.includes("publicCacheHeaders"), "Public location detail API should use public cache headers.");
+assert(publicLocationRoute.includes("s-maxage=60"), "Public location detail API should cache safely for short public TTL.");
 
 console.log(JSON.stringify({
   ok: true,
@@ -91,6 +97,8 @@ console.log(JSON.stringify({
     "display coordinates exposed",
     "production sketch exposed as a deliberate public/commercial asset",
     "public hero shows only free locations count",
+    "public catalog refresh respects API cache",
+    "public location detail API has short public cache",
     "private coordinates hidden",
     "BOOKED blocks with or without client/campaign",
     "CANCELLED/ARCHIVED ignored"

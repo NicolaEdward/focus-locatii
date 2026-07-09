@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { createLocation } from "@/lib/location-mutations";
-import { listAdminLocations, listCachedPublicLocations, serializeLocation } from "@/lib/locations";
-import { requirePermission } from "@/lib/auth";
-import { recordAudit } from "@/lib/audit";
+import { listCachedPublicLocations } from "@/lib/locations";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,6 +20,10 @@ export async function GET(request: NextRequest) {
   const scope = request.nextUrl.searchParams.get("scope");
 
   if (scope === "admin") {
+    const [{ requirePermission }, { listAdminLocations }] = await Promise.all([
+      import("@/lib/auth"),
+      import("@/lib/locations")
+    ]);
     const { response } = await requirePermission(request, "inventory.view");
     if (response) return response;
     return NextResponse.json({ locations: await listAdminLocations() }, { headers: noStoreHeaders });
@@ -33,6 +33,13 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const [{ requirePermission }, { createLocation }, { prisma }, { recordAudit }, { serializeLocation }] = await Promise.all([
+    import("@/lib/auth"),
+    import("@/lib/location-mutations"),
+    import("@/lib/prisma"),
+    import("@/lib/audit"),
+    import("@/lib/locations")
+  ]);
   const { session, response } = await requirePermission(request, "inventory.manage");
   if (response || !session) return response;
 

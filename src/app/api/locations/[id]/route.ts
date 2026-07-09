@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { duplicateLocation, updateLocation } from "@/lib/location-mutations";
-import { getAdminLocation, getPublicLocation, serializeLocation } from "@/lib/locations";
-import { requirePermission } from "@/lib/auth";
-import { recordAudit } from "@/lib/audit";
+import { getPublicLocation } from "@/lib/locations";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -19,11 +15,19 @@ const noStoreHeaders = {
   "Surrogate-Control": "no-store"
 };
 
+const publicCacheHeaders = {
+  "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120"
+};
+
 export async function GET(request: NextRequest, context: Context) {
   const { id } = await context.params;
   const admin = request.nextUrl.searchParams.get("scope") === "admin";
 
   if (admin) {
+    const [{ requirePermission }, { getAdminLocation }] = await Promise.all([
+      import("@/lib/auth"),
+      import("@/lib/locations")
+    ]);
     const { response } = await requirePermission(request, "inventory.view");
     if (response) return response;
     const location = await getAdminLocation(id);
@@ -34,11 +38,18 @@ export async function GET(request: NextRequest, context: Context) {
 
   const location = await getPublicLocation(id);
   return location
-    ? NextResponse.json({ location }, { headers: noStoreHeaders })
-    : NextResponse.json({ error: "Location not found" }, { status: 404, headers: noStoreHeaders });
+    ? NextResponse.json({ location }, { headers: publicCacheHeaders })
+    : NextResponse.json({ error: "Location not found" }, { status: 404, headers: publicCacheHeaders });
 }
 
 export async function PATCH(request: NextRequest, context: Context) {
+  const [{ requirePermission }, { updateLocation }, { prisma }, { recordAudit }, { serializeLocation }] = await Promise.all([
+    import("@/lib/auth"),
+    import("@/lib/location-mutations"),
+    import("@/lib/prisma"),
+    import("@/lib/audit"),
+    import("@/lib/locations")
+  ]);
   const { session, response } = await requirePermission(request, "inventory.manage");
   if (response || !session) return response;
 
@@ -66,6 +77,11 @@ export async function PATCH(request: NextRequest, context: Context) {
 }
 
 export async function POST(request: NextRequest, context: Context) {
+  const [{ requirePermission }, { duplicateLocation }, { recordAudit }] = await Promise.all([
+    import("@/lib/auth"),
+    import("@/lib/location-mutations"),
+    import("@/lib/audit")
+  ]);
   const { session, response } = await requirePermission(request, "inventory.manage");
   if (response || !session) return response;
 
@@ -81,6 +97,11 @@ export async function POST(request: NextRequest, context: Context) {
 }
 
 export async function DELETE(request: NextRequest, context: Context) {
+  const [{ requirePermission }, { prisma }, { recordAudit }] = await Promise.all([
+    import("@/lib/auth"),
+    import("@/lib/prisma"),
+    import("@/lib/audit")
+  ]);
   const { session, response } = await requirePermission(request, "inventory.manage");
   if (response || !session) return response;
 

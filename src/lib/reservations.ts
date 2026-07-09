@@ -182,7 +182,7 @@ export async function listReservations(filters: {
   const from = parseDate(filters.from);
   const to = parseDate(filters.to);
 
-  const reservations = await prisma.reservation.findMany({
+  const reservationIds = await prisma.reservation.findMany({
     where: {
       ...(actor?.role === "SALES_AGENT"
         ? {
@@ -213,13 +213,13 @@ export async function listReservations(filters: {
           }
         : {})
     },
-    include: reservationInclude,
+    select: { id: true },
     orderBy: [{ bookedAt: "desc" }, { createdAt: "desc" }, { periodStart: "desc" }],
     take: 500
   });
 
   const reservationsWithSegments = await prisma.reservation.findMany({
-    where: { id: { in: reservations.map((reservation) => reservation.id) } },
+    where: { id: { in: reservationIds.map((reservation) => reservation.id) } },
     include: reservationInclude,
     orderBy: [{ createdAt: "asc" }]
   });

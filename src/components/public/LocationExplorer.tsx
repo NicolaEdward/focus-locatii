@@ -65,12 +65,7 @@ export function LocationExplorer({
 
     async function refreshLocations() {
       try {
-        const response = await fetch(`/api/locations?ts=${Date.now()}`, {
-          cache: "no-store",
-          headers: {
-            "cache-control": "no-cache"
-          }
-        });
+        const response = await fetch("/api/locations");
         if (!response.ok) return;
 
         const payload = await response.json();
@@ -98,7 +93,7 @@ export function LocationExplorer({
     }
 
     refreshLocations();
-    const intervalId = window.setInterval(refreshLocations, 30_000);
+    const intervalId = window.setInterval(refreshLocations, 60_000);
     window.addEventListener("focus", refreshLocations);
     document.addEventListener("visibilitychange", refreshWhenVisible);
 

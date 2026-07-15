@@ -6,6 +6,7 @@ import { withOperationDelayChange, type OperationKind } from "@/lib/operation-st
 import { canRescheduleOperationalReservation } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
 import { updateReservation, updateReservationProductionNotes } from "@/lib/reservations";
+import { createOperationalNotifications } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -67,7 +68,9 @@ export async function POST(request: NextRequest) {
         ownerId: true,
         sellerUserId: true,
         salesperson: true,
-        client: { select: { accountOwnerUserId: true } },
+        client: { select: { accountOwnerUserId: true, companyName: true } },
+        campaign: { select: { campaignName: true } },
+        location: { select: { code: true } },
         billingItems: { select: { id: true }, take: 1 }
       }
     });
@@ -133,6 +136,29 @@ export async function POST(request: NextRequest) {
       },
       request
     });
+
+    try {
+      await createOperationalNotifications({
+        recipientUserIds: [existing.ownerId, existing.sellerUserId, existing.client?.accountOwnerUserId],
+        actorUserId: session.id,
+        type: `operation_${kind}_rescheduled`,
+        title: kind === "decoration" ? "Decorare reprogramata" : "Neutralizare reprogramata",
+        message: `${existing.location?.code || "Locatia"} / ${existing.campaign?.campaignName || existing.client?.companyName || "campanie"} a fost reprogramata pentru ${formatDateInput(newDate)} de ${session.name}.`,
+        entityId: `${reservationId}:${kind}:${taskId || "base"}:${formatDateInput(newDate)}`,
+        dueDate: newDate,
+        metadata: {
+          reservationId,
+          kind,
+          taskId,
+          oldDate: oldTaskDate.toISOString(),
+          newDate: newDate.toISOString(),
+          reason,
+          financeReviewRequired: existing.billingItems.length > 0
+        }
+      });
+    } catch {
+      console.error("Operational reschedule notification failed", { reservationId, kind });
+    }
 
     return NextResponse.json(
       {

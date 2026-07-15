@@ -20,6 +20,7 @@ import {
 } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
 import { updateReservationProductionNotesWithClient } from "@/lib/reservations";
+import { createOperationalNotifications } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -66,7 +67,9 @@ export async function POST(request: NextRequest) {
         ownerId: true,
         sellerUserId: true,
         salesperson: true,
-        client: { select: { accountOwnerUserId: true } }
+        client: { select: { accountOwnerUserId: true, companyName: true } },
+        campaign: { select: { campaignName: true } },
+        location: { select: { code: true } }
       }
     });
 
@@ -162,6 +165,20 @@ export async function POST(request: NextRequest) {
       metadata: { taskId, proofPhotoCount: files.length, expiresAt: expiresAt.toISOString() },
       request
     });
+
+    try {
+      await createOperationalNotifications({
+        recipientUserIds: [existing.ownerId, existing.sellerUserId, existing.client?.accountOwnerUserId],
+        actorUserId: session.id,
+        type: `operation_${kind}_completed`,
+        title: kind === "decoration" ? "Decorare finalizata" : "Neutralizare finalizata",
+        message: `${existing.location?.code || "Locatia"} / ${existing.campaign?.campaignName || existing.client?.companyName || "campanie"} a fost marcata ca finalizata de ${session.name}.`,
+        entityId: `${reservationId}:${kind}:${taskId || "base"}`,
+        metadata: { reservationId, kind, taskId, proofPhotoCount: files.length }
+      });
+    } catch {
+      console.error("Operational completion notification failed", { reservationId, kind });
+    }
 
     return NextResponse.json(
       {

@@ -66,7 +66,7 @@ function completionRouteIsScopedAndDoesNotCreateReservations() {
   assert(source.includes("requireAnyPermission"), "completion API must require authenticated admin permissions");
   assert(source.includes('"dashboard.operations.view"'), "field installer operational permission should be supported");
   assert(source.includes("canCompleteOperationalReservation"), "completion API must enforce scoped operational access");
-  assert(source.includes("client: { select: { accountOwnerUserId: true } }"), "completion API must load client owner for seller access checks");
+  assert(source.includes("client: { select:") && source.includes("accountOwnerUserId: true"), "completion API must load client owner for seller access checks");
   assert(source.includes("validateOperationalProofFile"), "completion API must validate uploaded files");
   assert(source.includes("clientDocument.create"), "proof photos should be stored as internal documents");
   assert(source.includes("withOperationCompletion"), "base operation completion should use operation metadata");
@@ -181,7 +181,7 @@ function operationalDateDelayWorkflowIsAudited() {
   assert(route.includes("Motivul intarzierii este obligatoriu."), "date delay route must require a delay reason");
   assert(route.includes("Confirma impactul asupra perioadei si pro-rata."), "date delay route must require explicit impact confirmation");
   assert(route.includes("canRescheduleOperationalReservation"), "date delay route must enforce scoped reschedule access");
-  assert(route.includes("client: { select: { accountOwnerUserId: true } }"), "date delay route must load client owner for seller access checks");
+  assert(route.includes("client: { select:") && route.includes("accountOwnerUserId: true"), "date delay route must load client owner for seller access checks");
   assert(route.includes("updateReservation("), "date delay route should use existing reservation update safety logic");
   assert(route.includes("financeReviewRequired"), "date delay route must flag finance review when billing exists");
   assert(route.includes("operation.delay.reschedule"), "date delay route must write an audit log");

@@ -9,6 +9,17 @@ const receivableNotificationTypes = ["receivable_overdue", "receivable_due_today
 const legacyInvoiceNotificationTypes = ["invoice_overdue", "invoice_due_today", "invoice_due_soon"];
 const financialNotificationTypes = [...receivableNotificationTypes, ...legacyInvoiceNotificationTypes];
 
+type OperationalNotificationInput = {
+  recipientUserIds: Array<string | null | undefined>;
+  actorUserId: string;
+  type: string;
+  title: string;
+  message: string;
+  entityId: string;
+  dueDate?: Date | null;
+  metadata?: Record<string, unknown>;
+};
+
 export async function syncFinancialNotifications(now = new Date()) {
   const today = startOfDay(now);
   const [receivables, fallbackUsers] = await Promise.all([
@@ -72,9 +83,43 @@ export async function listNotificationsForUser(session: AuthSession) {
   });
 }
 
+export async function createOperationalNotifications(input: OperationalNotificationInput) {
+  const requestedIds = [...new Set(input.recipientUserIds.filter((id): id is string => Boolean(id)))]
+    .filter((id) => id !== input.actorUserId);
+  let recipients = requestedIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: requestedIds }, active: true },
+        select: { id: true }
+      })
+    : [];
+  if (!recipients.length) {
+    recipients = await prisma.user.findMany({
+        where: { active: true, role: { in: ["COO", "SALES_DIRECTOR"] } },
+        select: { id: true }
+      });
+  }
+
+  let created = 0;
+  for (const recipient of recipients) {
+    created += await ensureNotification({
+      userId: recipient.id,
+      type: input.type,
+      title: input.title,
+      message: input.message,
+      entityType: "reservation",
+      entityId: input.entityId,
+      severity: "medium",
+      dueDate: input.dueDate ?? null,
+      recommendedAction: "Verifica detaliile in workspace-ul operational.",
+      metadata: input.metadata || {}
+    });
+  }
+  return created;
+}
+
 export async function updateNotificationAction(id: string, action: string, note: string | null, session: AuthSession, request?: Request) {
   const notification = await prisma.appNotification.findUniqueOrThrow({ where: { id } });
-  if (session.role === "SALES_AGENT" && notification.userId !== session.id) {
+  if (!["COO", "SUPER_ADMIN", "SALES_DIRECTOR"].includes(session.role) && notification.userId !== session.id) {
     throw new Error("Poti modifica doar notificarile tale.");
   }
   const status = action === "resolve" || action === "called" || action === "collected" ? "resolved" : action === "escalate" ? "in_progress" : "open";
@@ -111,7 +156,7 @@ async function ensureNotification(input: {
   entityType: string;
   entityId: string;
   severity: string;
-  dueDate: Date;
+  dueDate: Date | null;
   recommendedAction: string;
   metadata: Record<string, unknown>;
 }) {

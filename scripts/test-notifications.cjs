@@ -3,7 +3,11 @@ const path = require("node:path");
 const { loadTsModule } = require("./load-ts-module.cjs");
 
 let receivables = [];
-const users = [{ id: "director-1", role: "SALES_DIRECTOR" }, { id: "coo-1", role: "COO" }];
+const users = [
+  { id: "director-1", role: "SALES_DIRECTOR", active: true },
+  { id: "coo-1", role: "COO", active: true },
+  { id: "seller-1", role: "SALES_AGENT", active: true }
+];
 const notifications = [];
 let nextNotificationId = 1;
 
@@ -12,7 +16,12 @@ const prisma = {
     findMany: async () => receivables
   },
   user: {
-    findMany: async () => users
+    findMany: async ({ where } = {}) => users.filter((user) => {
+      if (where?.id?.in && !where.id.in.includes(user.id)) return false;
+      if (where?.active !== undefined && user.active !== where.active) return false;
+      if (where?.role?.in && !where.role.in.includes(user.role)) return false;
+      return true;
+    })
   },
   appNotification: {
     findMany: async ({ where }) => notifications
@@ -32,6 +41,11 @@ const prisma = {
       notification.entityId === where.entityId &&
       includes(where.status?.in, notification.status)
     ) || null,
+    findUniqueOrThrow: async ({ where }) => {
+      const notification = notifications.find((item) => item.id === where.id);
+      if (!notification) throw new Error("missing notification");
+      return notification;
+    },
     create: async ({ data }) => {
       const notification = { id: `notification-${nextNotificationId++}`, status: "open", ...data };
       notifications.push(notification);
@@ -57,7 +71,7 @@ const prisma = {
   }
 };
 
-const { syncFinancialNotifications } = loadTsModule(path.join(process.cwd(), "src", "lib", "notifications.ts"), {
+const { createOperationalNotifications, syncFinancialNotifications, updateNotificationAction } = loadTsModule(path.join(process.cwd(), "src", "lib", "notifications.ts"), {
   "@/lib/prisma": { prisma },
   "@/lib/audit": { recordAudit: async () => null }
 });
@@ -98,6 +112,39 @@ async function main() {
   assert(!openNotification("soon-1", "receivable_due_soon"), "due-soon transition archives stale due-soon notification");
   assert(openNotification("soon-1", "receivable_overdue"), "due-soon transition leaves current overdue notification");
 
+  const operationalCreated = await createOperationalNotifications({
+    recipientUserIds: ["seller-1"],
+    actorUserId: "field-1",
+    type: "operation_decoration_completed",
+    title: "Decorare finalizata",
+    message: "B01 a fost finalizata.",
+    entityId: "reservation-1:decoration:base"
+  });
+  assert.equal(operationalCreated, 1, "operational completion notifies the responsible seller");
+  const operational = openNotification("reservation-1:decoration:base", "operation_decoration_completed");
+  assert.equal(operational.userId, "seller-1", "operational notification is assigned to the responsible seller");
+  assert.equal(await createOperationalNotifications({
+    recipientUserIds: ["seller-1"],
+    actorUserId: "field-1",
+    type: "operation_decoration_completed",
+    title: "Decorare finalizata",
+    message: "B01 a fost finalizata.",
+    entityId: "reservation-1:decoration:base"
+  }), 0, "operational notification is idempotent while open");
+  await assert.rejects(
+    () => updateNotificationAction(operational.id, "resolve", null, {
+      id: "finance-1",
+      email: "finance@example.test",
+      name: "Finance",
+      role: "FINANCE_OPERATOR",
+      tokenVersion: 0,
+      iat: 0,
+      exp: 1
+    }),
+    /doar notificarile tale/,
+    "non-privileged users cannot resolve another user's notification"
+  );
+
   console.log(JSON.stringify({
     ok: true,
     checked: [
@@ -105,7 +152,9 @@ async function main() {
       "overdue receivable notification created",
       "stale receivable notifications cleaned",
       "due-soon transitions to overdue without stale duplicate",
-      "duplicate notification not repeatedly created"
+      "duplicate notification not repeatedly created",
+      "operational completion notification is scoped and idempotent",
+      "non-privileged notification ownership is enforced"
     ]
   }, null, 2));
 }

@@ -64,6 +64,7 @@
     "test:data-integrity": "node scripts/test-data-integrity.cjs",
     "test:operations-rbac": "node scripts/test-operations-rbac.cjs",
     "test:notifications": "node scripts/test-notifications.cjs",
+    "test:account-notifications": "node scripts/test-account-notifications.cjs",
     "test:client-supplier": "tsx scripts/test-client-supplier-workflows.ts",
     "smoke": "node scripts/smoke-http.cjs",
     "smoke:visual": "node scripts/visual-smoke.cjs",

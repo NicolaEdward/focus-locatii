@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission, requirePermission } from "@/lib/auth";
-import { deleteReservation, updateReservation, updateReservationGroupStatus } from "@/lib/reservations";
+import { deleteReservation, getReservation, updateReservation, updateReservationGroupStatus } from "@/lib/reservations";
 import { recordAudit } from "@/lib/audit";
 
 type Context = {
@@ -13,6 +13,21 @@ export const revalidate = 0;
 const noStoreHeaders = {
   "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"
 };
+
+export async function GET(request: NextRequest, context: Context) {
+  const { session, response } = await requireAnyPermission(request, ["reservations.view", "reservations.view.own"]);
+  if (response || !session) return response;
+
+  const { id } = await context.params;
+  try {
+    return NextResponse.json({ reservation: await getReservation(id, session) }, { headers: noStoreHeaders });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Rezervarea nu a putut fi incarcata." },
+      { status: 404, headers: noStoreHeaders }
+    );
+  }
+}
 
 export async function PATCH(request: NextRequest, context: Context) {
   const { session, response } = await requireAnyPermission(request, ["reservations.manage", "reservations.manage.own"]);

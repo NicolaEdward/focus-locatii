@@ -16,14 +16,12 @@ export function AdminDashboard({
   initialLocations,
   categories,
   initialReservations,
-  operationReservations,
   initialOfferRequests,
   session
 }: {
   initialLocations: LocationDTO[];
   categories: CategoryDTO[];
   initialReservations: ReservationDTO[];
-  operationReservations?: ReservationDTO[];
   initialOfferRequests: OfferRequestDTO[];
   session: AuthSession;
 }) {
@@ -131,7 +129,6 @@ export function AdminDashboard({
           <AdminReservationsPanel
             locations={locations}
             initialReservations={initialReservations}
-            operationReservations={operationReservations}
             initialOfferRequests={initialOfferRequests}
             onLocationsUpdated={setLocations}
             session={session}

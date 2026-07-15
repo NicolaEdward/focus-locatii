@@ -97,7 +97,7 @@ function operationControlsRemainPermissionGated() {
   assert(panel.includes('const canUpdateOperationStatus = hasPermission(session.role, "campaigns.operate")'), "reservation operation controls must require campaigns.operate");
   assert(commandCenter.includes('hasPermission(data.role, "campaigns.operate")'), "COO operation controls must require campaigns.operate");
   assert(commandCenter.includes("canOperate={canOperateCampaigns}"), "COO mini-card operation task actions should receive the operation permission gate");
-  assert(commandCenter.includes('{canOperate ? <button type="button" onClick={() => onCommand(row.id, "createTask"'), "create-task action should be hidden without operation permission");
+  assert(!commandCenter.includes('note: "Follow-up operational pentru hold."'), "HOLD actions must not create decoration tasks");
   assert(commandCenter.includes("Doar vizualizare"), "non-operators should see read-only operation status");
 }
 

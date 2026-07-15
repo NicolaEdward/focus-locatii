@@ -4,7 +4,7 @@ import { AdminHeader } from "@/components/admin/AdminHeader";
 import { getAdminSession } from "@/lib/auth";
 import { listAdminLocations, listCategories } from "@/lib/locations";
 import { listOfferRequests } from "@/lib/offer-requests";
-import { listOperationReservations, listReservations } from "@/lib/reservations";
+import { listReservations } from "@/lib/reservations";
 import { hasPermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
@@ -14,11 +14,10 @@ export default async function AdminLocationsPage() {
   if (!session) redirect("/admin/login");
   if (!hasPermission(session.role, "inventory.view")) redirect("/admin/dashboard");
 
-  const [locations, categories, reservations, operationReservations, offerRequests] = await Promise.all([
+  const [locations, categories, reservations, offerRequests] = await Promise.all([
     listAdminLocations(),
     listCategories(),
-    listReservations({}, session),
-    listOperationReservations(),
+    listReservations({}, session, { includeDetails: false }),
     listOfferRequests(session)
   ]);
 
@@ -29,7 +28,6 @@ export default async function AdminLocationsPage() {
         initialLocations={locations}
         categories={categories}
         initialReservations={reservations}
-        operationReservations={operationReservations}
         initialOfferRequests={offerRequests}
         session={session}
       />

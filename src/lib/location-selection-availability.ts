@@ -22,6 +22,7 @@ type AvailabilityLocation = {
   id: string;
   code: string;
   status: string;
+  lifecycleStatus: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "MAINTENANCE";
   availabilityText: string | null;
   blockedReason: string | null;
   blockedFrom: Date | null;
@@ -46,6 +47,7 @@ export async function getLocationSelectionAvailability(input: {
       id: true,
       code: true,
       status: true,
+      lifecycleStatus: true,
       availabilityText: true,
       blockedReason: true,
       blockedFrom: true,
@@ -87,7 +89,9 @@ export async function getLocationSelectionAvailability(input: {
           ...overrideConflicts.filter((conflict) => conflict.locationId === location.id),
           ...(legacyBlock ? [legacyBlock] : [])
         ].sort(compareConflicts);
-        return [location.id, buildNoPeriodAvailability(location, intervals, referenceDate)];
+        return [location.id, location.lifecycleStatus === "ACTIVE"
+          ? buildNoPeriodAvailability(location, intervals, referenceDate)
+          : lifecycleUnavailable(location)];
       })
     );
   }
@@ -132,12 +136,12 @@ export async function getLocationSelectionAvailability(input: {
       ].sort(compareConflicts);
       return [
         location.id,
-        buildAvailability({
+        location.lifecycleStatus === "ACTIVE" ? buildAvailability({
           location,
           conflicts: locationConflicts,
           periodStart,
           periodEnd
-        })
+        }) : lifecycleUnavailable(location)
       ];
     })
   );
@@ -216,6 +220,24 @@ function unknownAvailability(location: AvailabilityLocation, reason: string): Lo
     tone: "gray",
     explanation: reason,
     warnings: [reason],
+    conflicts: [],
+    blockingIntervals: []
+  };
+}
+
+function lifecycleUnavailable(location: AvailabilityLocation): LocationSelectionAvailability {
+  const maintenance = location.lifecycleStatus === "MAINTENANCE";
+  const label = maintenance ? "Mentenanta" : "Locatie inactiva";
+  const explanation = maintenance
+    ? "Locatia este in mentenanta si nu poate fi propusa momentan."
+    : "Locatia nu este activa in inventarul comercial.";
+  return {
+    locationId: location.id,
+    state: "CONFLICT",
+    label,
+    tone: "red",
+    explanation,
+    warnings: [explanation],
     conflicts: [],
     blockingIntervals: []
   };
@@ -338,9 +360,6 @@ function serializeConflict(
 
 function locationWarnings(location: AvailabilityLocation) {
   const warnings: string[] = [];
-  if (!["AVAILABLE", "AVAILABLE_FROM"].includes(location.status)) {
-    warnings.push(`Status inventar: ${location.status}. Verifica disponibilitatea comerciala.`);
-  }
   if (location.availabilityText) {
     warnings.push(`Nota disponibilitate: ${location.availabilityText}`);
   }

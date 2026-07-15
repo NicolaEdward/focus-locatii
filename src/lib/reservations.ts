@@ -60,6 +60,11 @@ const reservationInclude = {
   }
 };
 
+const reservationSummaryInclude = {
+  client: { select: { accountOwnerUserId: true } },
+  location: { select: { code: true, address: true, city: true, type: true } }
+};
+
 const optionalNumber = z.preprocess((value) => {
   if (value === undefined) return undefined;
   if (value === "" || value == null) return null;
@@ -177,7 +182,7 @@ export async function listReservations(filters: {
   locationId?: string | null;
   from?: string | null;
   to?: string | null;
-} = {}, actor?: AuthSession | null) {
+} = {}, actor?: AuthSession | null, options: { includeDetails?: boolean } = {}) {
   await expireStaleHolds();
   const from = parseDate(filters.from);
   const to = parseDate(filters.to);
@@ -220,11 +225,20 @@ export async function listReservations(filters: {
 
   const reservationsWithSegments = await prisma.reservation.findMany({
     where: { id: { in: reservationIds.map((reservation) => reservation.id) } },
-    include: reservationInclude,
+    include: options.includeDetails === false ? reservationSummaryInclude : reservationInclude,
     orderBy: [{ createdAt: "asc" }]
   });
 
   return reservationsWithSegments.map(serializeReservation);
+}
+
+export async function getReservation(id: string, actor?: AuthSession | null) {
+  const reservation = await prisma.reservation.findUniqueOrThrow({
+    where: { id },
+    include: reservationInclude
+  });
+  assertReservationOwnership(reservation, actor);
+  return serializeReservation(reservation);
 }
 
 export async function listOperationReservations() {

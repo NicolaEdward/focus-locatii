@@ -10,6 +10,7 @@ import type {
 
 export function LocationSelectionBasket({
   items,
+  availabilityById,
   warnings,
   mediaPlanSeed,
   periodStart,
@@ -17,11 +18,12 @@ export function LocationSelectionBasket({
   exportHref,
   onRemove,
   onClear,
+  onRemoveConflicts,
   onMove,
   onCopyCodes
 }: {
   items: LocationSelectionItem[];
-  locationsById: Map<string, LocationSelectionItem>;
+  availabilityById: Record<string, LocationSelectionAvailability>;
   warnings: string[];
   mediaPlanSeed: MediaPlanSeed;
   periodStart: string;
@@ -29,16 +31,21 @@ export function LocationSelectionBasket({
   exportHref: string;
   onRemove: (locationId: string) => void;
   onClear: () => void;
+  onRemoveConflicts: () => void;
   onMove: (locationId: string, direction: -1 | 1) => void;
   onCopyCodes: () => void;
 }) {
   const totalSurface = items.reduce((sum, item) => sum + (item.snapshot.surface || 0), 0);
   const estimatedTotal = items.reduce((sum, item) => sum + (item.suggestedBasePrice || 0), 0);
-  const warningCount = items.filter((item) => item.availabilityState === "CONFLICT" || item.availabilityWarnings.length).length;
-  const conflictCount = items.filter((item) => item.availabilityState === "CONFLICT").length;
+  const currentAvailability = (item: LocationSelectionItem) => availabilityById[item.locationId];
+  const warningCount = items.filter((item) => {
+    const availability = currentAvailability(item);
+    return (availability?.state || item.availabilityState) === "CONFLICT" || Boolean(availability?.warnings.length || item.availabilityWarnings.length);
+  }).length;
+  const conflictCount = items.filter((item) => (currentAvailability(item)?.state || item.availabilityState) === "CONFLICT").length;
 
   return (
-    <aside className="sticky top-24 grid max-h-[calc(100vh-7rem)] min-w-0 content-start overflow-hidden rounded-lg border border-focus-line bg-focus-navy/92 shadow-2xl">
+    <aside className="grid min-w-0 content-start overflow-hidden rounded-lg border border-focus-line bg-focus-navy/92 shadow-2xl xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)]">
       <header className="border-b border-focus-line p-4">
         <p className="text-xs font-black uppercase text-focus-yellow">Selectia pentru oferta</p>
         <div className="mt-1 flex items-end justify-between gap-3">
@@ -51,9 +58,12 @@ export function LocationSelectionBasket({
           <Metric label="Avertizari" value={String(warningCount)} />
         </div>
         {conflictCount ? (
-          <p className="mt-3 rounded-md border border-red-300/35 bg-red-400/10 px-3 py-2 text-xs font-bold text-red-100">
-            {conflictCount} locatii selectate au conflict in perioada aleasa.
-          </p>
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-red-300/35 bg-red-400/10 px-3 py-2 text-xs font-bold text-red-100">
+            <span>{conflictCount} locatii selectate au conflict in perioada aleasa.</span>
+            <button className="shrink-0 rounded-md border border-red-200/40 px-2 py-1 text-[10px] font-black uppercase hover:bg-red-200/10" type="button" onClick={onRemoveConflicts}>
+              Elimina conflictele
+            </button>
+          </div>
         ) : null}
       </header>
 
@@ -64,6 +74,7 @@ export function LocationSelectionBasket({
               <SelectedLocationRow
                 key={item.locationId}
                 item={item}
+                availability={availabilityById[item.locationId]}
                 index={index}
                 total={items.length}
                 onRemove={onRemove}
@@ -126,18 +137,20 @@ export function LocationSelectionBasket({
 
 function SelectedLocationRow({
   item,
+  availability: currentAvailability,
   index,
   total,
   onRemove,
   onMove
 }: {
   item: LocationSelectionItem;
+  availability?: LocationSelectionAvailability;
   index: number;
   total: number;
   onRemove: (locationId: string) => void;
   onMove: (locationId: string, direction: -1 | 1) => void;
 }) {
-  const availability: LocationSelectionAvailability = {
+  const availability: LocationSelectionAvailability = currentAvailability || {
     locationId: item.locationId,
     state: item.availabilityState,
     label: item.availabilityState === "CONFLICT" ? "Conflict" : item.availabilityState === "AVAILABLE" ? "Disponibil" : item.availabilityState === "PARTIAL" ? "Partial" : "Alege perioada",
@@ -185,7 +198,7 @@ function SelectedLocationRow({
           <div className="mt-2">
             <AvailabilityBadge availability={availability} />
           </div>
-          {item.availabilityWarnings[0] ? <p className="mt-1 line-clamp-2 text-xs text-amber-100">{item.availabilityWarnings[0]}</p> : null}
+          {availability.explanation ? <p className={`mt-1 line-clamp-2 text-xs ${availability.state === "CONFLICT" ? "text-red-100" : availability.tone === "yellow" ? "text-amber-100" : "text-slate-400"}`}>{availability.explanation}</p> : null}
           <p className="mt-1 truncate text-xs text-slate-400">{item.snapshot.name || item.snapshot.address || "-"}</p>
         </div>
       </div>

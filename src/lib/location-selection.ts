@@ -29,6 +29,7 @@ const selectionLocationSelect = {
   rateCard: true,
   rateCardValue: true,
   status: true,
+  lifecycleStatus: true,
   showInPublic: true,
   showPricePublic: true,
   isPremium: true,
@@ -181,6 +182,7 @@ function selectionDescription(row: SelectionLocationRow) {
 function selectionWhere(filters: LocationSelectionFilters): Prisma.LocationWhereInput {
   const search = filters.search?.trim();
   return {
+    lifecycleStatus: { not: "ARCHIVED" },
     ...(search
       ? {
           OR: [

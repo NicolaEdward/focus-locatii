@@ -7,30 +7,30 @@ import type { LocationSelectionAvailability, LocationSelectionLocationDTO } from
 
 export const LocationSelectionResults = memo(function LocationSelectionResults({
   locations,
+  title,
   availabilityById,
   selectedIds,
   onAdd,
-  onRemove,
-  onHover
+  onRemove
 }: {
   locations: LocationSelectionLocationDTO[];
+  title: string;
   availabilityById: Record<string, LocationSelectionAvailability>;
   selectedIds: Set<string>;
   onAdd: (location: LocationSelectionLocationDTO) => void;
   onRemove: (locationId: string) => void;
-  onHover: (locationId: string | null) => void;
 }) {
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border border-focus-line bg-focus-navy/80">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-focus-line p-4">
         <div>
-          <p className="text-xs font-black uppercase text-focus-yellow">Locatii propunibile</p>
+          <p className="text-xs font-black uppercase text-focus-yellow">{title}</p>
           <h2 className="text-xl font-black text-white">{locations.length} rezultate</h2>
         </div>
         <p className="text-sm font-bold text-slate-300">Selectie rapida pentru oferta OOH</p>
       </header>
       <div className="max-h-[760px] overflow-auto">
-        <table className="w-full min-w-[820px] table-fixed text-left text-sm">
+        <table className="w-full min-w-[780px] table-fixed text-left text-sm">
           <thead className="sticky top-0 z-10 bg-focus-ink text-xs uppercase text-slate-300">
             <tr>
               <th className="w-[32%] px-3 py-3">Locatie</th>
@@ -50,8 +50,6 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
                 <tr
                   key={location.id}
                   className={selected ? "bg-focus-yellow/8" : unavailable ? "bg-red-950/15" : "hover:bg-white/[0.03]"}
-                  onMouseEnter={() => onHover(location.id)}
-                  onMouseLeave={() => onHover(null)}
                 >
                   <td className="px-3 py-3">
                     <div className="flex min-w-0 items-center gap-3">
@@ -162,7 +160,8 @@ function rateCardLabel(location: LocationSelectionLocationDTO) {
 function blockingText(availability: LocationSelectionAvailability) {
   const first = availability.blockingIntervals[0];
   if (!first) return "";
-  return `${blockingStatusLabel(first.status)}: ${formatDate(first.start)}${first.openEnded ? "" : ` - ${formatDate(first.end)}`}${holdRemainingSuffix(first)}`;
+  const more = availability.blockingIntervals.length > 1 ? ` (+${availability.blockingIntervals.length - 1} intervale)` : "";
+  return `${blockingStatusLabel(first.status)}: ${formatDate(first.start)}${first.openEnded ? "" : ` - ${formatDate(first.end)}`}${holdRemainingSuffix(first)}${more}`;
 }
 
 function formatDate(value: string) {

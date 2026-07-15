@@ -3,7 +3,6 @@ import type { AuthSession } from "@/lib/auth";
 import { calculateProrata } from "@/lib/prorata";
 import { isOperationActive, operationExtraTasks, operationStatus, type OperationKind, type OperationStatus } from "@/lib/operation-status";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
-import { expireStaleHolds } from "@/lib/reservation-lifecycle";
 import { hasPermission } from "@/lib/rbac";
 import { parseOfferRequestMeta } from "@/lib/offer-request-meta";
 import { getFinancialDashboardData } from "@/lib/financial-dashboard";
@@ -11,6 +10,7 @@ import { sortOperationalLocations } from "@/lib/location-order";
 import { calculateLocationProfit } from "@/lib/profit";
 import { effectiveInstallationDate, hasMissingInstallationSchedule } from "@/lib/installation-date";
 import { effectiveNeutralizationDate, hasMissingNeutralizationSchedule } from "@/lib/neutralization-date";
+import { HOLD_DURATION_DAYS } from "@/lib/reservation-lifecycle";
 import {
   listOperationalTasksWithFallback,
   operationTaskReadsEnabled,
@@ -93,6 +93,7 @@ type LocationRow = {
   sqm: number | null;
   address: string | null;
   status: string;
+  lifecycleStatus: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "MAINTENANCE";
   isPremium: boolean;
   showInPublic: boolean;
   reportingGroupName: string | null;
@@ -161,7 +162,6 @@ type CrmLeadRow = {
 export type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
 
 export async function getDashboardData(session: AuthSession) {
-  await expireStaleHolds();
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
@@ -177,11 +177,12 @@ export async function getDashboardData(session: AuthSession) {
       ? { OR: [{ sellerUserId: session.id }, { ownerId: session.id }, { ownerId: null, salesperson: { in: [session.name, session.email] } }] }
       : {};
 
-  const [locations, campaigns, operationCampaigns, offerRequests, users, auditLogs, crmRows] = await Promise.all([
+  const financePromise = hasPermission(session.role, "finance.view") ? getFinancialDashboardData() : Promise.resolve(null);
+  const [locations, campaigns, operationCampaigns, offerRequests, users, auditLogs, crmRows, finance] = await Promise.all([
     financeOnly
       ? Promise.resolve([]) as Promise<LocationRow[]>
       : prisma.location.findMany({
-          where: { showInPublic: true },
+          where: { lifecycleStatus: { not: "ARCHIVED" } },
           select: {
             id: true,
             code: true,
@@ -192,6 +193,7 @@ export async function getDashboardData(session: AuthSession) {
             size: true,
             sqm: true,
             status: true,
+            lifecycleStatus: true,
             isPremium: true,
             showInPublic: true,
             reportingGroupName: true,
@@ -307,7 +309,8 @@ export async function getDashboardData(session: AuthSession) {
           include: { assignedTo: { select: { name: true, email: true } } },
           orderBy: [{ updatedAt: "desc" }],
           take: 300
-        }) as Promise<CrmLeadRow[]>
+        }) as Promise<CrmLeadRow[]>,
+    financePromise
   ]);
 
   const active = campaigns.filter((item) => item.status === "BOOKED" && item.periodStart <= now && item.periodEnd >= now);
@@ -316,16 +319,17 @@ export async function getDashboardData(session: AuthSession) {
     .sort((a, b) => a.periodStart.getTime() - b.periodStart.getTime());
   const completed = campaigns.filter((item) => item.status === "BOOKED" && item.periodEnd < now);
   const cancelled = campaigns.filter((item) => item.status === "CANCELLED");
-  const holds = campaigns.filter(
-    (item) => ["HOLD", "RESERVED"].includes(item.status) && (!item.holdExpiresAt || item.holdExpiresAt > now)
-  );
+  const holds = campaigns.filter((item) => ["HOLD", "RESERVED"].includes(item.status) && holdIsActive(item, now));
   const expiredHolds = campaigns
-    .filter((item) => item.status === "EXPIRED" || (["HOLD", "RESERVED"].includes(item.status) && item.holdExpiresAt && item.holdExpiresAt <= now))
+    .filter((item) => item.status === "EXPIRED" || (["HOLD", "RESERVED"].includes(item.status) && !holdIsActive(item, now)))
     .sort((a, b) => (b.holdExpiresAt || b.updatedAt).getTime() - (a.holdExpiresAt || a.updatedAt).getTime());
-  const occupiedIds = new Set(active.map((item) => item.location.id));
-  const heldIds = new Set(holds.filter((item) => item.periodStart <= now && item.periodEnd >= now).map((item) => item.location.id));
+  const inventoryIds = new Set(locations.map((location) => location.id));
+  const occupiedIds = new Set(active.filter((item) => inventoryIds.has(item.location.id)).map((item) => item.location.id));
+  const heldIds = new Set(holds
+    .filter((item) => inventoryIds.has(item.location.id) && item.periodStart <= now && item.periodEnd >= now)
+    .map((item) => item.location.id));
   const blockedLocations = locations
-    .filter((location) => isLocationBlocked(location, now) || (["UNKNOWN"].includes(location.status) && !occupiedIds.has(location.id) && !heldIds.has(location.id)))
+    .filter((location) => location.lifecycleStatus !== "ACTIVE" || isLocationBlocked(location, now))
     .sort(sortOperationalLocations);
   const blockedIds = new Set(blockedLocations.map((location) => location.id));
   const availableLocations = locations
@@ -381,7 +385,7 @@ export async function getDashboardData(session: AuthSession) {
     neutralizations: neutralizationTasks.length,
     overdue: overdueTasks.length
   };
-  const sellers = sellerActivity(users, offerRequests, campaigns, monthlySales, now);
+  const sellers = sellerActivity(users, offerRequests, crmRows, campaigns, monthlySales, now);
   const crmLeads = [
     ...crmRows.map(serializeRealCrmLead),
     ...offerRequests
@@ -389,9 +393,8 @@ export async function getDashboardData(session: AuthSession) {
     .slice(0, Math.max(0, 40 - crmRows.length))
     .map((item) => serializeCrmLead(item, campaigns))
   ].slice(0, 60);
-  const inventoryByCity = inventoryBreakdown(locations, active, holds, (location) => location.city || "Fara oras");
-  const inventoryByType = inventoryBreakdown(locations, active, holds, (location) => location.type || "Fara tip");
-  const finance = hasPermission(session.role, "finance.view") ? await getFinancialDashboardData() : null;
+  const inventoryByCity = inventoryBreakdown(locations, active, holds, now, (location) => location.city || "Fara oras");
+  const inventoryByType = inventoryBreakdown(locations, active, holds, now, (location) => location.type || "Fara tip");
   const activeCampaignGroups = serializeCampaignGroups(active);
   const startingSoonGroups = serializeCampaignGroups(startingSoon);
   const endingSoonGroups = serializeCampaignGroups(endingSoon);
@@ -417,7 +420,7 @@ export async function getDashboardData(session: AuthSession) {
       locations: locations.length,
       occupied: occupiedIds.size,
       held: heldIds.size,
-      available: Math.max(0, locations.length - occupiedIds.size - heldIds.size),
+      available: availableLocations.length,
       occupancyPercent: locations.length ? Math.round((occupiedIds.size / locations.length) * 100) : 0,
       active: active.length,
       future: future.length,
@@ -454,8 +457,8 @@ export async function getDashboardData(session: AuthSession) {
     coo: {
       health: {
         activeCampaigns: activeCampaignGroups.length,
-        startingSoon: startingSoon.length,
-        endingSoon: endingSoon.length,
+        startingSoon: startingSoonGroups.length,
+        endingSoon: endingSoonGroups.length,
         availableLocations: availableLocations.length,
         occupiedLocations: occupiedIds.size,
         heldLocations: heldIds.size,
@@ -639,6 +642,7 @@ function serializeLocation(item: LocationRow) {
     size: item.size,
     sqm: item.sqm,
     status: item.status,
+    lifecycleStatus: item.lifecycleStatus,
     isPremium: item.isPremium,
     reportingGroupName: item.reportingGroupName,
     blockedReason: item.blockedReason,
@@ -882,14 +886,28 @@ function buildProblemCenter(input: {
     status: "open"
   }));
 
+  input.overdueTasks.forEach((task) => problems.push({
+    id: `overdue-operation-${task.id}`,
+    module: "Operational",
+    type: "overdue_operation",
+    title: `Lucrare intarziata: ${task.code}`,
+    plainLanguageDescription: `${task.kind === "decoration" ? "Decorarea" : "Neutralizarea"} pentru ${task.clientName} nu este finalizata la termen.`,
+    entityType: "reservation",
+    entityId: task.reservationId,
+    severity: "high",
+    ownerUserId: null,
+    dueDate: task.taskDate,
+    recommendedAction: "Verifica responsabilul si actualizeaza starea lucrarii.",
+    status: "open"
+  }));
+
   input.blockedLocations.forEach((location) => {
-    if (location.blockedReason) {
-      problems.push({
+    problems.push({
         id: `blocked-location-${location.id}`,
         module: "Inventar",
         type: "blocked_location",
         title: `Locatie blocata: ${location.code}`,
-        plainLanguageDescription: location.blockedReason || "Locatia este blocata operational.",
+        plainLanguageDescription: location.blockedReason || `Status inventar: ${location.lifecycleStatus}.`,
         entityType: "location",
         entityId: location.id,
         severity: "medium",
@@ -898,7 +916,6 @@ function buildProblemCenter(input: {
         recommendedAction: "Verifica motivul blocarii si deblocheaza locatia daca poate fi vanduta.",
         status: "open"
       });
-    }
   });
 
   input.campaigns.filter((campaign) => campaign.status === "BOOKED").forEach((campaign) => {
@@ -963,6 +980,7 @@ function incompleteProblem(campaign: CampaignRow, type: string, title: string, a
 function sellerActivity(
   users: UserRow[],
   requests: OfferRequestRow[],
+  crmRows: CrmLeadRow[],
   campaigns: CampaignRow[],
   monthlySales: CampaignRow[],
   now: Date
@@ -974,39 +992,46 @@ function sellerActivity(
     if (seller) sellerNames.add(seller);
   });
   campaigns.forEach((campaign) => sellerNames.add(sellerName(campaign)));
+  crmRows.forEach((lead) => {
+    if (lead.assignedTo?.name) sellerNames.add(lead.assignedTo.name);
+  });
 
   return [...sellerNames].sort((a, b) => a.localeCompare(b, "ro")).map((seller) => {
     const sellerRequests = requests.filter((request) => parseOfferRequestMeta(request.source).salesperson === seller);
+    const sellerCrmRows = crmRows.filter((lead) => lead.assignedTo?.name === seller);
     const sellerCampaigns = campaigns.filter((campaign) => sellerName(campaign) === seller);
     const sellerSales = monthlySales.filter((campaign) => sellerName(campaign) === seller);
     const activeHolds = sellerCampaigns.filter((campaign) => ["HOLD", "RESERVED"].includes(campaign.status) && (!campaign.holdExpiresAt || campaign.holdExpiresAt > now));
     const expiredHolds = sellerCampaigns.filter((campaign) => campaign.status === "EXPIRED");
     const confirmed = sellerCampaigns.filter((campaign) => campaign.status === "BOOKED");
     const openLeads = sellerRequests.filter((request) => ["NEW", "CONTACTED", "QUOTED"].includes(request.status));
-    const wonLeads = sellerRequests.filter((request) => request.status === "WON").length;
-    const lostLeads = sellerRequests.filter((request) => request.status === "LOST").length;
+    const openCrmLeads = sellerCrmRows.filter((lead) => !["WON", "LOST", "INACTIVE"].includes(dbCrmStatusToUi(lead.status)));
+    const wonLeads = sellerRequests.filter((request) => request.status === "WON").length + sellerCrmRows.filter((lead) => dbCrmStatusToUi(lead.status) === "WON").length;
+    const lostLeads = sellerRequests.filter((request) => request.status === "LOST").length + sellerCrmRows.filter((lead) => dbCrmStatusToUi(lead.status) === "LOST").length;
     const pipelineValue =
       openLeads.reduce((sum, request) => sum + (parseOfferRequestMeta(request.source).estimatedValue || 0), 0) +
+      openCrmLeads.reduce((sum, lead) => sum + (lead.estimatedValue || 0), 0) +
       activeHolds.reduce((sum, campaign) => sum + (campaign.amount ?? campaign.monthlyRentShare ?? 0), 0);
     const soldValue = sellerSales.reduce((sum, campaign) => sum + (campaign.amount ?? campaign.monthlyRentShare ?? 0), 0);
     const overdueFollowUps = sellerRequests.filter((request) => {
       const followUp = parseOfferRequestMeta(request.source).nextFollowUpAt;
       return followUp ? new Date(followUp) < now && !["WON", "LOST", "ARCHIVED"].includes(request.status) : false;
-    }).length;
+    }).length + sellerCrmRows.filter((lead) => lead.nextFollowUpDate && lead.nextFollowUpDate < now && !["WON", "LOST", "INACTIVE"].includes(dbCrmStatusToUi(lead.status))).length;
     return {
       seller,
-      activeLeads: openLeads.length,
+      activeLeads: openLeads.length + openCrmLeads.length,
       receivedRequests: sellerRequests.length,
-      reservationsCreated: sellerCampaigns.filter((campaign) => ["HOLD", "RESERVED"].includes(campaign.status)).length,
+      reservationsCreated: uniqueCampaignCount(sellerCampaigns.filter((campaign) => ["HOLD", "RESERVED"].includes(campaign.status))),
       activeHolds: activeHolds.length,
       expiredHolds: expiredHolds.length,
-      confirmedCampaigns: confirmed.length,
+      confirmedCampaigns: uniqueCampaignCount(confirmed),
       soldValue: roundMoney(soldValue),
       pipelineValue: roundMoney(pipelineValue),
       overdueFollowUps,
       conversionRate: wonLeads + lostLeads ? Math.round((wonLeads / (wonLeads + lostLeads)) * 100) : null,
       latestActivityAt: latestDate([
         ...sellerRequests.map((request) => request.updatedAt),
+        ...sellerCrmRows.map((lead) => lead.updatedAt),
         ...sellerCampaigns.map((campaign) => campaign.updatedAt)
       ])?.toISOString() || null
     };
@@ -1017,22 +1042,35 @@ function inventoryBreakdown(
   locations: LocationRow[],
   active: CampaignRow[],
   holds: CampaignRow[],
+  now: Date,
   key: (location: LocationRow) => string
 ) {
   const occupied = new Set(active.map((item) => item.location.id));
-  const held = new Set(holds.map((item) => item.location.id));
-  const groups = new Map<string, { label: string; total: number; available: number; occupied: number; held: number; premium: number }>();
+  const held = new Set(holds.filter((item) => item.periodStart <= now && item.periodEnd >= now).map((item) => item.location.id));
+  const groups = new Map<string, { label: string; total: number; available: number; occupied: number; held: number; blocked: number; premium: number }>();
   for (const location of locations) {
     const label = key(location);
-    const current = groups.get(label) || { label, total: 0, available: 0, occupied: 0, held: 0, premium: 0 };
+    const current = groups.get(label) || { label, total: 0, available: 0, occupied: 0, held: 0, blocked: 0, premium: 0 };
     current.total += 1;
     if (occupied.has(location.id)) current.occupied += 1;
     else if (held.has(location.id)) current.held += 1;
+    else if (location.lifecycleStatus !== "ACTIVE" || isLocationBlocked(location, now)) current.blocked += 1;
     else current.available += 1;
     if (location.isPremium) current.premium += 1;
     groups.set(label, current);
   }
   return [...groups.values()].sort((a, b) => b.total - a.total || a.label.localeCompare(b.label, "ro"));
+}
+
+function uniqueCampaignCount(items: CampaignRow[]) {
+  return new Set(items.map((item) => item.campaignId || item.contractGroupId || item.id)).size;
+}
+
+function holdIsActive(item: Pick<CampaignRow, "holdExpiresAt" | "createdAt">, now: Date) {
+  if (item.holdExpiresAt) return item.holdExpiresAt > now;
+  const legacyCutoff = new Date(now);
+  legacyCutoff.setUTCDate(legacyCutoff.getUTCDate() - HOLD_DURATION_DAYS);
+  return item.createdAt > legacyCutoff;
 }
 
 function countBy<T>(items: T[], key: (item: T) => string) {

@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   AlertTriangle,
   BriefcaseBusiness,
@@ -19,11 +21,15 @@ import {
   XCircle
 } from "lucide-react";
 import type { DashboardData } from "@/lib/dashboard";
-import { FinancialDashboardPanel } from "@/components/admin/FinancialDashboardPanel";
 import { adminNewReservationHref, adminReservationHref, adminReservationsHref } from "@/lib/admin-routes";
 import { hasPermission } from "@/lib/rbac";
 import { ReservationPeriodChangeDialog, type ReservationPeriodChangeTarget } from "@/components/admin/ReservationPeriodChangeDialog";
 import { SalesReportExportButton } from "@/components/admin/SalesReportExportButton";
+
+const FinancialDashboardPanel = dynamic(
+  () => import("@/components/admin/FinancialDashboardPanel").then((module) => module.FinancialDashboardPanel),
+  { loading: () => <div className="rounded-lg border border-focus-line p-6 text-sm font-bold text-slate-300">Se incarca datele financiare...</div> }
+);
 
 type CooData = DashboardData["coo"];
 type CooTab = "overview" | "issues" | "sales" | "crm" | "operations" | "inventory" | "financial" | "exports" | "admin";
@@ -63,6 +69,8 @@ const crmStatuses = [
 ] as const;
 
 export function CooCommandCenter({ data }: { data: DashboardData }) {
+  const router = useRouter();
+  const [, startRefresh] = useTransition();
   const coo = data.coo;
   const canOperateCampaigns = hasPermission(data.role, "campaigns.operate");
   const [activeTab, setActiveTab] = useState<CooTab>("overview");
@@ -126,6 +134,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
         const taskKey = body.taskId ? `${body.kind}-${reservationId}-${body.taskId}` : `${body.kind}-${reservationId}`;
         setHiddenTasks((current) => new Set(current).add(taskKey));
       }
+      startRefresh(() => router.refresh());
     } catch (commandError) {
       setError(commandError instanceof Error ? commandError.message : "Actiunea nu a putut fi executata.");
     } finally {
@@ -272,7 +281,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                           </ActionMenu>
                         </div>
                         <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                          {conflict.reservations.map((reservation) => <ReservationMini key={reservation.id} row={reservation} busy={busy} canOperate={canOperateCampaigns} onCommand={command} onChangePeriod={setPeriodTarget} />)}
+                          {conflict.reservations.map((reservation) => <ReservationMini key={reservation.id} row={reservation} busy={busy} onCommand={command} onChangePeriod={setPeriodTarget} />)}
                         </div>
                       </article>
                     )) : <Empty text="Nu exista suprapuneri active." />}
@@ -280,8 +289,8 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                 </Panel>
 
                 <div className="grid gap-5 xl:grid-cols-2">
-                  <HoldPanel title="Hold-uri active" rows={visibleHolds} busy={busy} canOperate={canOperateCampaigns} onCommand={command} onChangePeriod={setPeriodTarget} />
-                  <HoldPanel title="Hold-uri expirate" rows={visibleExpiredHolds} busy={busy} canOperate={canOperateCampaigns} onCommand={command} onChangePeriod={setPeriodTarget} expired />
+                  <HoldPanel title="Hold-uri active" rows={visibleHolds} busy={busy} onCommand={command} onChangePeriod={setPeriodTarget} />
+                  <HoldPanel title="Hold-uri expirate" rows={visibleExpiredHolds} busy={busy} onCommand={command} onChangePeriod={setPeriodTarget} expired />
                 </div>
                 <div className="grid gap-5 xl:grid-cols-2">
                   <CampaignList title="Montaj fara data valida" rows={coo.missingInstallations} />
@@ -294,7 +303,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
               <div className="grid gap-5">
                 <SellerTable rows={coo.sellers} />
                 <div className="grid gap-5 xl:grid-cols-2">
-                  <HoldPanel title="Rezervari neconfirmate" rows={visibleHolds} busy={busy} canOperate={canOperateCampaigns} onCommand={command} onChangePeriod={setPeriodTarget} />
+                  <HoldPanel title="Rezervari neconfirmate" rows={visibleHolds} busy={busy} onCommand={command} onChangePeriod={setPeriodTarget} />
                   <CampaignList title="Campanii confirmate" rows={coo.activeCampaigns} />
                 </div>
               </div>
@@ -401,7 +410,6 @@ function HoldPanel({
   title,
   rows,
   busy,
-  canOperate,
   onCommand,
   onChangePeriod,
   expired = false
@@ -409,14 +417,13 @@ function HoldPanel({
   title: string;
   rows: ReservationRow[];
   busy: string | null;
-  canOperate: boolean;
   onCommand: (id: string, action: string, body?: Record<string, unknown>, success?: string) => void;
   onChangePeriod: (row: ReservationRow) => void;
   expired?: boolean;
 }) {
   return <Panel title={`${title} (${rows.length})`} icon={<CalendarClock size={18} />}>
     <div className="grid gap-3">
-      {rows.length ? rows.map((row) => <ReservationMini key={row.id} row={row} busy={busy} canOperate={canOperate} onCommand={onCommand} onChangePeriod={onChangePeriod} expired={expired} />) : <Empty text="Nu exista inregistrari." />}
+      {rows.length ? rows.map((row) => <ReservationMini key={row.id} row={row} busy={busy} onCommand={onCommand} onChangePeriod={onChangePeriod} expired={expired} />) : <Empty text="Nu exista inregistrari." />}
     </div>
   </Panel>;
 }
@@ -424,14 +431,12 @@ function HoldPanel({
 function ReservationMini({
   row,
   busy,
-  canOperate,
   onCommand,
   onChangePeriod,
   expired = false
 }: {
   row: ReservationRow;
   busy: string | null;
-  canOperate: boolean;
   onCommand: (id: string, action: string, body?: Record<string, unknown>, success?: string) => void;
   onChangePeriod: (row: ReservationRow) => void;
   expired?: boolean;
@@ -460,7 +465,6 @@ function ReservationMini({
         <Link href={adminReservationHref(row.id)} prefetch={false}>Vezi detalii</Link>
         {canChangePeriod ? <button type="button" onClick={() => onChangePeriod(row)}>Schimba perioada</button> : null}
         {isActiveHold ? <button type="button" onClick={() => onCommand(row.id, "markLost", {}, "Hold-ul a fost marcat ca pierdut.")}>Marcheaza pierdut</button> : null}
-        {canOperate ? <button type="button" onClick={() => onCommand(row.id, "createTask", { kind: "decoration", status: "NEW", note: "Follow-up operational pentru hold." })}>Creeaza task</button> : null}
         {!isActiveHold && !canChangePeriod ? <span className="px-3 py-2 text-xs font-bold text-slate-400">Nu exista actiuni rapide pentru acest status.</span> : null}
       </ActionMenu>
     </div>
@@ -644,7 +648,7 @@ function SellerTable({ rows }: { rows: CooData["sellers"] }) {
 
 function InventoryTable({ title, rows }: { title: string; rows: CooData["inventoryByCity"] }) {
   return <Panel title={title} icon={<MapPinned size={18} />}>
-    <div className="grid gap-2">{rows.length ? rows.map((row) => <div className="grid gap-3 rounded-md border border-focus-line bg-focus-navy/40 p-3 text-sm md:grid-cols-[1fr_repeat(5,auto)]" key={row.label}><strong className="text-white">{row.label}</strong><span>Total {row.total}</span><span className="text-emerald-200">Libere {row.available}</span><span>Ocupate {row.occupied}</span><span className="text-focus-yellow">Hold {row.held}</span><span>Premium {row.premium}</span></div>) : <Empty text="Nu exista date de inventar." />}</div>
+    <div className="grid gap-2">{rows.length ? rows.map((row) => <div className="grid gap-3 rounded-md border border-focus-line bg-focus-navy/40 p-3 text-sm md:grid-cols-[1fr_repeat(6,auto)]" key={row.label}><strong className="text-white">{row.label}</strong><span>Total {row.total}</span><span className="text-emerald-200">Libere {row.available}</span><span>Ocupate {row.occupied}</span><span className="text-focus-yellow">Hold {row.held}</span><span className="text-red-100">Blocate {row.blocked}</span><span>Premium {row.premium}</span></div>) : <Empty text="Nu exista date de inventar." />}</div>
   </Panel>;
 }
 
@@ -695,7 +699,7 @@ function LocationList({ title, rows }: { title: string; rows: CooData["available
   }
   if (blockedList) {
     return <Panel title={`${title} (${visibleRows.length})`} icon={<MapPinned size={18} />}>
-      <div className="grid gap-2">{visibleRows.length ? visibleRows.map((row) => <div className="rounded-md border border-focus-line bg-focus-navy/40 p-3 text-sm" key={row.id}><strong className="text-white">{row.code}</strong><span className="block text-slate-400">{[row.city, row.type, row.status].filter(Boolean).join(" | ")}</span><span className="mt-1 block text-xs text-red-100">{row.blockedReason || "Blocare operationala"}</span><button className="focus-button secondary mt-3" type="button" onClick={() => unblock(row.id)}>Deblocheaza</button></div>) : <Empty text="Nu exista locatii blocate." />}</div>
+      <div className="grid gap-2">{visibleRows.length ? visibleRows.map((row) => <div className="rounded-md border border-focus-line bg-focus-navy/40 p-3 text-sm" key={row.id}><strong className="text-white">{row.code}</strong><span className="block text-slate-400">{[row.city, row.type, row.lifecycleStatus].filter(Boolean).join(" | ")}</span><span className="mt-1 block text-xs text-red-100">{row.blockedReason || `Status inventar: ${row.lifecycleStatus}`}</span>{row.blockedReason ? <button className="focus-button secondary mt-3" type="button" onClick={() => unblock(row.id)}>Deblocheaza</button> : null}</div>) : <Empty text="Nu exista locatii blocate." />}</div>
     </Panel>;
   }
   return <Panel title={`${title} (${rows.length})`} icon={<MapPinned size={18} />}>

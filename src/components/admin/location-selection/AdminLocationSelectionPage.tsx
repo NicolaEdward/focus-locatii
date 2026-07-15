@@ -47,23 +47,33 @@ export function AdminLocationSelectionPage({
   const [selectionLoaded, setSelectionLoaded] = useState(false);
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
-  const [filters, setFilters] = useState<SelectionFilters>({ sort: "code", availability: "PROPOSABLE" });
+  const [filters, setFilters] = useState<SelectionFilters>({ sort: "code", availability: "ALL" });
   const [availabilityById, setAvailabilityById] = useState<Record<string, LocationSelectionAvailability>>({});
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [fitKey, setFitKey] = useState("initial");
   const [showMap, setShowMap] = useState(false);
   const [availabilityRefreshKey, setAvailabilityRefreshKey] = useState(0);
   const availabilityRequestRef = useRef(0);
 
   const selectedIds = useMemo(() => new Set(selection.items.map((item) => item.locationId)), [selection.items]);
-  const selectedItemsById = useMemo(
-    () => new Map(selection.items.map((item) => [item.locationId, item])),
-    [selection.items]
-  );
   const periodValid = Boolean(selection.periodStart && selection.periodEnd && selection.periodStart <= selection.periodEnd);
   const periodInvalid = Boolean(selection.periodStart && selection.periodEnd && selection.periodStart > selection.periodEnd);
+  const periodMode = periodValid ? "range" : selection.periodStart ? "start" : "none";
+  const availabilityScopeActive = Boolean(selection.periodStart && !periodInvalid);
+
+  useEffect(() => {
+    const allowed = periodMode === "range"
+      ? new Set(["PROPOSABLE", "AVAILABLE", "PARTIAL", "ALL", "CONFLICT"])
+      : new Set(["ALL", "CURRENT_AVAILABLE", "FUTURE_BOOKINGS", "CURRENT_CONFLICT"]);
+    setFilters((current) => {
+      if (allowed.has(current.availability || "")) return current;
+      return {
+        ...current,
+        availability: periodMode === "range" ? "PROPOSABLE" : periodMode === "start" ? "CURRENT_AVAILABLE" : "ALL"
+      };
+    });
+  }, [periodMode]);
 
   const baseFilteredLocations = useMemo(() => {
     const normalizedSearch = normalizeSearch(deferredSearch);
@@ -78,12 +88,12 @@ export function AdminLocationSelectionPage({
 
   const filteredLocations = useMemo(() => {
     let rows = baseFilteredLocations.filter((location) => {
-      return locationMatchesAvailabilityFilter(location.id, filters.availability || "PROPOSABLE", availabilityById, periodValid, availabilityLoading);
+      return locationMatchesAvailabilityFilter(location.id, filters.availability || "ALL", availabilityById, periodValid, availabilityLoading);
     });
 
     rows = sortLocations(rows, filters.sort, selectedIds, availabilityById);
     return rows;
-  }, [availabilityById, baseFilteredLocations, filters.availability, filters.sort, periodValid, selectedIds]);
+  }, [availabilityById, availabilityLoading, baseFilteredLocations, filters.availability, filters.sort, periodValid, selectedIds]);
 
   const selectionPayload = useMemo(
     () => ({
@@ -143,7 +153,8 @@ export function AdminLocationSelectionPage({
 
   useEffect(() => {
     const selectedIdsForAvailability = selectedAvailabilityIdsKey ? selectedAvailabilityIdsKey.split("|") : [];
-    const ids = [...new Set([...initialData.locations.map((location) => location.id), ...selectedIdsForAvailability])];
+    const allIds = allAvailabilityIdsKey ? allAvailabilityIdsKey.split("|") : [];
+    const ids = [...new Set([...allIds, ...selectedIdsForAvailability])];
     if (!ids.length) return;
     const requestId = ++availabilityRequestRef.current;
     const controller = new AbortController();
@@ -182,15 +193,21 @@ export function AdminLocationSelectionPage({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [allAvailabilityIdsKey, availabilityRefreshKey, initialData.locations, selectedAvailabilityIdsKey, selection.periodEnd, selection.periodStart]);
+  }, [allAvailabilityIdsKey, availabilityRefreshKey, selectedAvailabilityIdsKey, selection.periodEnd, selection.periodStart]);
 
   const updatePeriod = useCallback((patch: Partial<Pick<SelectionState, "periodStart" | "periodEnd">>) => {
-    setSelection((current) => ({ ...current, ...patch }));
+    setSelection((current) => {
+      const next = { ...current, ...patch };
+      if (patch.periodStart !== undefined && next.periodStart && next.periodEnd && next.periodEnd < next.periodStart) {
+        next.periodEnd = "";
+      }
+      return next;
+    });
   }, []);
 
   const addLocation = useCallback((location: LocationSelectionLocationDTO) => {
     const availability = availabilityById[location.id];
-    if (periodValid && availability?.state === "CONFLICT") return;
+    if (availabilityScopeActive && availability?.state === "CONFLICT") return;
     setSelection((current) => {
       if (current.items.some((item) => item.locationId === location.id)) return current;
       return {
@@ -210,7 +227,7 @@ export function AdminLocationSelectionPage({
         ]
       };
     });
-  }, [availabilityById, periodValid]);
+  }, [availabilityById, availabilityScopeActive]);
 
   const removeLocation = useCallback((locationId: string) => {
     setSelection((current) => ({
@@ -226,10 +243,19 @@ export function AdminLocationSelectionPage({
     setSelection((current) => ({ ...current, items: [] }));
   }, [selection.items.length]);
 
+  const removeConflicted = useCallback(() => {
+    setSelection((current) => ({
+      ...current,
+      items: current.items
+        .filter((item) => (availabilityById[item.locationId]?.state || item.availabilityState) !== "CONFLICT")
+        .map((item, sortOrder) => ({ ...item, sortOrder }))
+    }));
+  }, [availabilityById]);
+
   const selectVisible = useCallback(() => {
     const candidates = filteredLocations.filter((location) => {
       if (selectedIds.has(location.id)) return false;
-      return !periodValid || availabilityById[location.id]?.state !== "CONFLICT";
+      return !availabilityScopeActive || availabilityById[location.id]?.state !== "CONFLICT";
     });
     if (candidates.length > 25 && !window.confirm(`Vrei sa selectezi ${candidates.length} locatii?`)) return;
     setSelection((current) => {
@@ -251,7 +277,7 @@ export function AdminLocationSelectionPage({
         });
       return { ...current, items: [...current.items, ...additions] };
     });
-  }, [availabilityById, filteredLocations, periodValid, selectedIds]);
+  }, [availabilityById, availabilityScopeActive, filteredLocations, selectedIds]);
 
   const moveItem = useCallback((locationId: string, direction: -1 | 1) => {
     setSelection((current) => {
@@ -263,6 +289,11 @@ export function AdminLocationSelectionPage({
       return { ...current, items: items.map((item, sortOrder) => ({ ...item, sortOrder })) };
     });
   }, []);
+
+  const toggleMapLocation = useCallback((location: LocationSelectionLocationDTO) => {
+    if (selectedIds.has(location.id)) removeLocation(location.id);
+    else addLocation(location);
+  }, [addLocation, removeLocation, selectedIds]);
 
   const copyCodes = useCallback(async () => {
     const codes = selection.items.map((item) => item.snapshot.code).join(", ");
@@ -312,6 +343,7 @@ export function AdminLocationSelectionPage({
                 type="date"
                 value={selection.periodEnd}
                 min={selection.periodStart || undefined}
+                disabled={!selection.periodStart}
                 onChange={(event) => updatePeriod({ periodEnd: event.target.value })}
               />
             </Field>
@@ -334,14 +366,14 @@ export function AdminLocationSelectionPage({
         </div>
       </section>
 
-      <div className="focus-container grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_430px]">
+      <div className="focus-container grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <section className="grid min-w-0 gap-4">
           <div className="grid gap-3 rounded-lg border border-focus-line bg-focus-navy/80 p-4">
             <div className="flex items-center gap-2 text-sm font-black uppercase text-focus-yellow">
               <SlidersHorizontal size={16} />
               Filtrare rapida
             </div>
-            <div className="grid gap-3 lg:grid-cols-[minmax(280px,1.3fr)_220px_240px]">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.25fr)_minmax(210px,.8fr)_minmax(210px,.8fr)]">
               <label className="grid gap-1 text-xs font-bold uppercase text-slate-300">
                 Cauta cod, nume sau adresa
                 <span className="relative">
@@ -349,7 +381,7 @@ export function AdminLocationSelectionPage({
                   <input className="focus-input pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ex: DN1, Baneasa, FM..." />
                 </span>
               </label>
-              <LocationSelectionFilters filters={filters} onChange={setFilters} options={initialData.options} periodSelected={periodValid} />
+              <LocationSelectionFilters filters={filters} onChange={setFilters} options={initialData.options} periodMode={periodMode} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={selectVisible}>
@@ -377,30 +409,26 @@ export function AdminLocationSelectionPage({
 
           <LocationSelectionResults
             locations={filteredLocations}
+            title={filters.availability === "CONFLICT" ? "Locatii indisponibile" : filters.availability === "ALL" ? "Rezultate filtrate" : "Locatii propunibile"}
             availabilityById={availabilityById}
             selectedIds={selectedIds}
             onAdd={addLocation}
             onRemove={removeLocation}
-            onHover={setHoveredId}
           />
           {showMap ? (
             <LocationSelectionMap
               locations={filteredLocations}
               availabilityById={availabilityById}
               selectedIds={selectedIds}
-              hoveredId={hoveredId}
               fitKey={fitKey}
-              onSelect={(location) => {
-                if (selectedIds.has(location.id)) removeLocation(location.id);
-                else addLocation(location);
-              }}
+              onSelect={toggleMapLocation}
             />
           ) : null}
         </section>
 
         <LocationSelectionBasket
           items={selection.items}
-          locationsById={selectedItemsById}
+          availabilityById={availabilityById}
           warnings={warnings}
           mediaPlanSeed={seed}
           periodStart={selection.periodStart}
@@ -408,6 +436,7 @@ export function AdminLocationSelectionPage({
           exportHref={exportHref}
           onRemove={removeLocation}
           onClear={clearSelection}
+          onRemoveConflicts={removeConflicted}
           onMove={moveItem}
           onCopyCodes={copyCodes}
         />
@@ -473,7 +502,7 @@ function locationMatchesAvailabilityFilter(
     return state === "AVAILABLE" || state === "PARTIAL";
   }
 
-  if (filter === "CURRENT_AVAILABLE") return state === "AVAILABLE" && !availability?.blockingIntervals.length;
+  if (filter === "CURRENT_AVAILABLE") return state === "AVAILABLE";
   if (filter === "FUTURE_BOOKINGS") return state === "AVAILABLE" && Boolean(availability?.blockingIntervals.length);
   if (filter === "CURRENT_CONFLICT" || filter === "CONFLICT") return state === "CONFLICT";
   return true;

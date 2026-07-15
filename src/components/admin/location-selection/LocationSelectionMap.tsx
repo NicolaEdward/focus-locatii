@@ -19,14 +19,12 @@ export const LocationSelectionMap = memo(function LocationSelectionMap({
   locations,
   availabilityById,
   selectedIds,
-  hoveredId,
   fitKey,
   onSelect
 }: {
   locations: LocationSelectionLocationDTO[];
   availabilityById: Record<string, LocationSelectionAvailability>;
   selectedIds: Set<string>;
-  hoveredId: string | null;
   fitKey: string;
   onSelect: (location: LocationSelectionLocationDTO) => void;
 }) {
@@ -99,16 +97,14 @@ export const LocationSelectionMap = memo(function LocationSelectionMap({
     for (const location of locations) {
       if (location.displayLat == null || location.displayLng == null) continue;
       const availability = availabilityById[location.id];
-      const state = availability?.state || "UNKNOWN";
       const selected = selectedIds.has(location.id);
-      const hovered = hoveredId === location.id;
       const markerWidth = Math.max(40, Math.min(112, location.code.length * 7 + 22));
       const marker = L.marker([location.displayLat, location.displayLng], {
         riseOnHover: true,
         riseOffset: 1200,
         icon: L.divIcon({
           className: "",
-          html: `<span class="map-marker ${markerClass(availability)} ${selected || hovered ? "selected" : ""}" title="${escapeHtml(location.code)}"><span class="map-marker-dot"></span><span>${escapeHtml(location.code)}</span></span>`,
+          html: `<span class="map-marker ${markerClass(availability)} ${selected ? "selected" : ""}" title="${escapeHtml(location.code)}"><span class="map-marker-dot"></span><span>${escapeHtml(location.code)}</span></span>`,
           iconSize: [markerWidth, 28],
           iconAnchor: [markerWidth / 2, 14]
         })
@@ -126,7 +122,7 @@ export const LocationSelectionMap = memo(function LocationSelectionMap({
       map.fitBounds(bounds, { padding: [36, 36], maxZoom: 15 });
       lastFitKeyRef.current = fitKey;
     }
-  }, [availabilityById, fitKey, hoveredId, locations, onSelect, ready, selectedIds]);
+  }, [availabilityById, fitKey, locations, onSelect, ready, selectedIds]);
 
   return (
     <section className="premium-map relative z-0 min-h-[520px] overflow-hidden rounded-lg border border-focus-line bg-focus-navy/80">

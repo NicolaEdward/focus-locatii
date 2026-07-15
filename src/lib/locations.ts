@@ -6,7 +6,7 @@ import { arrayFromJson, makeSlug, normalizeMediaType, statusFromAvailabilityText
 import { isInsideRomania } from "@/lib/gps";
 import { isProductionSketchImage } from "@/lib/location-images";
 import { displayPhotoUrl, samplePhotoForCode } from "@/lib/photos";
-import { expireStaleHolds } from "@/lib/reservation-lifecycle";
+import { expireStaleHolds, HOLD_DURATION_DAYS } from "@/lib/reservation-lifecycle";
 import { sortOperationalLocations } from "@/lib/location-order";
 import type { CategoryDTO, LocationDTO } from "@/types/location";
 
@@ -21,6 +21,39 @@ const adminLocationInclude = {
     orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
   }
 };
+
+function adminLocationListInclude(now: Date) {
+  const today = startOfUtcDay(now);
+  const legacyHoldCutoff = new Date(now);
+  legacyHoldCutoff.setUTCDate(legacyHoldCutoff.getUTCDate() - HOLD_DURATION_DAYS);
+  return {
+    category: true,
+    images: {
+      orderBy: [{ isMain: "desc" as const }, { sortOrder: "asc" as const }]
+    },
+    reservations: {
+      where: {
+        periodEnd: { gte: today },
+        OR: [
+          { status: "BOOKED" as const },
+          {
+            status: { in: ["HOLD" as const, "RESERVED" as const] },
+            OR: [
+              { holdExpiresAt: { gt: now } },
+              { holdExpiresAt: null, createdAt: { gt: legacyHoldCutoff } }
+            ]
+          }
+        ]
+      },
+      select: {
+        status: true,
+        periodStart: true,
+        periodEnd: true
+      },
+      orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
+    }
+  };
+}
 
 function publicLocationInclude(today: Date) {
   return {
@@ -76,6 +109,7 @@ type LocationWithRelations = AdminLocationWithRelations | PublicLocationWithRela
 type SerializeLocationOptions = {
   includeHiddenCommercials?: boolean;
   includePrivateFields?: boolean;
+  includeReservationDetails?: boolean;
 };
 
 export function serializeLocation(location: LocationWithRelations, options: SerializeLocationOptions = {}): LocationDTO {
@@ -184,7 +218,7 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
       sortOrder: image.sortOrder,
       isMain: image.isMain
     })),
-    reservations: exposePrivateFields
+    reservations: exposePrivateFields && options.includeReservationDetails !== false
       ? (location.reservations as AdminLocationWithRelations["reservations"]).map((reservation) => ({
           id: reservation.id,
           locationId: reservation.locationId,
@@ -357,14 +391,14 @@ export const listCachedPublicLocations = unstable_cache(
 );
 
 export async function listAdminLocations() {
-  await expireStaleHolds();
+  const now = new Date();
   const locations = await prisma.location.findMany({
-    include: adminLocationInclude,
+    include: adminLocationListInclude(now),
     orderBy: [{ updatedAt: "desc" }]
   });
 
   return locations.map((location) =>
-    serializeLocation(location, { includeHiddenCommercials: true, includePrivateFields: true })
+    serializeLocation(location, { includeHiddenCommercials: true, includePrivateFields: true, includeReservationDetails: false })
   ).sort(sortOperationalLocations);
 }
 

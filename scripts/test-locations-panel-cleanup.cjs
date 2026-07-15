@@ -15,6 +15,7 @@ function main() {
   galleryPreviewIsPresent();
   productionSketchSupportUsesExistingImages();
   operationalWidgetsMovedToWorkspace();
+  locationWorkspaceLoadsSummaryDataFirst();
   salesExportsBelongToFinance();
   activeRentalsCanBeCorrectedSafely();
   numericBlankValuesRemainNull();
@@ -34,6 +35,7 @@ function main() {
       "gallery preview and empty state exist",
       "production sketch is edited separately from public gallery",
       "operational widgets moved to /admin/operational",
+      "locations workspace avoids duplicate operational data and lazy-loads reservation details",
       "sales export removed from /admin/locatii and kept under finance",
       "active rental correction keeps client/campaign and cancellation safe",
       "blank numeric values remain null"
@@ -168,6 +170,21 @@ function operationalWidgetsMovedToWorkspace() {
   assert(operationalPage.includes('workspace="operational"'), "/admin/operational should render operational widgets");
   assert(routes.includes('adminHref("/admin/operational"'), "operational route helper should point to the operational workspace");
   assert(header.includes('href="/admin/operational"'), "admin navigation should include Operational");
+}
+
+function locationWorkspaceLoadsSummaryDataFirst() {
+  const page = read("src", "app", "admin", "locatii", "page.tsx");
+  const dashboard = read("src", "components", "admin", "AdminDashboard.tsx");
+  const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
+  const reservations = read("src", "lib", "reservations.ts");
+  const detailRoute = read("src", "app", "api", "reservations", "[id]", "route.ts");
+  assert(page.includes("includeDetails: false"), "locations page should load reservation summaries without nested history/photos");
+  assert(!page.includes("listOperationReservations"), "locations page must not load the operational reservation dataset twice");
+  assert(!dashboard.includes("operationReservations="), "locations dashboard should not serialize operational history into the page");
+  assert(panel.includes('fetch(`/api/reservations/${summary.id}`'), "reservation detail should load only when edit is opened");
+  assert(reservations.includes("reservationSummaryInclude"), "reservation summary query should use a narrow relation set");
+  assert(read("src", "lib", "locations.ts").includes("legacyHoldCutoff"), "location summaries must ignore expired legacy holds without relying on a write during page load");
+  assert(detailRoute.includes("getReservation(id, session)"), "reservation detail route should enforce authenticated ownership");
 }
 
 function salesExportsBelongToFinance() {

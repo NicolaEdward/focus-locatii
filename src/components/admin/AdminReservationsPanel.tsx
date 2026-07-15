@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Building2,
@@ -244,7 +244,6 @@ const requestStatuses: OfferRequestStatus[] = ["NEW", "CONTACTED", "ARCHIVED"];
 export function AdminReservationsPanel({
   locations,
   initialReservations,
-  operationReservations,
   initialOfferRequests,
   onLocationsUpdated,
   session,
@@ -252,7 +251,6 @@ export function AdminReservationsPanel({
 }: {
   locations: LocationDTO[];
   initialReservations: ReservationDTO[];
-  operationReservations?: ReservationDTO[];
   initialOfferRequests: OfferRequestDTO[];
   onLocationsUpdated?: (locations: LocationDTO[]) => void;
   session: AuthSession;
@@ -308,6 +306,7 @@ export function AdminReservationsPanel({
   const [editingReservation, setEditingReservation] = useState<ReservationDTO | null>(null);
   const [editForm, setEditForm] = useState<ReservationEditForm | null>(null);
   const [editing, setEditing] = useState(false);
+  const reservationDetailRequestRef = useRef<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
@@ -604,7 +603,7 @@ export function AdminReservationsPanel({
       .map((reservation) => reservation.locationId);
   }, [editingReservation, reservations]);
 
-  const operationalReservations = isOperationalWorkspace ? reservations : operationReservations?.length ? operationReservations : reservations;
+  const operationalReservations = isOperationalWorkspace ? reservations : [];
 
   const decorationWindowEnd = useMemo(() => addDays(today, DECORATION_LOOKAHEAD_DAYS), [today]);
   const neutralizationWindowEnd = useMemo(() => addDays(today, NEUTRALIZATION_LOOKAHEAD_DAYS), [today]);
@@ -786,47 +785,64 @@ export function AdminReservationsPanel({
     }
   }
 
-  function openReservationEditor(reservation: ReservationDTO) {
+  async function openReservationEditor(summary: ReservationDTO) {
+    if (reservationDetailRequestRef.current) return;
+    reservationDetailRequestRef.current = summary.id;
     setError(null);
-    setMessage(null);
-    setEditingReservation(reservation);
-    setEditClientSearch("");
-    const decorationCost = operationCost(reservation.productionNotes, "decoration");
-    setEditForm({
-      clientId: reservation.clientId || "",
-      campaignId: reservation.campaignId || "",
-      clientName: reservation.clientName || "",
-      clientCompany: reservation.clientCompany || "",
-      contractCompany: normalizeCompanyEntity(reservation.contractCompany) || "",
-      clientEmail: reservation.clientEmail || "",
-      clientPhone: reservation.clientPhone || "",
-      campaignName: reservation.campaignName || "",
-      contractNumber: reservation.contractNumber || "",
-      salesperson: reservation.salesperson || "",
-      sellerUserId: reservation.sellerUserId || reservation.ownerId || "",
-      amount: numberInputValue(reservation.amount),
-      monthlyRentTotal: numberInputValue(reservation.monthlyRentTotal),
-      monthlyRentShare: numberInputValue(reservation.monthlyRentShare),
-      currency: reservation.currency || "EUR",
-      paymentTermType: reservation.paymentTermType || "30_days",
-      paymentTermDays: numberInputValue(reservation.paymentTermDays ?? 30),
-      customPaymentTermNote: reservation.customPaymentTermNote || "",
-      billingRule: reservation.billingRule || "month_start",
-      billingDayOfMonth: numberInputValue(reservation.billingDayOfMonth ?? 1),
-      customBillingDate: dateInputValue(reservation.customBillingDate),
-      billingFrequency: reservation.billingFrequency || "monthly",
-      invoiceGenerationMode: reservation.invoiceGenerationMode || "manual",
-      billingNotes: reservation.billingNotes || "",
-      periodStart: dateInputValue(reservation.periodStart),
-      periodEnd: dateInputValue(reservation.periodEnd),
-      installationDate: dateInputValue(reservation.installationDate),
-      decorationCost: numberInputValue(decorationCost.cost),
-      decorationCurrency: decorationCost.currency || reservation.currency || "EUR",
-      neutralizationDate: dateInputValue(reservation.neutralizationDate),
-      productionNotes: reservation.productionNotes || "",
-      notes: reservation.notes || "",
-      applyToGroup: Boolean(reservation.contractGroupId)
-    });
+    setMessage("Se incarca detaliile rezervarii...");
+
+    try {
+      const response = await fetch(`/api/reservations/${summary.id}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.reservation) {
+        throw new Error(payload?.error || "Rezervarea nu a putut fi incarcata.");
+      }
+      const reservation = payload.reservation as ReservationDTO;
+      setMessage(null);
+      setEditingReservation(reservation);
+      setEditClientSearch("");
+      const decorationCost = operationCost(reservation.productionNotes, "decoration");
+      setEditForm({
+        clientId: reservation.clientId || "",
+        campaignId: reservation.campaignId || "",
+        clientName: reservation.clientName || "",
+        clientCompany: reservation.clientCompany || "",
+        contractCompany: normalizeCompanyEntity(reservation.contractCompany) || "",
+        clientEmail: reservation.clientEmail || "",
+        clientPhone: reservation.clientPhone || "",
+        campaignName: reservation.campaignName || "",
+        contractNumber: reservation.contractNumber || "",
+        salesperson: reservation.salesperson || "",
+        sellerUserId: reservation.sellerUserId || reservation.ownerId || "",
+        amount: numberInputValue(reservation.amount),
+        monthlyRentTotal: numberInputValue(reservation.monthlyRentTotal),
+        monthlyRentShare: numberInputValue(reservation.monthlyRentShare),
+        currency: reservation.currency || "EUR",
+        paymentTermType: reservation.paymentTermType || "30_days",
+        paymentTermDays: numberInputValue(reservation.paymentTermDays ?? 30),
+        customPaymentTermNote: reservation.customPaymentTermNote || "",
+        billingRule: reservation.billingRule || "month_start",
+        billingDayOfMonth: numberInputValue(reservation.billingDayOfMonth ?? 1),
+        customBillingDate: dateInputValue(reservation.customBillingDate),
+        billingFrequency: reservation.billingFrequency || "monthly",
+        invoiceGenerationMode: reservation.invoiceGenerationMode || "manual",
+        billingNotes: reservation.billingNotes || "",
+        periodStart: dateInputValue(reservation.periodStart),
+        periodEnd: dateInputValue(reservation.periodEnd),
+        installationDate: dateInputValue(reservation.installationDate),
+        decorationCost: numberInputValue(decorationCost.cost),
+        decorationCurrency: decorationCost.currency || reservation.currency || "EUR",
+        neutralizationDate: dateInputValue(reservation.neutralizationDate),
+        productionNotes: reservation.productionNotes || "",
+        notes: reservation.notes || "",
+        applyToGroup: Boolean(reservation.contractGroupId)
+      });
+    } catch (loadError) {
+      setMessage(null);
+      setError(loadError instanceof Error ? loadError.message : "Rezervarea nu a putut fi incarcata.");
+    } finally {
+      reservationDetailRequestRef.current = null;
+    }
   }
 
   function closeReservationEditor() {
@@ -1329,7 +1345,7 @@ export function AdminReservationsPanel({
                         <span className="line-clamp-2 text-xs text-slate-400">{location.address || location.categoryName}</span>
                         {periodAvailability ? (
                           <span className="text-xs font-bold text-focus-yellow">
-                            {periodAvailability.detail || occupiedPeriodsLabel(location)}
+                            {periodAvailability.detail || occupiedPeriodsLabel(location.id, reservations)}
                           </span>
                         ) : location.availabilityDetail ? (
                           <span className="text-xs font-bold text-focus-yellow">{location.availabilityDetail}</span>
@@ -3883,8 +3899,9 @@ function addDays(value: Date, days: number) {
   return next;
 }
 
-function occupiedPeriodsLabel(location: LocationDTO) {
-  const periods = location.reservations
+function occupiedPeriodsLabel(locationId: string, reservations: ReservationDTO[]) {
+  const periods = reservations
+    .filter((reservation) => reservation.locationId === locationId)
     .filter((reservation) => activeReservationStatuses.includes(reservation.status))
     .slice(0, 3)
     .map((reservation) => `${dateLabel(reservation.periodStart)} - ${dateLabel(reservation.periodEnd)}`);

@@ -39,6 +39,9 @@ for (const status of ["CANCELLED", "EXPIRED", "LOST", "ARCHIVED"]) {
 assert(files.availability.includes("periodStart: { lte: periodEnd }"), "availability must use inclusive overlap start check");
 assert(files.availability.includes("periodEnd: { gte: periodStart }"), "availability must use inclusive overlap end check");
 assert(files.availability.includes("buildNoPeriodAvailability"), "availability must provide useful no-period status");
+assert(files.service.includes('lifecycleStatus: { not: "ARCHIVED" }'), "archived inventory must not enter the sales selector");
+assert(files.availability.includes("lifecycleUnavailable"), "inactive or maintenance inventory must not be proposed for sale");
+assert(!files.availability.includes("Status inventar: ${location.status}"), "legacy UNKNOWN status must not act as a commercial availability warning");
 assert(files.availability.includes("referenceDate"), "start-date-only availability should use the selected start date as reference");
 assert(files.availability.includes("periodEnd: { gte: referenceDate }"), "start-date-only availability should look forward from the selected start date");
 assert(files.availability.includes("Disponibil pana la"), "no-period future booking should show available-until label");
@@ -89,7 +92,7 @@ assert(files.builder.includes("const [showMap, setShowMap] = useState(false)"), 
 assert(!files.builder.includes("Firma contractanta"), "selector must not expose legal company selection");
 assert(files.builder.includes('companyEntity: "Focus Media"'), "selector may keep a safe internal company context for compatibility");
 assert(files.builder.includes("locationMatchesAvailabilityFilter"), "selector must use one availability filter model");
-assert(files.builder.includes('availability: "PROPOSABLE"'), "selected-period default should focus on proposable locations");
+assert(files.builder.includes('periodMode === "range" ? "PROPOSABLE"'), "selected-period default should focus on proposable locations");
 assert(files.builder.includes("state === \"AVAILABLE\" || state === \"PARTIAL\""), "default selected-period filter should hide fully conflicted locations");
 assert(files.builder.includes("availabilityById[location.id]?.state !== \"CONFLICT\""), "bulk select must not select hidden or conflicted locations");
 assert(files.builder.includes("Selecteaza tot"), "bulk select action should be sales-friendly");
@@ -106,6 +109,15 @@ assert(!files.filters.includes("Pret max."), "price max filter should not be pri
 assert(!files.filters.includes("Select label=\"Zona\""), "zone filter should not be primary");
 assert(files.filters.includes("function MultiSelect"), "format filter should be a compact multi-select");
 assert(files.filters.includes("Selecteaza"), "format multi-select should expose a clear checklist trigger");
+assert(files.filters.includes("overflow-x-hidden overflow-y-auto"), "format checklist must not create a horizontal scrollbar");
+assert(files.filters.includes('periodMode: "none" | "start" | "range"'), "availability filter should distinguish no-period, start-only and exact range modes");
+assert(files.builder.includes('availability: periodMode === "range" ? "PROPOSABLE"'), "availability filter must normalize when the date mode changes");
+assert(files.builder.includes("availabilityLoading, baseFilteredLocations"), "availability loading changes must refresh filtered rows without stale state");
+assert(files.builder.includes('availability: "ALL"'), "selector should hydrate with the no-period availability filter");
+assert(files.builder.includes('if (filter === "CURRENT_AVAILABLE") return state === "AVAILABLE"'), "start-date availability must include locations that are free at the selected date even if booked later");
+assert(files.builder.includes("Elimina conflictele") || files.basket.includes("Elimina conflictele"), "stale conflicted basket items should have a clear cleanup action");
+assert(files.basket.includes("availabilityById"), "basket and result list should share the normalized availability source");
+assert(files.basket.includes("currentAvailability(item)?.state"), "basket conflict counter must use current normalized availability");
 assert(files.basket.includes("Continua catre Media Plan - urmatorul pas"), "future Media Plan CTA should be disabled placeholder");
 assert(files.basket.includes("disabled"), "future Media Plan CTA must not write in this batch");
 assert(files.basket.includes("Exporta disponibil"), "basket should expose availability export as a primary action");

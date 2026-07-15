@@ -15,6 +15,7 @@ function main() {
   cooConflictActionsAreManualOnly();
   operationMutationControlsRequireOperatePermission();
   dashboardLabelsAreClearRomanian();
+  dashboardInventoryAndProblemsStayConsistent();
 
   console.log(JSON.stringify({
     ok: true,
@@ -26,7 +27,8 @@ function main() {
       "COO operation task list is not duplicated",
       "note-only conflict resolve buttons are hidden",
       "operation mutation controls require campaigns.operate",
-      "dashboard labels are clearer Romanian labels"
+      "dashboard labels are clearer Romanian labels",
+      "COO inventory, problems and notification reads stay consistent"
     ]
   }, null, 2));
 }
@@ -89,7 +91,7 @@ function operationMutationControlsRequireOperatePermission() {
   const reservationsPanel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
   assert(reservationsPanel.includes('const canUpdateOperationStatus = hasPermission(session.role, "campaigns.operate")'), "reservation operation status controls must require campaigns.operate");
   const canEditBlock = blockFrom(reservationsPanel, "function canEditOperationalReservation", "function AdminTableShell");
-  assert(canEditBlock.includes('return hasPermission(session.role, "campaigns.operate");'), "operation task edit helper must require campaigns.operate");
+  assert(canEditBlock.includes("canCompleteOperationalReservation(session, _reservation)"), "operation completion helper must use the central role/ownership policy");
   assert(!canEditBlock.includes("reservations.manage.own"), "sales ownership must not enable operation mutation controls");
 
   const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
@@ -114,6 +116,21 @@ function dashboardLabelsAreClearRomanian() {
   const clientCampaigns = read("src", "components", "admin", "ClientCampaignsWorkspace.tsx");
   assert(!clientCampaigns.includes("Accounts OOH"), "client workspace title should not use mixed English label");
   assert(clientCampaigns.includes("Clienti si campanii OOH"), "client workspace title should be clear Romanian");
+}
+
+function dashboardInventoryAndProblemsStayConsistent() {
+  const dashboard = read("src", "lib", "dashboard.ts");
+  const notificationsRoute = read("src", "app", "api", "admin", "notifications", "route.ts");
+  const notificationCron = read("src", "app", "api", "cron", "sync-financial-notifications", "route.ts");
+  assert(dashboard.includes('where: { lifecycleStatus: { not: "ARCHIVED" } }'), "COO inventory should include internal non-archived locations");
+  assert(!dashboard.includes('where: { showInPublic: true }'), "COO inventory must not be limited to the public catalog");
+  assert(!dashboard.includes('["UNKNOWN"].includes(location.status)'), "legacy UNKNOWN must not mean commercially blocked");
+  assert(dashboard.includes("available: availableLocations.length"), "dashboard availability totals should use the normalized inventory calculation");
+  assert(dashboard.includes("holdIsActive(item, now)"), "dashboard reads must ignore expired legacy holds without mutating data");
+  assert(dashboard.includes("input.overdueTasks.forEach"), "problem center should include overdue operational work");
+  assert(dashboard.includes("uniqueCampaignCount(confirmed)"), "seller confirmed campaigns should not count every location row as a campaign");
+  assert(!notificationsRoute.includes("syncFinancialNotifications"), "notification reads must not run financial synchronization");
+  assert(notificationCron.includes("CRON_SECRET") && notificationCron.includes("syncFinancialNotifications"), "financial notification sync should run through the protected cron route");
 }
 
 function blockFrom(source, start, end) {

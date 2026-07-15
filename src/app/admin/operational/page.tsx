@@ -33,7 +33,6 @@ export default async function AdminOperationalPage() {
           <AdminReservationsPanel
             locations={[]}
             initialReservations={operationReservations}
-            operationReservations={operationReservations}
             initialOfferRequests={[]}
             session={session}
             workspace="operational"

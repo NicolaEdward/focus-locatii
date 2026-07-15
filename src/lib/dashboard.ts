@@ -23,6 +23,12 @@ import {
   operationalProofDownloadPath,
   parseOperationalProofNotes
 } from "@/lib/operational-proof";
+import {
+  hasSellerReportActivity,
+  normalizeSellerName,
+  reportableLooseSellerName,
+  reportableSellerName
+} from "@/lib/seller-reporting";
 
 type CampaignRow = {
   id: string;
@@ -358,7 +364,7 @@ export async function getDashboardData(session: AuthSession) {
     }, 0)
   );
   const offerPipeline = countBy(offerRequests, (item) => item.status);
-  const agentPerformance = groupPerformance(monthlySales, sellerName);
+  const agentPerformance = groupPerformance(monthlySales, reportableSellerName);
   const cityPerformance = groupPerformance(monthlySales, (item) => item.location.city || "Fara oras");
   const topClients = groupPerformance(monthlySales, (item) => item.clientName || "Fara client");
   const legacyDecorationTasks = operationTasks(operationCampaigns, "decoration", now, operationWindowStart, decorationWindowEnd, session);
@@ -986,21 +992,36 @@ function sellerActivity(
   now: Date
 ) {
   const sellerNames = new Set<string>();
-  users.filter((user) => user.active && user.role === "SALES_AGENT").forEach((user) => sellerNames.add(user.name));
+  const excludedUserNames = new Set(
+    users
+      .filter((user) => !user.active || !["SALES_AGENT", "SALES_DIRECTOR", "COO"].includes(user.role))
+      .map((user) => normalizeSellerName(user.name))
+  );
+  users
+    .filter((user) => user.active && ["SALES_AGENT", "SALES_DIRECTOR", "COO"].includes(user.role))
+    .forEach((user) => sellerNames.add(user.name));
   requests.forEach((request) => {
-    const seller = parseOfferRequestMeta(request.source).salesperson;
+    const seller = reportableLooseSellerName(parseOfferRequestMeta(request.source).salesperson, excludedUserNames);
     if (seller) sellerNames.add(seller);
   });
-  campaigns.forEach((campaign) => sellerNames.add(sellerName(campaign)));
+  campaigns.forEach((campaign) => {
+    const seller = reportableSellerName(campaign);
+    if (seller) sellerNames.add(seller);
+  });
   crmRows.forEach((lead) => {
-    if (lead.assignedTo?.name) sellerNames.add(lead.assignedTo.name);
+    const seller = reportableLooseSellerName(lead.assignedTo?.name, excludedUserNames);
+    if (seller) sellerNames.add(seller);
   });
 
   return [...sellerNames].sort((a, b) => a.localeCompare(b, "ro")).map((seller) => {
-    const sellerRequests = requests.filter((request) => parseOfferRequestMeta(request.source).salesperson === seller);
-    const sellerCrmRows = crmRows.filter((lead) => lead.assignedTo?.name === seller);
-    const sellerCampaigns = campaigns.filter((campaign) => sellerName(campaign) === seller);
-    const sellerSales = monthlySales.filter((campaign) => sellerName(campaign) === seller);
+    const sellerRequests = requests.filter(
+      (request) => reportableLooseSellerName(parseOfferRequestMeta(request.source).salesperson, excludedUserNames) === seller
+    );
+    const sellerCrmRows = crmRows.filter(
+      (lead) => reportableLooseSellerName(lead.assignedTo?.name, excludedUserNames) === seller
+    );
+    const sellerCampaigns = campaigns.filter((campaign) => reportableSellerName(campaign) === seller);
+    const sellerSales = monthlySales.filter((campaign) => reportableSellerName(campaign) === seller);
     const activeHolds = sellerCampaigns.filter((campaign) => ["HOLD", "RESERVED"].includes(campaign.status) && (!campaign.holdExpiresAt || campaign.holdExpiresAt > now));
     const expiredHolds = sellerCampaigns.filter((campaign) => campaign.status === "EXPIRED");
     const confirmed = sellerCampaigns.filter((campaign) => campaign.status === "BOOKED");
@@ -1035,7 +1056,7 @@ function sellerActivity(
         ...sellerCampaigns.map((campaign) => campaign.updatedAt)
       ])?.toISOString() || null
     };
-  });
+  }).filter(hasSellerReportActivity);
 }
 
 function inventoryBreakdown(
@@ -1081,10 +1102,11 @@ function countBy<T>(items: T[], key: (item: T) => string) {
   }, {});
 }
 
-function groupPerformance(items: CampaignRow[], key: (item: CampaignRow) => string) {
+function groupPerformance(items: CampaignRow[], key: (item: CampaignRow) => string | null) {
   const groups = new Map<string, { label: string; campaigns: number; revenue: number }>();
   for (const item of items) {
     const label = key(item);
+    if (!label) continue;
     const current = groups.get(label) || { label, campaigns: 0, revenue: 0 };
     current.campaigns += 1;
     current.revenue += item.amount ?? item.monthlyRentShare ?? 0;

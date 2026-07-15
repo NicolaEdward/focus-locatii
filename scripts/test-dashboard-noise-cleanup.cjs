@@ -4,6 +4,7 @@ const path = require("node:path");
 const { loadTsModule } = require("./load-ts-module.cjs");
 
 const neutralizationDates = loadTsModule(path.join(process.cwd(), "src", "lib", "neutralization-date.ts"));
+const sellerReporting = loadTsModule(path.join(process.cwd(), "src", "lib", "seller-reporting.ts"));
 
 main();
 
@@ -16,6 +17,7 @@ function main() {
   operationMutationControlsRequireOperatePermission();
   dashboardLabelsAreClearRomanian();
   dashboardInventoryAndProblemsStayConsistent();
+  sellerReportsExcludeSystemAccountsAndEmptyRows();
 
   console.log(JSON.stringify({
     ok: true,
@@ -28,9 +30,44 @@ function main() {
       "note-only conflict resolve buttons are hidden",
       "operation mutation controls require campaigns.operate",
       "dashboard labels are clearer Romanian labels",
-      "COO inventory, problems and notification reads stay consistent"
+      "COO inventory, problems and notification reads stay consistent",
+      "seller reports exclude system accounts, unassigned rows and empty sellers"
     ]
   }, null, 2));
+}
+
+function sellerReportsExcludeSystemAccountsAndEmptyRows() {
+  assert.equal(sellerReporting.reportableSellerName({
+    salesperson: "Administrator Focus Media",
+    sellerUser: { name: "Administrator Focus Media", role: "SUPER_ADMIN", active: true }
+  }), null);
+  assert.equal(sellerReporting.reportableSellerName({ salesperson: "admin", sellerUser: null }), null);
+  assert.equal(sellerReporting.reportableSellerName({ salesperson: "Nealocat", sellerUser: null }), null);
+  assert.equal(sellerReporting.reportableSellerName({
+    salesperson: "Mihail Gabriel",
+    sellerUser: { name: "Mihail Gabriel", role: "SALES_DIRECTOR", active: true }
+  }), "Mihail Gabriel");
+  assert.equal(sellerReporting.reportableSellerName({
+    salesperson: "Nicola Edward",
+    sellerUser: { name: "Nicola Edward", role: "COO", active: true }
+  }), "Nicola Edward");
+  assert.equal(sellerReporting.hasSellerReportActivity({
+    activeLeads: 0,
+    receivedRequests: 0,
+    reservationsCreated: 0,
+    activeHolds: 0,
+    expiredHolds: 0,
+    confirmedCampaigns: 0,
+    soldValue: 0,
+    pipelineValue: 0,
+    overdueFollowUps: 0,
+    conversionRate: null,
+    latestActivityAt: null
+  }), false);
+
+  const dashboard = read("src", "lib", "dashboard.ts");
+  assert(dashboard.includes("groupPerformance(monthlySales, reportableSellerName)"), "sales ranking must use filtered seller attribution");
+  assert(dashboard.includes(".filter(hasSellerReportActivity)"), "empty seller rows must not remain in the COO report");
 }
 
 function neutralizationDateBusinessRule() {

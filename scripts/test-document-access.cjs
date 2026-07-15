@@ -1,6 +1,12 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 const { loadTsModule } = require("./load-ts-module.cjs");
+
+const uploadRoute = fs.readFileSync(
+  path.join(process.cwd(), "src", "app", "api", "admin", "client-documents", "route.ts"),
+  "utf8"
+);
 
 const { evaluateDocumentAccess } = loadTsModule(path.join(process.cwd(), "src", "lib", "client-document-access.ts"), {
   "@/lib/prisma": { prisma: {} }
@@ -43,6 +49,19 @@ assert.equal(
   "Missing linked entities should be rejected before ownership checks."
 );
 
+assert(
+  uploadRoute.includes("documentType === OPERATIONAL_PROOF_DOCUMENT_TYPE"),
+  "Generic document uploads must not bypass the operational proof validation and retention workflow."
+);
+assert(
+  uploadRoute.includes("safeExternalDocumentUrl") && uploadRoute.includes('url.protocol !== "https:"'),
+  "External document links must be restricted to HTTP(S)."
+);
+assert(
+  !uploadRoute.includes("NextResponse.json({ document }, { status: 201"),
+  "Upload responses must not expose raw document storage contents."
+);
+
 console.log(JSON.stringify({
   ok: true,
   checked: [
@@ -53,7 +72,10 @@ console.log(JSON.stringify({
     "upload to own linked entity",
     "upload to foreign linked entity rejected",
     "admin/COO access allowed",
-    "finance limited to financial documents"
+    "finance limited to financial documents",
+    "operational proof upload bypass rejected",
+    "external links limited to HTTP(S)",
+    "raw storage contents excluded from upload responses"
   ]
 }, null, 2));
 

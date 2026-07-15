@@ -2,6 +2,7 @@ import type { ReservationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { hasGlobalDataAccess } from "@/lib/rbac";
 import type { AuthSession } from "@/lib/auth";
+import { HOLD_DURATION_DAYS } from "@/lib/reservation-lifecycle";
 import {
   isManualAvailabilityStatus,
   legacyManualBlockConflict,
@@ -61,10 +62,21 @@ export async function getLocationSelectionAvailability(input: {
       prisma.reservation.findMany({
         where: {
           locationId: { in: locationIds },
-          status: { in: [...LOCATION_SELECTION_BLOCKING_STATUSES] as ReservationStatus[] },
+          ...activeBlockingReservationWhere(referenceDate),
           periodEnd: { gte: referenceDate }
         },
-        include: {
+        select: {
+          id: true,
+          locationId: true,
+          status: true,
+          periodStart: true,
+          periodEnd: true,
+          holdExpiresAt: true,
+          clientName: true,
+          campaignName: true,
+          salesperson: true,
+          ownerId: true,
+          sellerUserId: true,
           client: { select: { companyName: true } },
           campaign: { select: { campaignName: true } },
           sellerUser: { select: { name: true } }
@@ -78,15 +90,18 @@ export async function getLocationSelectionAvailability(input: {
       })
     ]);
 
+    const reservationConflictsByLocationId = groupByLocationId(
+      futureReservations.map((reservation) => serializeConflict(reservation, input.session))
+    );
+    const overrideConflictsByLocationId = groupByLocationId(overrideConflicts);
+
     return Object.fromEntries(
       locations.map((location) => {
-        const reservationConflicts = futureReservations
-          .filter((reservation) => reservation.locationId === location.id)
-          .map((reservation) => serializeConflict(reservation, input.session));
+        const reservationConflicts = reservationConflictsByLocationId.get(location.id) || [];
         const legacyBlock = legacyManualBlockConflict(location, { referenceDate });
         const intervals = [
           ...reservationConflicts,
-          ...overrideConflicts.filter((conflict) => conflict.locationId === location.id),
+          ...(overrideConflictsByLocationId.get(location.id) || []),
           ...(legacyBlock ? [legacyBlock] : [])
         ].sort(compareConflicts);
         return [location.id, location.lifecycleStatus === "ACTIVE"
@@ -104,11 +119,22 @@ export async function getLocationSelectionAvailability(input: {
     prisma.reservation.findMany({
       where: {
         locationId: { in: locationIds },
-        status: { in: [...LOCATION_SELECTION_BLOCKING_STATUSES] as ReservationStatus[] },
+        ...activeBlockingReservationWhere(new Date()),
         periodStart: { lte: periodEnd },
         periodEnd: { gte: periodStart }
       },
-      include: {
+      select: {
+        id: true,
+        locationId: true,
+        status: true,
+        periodStart: true,
+        periodEnd: true,
+        holdExpiresAt: true,
+        clientName: true,
+        campaignName: true,
+        salesperson: true,
+        ownerId: true,
+        sellerUserId: true,
         client: { select: { companyName: true } },
         campaign: { select: { campaignName: true } },
         sellerUser: { select: { name: true } }
@@ -123,15 +149,18 @@ export async function getLocationSelectionAvailability(input: {
     })
   ]);
 
+  const reservationConflictsByLocationId = groupByLocationId(
+    conflicts.map((conflict) => serializeConflict(conflict, input.session))
+  );
+  const overrideConflictsByLocationId = groupByLocationId(overrideConflicts);
+
   return Object.fromEntries(
     locations.map((location) => {
-      const reservationConflicts = conflicts
-        .filter((conflict) => conflict.locationId === location.id)
-        .map((conflict) => serializeConflict(conflict, input.session));
+      const reservationConflicts = reservationConflictsByLocationId.get(location.id) || [];
       const legacyBlock = legacyManualBlockConflict(location, { periodStart, periodEnd });
       const locationConflicts = [
         ...reservationConflicts,
-        ...overrideConflicts.filter((conflict) => conflict.locationId === location.id),
+        ...(overrideConflictsByLocationId.get(location.id) || []),
         ...(legacyBlock ? [legacyBlock] : [])
       ].sort(compareConflicts);
       return [
@@ -500,6 +529,32 @@ function parseDate(value?: string | null) {
 
 function unique(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function activeBlockingReservationWhere(now: Date) {
+  const legacyHoldCutoff = addDays(now, -HOLD_DURATION_DAYS);
+  return {
+    OR: [
+      { status: "BOOKED" as ReservationStatus },
+      {
+        status: { in: ["HOLD", "RESERVED"] as ReservationStatus[] },
+        OR: [
+          { holdExpiresAt: { gt: now } },
+          { holdExpiresAt: null, createdAt: { gt: legacyHoldCutoff } }
+        ]
+      }
+    ]
+  };
+}
+
+function groupByLocationId<T extends { locationId: string }>(rows: T[]) {
+  const grouped = new Map<string, T[]>();
+  for (const row of rows) {
+    const current = grouped.get(row.locationId) || [];
+    current.push(row);
+    grouped.set(row.locationId, current);
+  }
+  return grouped;
 }
 
 function startOfUtcDay(date: Date) {

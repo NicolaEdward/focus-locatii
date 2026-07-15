@@ -120,7 +120,6 @@ function Select({
     <label className="grid gap-1 text-xs font-bold uppercase text-slate-300">
       {label}
       <select className="focus-input" value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Toate</option>
         {options.map((option) => {
           const value = typeof option === "string" ? option : option.value;
           const label = typeof option === "string" ? option : option.label;

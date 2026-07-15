@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
       .map((id) => id.trim())
       .filter(Boolean)
   );
+  const explicitIdScope = request.nextUrl.searchParams.get("scope") === "ids";
   const includeHidden = request.nextUrl.searchParams.get("includeHidden") === "1";
   const includeUnavailable = request.nextUrl.searchParams.get("includeUnavailable") === "1";
 
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest) {
 
   const baseLocations = (await listAdminLocations())
     .filter((location) => includeHidden || location.showInPublic)
-    .filter((location) => (ids.size ? ids.has(location.id) : true))
+    .filter((location) => (explicitIdScope ? ids.has(location.id) : ids.size ? ids.has(location.id) : true))
     .filter((location) => {
       if (!search) return true;
       return [location.code, location.city, location.county, location.address, location.type, location.categoryName]

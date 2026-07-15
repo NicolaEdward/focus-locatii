@@ -539,6 +539,7 @@ function selectionStorageKey(userId: string) {
 
 function buildAvailabilityExportHref(input: { locationIds: string[]; periodStart?: string; periodEnd?: string; includeUnavailable?: boolean }) {
   const params = new URLSearchParams();
+  params.set("scope", "ids");
   if (input.locationIds.length) params.set("ids", input.locationIds.join(","));
   if (input.periodStart) params.set("from", input.periodStart);
   if (input.periodEnd) params.set("to", input.periodEnd);

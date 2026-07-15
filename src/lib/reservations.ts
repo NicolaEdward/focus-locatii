@@ -65,6 +65,26 @@ const reservationSummaryInclude = {
   location: { select: { code: true, address: true, city: true, type: true } }
 };
 
+const reservationOperationalInclude = {
+  ...reservationSummaryInclude,
+  documents: {
+    where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active" },
+    orderBy: { uploadedAt: "desc" as const },
+    take: 40,
+    select: {
+      id: true,
+      fileName: true,
+      fileType: true,
+      fileSize: true,
+      uploadedAt: true,
+      expiryDate: true,
+      notes: true,
+      status: true,
+      uploadedBy: { select: { name: true } }
+    }
+  }
+};
+
 const optionalNumber = z.preprocess((value) => {
   if (value === undefined) return undefined;
   if (value === "" || value == null) return null;
@@ -186,47 +206,42 @@ export async function listReservations(filters: {
   await expireStaleHolds();
   const from = parseDate(filters.from);
   const to = parseDate(filters.to);
-
-  const reservationIds = await prisma.reservation.findMany({
-    where: {
-      ...(actor?.role === "SALES_AGENT"
-        ? {
-            OR: [
-              { sellerUserId: actor.id },
-              { ownerId: actor.id },
-              { ownerId: null, salesperson: { in: [actor.name, actor.email] } }
-            ]
-          }
-        : {}),
-      ...(filters.status ? { status: filters.status as never } : {}),
-      ...(filters.locationId ? { locationId: filters.locationId } : {}),
-      ...(filters.client
-        ? {
-            OR: [
-              { clientName: { contains: filters.client } },
-              { clientCompany: { contains: filters.client } },
-              { campaignName: { contains: filters.client } }
-            ]
-          }
-        : {}),
-      ...(from || to
-        ? {
-            AND: [
-              from ? { periodEnd: { gte: from } } : {},
-              to ? { periodStart: { lte: to } } : {}
-            ]
-          }
-        : {})
-    },
-    select: { id: true },
-    orderBy: [{ bookedAt: "desc" }, { createdAt: "desc" }, { periodStart: "desc" }],
-    take: 500
-  });
+  const where: Prisma.ReservationWhereInput = {
+    ...(actor?.role === "SALES_AGENT"
+      ? {
+          OR: [
+            { sellerUserId: actor.id },
+            { ownerId: actor.id },
+            { ownerId: null, salesperson: { in: [actor.name, actor.email] } }
+          ]
+        }
+      : {}),
+    ...(filters.status ? { status: filters.status as never } : {}),
+    ...(filters.locationId ? { locationId: filters.locationId } : {}),
+    ...(filters.client
+      ? {
+          OR: [
+            { clientName: { contains: filters.client } },
+            { clientCompany: { contains: filters.client } },
+            { campaignName: { contains: filters.client } }
+          ]
+        }
+      : {}),
+    ...(from || to
+      ? {
+          AND: [
+            from ? { periodEnd: { gte: from } } : {},
+            to ? { periodStart: { lte: to } } : {}
+          ]
+        }
+      : {})
+  };
 
   const reservationsWithSegments = await prisma.reservation.findMany({
-    where: { id: { in: reservationIds.map((reservation) => reservation.id) } },
+    where,
     include: options.includeDetails === false ? reservationSummaryInclude : reservationInclude,
-    orderBy: [{ createdAt: "asc" }]
+    orderBy: [{ bookedAt: "desc" }, { createdAt: "desc" }, { periodStart: "desc" }],
+    take: 500
   });
 
   return reservationsWithSegments.map(serializeReservation);
@@ -242,7 +257,6 @@ export async function getReservation(id: string, actor?: AuthSession | null) {
 }
 
 export async function listOperationReservations() {
-  await expireStaleHolds();
   const today = startOfUtcDay(new Date());
   const windowStart = addDays(today, -OPERATION_HISTORY_DAYS);
   const decorationWindowEnd = addDays(today, DECORATION_LOOKAHEAD_DAYS);
@@ -259,7 +273,7 @@ export async function listOperationReservations() {
         { periodStart: { lte: neutralizationWindowEnd }, periodEnd: { gte: windowStart } }
       ]
     },
-    include: reservationInclude,
+    include: reservationOperationalInclude,
     orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }, { createdAt: "desc" }],
     take: 1000
   });

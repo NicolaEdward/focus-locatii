@@ -102,6 +102,7 @@ assert(files.builder.includes("includeUnavailable"), "selector export should exp
 assert(files.filters.includes("Disponibile / partiale"), "availability filter should support default proposable locations");
 assert(files.filters.includes("Disponibile partial"), "availability filter should support partial availability");
 assert(files.filters.includes("Indisponibile / cu conflict"), "availability filter should expose conflicts only explicitly");
+assert(!files.filters.includes('<option value="">Toate</option>'), "availability filter must not render a duplicate generic All option");
 assert(!files.filters.includes("Suprafata min."), "surface min filter should not be primary");
 assert(!files.filters.includes("Suprafata max."), "surface max filter should not be primary");
 assert(!files.filters.includes("Pret min."), "price min filter should not be primary");
@@ -143,6 +144,8 @@ assert(files.availabilityExport.includes("mapsHref(null, location.latDisplay, lo
 assert(files.availabilityExport.includes("availability.blockingIntervals.length > 1"), "availability export should list blocking intervals only when multiple intervals need explicit detail");
 assert(files.availabilityExport.includes('return "Rezervat"'), "availability export should label HOLD/RESERVED as reserved, not occupied");
 assert(files.availabilityExport.includes("mai are"), "availability export should show remaining hold days when expiry is available");
+assert(files.builder.includes('params.set("scope", "ids")'), "filtered export should preserve an explicit empty result set instead of exporting every location");
+assert(files.availabilityExport.includes('explicitIdScope'), "availability export should distinguish all inventory from an explicitly empty filtered scope");
 
 assert(files.publicCard.includes("Adauga in selectie") || files.publicCard.includes("Adaugă în selecție"), "public card must keep selection wording");
 assert(files.publicDrawer.includes("Selectia ta de locatii") || files.publicDrawer.includes("Selecția ta de locații"), "public drawer must keep selection wording");

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { evaluateDocumentAccess, resolveDocumentAccess } from "@/lib/client-document-access";
+import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +35,9 @@ export async function POST(request: NextRequest) {
     if (!clientId && !campaignId && !reservationId && !billingItemId && !financialReceivableId && !financialPayableId) {
       return NextResponse.json({ error: "Leaga documentul de client, campanie sau factura." }, { status: 400, headers: noStoreHeaders });
     }
+    if (documentType === OPERATIONAL_PROOF_DOCUMENT_TYPE) {
+      return NextResponse.json({ error: "Pozele dovada se incarca numai din fluxul operational." }, { status: 400, headers: noStoreHeaders });
+    }
     const accessError = evaluateDocumentAccess(
       session,
       await resolveDocumentAccess({ clientId, campaignId, reservationId, billingItemId, financialReceivableId, financialPayableId }),
@@ -51,7 +55,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Fisierul depaseste limita de 5 MB." }, { status: 400, headers: noStoreHeaders });
     }
 
-    const storageUrl = uploadedFile ? await fileToDataUrl(uploadedFile) : url as string;
+    const storageUrl = uploadedFile ? await fileToDataUrl(uploadedFile) : safeExternalDocumentUrl(url as string);
     const document = await prisma.clientDocument.create({
       data: {
         clientId,
@@ -81,7 +85,18 @@ export async function POST(request: NextRequest) {
       request
     });
 
-    return NextResponse.json({ document }, { status: 201, headers: noStoreHeaders });
+    return NextResponse.json({
+      document: {
+        id: document.id,
+        fileName: document.fileName,
+        fileType: document.fileType,
+        fileSize: document.fileSize,
+        documentType: document.documentType,
+        uploadedAt: document.uploadedAt.toISOString(),
+        expiryDate: document.expiryDate?.toISOString() || null,
+        status: document.status
+      }
+    }, { status: 201, headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Documentul nu a putut fi salvat." },
@@ -106,4 +121,12 @@ async function fileToDataUrl(file: File) {
   const buffer = Buffer.from(await file.arrayBuffer());
   const type = file.type || "application/octet-stream";
   return `data:${type};base64,${buffer.toString("base64")}`;
+}
+
+function safeExternalDocumentUrl(value: string) {
+  const url = new URL(value);
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("Linkul documentului trebuie sa foloseasca HTTP sau HTTPS.");
+  }
+  return url.toString();
 }

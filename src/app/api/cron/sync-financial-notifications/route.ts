@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { syncFinancialNotifications } from "@/lib/notifications";
+import { syncCrmNotifications, syncFinancialNotifications } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -13,6 +13,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const created = await syncFinancialNotifications();
-  return NextResponse.json({ ok: true, created });
+  const [financialCreated, crmCreated] = await Promise.all([
+    syncFinancialNotifications(),
+    syncCrmNotifications()
+  ]);
+  return NextResponse.json({ ok: true, financialCreated, crmCreated });
 }

@@ -10,6 +10,12 @@ assert.equal(hasPermission("SALES_AGENT", "users.manage"), false);
 assert.equal(hasPermission("SALES_AGENT", "inventory.manage"), false);
 assert.equal(hasPermission("SALES_AGENT", "reservations.manage.own"), true);
 assert.equal(hasPermission("SALES_DIRECTOR", "proposals.approve"), true);
+assert.equal(hasPermission("SALES_DIRECTOR", "leads.view"), false);
+assert.equal(hasPermission("SALES_DIRECTOR", "leads.manage"), false);
+assert.equal(hasPermission("SALES_AGENT", "leads.view.own"), true);
+assert.equal(hasPermission("SALES_AGENT", "leads.manage.own"), true);
+assert.equal(hasPermission("COO", "leads.view"), true);
+assert.equal(hasPermission("SUPER_ADMIN", "leads.manage"), true);
 assert.equal(hasPermission("COO", "campaigns.operate"), true);
 assert.equal(hasPermission("SUPER_ADMIN", "campaigns.operate"), true);
 assert.equal(hasPermission("SALES_AGENT", "campaigns.operate"), false);
@@ -35,4 +41,4 @@ assert.equal(canTransitionReservation("COMPLETED" as never, "RESERVED"), false);
 assert.equal(allowedReservationTransitions("RESERVED", "SALES_AGENT").includes("BOOKED"), false);
 assert.equal(allowedReservationTransitions("RESERVED", "SALES_DIRECTOR").includes("BOOKED"), true);
 
-console.log(JSON.stringify({ ok: true, roles: USER_ROLES, checks: 28 }, null, 2));
+console.log(JSON.stringify({ ok: true, roles: USER_ROLES, checks: 34 }, null, 2));

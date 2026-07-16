@@ -63,6 +63,7 @@
     "test:montaj-billing": "node scripts/test-montaj-billing.cjs",
     "test:data-integrity": "node scripts/test-data-integrity.cjs",
     "test:operations-rbac": "node scripts/test-operations-rbac.cjs",
+    "test:crm": "node scripts/test-crm-v2.cjs",
     "test:notifications": "node scripts/test-notifications.cjs",
     "test:account-notifications": "node scripts/test-account-notifications.cjs",
     "test:client-supplier": "tsx scripts/test-client-supplier-workflows.ts",

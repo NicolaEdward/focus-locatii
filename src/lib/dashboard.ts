@@ -3,11 +3,12 @@ import type { AuthSession } from "@/lib/auth";
 import { calculateProrata } from "@/lib/prorata";
 import { isOperationActive, operationExtraTasks, operationStatus, type OperationKind, type OperationStatus } from "@/lib/operation-status";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
-import { hasPermission } from "@/lib/rbac";
+import { hasAnyPermission, hasPermission } from "@/lib/rbac";
 import { parseOfferRequestMeta } from "@/lib/offer-request-meta";
 import { getFinancialDashboardData } from "@/lib/financial-dashboard";
 import { sortOperationalLocations } from "@/lib/location-order";
 import { calculateLocationProfit } from "@/lib/profit";
+import { getCrmTeamDashboardData } from "@/lib/crm-dashboard";
 import { effectiveInstallationDate, hasMissingInstallationSchedule } from "@/lib/installation-date";
 import { effectiveNeutralizationDate, hasMissingNeutralizationSchedule } from "@/lib/neutralization-date";
 import { HOLD_DURATION_DAYS } from "@/lib/reservation-lifecycle";
@@ -184,7 +185,11 @@ export async function getDashboardData(session: AuthSession) {
       : {};
 
   const financePromise = hasPermission(session.role, "finance.view") ? getFinancialDashboardData() : Promise.resolve(null);
-  const [locations, campaigns, operationCampaigns, offerRequests, users, auditLogs, crmRows, finance] = await Promise.all([
+  const canReadCrm = hasAnyPermission(session.role, ["leads.view", "leads.view.own"]);
+  const crmTeamPromise = ["COO", "SUPER_ADMIN"].includes(session.role)
+    ? getCrmTeamDashboardData(now)
+    : Promise.resolve(null);
+  const [locations, campaigns, operationCampaigns, offerRequests, users, auditLogs, crmRows, finance, crmTeam] = await Promise.all([
     financeOnly
       ? Promise.resolve([]) as Promise<LocationRow[]>
       : prisma.location.findMany({
@@ -305,7 +310,7 @@ export async function getDashboardData(session: AuthSession) {
           take: 12
         })
       : Promise.resolve([]),
-    financeOnly
+    financeOnly || !canReadCrm
       ? Promise.resolve([]) as Promise<CrmLeadRow[]>
       : prisma.crmLead.findMany({
           where:
@@ -316,7 +321,8 @@ export async function getDashboardData(session: AuthSession) {
           orderBy: [{ updatedAt: "desc" }],
           take: 300
         }) as Promise<CrmLeadRow[]>,
-    financePromise
+    financePromise,
+    crmTeamPromise
   ]);
 
   const active = campaigns.filter((item) => item.status === "BOOKED" && item.periodStart <= now && item.periodEnd >= now);
@@ -484,6 +490,7 @@ export async function getDashboardData(session: AuthSession) {
       ...(operationTaskReadResult ? { operationTaskReadComparison: operationTaskReadResult.comparison } : {}),
       sellers,
       crmLeads,
+      crmTeam,
       inventoryByCity,
       inventoryByType,
       approvalQueue: holds.slice(0, 20).map(serializeCampaign),

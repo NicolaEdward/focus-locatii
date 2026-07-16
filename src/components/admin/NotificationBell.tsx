@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bell, CheckCircle2, PhoneCall } from "lucide-react";
+import Link from "next/link";
 
 type NotificationRow = {
   id: string;
@@ -13,6 +14,8 @@ type NotificationRow = {
   dueDate: string | null;
   recommendedAction: string | null;
   createdAt: string;
+  entityType: string | null;
+  entityId: string | null;
   user?: { name: string; email: string } | null;
 };
 
@@ -95,6 +98,11 @@ export function NotificationBell() {
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {row.entityType === "crm_lead" && row.entityId ? (
+                    <Link className="focus-button secondary" href={`/admin/crm?lead=${encodeURIComponent(row.entityId)}`} onClick={() => setOpen(false)}>
+                      Deschide lead
+                    </Link>
+                  ) : null}
                   {row.type.startsWith("receivable_") ? <button className="focus-button secondary" type="button" disabled={busy === `${row.id}-called`} onClick={() => action(row.id, "called")}><PhoneCall size={14} /> Am sunat</button> : null}
                   <button className="focus-button" type="button" disabled={busy === `${row.id}-resolve`} onClick={() => action(row.id, "resolve")}><CheckCircle2 size={14} /> Rezolvat</button>
                 </div>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import {
   AlertTriangle,
   BriefcaseBusiness,
@@ -37,9 +37,7 @@ type OperationTaskFilter = "all" | "decoration" | "neutralization" | "overdue";
 type ReservationRow = CooData["holds"][number];
 type CampaignListRow = CooData["activeCampaigns"][number] | CooData["holds"][number];
 type TaskRow = CooData["decorationTasks"][number];
-type CrmLead = CooData["crmLeads"][number];
 type ProblemRow = CooData["problems"][number];
-type SellerUser = { id: string; name: string; email: string; role: string };
 
 const tabs: Array<{ id: CooTab; label: string }> = [
   { id: "overview", label: "Prioritati" },
@@ -53,21 +51,6 @@ const tabs: Array<{ id: CooTab; label: string }> = [
   { id: "admin", label: "Admin" }
 ];
 
-const crmStatuses = [
-  ["COLD", "Cold"],
-  ["QUALIFIED", "Calificat"],
-  ["IN_ANALYSIS", "In analiza"],
-  ["IN_OFFER", "In ofertare"],
-  ["IN_NEGOTIATION", "In negociere"],
-  ["IN_CONTRACTING", "In contractare"],
-  ["ON_HOLD", "On Hold"],
-  ["NO_RESPONSE", "Nu raspunde"],
-  ["ACCOUNT_MANAGEMENT", "Account Management"],
-  ["WON", "Castigat"],
-  ["LOST", "Pierdut"],
-  ["INACTIVE", "Inactiv"]
-] as const;
-
 export function CooCommandCenter({ data }: { data: DashboardData }) {
   const router = useRouter();
   const [, startRefresh] = useTransition();
@@ -78,8 +61,6 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
   const [query, setQuery] = useState("");
   const [hiddenReservations, setHiddenReservations] = useState<Set<string>>(new Set());
   const [hiddenTasks, setHiddenTasks] = useState<Set<string>>(new Set());
-  const [crmLeads, setCrmLeads] = useState(coo.crmLeads);
-  const [sellerUsers, setSellerUsers] = useState<SellerUser[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,24 +75,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
     if (operationFilter === "overdue") return item.overdue;
     return true;
   }), [operationFilter, visibleTasks]);
-  const visibleCrm = useMemo(() => crmLeads.filter((item) => crmMatches(item, filterText)), [crmLeads, filterText]);
   const visibleProblems = useMemo(() => coo.problems.filter((item) => problemMatches(item, filterText)).slice(0, 80), [coo.problems, filterText]);
-
-  useEffect(() => {
-    if (activeTab !== "crm") return;
-    let cancelled = false;
-    fetch("/api/admin/sellers", { cache: "no-store" })
-      .then((response) => response.ok ? response.json() : null)
-      .then((payload) => {
-        if (!cancelled && Array.isArray(payload?.sellers)) setSellerUsers(payload.sellers);
-      })
-      .catch(() => {
-        if (!cancelled) setSellerUsers([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab]);
 
   async function command(reservationId: string, action: string, body: Record<string, unknown> = {}, success = "Actiunea a fost executata.") {
     setBusy(`${action}-${reservationId}`);
@@ -136,50 +100,6 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
       startRefresh(() => router.refresh());
     } catch (commandError) {
       setError(commandError instanceof Error ? commandError.message : "Actiunea nu a putut fi executata.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function updateCrmLead(id: string, patch: Record<string, unknown>) {
-    setBusy(`crm-${id}`);
-    setError(null);
-    setMessage(null);
-    try {
-      const lead = crmLeads.find((item) => item.id === id);
-      const endpoint = lead?.sourceKind === "crm" ? `/api/admin/crm/leads/${id}` : `/api/offer-requests/${id}`;
-      const response = await fetch(endpoint, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(lead?.sourceKind === "crm" ? normalizeCrmPatch(patch) : patch)
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Lead-ul nu a putut fi actualizat.");
-      setCrmLeads((current) => current.map((item) => item.id === id ? { ...item, ...patch, ...payload.request, ...serializePatchedCrmLead(payload.lead) } : item));
-      setMessage("Lead-ul a fost actualizat.");
-    } catch (crmError) {
-      setError(crmError instanceof Error ? crmError.message : "Lead-ul nu a putut fi actualizat.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function createCrmLead(input: Record<string, unknown>) {
-    setBusy("crm-create");
-    setError(null);
-    setMessage(null);
-    try {
-      const response = await fetch("/api/admin/crm/leads", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input)
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Lead-ul nu a putut fi creat.");
-      setCrmLeads((current) => [{ ...serializePatchedCrmLead(payload.lead), id: payload.lead.id, sourceKind: "crm", selectedCodes: null, relatedCampaigns: [], createdAt: payload.lead.createdAt || new Date().toISOString() } as CrmLead, ...current]);
-      setMessage("Lead-ul a fost creat.");
-    } catch (crmError) {
-      setError(crmError instanceof Error ? crmError.message : "Lead-ul nu a putut fi creat.");
     } finally {
       setBusy(null);
     }
@@ -306,7 +226,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
             ) : null}
 
             {activeTab === "crm" ? (
-              <CrmPanel rows={visibleCrm} sellers={sellerUsers} busy={busy} onUpdate={updateCrmLead} onCreate={createCrmLead} />
+              <CrmTeamPanel data={coo.crmTeam} />
             ) : null}
 
             {activeTab === "operations" ? (
@@ -565,70 +485,79 @@ function ProblemCenterPanel({ rows }: { rows: ProblemRow[] }) {
   </Panel>;
 }
 
-function CrmPanel({
-  rows,
-  sellers,
-  busy,
-  onUpdate,
-  onCreate
-}: {
-  rows: CrmLead[];
-  sellers: SellerUser[];
-  busy: string | null;
-  onUpdate: (id: string, patch: Record<string, unknown>) => void;
-  onCreate: (input: Record<string, unknown>) => void;
-}) {
-  const [newLead, setNewLead] = useState({ companyName: "", contactName: "", phone: "", email: "", estimatedValue: "", nextFollowUpDate: "" });
-  const canCreate = newLead.companyName.trim().length >= 2;
-  return <Panel title={`Mini CRM (${rows.length})`} icon={<Users size={18} />}>
-    <div className="mb-4 grid gap-3 rounded-lg border border-focus-line bg-focus-navy/35 p-4 md:grid-cols-3 xl:grid-cols-7">
-      <input className="focus-input" value={newLead.companyName} onChange={(event) => setNewLead((current) => ({ ...current, companyName: event.target.value }))} placeholder="Companie" />
-      <input className="focus-input" value={newLead.contactName} onChange={(event) => setNewLead((current) => ({ ...current, contactName: event.target.value }))} placeholder="Contact" />
-      <input className="focus-input" value={newLead.phone} onChange={(event) => setNewLead((current) => ({ ...current, phone: event.target.value }))} placeholder="Telefon" />
-      <input className="focus-input" value={newLead.email} onChange={(event) => setNewLead((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
-      <input className="focus-input" value={newLead.estimatedValue} onChange={(event) => setNewLead((current) => ({ ...current, estimatedValue: event.target.value }))} placeholder="Valoare estimata" />
-      <input className="focus-input" type="date" value={newLead.nextFollowUpDate} onChange={(event) => setNewLead((current) => ({ ...current, nextFollowUpDate: event.target.value }))} aria-label="Data follow-up" />
-      <button className="focus-button" type="button" disabled={!canCreate || busy === "crm-create"} onClick={() => {
-        onCreate({
-          ...newLead,
-          estimatedValue: newLead.estimatedValue ? Number(newLead.estimatedValue.replace(",", ".")) : null,
-          currency: "EUR"
-        });
-        if (canCreate) setNewLead({ companyName: "", contactName: "", phone: "", email: "", estimatedValue: "", nextFollowUpDate: "" });
-      }}>Adauga lead</button>
-    </div>
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[1120px] text-sm">
-        <thead className="bg-focus-navy/70 text-left text-xs uppercase text-slate-400">
-          <tr><th className="px-3 py-2">Client</th><th className="px-3 py-2">Contact</th><th className="px-3 py-2">Vanzator</th><th className="px-3 py-2">Status lead</th><th className="px-3 py-2">Valoare</th><th className="px-3 py-2">Follow-up</th><th className="px-3 py-2">Coduri</th><th className="px-3 py-2">Actiuni</th></tr>
-        </thead>
-        <tbody>{rows.length ? rows.map((row) => <tr className="border-t border-focus-line" key={row.id}>
-          <td className="px-3 py-3 font-black text-white">{row.clientName}<small className="block text-slate-400">{row.company || row.message || "-"}</small></td>
-          <td className="px-3 py-3">{[row.email, row.phone].filter(Boolean).join(" / ") || "-"}</td>
-          <td className="px-3 py-3">{row.sourceKind === "crm" ? (
-            <select
-              className="focus-input min-w-48"
-              value={(row as CrmLead & { assignedToUserId?: string | null }).assignedToUserId || ""}
-              disabled={busy === `crm-${row.id}` || sellers.length === 0}
-              onChange={(event) => onUpdate(row.id, { assignedToUserId: event.target.value || null })}
-            >
-              <option value="">{sellers.length ? "Nealocat" : row.salesperson || "Nealocat"}</option>
-              {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
-            </select>
-          ) : row.salesperson || "Nealocat"}</td>
-          <td className="px-3 py-3"><select className="focus-input min-w-44" value={row.crmStatus} disabled={busy === `crm-${row.id}`} onChange={(event) => onUpdate(row.id, { crmStatus: event.target.value, status: offerStatusForCrm(event.target.value) })}>{crmStatuses.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></td>
-          <td className="px-3 py-3">{row.estimatedValue ? `${money(row.estimatedValue)} EUR` : "-"}</td>
-          <td className="px-3 py-3">{row.nextFollowUpAt ? date(row.nextFollowUpAt) : "-"}</td>
-          <td className="px-3 py-3 max-w-52 whitespace-normal text-xs">{row.selectedCodes || "-"}</td>
-          <td className="px-3 py-3"><ActionMenu>
-            <button type="button" onClick={() => setCrmEstimate(row, onUpdate)}>Seteaza valoare</button>
-            <button type="button" onClick={() => setCrmFollowUp(row, onUpdate)}>Seteaza follow-up</button>
-            <button type="button" onClick={() => setCrmNotes(row, onUpdate)}>Adauga note</button>
-          </ActionMenu></td>
-        </tr>) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={8}>Nu exista lead-uri pentru filtrul curent.</td></tr>}</tbody>
-      </table>
-    </div>
-  </Panel>;
+function CrmTeamPanel({ data }: { data: CooData["crmTeam"] }) {
+  if (!data) {
+    return <Panel title="Activitate CRM" icon={<Users size={18} />}>
+      <Empty text="Metricile CRM nu sunt disponibile pentru acest rol." />
+    </Panel>;
+  }
+  return <div className="grid gap-5">
+    <Panel
+      title="Activitate CRM"
+      icon={<Users size={18} />}
+      action={<Link className="focus-button" href="/admin/crm" prefetch={false}>Deschide CRM</Link>}
+    >
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Lead-uri active" value={data.summary.active} tone="green" />
+        <Metric label="Follow-up restant" value={data.summary.overdue} tone={data.summary.overdue ? "red" : "green"} />
+        <Metric label="Fara urmator pas" value={data.summary.missingNextStep} tone={data.summary.missingNextStep ? "yellow" : "green"} />
+        <Metric label="Activitati 7 zile" value={data.activities7Days} />
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <CrmMoneyMetric label="Pipeline" values={data.summary.pipelineByCurrency} />
+        <CrmMoneyMetric label="Forecast ponderat" values={data.summary.weightedByCurrency} />
+        <Metric label="Castigate luna" value={data.summary.wonThisMonth} tone="green" />
+        <Metric label="Pierdute luna" value={data.summary.lostThisMonth} tone={data.summary.lostThisMonth ? "red" : "neutral"} />
+      </div>
+    </Panel>
+
+    <Panel title="Activitate agenti CRM" icon={<Users size={18} />}>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] text-sm">
+          <thead className="bg-focus-navy/70 text-left text-xs uppercase text-slate-400">
+            <tr>
+              <th className="px-3 py-2">Agent</th>
+              <th className="px-3 py-2">Lead-uri</th>
+              <th className="px-3 py-2">Follow-up</th>
+              <th className="px-3 py-2">Activitati</th>
+              <th className="px-3 py-2">Disciplina</th>
+              <th className="px-3 py-2">Forecast</th>
+              <th className="px-3 py-2">Conversie</th>
+            </tr>
+          </thead>
+          <tbody>{data.sellers.length ? data.sellers.map((seller) => (
+            <tr className="border-t border-focus-line" key={seller.id}>
+              <td className="px-3 py-3 font-black text-white">{seller.name}<small className="block text-slate-400">{seller.email}</small></td>
+              <td className="px-3 py-3">{seller.activeLeads} active</td>
+              <td className="px-3 py-3"><span className={seller.overdue ? "font-black text-red-100" : ""}>{seller.overdue} restante</span><small className="block text-slate-400">{seller.dueToday} azi / {seller.missingNextStep} fara pas</small></td>
+              <td className="px-3 py-3">{seller.activities7Days} / 7 zile<small className="block text-slate-400">{seller.activities30Days} / 30 zile</small></td>
+              <td className="px-3 py-3">{seller.followUpCompliance}%</td>
+              <td className="px-3 py-3">{formatCurrencyValues(seller.weightedByCurrency)}</td>
+              <td className="px-3 py-3">{seller.conversionRate == null ? "-" : `${seller.conversionRate}%`}<small className="block text-slate-400">{seller.won} castigate / {seller.lost} pierdute</small></td>
+            </tr>
+          )) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={7}>Nu exista agenti CRM activi.</td></tr>}</tbody>
+        </table>
+      </div>
+    </Panel>
+
+    <Panel title="Pipeline pe etapa" icon={<BriefcaseBusiness size={18} />}>
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {data.statusBreakdown.length ? data.statusBreakdown.map((row) => (
+          <div className="rounded-lg border border-focus-line bg-focus-navy/40 p-4" key={row.status}>
+            <p className="text-xs font-black uppercase text-slate-400">{row.label}</p>
+            <p className="mt-2 text-2xl font-black text-white">{row.count}</p>
+          </div>
+        )) : <Empty text="Pipeline-ul CRM este gol." />}
+      </div>
+    </Panel>
+  </div>;
+}
+
+function CrmMoneyMetric({ label, values }: { label: string; values: Record<string, number> }) {
+  return <div className="rounded-lg border border-focus-line bg-focus-ink/55 p-4">
+    <p className="text-xs font-black uppercase text-slate-400">{label}</p>
+    <p className="mt-2 text-lg font-black text-white">{formatCurrencyValues(values)}</p>
+  </div>;
 }
 
 function SellerTable({ rows }: { rows: CooData["sellers"] }) {
@@ -734,11 +663,6 @@ function taskMatches(row: TaskRow, query: string) {
   return [row.code, row.city, row.clientName, row.campaignName, row.salesperson, row.status, row.kind].join(" ").toLowerCase().includes(query);
 }
 
-function crmMatches(row: CrmLead, query: string) {
-  if (!query) return true;
-  return [row.clientName, row.company, row.email, row.phone, row.salesperson, row.crmStatus, row.selectedCodes].join(" ").toLowerCase().includes(query);
-}
-
 function problemMatches(row: ProblemRow, query: string) {
   if (!query) return true;
   return [row.module, row.type, row.title, row.plainLanguageDescription, row.recommendedAction, row.severity].join(" ").toLowerCase().includes(query);
@@ -748,12 +672,6 @@ function severityTone(severity: ProblemRow["severity"]) {
   if (severity === "critical" || severity === "high") return "red" as const;
   if (severity === "medium") return "yellow" as const;
   return "neutral" as const;
-}
-
-function setCrmEstimate(row: CrmLead, onUpdate: (id: string, patch: Record<string, unknown>) => void) {
-  const estimatedValue = window.prompt("Valoare estimata EUR", row.estimatedValue ? String(row.estimatedValue) : "");
-  if (estimatedValue == null) return;
-  onUpdate(row.id, { estimatedValue });
 }
 
 function periodTargetFromReservation(row: ReservationRow): ReservationPeriodChangeTarget {
@@ -768,118 +686,6 @@ function periodTargetFromReservation(row: ReservationRow): ReservationPeriodChan
   };
 }
 
-function setCrmFollowUp(row: CrmLead, onUpdate: (id: string, patch: Record<string, unknown>) => void) {
-  const nextFollowUpAt = window.prompt("Urmatorul follow-up (YYYY-MM-DD)", row.nextFollowUpAt ? row.nextFollowUpAt.slice(0, 10) : "");
-  if (nextFollowUpAt == null) return;
-  onUpdate(row.id, { nextFollowUpAt });
-}
-
-function setCrmNotes(row: CrmLead, onUpdate: (id: string, patch: Record<string, unknown>) => void) {
-  const notes = window.prompt("Notite interne", row.notes || "");
-  if (notes == null) return;
-  onUpdate(row.id, { notes });
-}
-
-function offerStatusForCrm(status: string) {
-  if (status === "OFFER_SENT") return "QUOTED";
-  if (status === "WON") return "WON";
-  if (status === "LOST") return "LOST";
-  if (status === "CONTACTED" || status === "NEGOTIATION" || status === "RESERVATION_CREATED") return "CONTACTED";
-  return "NEW";
-}
-
-function normalizeCrmPatch(patch: Record<string, unknown>) {
-  const next = { ...patch };
-  if (typeof next.crmStatus === "string") {
-    next.status = crmStatusToDb(next.crmStatus);
-    delete next.crmStatus;
-  }
-  if (typeof next.estimatedValue === "string") next.estimatedValue = Number(next.estimatedValue.replace(",", "."));
-  if (typeof next.nextFollowUpAt === "string") {
-    next.nextFollowUpDate = next.nextFollowUpAt;
-    delete next.nextFollowUpAt;
-  }
-  return next;
-}
-
-function serializePatchedCrmLead(lead?: {
-  id: string;
-  companyName: string;
-  contactName: string | null;
-  email: string | null;
-  phone: string | null;
-  status: string;
-  estimatedValue: number | null;
-  currency: string | null;
-  nextFollowUpDate: string | null;
-  notes: string | null;
-  assignedToUserId?: string | null;
-  assignedTo?: { id?: string; name: string; email: string } | null;
-}) {
-  if (!lead) return {};
-  return {
-    clientName: lead.contactName || lead.companyName,
-    company: lead.companyName,
-    email: lead.email,
-    phone: lead.phone,
-    assignedToUserId: lead.assignedToUserId || lead.assignedTo?.id || null,
-    salesperson: lead.assignedTo?.name || "Nealocat",
-    crmStatus: dbStatusToCrm(lead.status),
-    status: dbStatusToCrm(lead.status),
-    estimatedValue: lead.estimatedValue || 0,
-    currency: lead.currency || "EUR",
-    nextFollowUpAt: lead.nextFollowUpDate,
-    notes: lead.notes
-  };
-}
-
-function crmStatusToDb(status: string) {
-  const map: Record<string, string> = {
-    COLD: "cold",
-    QUALIFIED: "qualified",
-    IN_ANALYSIS: "in_analysis",
-    IN_OFFER: "in_offer",
-    IN_NEGOTIATION: "in_negotiation",
-    IN_CONTRACTING: "in_contracting",
-    ON_HOLD: "on_hold",
-    NO_RESPONSE: "no_response",
-    ACCOUNT_MANAGEMENT: "account_management",
-    WON: "won",
-    LOST: "lost",
-    INACTIVE: "inactive",
-    NEW: "cold",
-    CONTACTED: "qualified",
-    OFFER_SENT: "in_offer",
-    NEGOTIATION: "in_negotiation",
-    RESERVATION_CREATED: "on_hold"
-  };
-  return map[status] || status.toLowerCase();
-}
-
-function dbStatusToCrm(status: string) {
-  const map: Record<string, string> = {
-    cold: "COLD",
-    qualified: "QUALIFIED",
-    in_analysis: "IN_ANALYSIS",
-    in_offer: "IN_OFFER",
-    in_negotiation: "IN_NEGOTIATION",
-    in_contracting: "IN_CONTRACTING",
-    on_hold: "ON_HOLD",
-    no_response: "NO_RESPONSE",
-    account_management: "ACCOUNT_MANAGEMENT",
-    won: "WON",
-    lost: "LOST",
-    inactive: "INACTIVE",
-    new: "COLD",
-    contacted: "QUALIFIED",
-    brief_received: "IN_ANALYSIS",
-    offer_sent: "IN_OFFER",
-    negotiation: "IN_NEGOTIATION",
-    hold_created: "ON_HOLD"
-  };
-  return map[status] || status.toUpperCase();
-}
-
 function date(value: string) {
   return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(value));
 }
@@ -890,4 +696,10 @@ function dateTime(value: string) {
 
 function money(value: number) {
   return new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 0 }).format(value || 0);
+}
+
+function formatCurrencyValues(values: Record<string, number>) {
+  const rows = Object.entries(values).filter(([, value]) => value !== 0);
+  if (!rows.length) return "0";
+  return rows.map(([currency, value]) => `${money(value)} ${currency}`).join(" / ");
 }

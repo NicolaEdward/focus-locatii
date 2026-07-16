@@ -6,12 +6,21 @@ import { hasAnyPermission, hasGlobalDataAccess } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
-export default async function CrmPage() {
+export default async function CrmPage({
+  searchParams
+}: {
+  searchParams: Promise<{ lead?: string }>;
+}) {
   const session = await getAuthSession();
   if (!session) redirect("/admin/login");
   if (!hasAnyPermission(session.role, ["leads.view", "leads.view.own"])) redirect("/admin/dashboard");
+  const params = await searchParams;
   return <>
     <AdminHeader session={session} />
-    <CrmWorkspace currentUserId={session.id} canViewTeam={hasGlobalDataAccess(session.role)} />
+    <CrmWorkspace
+      currentUserId={session.id}
+      canViewTeam={hasGlobalDataAccess(session.role)}
+      initialLeadId={params.lead || null}
+    />
   </>;
 }

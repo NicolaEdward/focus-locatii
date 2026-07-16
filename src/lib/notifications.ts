@@ -1,6 +1,7 @@
 import type { AuthSession } from "@/lib/auth";
 import type { Prisma } from "@prisma/client";
 import { recordAudit } from "@/lib/audit";
+import { CRM_ACTIVE_DB_STATUSES, normalizeCrmStatus, startOfUtcDay } from "@/lib/crm";
 import { moneyNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -8,6 +9,7 @@ const receivableReminderDays = new Set([7, 3, 0, -1, -7]);
 const receivableNotificationTypes = ["receivable_overdue", "receivable_due_today", "receivable_due_soon"];
 const legacyInvoiceNotificationTypes = ["invoice_overdue", "invoice_due_today", "invoice_due_soon"];
 const financialNotificationTypes = [...receivableNotificationTypes, ...legacyInvoiceNotificationTypes];
+const crmNotificationTypes = ["crm_followup_overdue", "crm_followup_due_today", "crm_next_step_missing"];
 
 type OperationalNotificationInput = {
   recipientUserIds: Array<string | null | undefined>;
@@ -71,16 +73,78 @@ export async function syncFinancialNotifications(now = new Date()) {
 }
 
 export async function listNotificationsForUser(session: AuthSession) {
+  const ownershipWhere =
+    ["COO", "SUPER_ADMIN"].includes(session.role)
+      ? {}
+      : session.role === "SALES_DIRECTOR"
+        ? {}
+        : { userId: session.id };
+  const blockedTypes = session.role === "SALES_DIRECTOR"
+    ? [...legacyInvoiceNotificationTypes, ...crmNotificationTypes]
+    : legacyInvoiceNotificationTypes;
   return prisma.appNotification.findMany({
     where: {
-      ...(["COO", "SUPER_ADMIN", "SALES_DIRECTOR"].includes(session.role) ? {} : { userId: session.id }),
-      type: { notIn: legacyInvoiceNotificationTypes },
+      ...ownershipWhere,
+      type: { notIn: blockedTypes },
       status: { in: ["open", "in_progress"] }
     },
     include: { user: { select: { name: true, email: true } } },
     orderBy: [{ status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
     take: 200
   });
+}
+
+export async function syncCrmNotifications(now = new Date()) {
+  const today = startOfUtcDay(now);
+  const tomorrow = addDays(today, 1);
+  const leads = await prisma.crmLead.findMany({
+    where: {
+      status: { in: CRM_ACTIVE_DB_STATUSES },
+      assignedToUserId: { not: null }
+    },
+    select: {
+      id: true,
+      companyName: true,
+      status: true,
+      assignedToUserId: true,
+      nextFollowUpDate: true
+    },
+    take: 2000
+  });
+
+  const desiredKeys = new Set<string>();
+  let created = 0;
+  for (const lead of leads) {
+    if (!lead.assignedToUserId) continue;
+    const type = !lead.nextFollowUpDate
+      ? "crm_next_step_missing"
+      : lead.nextFollowUpDate < today
+        ? "crm_followup_overdue"
+        : lead.nextFollowUpDate < tomorrow
+          ? "crm_followup_due_today"
+          : null;
+    if (!type) continue;
+    desiredKeys.add(notificationKey(lead.assignedToUserId, type, "crm_lead", lead.id));
+    created += await ensureNotification({
+      userId: lead.assignedToUserId,
+      type,
+      title: type === "crm_followup_overdue"
+        ? "Follow-up CRM restant"
+        : type === "crm_followup_due_today"
+          ? "Follow-up CRM pentru azi"
+          : "Lead fara urmator pas",
+      message: `${lead.companyName} este in etapa ${normalizeCrmStatus(lead.status)}.`,
+      entityType: "crm_lead",
+      entityId: lead.id,
+      severity: type === "crm_followup_overdue" ? "high" : "medium",
+      dueDate: lead.nextFollowUpDate,
+      recommendedAction: "Deschide lead-ul si inregistreaza urmatoarea activitate.",
+      metadata: { companyName: lead.companyName, crmStatus: normalizeCrmStatus(lead.status) }
+    });
+  }
+
+  await archiveStaleCrmNotifications(desiredKeys, now);
+  return created;
 }
 
 export async function createOperationalNotifications(input: OperationalNotificationInput) {
@@ -195,6 +259,27 @@ async function archiveStaleFinancialNotifications(desiredKeys: Set<string>, now:
   });
   const staleIds = openFinancial
     .filter((notification) => !desiredKeys.has(notificationKey(notification.userId, notification.type, notification.entityType, notification.entityId)))
+    .map((notification) => notification.id);
+  if (!staleIds.length) return 0;
+  const result = await prisma.appNotification.updateMany({
+    where: { id: { in: staleIds } },
+    data: { status: "archived", resolvedAt: now }
+  });
+  return result.count;
+}
+
+async function archiveStaleCrmNotifications(desiredKeys: Set<string>, now: Date) {
+  const openNotifications = await prisma.appNotification.findMany({
+    where: { type: { in: crmNotificationTypes }, status: { in: ["open", "in_progress"] } },
+    select: { id: true, userId: true, type: true, entityType: true, entityId: true }
+  });
+  const staleIds = openNotifications
+    .filter((notification) => !desiredKeys.has(notificationKey(
+      notification.userId,
+      notification.type,
+      notification.entityType,
+      notification.entityId
+    )))
     .map((notification) => notification.id);
   if (!staleIds.length) return 0;
   const result = await prisma.appNotification.updateMany({

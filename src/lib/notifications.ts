@@ -1,7 +1,13 @@
 import type { AuthSession } from "@/lib/auth";
 import type { Prisma } from "@prisma/client";
 import { recordAudit } from "@/lib/audit";
-import { CRM_ACTIVE_DB_STATUSES, normalizeCrmStatus, startOfUtcDay } from "@/lib/crm";
+import {
+  CRM_ACTIVE_DB_STATUSES,
+  crmLeadClassificationAttention,
+  crmStatusLabel,
+  normalizeCrmStatus,
+  startOfUtcDay
+} from "@/lib/crm";
 import { moneyNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -9,7 +15,13 @@ const receivableReminderDays = new Set([7, 3, 0, -1, -7]);
 const receivableNotificationTypes = ["receivable_overdue", "receivable_due_today", "receivable_due_soon"];
 const legacyInvoiceNotificationTypes = ["invoice_overdue", "invoice_due_today", "invoice_due_soon"];
 const financialNotificationTypes = [...receivableNotificationTypes, ...legacyInvoiceNotificationTypes];
-const crmNotificationTypes = ["crm_followup_overdue", "crm_followup_due_today", "crm_next_step_missing"];
+const crmNotificationTypes = [
+  "crm_followup_overdue",
+  "crm_followup_due_today",
+  "crm_followup_due_tomorrow",
+  "crm_next_step_missing",
+  "crm_classification_due"
+];
 
 type OperationalNotificationInput = {
   recipientUserIds: Array<string | null | undefined>;
@@ -94,6 +106,7 @@ export async function listNotificationsForUser(session: AuthSession) {
 export async function syncCrmNotifications(now = new Date()) {
   const today = startOfUtcDay(now);
   const tomorrow = addDays(today, 1);
+  const dayAfterTomorrow = addDays(today, 2);
   const leads = await prisma.crmLead.findMany({
     where: {
       status: { in: CRM_ACTIVE_DB_STATUSES },
@@ -104,7 +117,8 @@ export async function syncCrmNotifications(now = new Date()) {
       companyName: true,
       status: true,
       assignedToUserId: true,
-      nextFollowUpDate: true
+      nextFollowUpDate: true,
+      updatedAt: true
     },
     take: 2000
   });
@@ -113,15 +127,23 @@ export async function syncCrmNotifications(now = new Date()) {
   let created = 0;
   for (const lead of leads) {
     if (!lead.assignedToUserId) continue;
+    const classificationAttention = crmLeadClassificationAttention(lead, now);
     const type = !lead.nextFollowUpDate
       ? "crm_next_step_missing"
       : lead.nextFollowUpDate < today
         ? "crm_followup_overdue"
         : lead.nextFollowUpDate < tomorrow
           ? "crm_followup_due_today"
-          : null;
+          : lead.nextFollowUpDate < dayAfterTomorrow
+            ? "crm_followup_due_tomorrow"
+            : classificationAttention
+              ? "crm_classification_due"
+              : null;
     if (!type) continue;
     desiredKeys.add(notificationKey(lead.assignedToUserId, type, "crm_lead", lead.id));
+    const classificationTitle = classificationAttention === "cold"
+      ? "Prospect Cold de clasificat"
+      : "Lead Contactat de calificat";
     created += await ensureNotification({
       userId: lead.assignedToUserId,
       type,
@@ -129,19 +151,47 @@ export async function syncCrmNotifications(now = new Date()) {
         ? "Follow-up CRM restant"
         : type === "crm_followup_due_today"
           ? "Follow-up CRM pentru azi"
-          : "Lead fara urmator pas",
-      message: `${lead.companyName} este in etapa ${normalizeCrmStatus(lead.status)}.`,
+          : type === "crm_followup_due_tomorrow"
+            ? "Follow-up CRM pentru maine"
+            : type === "crm_classification_due"
+              ? classificationTitle
+              : "Lead fara urmator pas",
+      message: `${lead.companyName} este in etapa ${crmStatusLabel(lead.status)}.`,
       entityType: "crm_lead",
       entityId: lead.id,
       severity: type === "crm_followup_overdue" ? "high" : "medium",
-      dueDate: lead.nextFollowUpDate,
-      recommendedAction: "Deschide lead-ul si inregistreaza urmatoarea activitate.",
-      metadata: { companyName: lead.companyName, crmStatus: normalizeCrmStatus(lead.status) }
+      dueDate: type === "crm_classification_due" ? today : lead.nextFollowUpDate,
+      recommendedAction: type === "crm_classification_due"
+        ? classificationAttention === "cold"
+          ? "Contacteaza prospectul sau inchide-l daca nu mai este relevant."
+          : "Confirma nevoia, perioada si bugetul, apoi actualizeaza etapa."
+        : "Deschide lead-ul si inregistreaza urmatoarea activitate.",
+      metadata: {
+        companyName: lead.companyName,
+        crmStatus: normalizeCrmStatus(lead.status),
+        classificationAttention
+      }
     });
   }
 
   await archiveStaleCrmNotifications(desiredKeys, now);
   return created;
+}
+
+export async function resolveCrmNotificationsForLead(leadId: string, resolvedByUserId: string, now = new Date()) {
+  return prisma.appNotification.updateMany({
+    where: {
+      entityType: "crm_lead",
+      entityId: leadId,
+      type: { in: crmNotificationTypes },
+      status: { in: ["open", "in_progress"] }
+    },
+    data: {
+      status: "resolved",
+      resolvedByUserId,
+      resolvedAt: now
+    }
+  });
 }
 
 export async function createOperationalNotifications(input: OperationalNotificationInput) {

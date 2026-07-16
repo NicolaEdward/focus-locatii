@@ -2,24 +2,25 @@ import type { Prisma } from "@prisma/client";
 import type { AuthSession } from "@/lib/auth";
 
 export const CRM_STATUS_OPTIONS = [
-  { value: "new", label: "Nou", tone: "gray" },
-  { value: "qualified", label: "Calificat", tone: "blue" },
-  { value: "brief_received", label: "Brief primit", tone: "blue" },
-  { value: "in_offer", label: "Oferta in pregatire", tone: "yellow" },
-  { value: "offer_sent", label: "Oferta trimisa", tone: "yellow" },
-  { value: "in_negotiation", label: "Negociere", tone: "yellow" },
-  { value: "on_hold", label: "Revenire ulterioara", tone: "gray" },
-  { value: "won", label: "Castigat", tone: "green" },
-  { value: "lost", label: "Pierdut", tone: "red" },
-  { value: "inactive", label: "Inactiv", tone: "gray" }
+  { value: "cold", label: "Cold", tone: "gray", defaultProbability: 10, description: "Prospect nou, fara contact comercial confirmat." },
+  { value: "contacted", label: "Contactat", tone: "blue", defaultProbability: 20, description: "Primul contact a avut loc; nevoia trebuie clarificata." },
+  { value: "qualified", label: "Calificat", tone: "blue", defaultProbability: 35, description: "Exista nevoie OOH si oportunitatea merita urmarita." },
+  { value: "brief_received", label: "Brief primit", tone: "blue", defaultProbability: 50, description: "Perioada, obiectivul si cerintele sunt cunoscute." },
+  { value: "in_offer", label: "Oferta in pregatire", tone: "yellow", defaultProbability: 60, description: "Propunerea comerciala este in lucru." },
+  { value: "offer_sent", label: "Oferta trimisa", tone: "yellow", defaultProbability: 70, description: "Clientul a primit oferta si asteptam raspuns." },
+  { value: "in_negotiation", label: "Negociere", tone: "yellow", defaultProbability: 80, description: "Oferta este discutata activ cu clientul." },
+  { value: "on_hold", label: "Revenire ulterioara", tone: "gray", defaultProbability: 20, description: "Oportunitate deschisa, cu revenire programata." },
+  { value: "won", label: "Castigat", tone: "green", defaultProbability: 100, description: "Lead convertit in client." },
+  { value: "lost", label: "Pierdut", tone: "red", defaultProbability: 0, description: "Oportunitatea a fost inchisa fara vanzare." },
+  { value: "inactive", label: "Inactiv", tone: "gray", defaultProbability: 0, description: "Nu mai necesita activitate comerciala." }
 ] as const;
 
 export type CrmStatus = (typeof CRM_STATUS_OPTIONS)[number]["value"];
 export type CrmDueFilter = "all" | "attention" | "overdue" | "today" | "upcoming" | "missing";
+export type CrmClassificationAttention = "cold" | "contacted" | null;
 
 const crmStatusAliases: Record<string, CrmStatus> = {
-  cold: "new",
-  contacted: "qualified",
+  new: "cold",
   in_analysis: "qualified",
   negotiation: "in_negotiation",
   in_contracting: "in_negotiation",
@@ -29,8 +30,9 @@ const crmStatusAliases: Record<string, CrmStatus> = {
 };
 
 const dbStatusesByCanonical: Record<CrmStatus, string[]> = {
-  new: ["new", "cold"],
-  qualified: ["qualified", "contacted", "in_analysis"],
+  cold: ["cold", "new"],
+  contacted: ["contacted"],
+  qualified: ["qualified", "in_analysis"],
   brief_received: ["brief_received"],
   in_offer: ["in_offer"],
   offer_sent: ["offer_sent"],
@@ -42,7 +44,8 @@ const dbStatusesByCanonical: Record<CrmStatus, string[]> = {
 };
 
 export const CRM_ACTIVE_STATUSES: CrmStatus[] = [
-  "new",
+  "cold",
+  "contacted",
   "qualified",
   "brief_received",
   "in_offer",
@@ -60,7 +63,13 @@ export function normalizeCrmStatus(value?: string | null): CrmStatus {
   if (crmStatusAliases[normalized]) return crmStatusAliases[normalized];
   return CRM_STATUS_OPTIONS.some((option) => option.value === normalized)
     ? normalized as CrmStatus
-    : "new";
+    : "cold";
+}
+
+export function isKnownCrmStatus(value?: string | null) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return Boolean(crmStatusAliases[normalized])
+    || CRM_STATUS_OPTIONS.some((option) => option.value === normalized);
 }
 
 export function crmDbStatusesFor(status: CrmStatus) {
@@ -69,12 +78,22 @@ export function crmDbStatusesFor(status: CrmStatus) {
 
 export function crmStatusLabel(value?: string | null) {
   const status = normalizeCrmStatus(value);
-  return CRM_STATUS_OPTIONS.find((option) => option.value === status)?.label || "Nou";
+  return CRM_STATUS_OPTIONS.find((option) => option.value === status)?.label || "Cold";
 }
 
 export function crmStatusTone(value?: string | null) {
   const status = normalizeCrmStatus(value);
   return CRM_STATUS_OPTIONS.find((option) => option.value === status)?.tone || "gray";
+}
+
+export function crmStatusDescription(value?: string | null) {
+  const status = normalizeCrmStatus(value);
+  return CRM_STATUS_OPTIONS.find((option) => option.value === status)?.description || "";
+}
+
+export function crmDefaultProbability(value?: string | null) {
+  const status = normalizeCrmStatus(value);
+  return CRM_STATUS_OPTIONS.find((option) => option.value === status)?.defaultProbability ?? 0;
 }
 
 export function isActiveCrmStatus(value?: string | null) {
@@ -125,7 +144,16 @@ export function crmDueWhere(filter: CrmDueFilter, now = new Date()): Prisma.CrmL
       status: { in: CRM_ACTIVE_DB_STATUSES },
       OR: [
         { nextFollowUpDate: null },
-        { nextFollowUpDate: { lt: tomorrow } }
+        { nextFollowUpDate: { lt: tomorrow } },
+        { updatedAt: { lt: addDays(now, -14) } },
+        {
+          status: { in: crmDbStatusesFor("cold") },
+          updatedAt: { lte: addDays(now, -7) }
+        },
+        {
+          status: { in: crmDbStatusesFor("contacted") },
+          updatedAt: { lte: addDays(now, -5) }
+        }
       ]
     };
   }
@@ -155,6 +183,17 @@ export function crmLeadAttention(input: {
   if (followUp < todayStart) return "overdue";
   if (followUp < tomorrow) return "today";
   if (new Date(input.updatedAt) < addDays(now, -14)) return "dormant";
+  return null;
+}
+
+export function crmLeadClassificationAttention(input: {
+  status: string;
+  updatedAt: Date | string;
+}, now = new Date()): CrmClassificationAttention {
+  const status = normalizeCrmStatus(input.status);
+  const updatedAt = new Date(input.updatedAt);
+  if (status === "cold" && updatedAt <= addDays(now, -7)) return "cold";
+  if (status === "contacted" && updatedAt <= addDays(now, -5)) return "contacted";
   return null;
 }
 

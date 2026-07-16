@@ -6,11 +6,16 @@ import { removeCrmContact, updateCrmContact } from "@/lib/crm-service";
 
 type Context = { params: Promise<{ id: string; contactId: string }> };
 
+const optionalEmail = z.preprocess(
+  (value) => typeof value === "string" && !value.trim() ? null : value,
+  z.string().trim().email().nullable().optional()
+);
+
 const patchSchema = z.object({
   name: z.string().trim().min(2).max(191).optional(),
   role: z.string().trim().max(191).nullable().optional(),
   phone: z.string().trim().max(80).nullable().optional(),
-  email: z.string().trim().email().nullable().optional(),
+  email: optionalEmail,
   isPrimary: z.boolean().optional(),
   notes: z.string().trim().max(2000).nullable().optional()
 });

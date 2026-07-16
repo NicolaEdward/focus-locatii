@@ -62,10 +62,14 @@ const prisma = {
       return notification;
     },
     updateMany: async ({ where, data }) => {
-      const ids = new Set(where.id?.in || []);
       let count = 0;
       for (const notification of notifications) {
-        if (ids.has(notification.id)) {
+        const matchesIds = where.id?.in ? where.id.in.includes(notification.id) : true;
+        const matchesEntityType = where.entityType ? notification.entityType === where.entityType : true;
+        const matchesEntityId = where.entityId ? notification.entityId === where.entityId : true;
+        const matchesType = where.type?.in ? where.type.in.includes(notification.type) : true;
+        const matchesStatus = where.status?.in ? where.status.in.includes(notification.status) : true;
+        if (matchesIds && matchesEntityType && matchesEntityId && matchesType && matchesStatus) {
           Object.assign(notification, data);
           count += 1;
         }
@@ -75,7 +79,13 @@ const prisma = {
   }
 };
 
-const { createOperationalNotifications, syncCrmNotifications, syncFinancialNotifications, updateNotificationAction } = loadTsModule(path.join(process.cwd(), "src", "lib", "notifications.ts"), {
+const {
+  createOperationalNotifications,
+  resolveCrmNotificationsForLead,
+  syncCrmNotifications,
+  syncFinancialNotifications,
+  updateNotificationAction
+} = loadTsModule(path.join(process.cwd(), "src", "lib", "notifications.ts"), {
   "@/lib/prisma": { prisma },
   "@/lib/audit": { recordAudit: async () => null }
 });
@@ -117,25 +127,31 @@ async function main() {
   assert(openNotification("soon-1", "receivable_overdue"), "due-soon transition leaves current overdue notification");
 
   crmLeads = [
-    crmLead("crm-overdue", "Client restant", "qualified", "2026-06-25"),
-    crmLead("crm-today", "Client azi", "in_offer", "2026-06-26"),
-    crmLead("crm-missing", "Client fara pas", "new", null),
-    crmLead("crm-future", "Client viitor", "offer_sent", "2026-06-27")
+    crmLead("crm-overdue", "Client restant", "qualified", "2026-06-25", "2026-06-25"),
+    crmLead("crm-today", "Client azi", "in_offer", "2026-06-26", "2026-06-25"),
+    crmLead("crm-missing", "Client fara pas", "new", null, "2026-06-25"),
+    crmLead("crm-tomorrow", "Client maine", "offer_sent", "2026-06-27", "2026-06-25"),
+    crmLead("crm-classify", "Prospect vechi", "cold", "2026-07-10", "2026-06-10"),
+    crmLead("crm-future", "Client viitor", "offer_sent", "2026-06-28", "2026-06-25")
   ];
   const crmCreated = await syncCrmNotifications(now);
-  assert.equal(crmCreated, 3, "CRM sync creates overdue, today and missing-next-step notifications");
+  assert.equal(crmCreated, 5, "CRM sync creates overdue, today, tomorrow, missing-step and classification notifications");
   assert(openNotification("crm-overdue", "crm_followup_overdue"), "overdue CRM notification is created");
   assert(openNotification("crm-today", "crm_followup_due_today"), "today CRM notification is created");
   assert(openNotification("crm-missing", "crm_next_step_missing"), "missing-next-step CRM notification is created");
+  assert(openNotification("crm-tomorrow", "crm_followup_due_tomorrow"), "tomorrow CRM notification is created");
+  assert(openNotification("crm-classify", "crm_classification_due"), "stale Cold prospect receives a classification reminder");
   assert.equal(await syncCrmNotifications(now), 0, "CRM notifications remain idempotent");
 
   crmLeads = [
-    crmLead("crm-overdue", "Client restant", "qualified", "2026-06-30"),
-    crmLead("crm-today", "Client azi", "in_offer", "2026-06-26"),
-    crmLead("crm-missing", "Client fara pas", "new", null)
+    crmLead("crm-overdue", "Client restant", "qualified", "2026-06-30", "2026-06-26"),
+    crmLead("crm-today", "Client azi", "in_offer", "2026-06-26", "2026-06-26"),
+    crmLead("crm-missing", "Client fara pas", "new", null, "2026-06-26")
   ];
   await syncCrmNotifications(now);
   assert(!openNotification("crm-overdue", "crm_followup_overdue"), "resolved CRM timing archives stale overdue notification");
+  assert.equal(await resolveCrmNotificationsForLead("crm-today", "seller-1", now).then((result) => result.count), 1, "saved CRM work resolves the related notification");
+  assert(!openNotification("crm-today", "crm_followup_due_today"), "resolved CRM work is removed from active notifications immediately");
 
   const operationalCreated = await createOperationalNotifications({
     recipientUserIds: ["seller-1"],
@@ -179,6 +195,8 @@ async function main() {
       "due-soon transitions to overdue without stale duplicate",
       "duplicate notification not repeatedly created",
       "CRM due and missing-next-step notifications are idempotent",
+      "CRM tomorrow and stale-classification reminders are generated without duplicate noise",
+      "saving CRM work resolves its active reminder immediately",
       "stale CRM notifications are archived",
       "operational completion notification is scoped and idempotent",
       "non-privileged notification ownership is enforced"
@@ -197,13 +215,14 @@ function receivable(id, dueDate, ownerId) {
   };
 }
 
-function crmLead(id, companyName, status, nextFollowUpDate) {
+function crmLead(id, companyName, status, nextFollowUpDate, updatedAt) {
   return {
     id,
     companyName,
     status,
     assignedToUserId: "seller-1",
-    nextFollowUpDate: nextFollowUpDate ? new Date(`${nextFollowUpDate}T00:00:00.000Z`) : null
+    nextFollowUpDate: nextFollowUpDate ? new Date(`${nextFollowUpDate}T00:00:00.000Z`) : null,
+    updatedAt: new Date(`${updatedAt}T00:00:00.000Z`)
   };
 }
 

@@ -5,9 +5,11 @@ import {
   canAccessCrmLead,
   CRM_ACTIVE_DB_STATUSES,
   CRM_STATUS_OPTIONS,
+  crmDefaultProbability,
   crmDbStatusesFor,
   crmDueWhere,
   crmLeadAttention,
+  crmLeadClassificationAttention,
   crmLeadScope,
   monthlyCrmOutcomes,
   normalizeCrmStatus,
@@ -177,6 +179,7 @@ export async function createCrmLead(input: {
     nextFollowUpDate: input.nextFollowUpDate,
     clientId: input.clientId
   });
+  const probability = input.probability ?? crmDefaultProbability(status);
   return prisma.crmLead.create({
     data: {
       companyName: input.companyName,
@@ -192,7 +195,7 @@ export async function createCrmLead(input: {
       status,
       estimatedValue: input.estimatedValue,
       currency: input.currency || "EUR",
-      probability: input.probability,
+      probability,
       expectedCloseDate: input.expectedCloseDate,
       nextFollowUpDate: input.nextFollowUpDate,
       locationsInterested: input.locationsInterested,
@@ -269,6 +272,14 @@ export async function updateCrmLead(id: string, patch: {
   });
   const statusChanged = nextStatus !== normalizeCrmStatus(existing.status);
   const ownerChanged = assignedToUserId !== existing.assignedToUserId;
+  const shouldApplyStageProbability = statusChanged
+    && patch.probability === undefined
+    && (existing.probability == null || existing.probability === crmDefaultProbability(existing.status));
+  const nextProbability = patch.probability !== undefined
+    ? patch.probability
+    : shouldApplyStageProbability
+      ? crmDefaultProbability(nextStatus)
+      : existing.probability;
 
   return prisma.crmLead.update({
     where: { id },
@@ -285,7 +296,7 @@ export async function updateCrmLead(id: string, patch: {
       ...(patch.status !== undefined ? { status: nextStatus } : {}),
       ...(patch.estimatedValue !== undefined ? { estimatedValue: patch.estimatedValue } : {}),
       ...(patch.currency !== undefined ? { currency: patch.currency } : {}),
-      ...(patch.probability !== undefined ? { probability: patch.probability } : {}),
+      ...(patch.probability !== undefined || shouldApplyStageProbability ? { probability: nextProbability } : {}),
       ...(patch.expectedCloseDate !== undefined ? { expectedCloseDate: patch.expectedCloseDate } : {}),
       ...(patch.nextFollowUpDate !== undefined ? { nextFollowUpDate: patch.nextFollowUpDate } : {}),
       ...(patch.locationsInterested !== undefined ? { locationsInterested: patch.locationsInterested } : {}),
@@ -333,16 +344,21 @@ export async function addCrmActivity(leadId: string, input: {
   locations?: string | null;
   nextStep?: string | null;
   nextFollowUpDate?: Date | null;
+  status?: string | null;
 }, actor: AuthSession) {
   const lead = await prisma.crmLead.findUnique({ where: { id: leadId } });
   if (!lead || !canAccessCrmLead(actor, lead)) throw new Error("Poti adauga activitati doar pe lead-urile tale.");
   const nextFollowUpDate = input.nextFollowUpDate === undefined ? lead.nextFollowUpDate : input.nextFollowUpDate;
+  const currentStatus = normalizeCrmStatus(lead.status);
+  const nextStatus = input.status ? normalizeCrmStatus(input.status) : currentStatus;
   validateCrmState({
-    status: lead.status,
+    status: nextStatus,
     nextFollowUpDate,
     lostReason: lead.lostReason,
     clientId: lead.clientId
   });
+  const shouldApplyStageProbability = nextStatus !== currentStatus
+    && (lead.probability == null || lead.probability === crmDefaultProbability(currentStatus));
   return prisma.$transaction(async (tx) => {
     const activity = await tx.crmActivity.create({
       data: {
@@ -351,7 +367,7 @@ export async function addCrmActivity(leadId: string, input: {
         type: input.actionType,
         actionType: input.actionType,
         activityDate: input.activityDate || new Date(),
-        statusAtTime: normalizeCrmStatus(lead.status),
+        statusAtTime: nextStatus,
         details: input.details,
         locations: input.locations,
         nextStep: input.nextStep,
@@ -364,6 +380,8 @@ export async function addCrmActivity(leadId: string, input: {
       where: { id: leadId },
       data: {
         nextFollowUpDate,
+        ...(nextStatus !== currentStatus ? { status: nextStatus } : {}),
+        ...(shouldApplyStageProbability ? { probability: crmDefaultProbability(nextStatus) } : {}),
         ...(input.locations !== undefined ? { locationsInterested: input.locations } : {})
       }
     });
@@ -614,6 +632,7 @@ function serializeCrmLeadSummary(row: Prisma.CrmLeadGetPayload<{ select: typeof 
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     attention: crmLeadAttention(row),
+    classificationAttention: crmLeadClassificationAttention(row),
     latestActivity: row.activities[0]
       ? {
           ...row.activities[0],

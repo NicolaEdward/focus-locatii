@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
+import { isKnownCrmStatus } from "@/lib/crm";
 import { createCrmLead, listCrmLeads } from "@/lib/crm-service";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,11 @@ const noStoreHeaders = {
   "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"
 };
 
+const optionalEmail = z.preprocess(
+  (value) => typeof value === "string" && !value.trim() ? null : value,
+  z.string().trim().email().nullable().optional()
+);
+
 const leadSchema = z.object({
   leadDate: z.string().trim().nullable().optional(),
   companyName: z.string().trim().min(2).max(191),
@@ -19,10 +25,10 @@ const leadSchema = z.object({
   contactName: z.string().trim().max(191).nullable().optional(),
   contactRole: z.string().trim().max(191).nullable().optional(),
   phone: z.string().trim().max(80).nullable().optional(),
-  email: z.string().trim().email().nullable().optional(),
+  email: optionalEmail,
   source: z.string().trim().max(191).nullable().optional(),
   assignedToUserId: z.string().trim().nullable().optional(),
-  status: z.string().trim().default("new"),
+  status: z.string().trim().refine(isKnownCrmStatus, "Etapa CRM nu este valida.").default("cold"),
   estimatedValue: z.coerce.number().nonnegative().nullable().optional(),
   currency: z.enum(["RON", "EUR"]).default("EUR"),
   probability: z.coerce.number().int().min(0).max(100).nullable().optional(),

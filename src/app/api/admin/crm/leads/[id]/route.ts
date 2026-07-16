@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
+import { isKnownCrmStatus } from "@/lib/crm";
 import { getCrmLead, updateCrmLead } from "@/lib/crm-service";
+import { resolveCrmNotificationsForLead } from "@/lib/notifications";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -15,6 +17,11 @@ const noStoreHeaders = {
   "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"
 };
 
+const optionalEmail = z.preprocess(
+  (value) => typeof value === "string" && !value.trim() ? null : value,
+  z.string().trim().email().nullable().optional()
+);
+
 const patchSchema = z.object({
   leadDate: z.string().trim().nullable().optional(),
   companyName: z.string().trim().min(2).max(191).optional(),
@@ -22,10 +29,10 @@ const patchSchema = z.object({
   clientId: z.string().trim().nullable().optional(),
   contactName: z.string().trim().max(191).nullable().optional(),
   phone: z.string().trim().max(80).nullable().optional(),
-  email: z.string().trim().email().nullable().optional(),
+  email: optionalEmail,
   source: z.string().trim().max(191).nullable().optional(),
   assignedToUserId: z.string().trim().nullable().optional(),
-  status: z.string().trim().optional(),
+  status: z.string().trim().refine(isKnownCrmStatus, "Etapa CRM nu este valida.").optional(),
   estimatedValue: z.coerce.number().nonnegative().nullable().optional(),
   currency: z.enum(["RON", "EUR"]).nullable().optional(),
   probability: z.coerce.number().int().min(0).max(100).nullable().optional(),
@@ -78,6 +85,9 @@ export async function PATCH(request: NextRequest, context: Context) {
       },
       request
     });
+    if (input.status !== undefined || input.nextFollowUpDate !== undefined) {
+      await resolveCrmNotificationsForLead(id, session.id).catch(() => undefined);
+    }
     return NextResponse.json({ lead }, { headers: noStoreHeaders });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Lead-ul nu a putut fi actualizat.";

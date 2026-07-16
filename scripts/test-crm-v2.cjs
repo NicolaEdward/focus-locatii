@@ -13,9 +13,16 @@ function main() {
   const director = actor("director-1", "SALES_DIRECTOR");
   const coo = actor("coo-1", "COO");
 
-  assert.equal(crm.normalizeCrmStatus("CONTACTED"), "qualified");
+  assert.equal(crm.normalizeCrmStatus("NEW"), "cold");
+  assert.equal(crm.normalizeCrmStatus("CONTACTED"), "contacted");
   assert.equal(crm.normalizeCrmStatus("NEGOTIATION"), "in_negotiation");
   assert.equal(crm.normalizeCrmStatus("account_management"), "won");
+  assert.equal(crm.isKnownCrmStatus("new"), true);
+  assert.equal(crm.isKnownCrmStatus("contacted"), true);
+  assert.equal(crm.isKnownCrmStatus("not-a-real-stage"), false);
+  assert.equal(crm.crmDefaultProbability("cold"), 10);
+  assert.equal(crm.crmDefaultProbability("contacted"), 20);
+  assert.equal(crm.crmDefaultProbability("qualified"), 35);
   assert.equal(crm.crmLeadScope(seller).assignedToUserId, "seller-1");
   assert.equal(Object.keys(crm.crmLeadScope(coo)).length, 0);
   assert.equal(Object.keys(crm.crmLeadScope(director)).length, 0);
@@ -41,7 +48,7 @@ function main() {
   }), "offer_sent");
 
   assert.equal(crm.crmLeadAttention({
-    status: "new",
+    status: "cold",
     nextFollowUpDate: "2026-07-15T00:00:00.000Z",
     updatedAt: "2026-07-15T00:00:00.000Z"
   }, now), "overdue");
@@ -55,11 +62,23 @@ function main() {
     nextFollowUpDate: null,
     updatedAt: "2026-07-15T00:00:00.000Z"
   }, now), null);
+  assert.equal(crm.crmLeadClassificationAttention({
+    status: "cold",
+    updatedAt: "2026-07-01T00:00:00.000Z"
+  }, now), "cold");
+  assert.equal(crm.crmLeadClassificationAttention({
+    status: "contacted",
+    updatedAt: "2026-07-01T00:00:00.000Z"
+  }, now), "contacted");
+  assert.equal(crm.crmLeadClassificationAttention({
+    status: "qualified",
+    updatedAt: "2026-07-01T00:00:00.000Z"
+  }, now), null);
 
   const summary = crm.summarizeCrmLeads([
     row("qualified", "2026-07-15", 100, "EUR", 50, "2026-07-15"),
     row("in_offer", "2026-07-16", 200, "RON", 25, "2026-07-16"),
-    row("new", null, 300, "EUR", null, "2026-07-16"),
+    row("cold", null, 300, "EUR", null, "2026-07-16"),
     row("won", null, 500, "EUR", 100, "2026-07-10"),
     row("lost", null, 100, "RON", 0, "2026-07-11")
   ], now);
@@ -88,6 +107,9 @@ function main() {
     ok: true,
     checked: [
       "canonical CRM statuses and legacy mappings",
+      "OOH Cold and Contactat stages remain distinct",
+      "stage probability suggestions preserve deterministic forecast defaults",
+      "stale Cold and Contactat leads are identified for classification",
       "sales agents see only owned leads",
       "Sales Director can use and coordinate CRM",
       "active leads require a next follow-up",
@@ -113,6 +135,8 @@ function sourceArchitectureChecks() {
   const cron = read("src/app/api/cron/sync-financial-notifications/route.ts");
   const rbac = read("src/lib/rbac.ts");
   const listRoute = read("src/app/api/admin/crm/leads/route.ts");
+  const activityRoute = read("src/app/api/admin/crm/leads/[id]/activities/route.ts");
+  const contactsRoute = read("src/app/api/admin/crm/leads/[id]/contacts/route.ts");
   const assigneesRoute = read("src/app/api/admin/crm/assignees/route.ts");
 
   assert(service.includes("skip: (page - 1) * limit"), "CRM list must be paginated");
@@ -128,6 +152,10 @@ function sourceArchitectureChecks() {
   assert(!workspace.includes("Media Plan"), "CRM must not activate Media Plan");
   assert(workspace.includes('type ViewMode = "today" | "pipeline" | "all"'), "CRM must expose daily, pipeline and list workflows");
   assert(workspace.includes("Urmatorul follow-up"), "CRM must make follow-up ownership visible");
+  assert(workspace.includes("Actiuni rapide"), "CRM must provide fast seller actions");
+  assert(workspace.includes("Nu raspunde"), "CRM must support a no-answer follow-up preset");
+  assert(workspace.includes("De clasificat"), "daily CRM must surface stale Cold and Contactat leads");
+  assert(workspace.includes('status: "contacted"'), "quick contact action must classify a Cold prospect as Contactat");
   assert(workspace.includes("initialLeadId"), "notification deep links must open lead detail without client search-param coupling");
   assert(!workspace.includes("grid-flow-col"), "CRM pipeline must wrap instead of extending indefinitely to the right");
   assert(workspace.includes("md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"), "CRM pipeline must use responsive wrapped columns");
@@ -139,11 +167,16 @@ function sourceArchitectureChecks() {
   assert(dashboard.includes('["COO", "SUPER_ADMIN"].includes(session.role)'), "team CRM metrics must be limited to COO and super admin");
   assert(dashboard.includes("financeOnly || !canReadCrm"), "dashboard payload must not include CRM rows for roles without CRM access");
   assert(notifications.includes("syncCrmNotifications"), "CRM follow-up notifications must be synchronized");
+  assert(notifications.includes("crm_followup_due_tomorrow"), "CRM must notify sellers before tomorrow's follow-up");
+  assert(notifications.includes("crm_classification_due"), "CRM must remind sellers to classify stale prospects");
   assert(notifications.includes('{ OR: [{ type: { notIn: crmNotificationTypes } }, { userId: session.id }] }'), "Sales Director must receive own CRM notifications without losing broader non-CRM oversight");
   assert(cron.includes("syncCrmNotifications()"), "protected cron must run CRM notification synchronization");
   assert(roleBlock(rbac, "SALES_DIRECTOR").includes('"leads.view"'), "Sales Director must have CRM read access");
   assert(roleBlock(rbac, "SALES_DIRECTOR").includes('"leads.manage"'), "Sales Director must have CRM write access");
   assert(listRoute.includes('["leads.view", "leads.view.own"]'), "CRM list API must require CRM permission");
+  assert(listRoute.includes("const optionalEmail = z.preprocess"), "CRM lead creation must accept an omitted email without rejecting the lead");
+  assert(contactsRoute.includes("const optionalEmail = z.preprocess"), "CRM contacts must accept an omitted email");
+  assert(activityRoute.includes("status: z.string().trim().refine(isKnownCrmStatus"), "quick actions must validate CRM stage changes");
   assert(assigneesRoute.includes('["leads.view"]'), "only global CRM roles may list all CRM assignees");
 }
 

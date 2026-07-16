@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
+import { isKnownCrmStatus } from "@/lib/crm";
 import { addCrmActivity, listCrmActivities } from "@/lib/crm-service";
+import { resolveCrmNotificationsForLead } from "@/lib/notifications";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -21,7 +23,8 @@ const activitySchema = z.object({
   details: z.string().trim().min(2).max(5000),
   locations: z.string().trim().max(5000).nullable().optional(),
   nextStep: z.string().trim().max(2000).nullable().optional(),
-  nextFollowUpDate: z.string().trim().nullable().optional()
+  nextFollowUpDate: z.string().trim().nullable().optional(),
+  status: z.string().trim().refine(isKnownCrmStatus, "Etapa CRM nu este valida.").nullable().optional()
 });
 
 export async function GET(request: NextRequest, context: Context) {
@@ -55,9 +58,10 @@ export async function POST(request: NextRequest, context: Context) {
       action: "crm.activity_create",
       entityType: "crm_lead",
       entityId: id,
-      metadata: { actionType: input.actionType, nextFollowUpDate: input.nextFollowUpDate },
+      metadata: { actionType: input.actionType, nextFollowUpDate: input.nextFollowUpDate, status: input.status },
       request
     });
+    await resolveCrmNotificationsForLead(id, session.id).catch(() => undefined);
     return NextResponse.json({ activity }, { status: 201, headers: noStoreHeaders });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Activitatea CRM nu a putut fi salvata.";

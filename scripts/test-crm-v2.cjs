@@ -105,6 +105,8 @@ function main() {
 function sourceArchitectureChecks() {
   const service = read("src/lib/crm-service.ts");
   const workspace = read("src/components/admin/CrmWorkspace.tsx");
+  const adminHeader = read("src/components/admin/AdminHeader.tsx");
+  const notificationBell = read("src/components/admin/NotificationBell.tsx");
   const crmPage = read("src/app/admin/crm/page.tsx");
   const dashboard = read("src/lib/dashboard.ts");
   const notifications = read("src/lib/notifications.ts");
@@ -127,6 +129,12 @@ function sourceArchitectureChecks() {
   assert(workspace.includes('type ViewMode = "today" | "pipeline" | "all"'), "CRM must expose daily, pipeline and list workflows");
   assert(workspace.includes("Urmatorul follow-up"), "CRM must make follow-up ownership visible");
   assert(workspace.includes("initialLeadId"), "notification deep links must open lead detail without client search-param coupling");
+  assert(!workspace.includes("grid-flow-col"), "CRM pipeline must wrap instead of extending indefinitely to the right");
+  assert(workspace.includes("md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"), "CRM pipeline must use responsive wrapped columns");
+  assert(workspace.includes("grid gap-3 xl:hidden"), "CRM lead list must use cards below wide desktop");
+  assert(workspace.includes("hidden overflow-x-auto xl:block"), "wide CRM table must be isolated to desktop widths");
+  assert(adminHeader.includes("order-3 col-span-3"), "admin navigation must move to a dedicated responsive row");
+  assert(notificationBell.includes('className="hidden sm:inline"'), "notification label must collapse on narrow screens");
   assert(crmPage.includes("initialLeadId={params.lead || null}"), "CRM page must pass the notification deep link safely");
   assert(dashboard.includes('["COO", "SUPER_ADMIN"].includes(session.role)'), "team CRM metrics must be limited to COO and super admin");
   assert(dashboard.includes("financeOnly || !canReadCrm"), "dashboard payload must not include CRM rows for roles without CRM access");

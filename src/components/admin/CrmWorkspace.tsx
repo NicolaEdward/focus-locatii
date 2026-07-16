@@ -363,12 +363,12 @@ export function CrmWorkspace({
   }), [leads]);
 
   return (
-    <main className="focus-shell py-7">
-      <div className="focus-container grid gap-5">
-        <section className="flex flex-wrap items-end justify-between gap-4 border-b border-focus-line pb-5">
-          <div>
+    <main className="focus-shell overflow-x-clip py-7">
+      <div className="focus-container grid min-w-0 gap-5">
+        <section className="flex min-w-0 flex-wrap items-end justify-between gap-4 border-b border-focus-line pb-5">
+          <div className="min-w-0">
             <p className="text-xs font-black uppercase text-focus-yellow">CRM Focus Media</p>
-            <h1 className="font-display text-4xl font-black uppercase text-white">Activitate comerciala OOH</h1>
+            <h1 className="font-display text-3xl font-black uppercase text-white sm:text-4xl">Activitate comerciala OOH</h1>
             <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-slate-300">
               Prioritati zilnice, pipeline, contacte si istoric comercial pentru fiecare agent.
             </p>
@@ -381,7 +381,7 @@ export function CrmWorkspace({
         {message ? <Feedback tone="green" text={message} onClose={() => setMessage(null)} /> : null}
         {error ? <Feedback tone="red" text={error} onClose={() => setError(null)} /> : null}
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <section className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           <Metric label="Lead-uri active" value={summary.active} icon={<BriefcaseBusiness size={18} />} />
           <Metric label="Restante" value={summary.overdue} icon={<AlertTriangle size={18} />} tone={summary.overdue ? "red" : "green"} />
           <Metric label="Pentru azi" value={summary.dueToday} icon={<CalendarClock size={18} />} tone="yellow" />
@@ -503,8 +503,13 @@ function CrmFilters({
   canViewTeam: boolean;
   hideAttention: boolean;
 }) {
-  return <section className="grid gap-3 border-b border-focus-line pb-4 lg:grid-cols-[minmax(260px,1fr)_220px_220px_220px]">
-    <label className="relative">
+  const columnClass = canViewTeam && !hideAttention
+    ? "xl:grid-cols-4"
+    : canViewTeam || !hideAttention
+      ? "xl:grid-cols-3"
+      : "xl:grid-cols-2";
+  return <section className={`grid min-w-0 gap-3 border-b border-focus-line pb-4 md:grid-cols-2 ${columnClass}`}>
+    <label className="relative min-w-0 md:col-span-2 xl:col-span-1">
       <span className="sr-only">Cauta</span>
       <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
       <input className="focus-input pl-10" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Companie, contact, email, telefon" />
@@ -521,7 +526,7 @@ function CrmFilters({
         <option value="upcoming">Viitoare</option>
         <option value="missing">Fara urmator pas</option>
       </select>
-    ) : <div />}
+    ) : null}
     {canViewTeam ? (
       <select className="focus-input" value={assignee} onChange={(event) => onAssignee(event.target.value)} aria-label="Agent CRM">
         <option value="">Toti agentii</option>
@@ -630,13 +635,13 @@ function PipelineView({
   onStatus: (id: string, patch: Record<string, unknown>) => void;
 }) {
   const columns = CRM_STATUS_OPTIONS.filter((option) => option.value !== "inactive");
-  return <section>
+  return <section className="min-w-0">
     {total > leads.length ? <p className="mb-3 text-xs font-bold text-focus-yellow">Sunt afisate primele {leads.length} din {total} lead-uri. Foloseste filtrele pentru un pipeline mai precis.</p> : null}
-    <div className="grid auto-cols-[minmax(260px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-3">
+    <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       {columns.map((column) => {
         const rows = leads.filter((lead) => lead.status === column.value);
-        return <section className="min-h-[420px] rounded-md border border-focus-line bg-focus-ink/45" key={column.value}>
-          <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-focus-line bg-focus-navy px-3 py-3">
+        return <section className="min-h-56 min-w-0 rounded-md border border-focus-line bg-focus-ink/45" key={column.value}>
+          <div className="flex items-center justify-between gap-3 border-b border-focus-line bg-focus-navy px-3 py-3">
             <h2 className="text-xs font-black uppercase text-white">{column.label}</h2>
             <span className="rounded-full bg-focus-yellow px-2 py-0.5 text-xs font-black text-focus-navy">{rows.length}</span>
           </div>
@@ -672,8 +677,11 @@ function PipelineView({
 }
 
 function LeadList({ leads, busy, onOpen }: { leads: LeadSummary[]; busy: string | null; onOpen: (id: string) => void }) {
-  return <section className="overflow-hidden border-y border-focus-line">
-    <div className="overflow-x-auto">
+  return <section className="min-w-0 overflow-hidden border-y border-focus-line py-3 xl:py-0">
+    <div className="grid gap-3 xl:hidden">
+      {leads.map((lead) => <LeadCard key={lead.id} lead={lead} busy={busy} onOpen={onOpen} />)}
+    </div>
+    <div className="hidden overflow-x-auto xl:block">
       <table className="w-full min-w-[1080px] text-sm">
         <thead className="bg-focus-navy/80 text-left text-xs uppercase text-slate-400">
           <tr>
@@ -1020,8 +1028,8 @@ function LeadDrawer({
 }
 
 function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return <div className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-label={title}>
-    <div className="my-8 w-full max-w-4xl rounded-md border border-focus-line bg-focus-navy shadow-2xl">
+  return <div className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-black/70 p-2 sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
+    <div className="my-4 min-w-0 w-full max-w-4xl rounded-md border border-focus-line bg-focus-navy shadow-2xl sm:my-8">
       <div className="flex items-center justify-between gap-3 border-b border-focus-line px-5 py-4">
         <h2 className="text-xl font-black text-white">{title}</h2>
         <button className="focus-button secondary" type="button" onClick={onClose} aria-label="Inchide"><X size={18} /></button>
@@ -1048,7 +1056,7 @@ function MiniMetric({ label, value, tone = "neutral" }: { label: string; value: 
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="grid gap-1 text-xs font-black uppercase text-slate-400">{label}{children}</label>;
+  return <label className="grid min-w-0 gap-1 text-xs font-black uppercase text-slate-400">{label}{children}</label>;
 }
 
 function InfoLine({ label, value }: { label: string; value: string }) {

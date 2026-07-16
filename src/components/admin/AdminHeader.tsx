@@ -45,7 +45,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-focus-line bg-focus-navy/95 backdrop-blur">
-      <div className="focus-container flex min-h-20 items-center gap-3 py-3">
+      <div className="focus-container grid min-h-20 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3 2xl:flex">
         <div className="flex shrink-0 items-center gap-4">
           <FocusLogo href="/admin/dashboard" prefetch={false} />
           <div className="hidden border-l border-focus-line pl-4 lg:block">
@@ -53,7 +53,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
             <p className="text-xs text-slate-400">{ROLE_LABELS[session.role]}</p>
           </div>
         </div>
-        <nav className="admin-nav flex min-w-0 flex-1 flex-wrap items-center gap-2" aria-label="Navigatie administrare">
+        <nav className="admin-nav order-3 col-span-3 flex w-full min-w-0 flex-wrap items-center gap-2 2xl:order-none 2xl:col-span-1 2xl:flex-1" aria-label="Navigatie administrare">
           {!isFieldOperator ? <AdminNavLink href="/admin/dashboard" active={isActiveAdminPath(pathname, "/admin/dashboard")}><Gauge size={18} />Dashboard</AdminNavLink> : null}
           {hasCommercialMenu ? (
             <AdminNavMenu
@@ -93,7 +93,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           ) : null}
           {!isFieldOperator ? <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Portal public</AdminNavLink> : null}
         </nav>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="col-start-3 row-start-1 flex shrink-0 items-center gap-2">
           {!isFieldOperator ? <NotificationBell /> : null}
           <div className="relative z-50">
             <LogoutButton />

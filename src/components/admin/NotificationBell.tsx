@@ -74,7 +74,7 @@ export function NotificationBell() {
         }}
       >
         <Bell size={18} />
-        Notificari
+        <span className="hidden sm:inline">Notificari</span>
         {activeRows.length ? <span className="rounded-full bg-focus-yellow px-2 py-0.5 text-xs text-focus-navy">{activeRows.length}</span> : null}
       </button>
       {open ? (

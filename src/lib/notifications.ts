@@ -77,15 +77,12 @@ export async function listNotificationsForUser(session: AuthSession) {
     ["COO", "SUPER_ADMIN"].includes(session.role)
       ? {}
       : session.role === "SALES_DIRECTOR"
-        ? {}
+        ? { OR: [{ type: { notIn: crmNotificationTypes } }, { userId: session.id }] }
         : { userId: session.id };
-  const blockedTypes = session.role === "SALES_DIRECTOR"
-    ? [...legacyInvoiceNotificationTypes, ...crmNotificationTypes]
-    : legacyInvoiceNotificationTypes;
   return prisma.appNotification.findMany({
     where: {
       ...ownershipWhere,
-      type: { notIn: blockedTypes },
+      type: { notIn: legacyInvoiceNotificationTypes },
       status: { in: ["open", "in_progress"] }
     },
     include: { user: { select: { name: true, email: true } } },

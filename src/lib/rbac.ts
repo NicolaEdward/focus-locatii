@@ -91,6 +91,8 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "dashboard.sales.view",
     "clients.view",
     "clients.manage",
+    "leads.view",
+    "leads.manage",
     "opportunities.view",
     "opportunities.manage",
     "proposals.view",

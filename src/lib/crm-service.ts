@@ -484,7 +484,7 @@ export async function convertCrmLeadToClient(input: {
 
 export async function validCrmAssignees() {
   return prisma.user.findMany({
-    where: { active: true, role: "SALES_AGENT" },
+    where: { active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } },
     select: { id: true, name: true, email: true, role: true },
     orderBy: { name: "asc" }
   });
@@ -665,10 +665,10 @@ async function resolveCrmAssignee(actor: AuthSession, requestedId?: string | nul
   }
   if (!requestedId) throw new Error("Alege agentul de vanzari responsabil.");
   const target = await prisma.user.findFirst({
-    where: { id: requestedId, active: true, role: "SALES_AGENT" },
+    where: { id: requestedId, active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } },
     select: { id: true }
   });
-  if (!target) throw new Error("Responsabilul CRM trebuie sa fie un agent de vanzari activ.");
+  if (!target) throw new Error("Responsabilul CRM trebuie sa fie un agent sau director de vanzari activ.");
   return target.id;
 }
 

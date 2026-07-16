@@ -53,7 +53,7 @@ export const CRM_ACTIVE_STATUSES: CrmStatus[] = [
 
 export const CRM_ACTIVE_DB_STATUSES = CRM_ACTIVE_STATUSES.flatMap((status) => dbStatusesByCanonical[status]);
 export const CRM_TERMINAL_DB_STATUSES = [...dbStatusesByCanonical.won, ...dbStatusesByCanonical.lost, ...dbStatusesByCanonical.inactive];
-export const CRM_ALLOWED_ROLES = ["SALES_AGENT", "COO", "SUPER_ADMIN"] as const;
+export const CRM_ALLOWED_ROLES = ["SALES_AGENT", "SALES_DIRECTOR", "COO", "SUPER_ADMIN"] as const;
 
 export function normalizeCrmStatus(value?: string | null): CrmStatus {
   const normalized = String(value || "new").trim().toLowerCase();

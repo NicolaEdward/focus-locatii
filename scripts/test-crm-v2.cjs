@@ -18,7 +18,8 @@ function main() {
   assert.equal(crm.normalizeCrmStatus("account_management"), "won");
   assert.equal(crm.crmLeadScope(seller).assignedToUserId, "seller-1");
   assert.equal(Object.keys(crm.crmLeadScope(coo)).length, 0);
-  assert.throws(() => crm.assertCrmRole(director), /nu are acces la CRM/);
+  assert.equal(Object.keys(crm.crmLeadScope(director)).length, 0);
+  assert.doesNotThrow(() => crm.assertCrmRole(director));
   assert.equal(crm.canAccessCrmLead(seller, { assignedToUserId: "seller-1" }), true);
   assert.equal(crm.canAccessCrmLead(seller, { assignedToUserId: "seller-2" }), false);
 
@@ -88,7 +89,7 @@ function main() {
     checked: [
       "canonical CRM statuses and legacy mappings",
       "sales agents see only owned leads",
-      "Sales Director is excluded from CRM",
+      "Sales Director can use and coordinate CRM",
       "active leads require a next follow-up",
       "lost and won terminal-state validation",
       "attention and deterministic pipeline metrics",
@@ -116,7 +117,7 @@ function sourceArchitectureChecks() {
   assert(service.includes("take: limit"), "CRM list must have a bounded page size");
   assert(service.includes("select: crmLeadSummarySelect"), "CRM list must use a summary DTO");
   assert(service.includes("take: 50"), "CRM detail activity history must stay bounded");
-  assert(service.includes('role: "SALES_AGENT"'), "CRM assignees must be active sales agents");
+  assert(service.includes('role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] }'), "CRM assignees must be active sales agents or the sales director");
   assert(service.includes("prisma.clientAccount.findMany"), "duplicate search must show registered clients");
   assert(!/clientAccount\.findMany\([\s\S]*accountOwnerUserId:\s*actor\.id/.test(service), "client duplicate lookup must not hide registered clients from sellers");
   assert(!service.includes("prisma.reservation"), "CRM conversion must not create or change reservations");
@@ -130,10 +131,10 @@ function sourceArchitectureChecks() {
   assert(dashboard.includes('["COO", "SUPER_ADMIN"].includes(session.role)'), "team CRM metrics must be limited to COO and super admin");
   assert(dashboard.includes("financeOnly || !canReadCrm"), "dashboard payload must not include CRM rows for roles without CRM access");
   assert(notifications.includes("syncCrmNotifications"), "CRM follow-up notifications must be synchronized");
-  assert(notifications.includes("blockedTypes"), "Sales Director CRM notifications must be blocked");
+  assert(notifications.includes('{ OR: [{ type: { notIn: crmNotificationTypes } }, { userId: session.id }] }'), "Sales Director must receive own CRM notifications without losing broader non-CRM oversight");
   assert(cron.includes("syncCrmNotifications()"), "protected cron must run CRM notification synchronization");
-  assert(!roleBlock(rbac, "SALES_DIRECTOR").includes('"leads.view"'), "Sales Director must not have CRM read access");
-  assert(!roleBlock(rbac, "SALES_DIRECTOR").includes('"leads.manage"'), "Sales Director must not have CRM write access");
+  assert(roleBlock(rbac, "SALES_DIRECTOR").includes('"leads.view"'), "Sales Director must have CRM read access");
+  assert(roleBlock(rbac, "SALES_DIRECTOR").includes('"leads.manage"'), "Sales Director must have CRM write access");
   assert(listRoute.includes('["leads.view", "leads.view.own"]'), "CRM list API must require CRM permission");
   assert(assigneesRoute.includes('["leads.view"]'), "only global CRM roles may list all CRM assignees");
 }

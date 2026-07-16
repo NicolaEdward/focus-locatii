@@ -15,7 +15,7 @@ export async function getCrmTeamDashboardData(now = new Date()) {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const [sellers, leads, activities7, activities30, outcomeEvents] = await Promise.all([
     prisma.user.findMany({
-      where: { active: true, role: "SALES_AGENT" },
+      where: { active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } },
       select: { id: true, name: true, email: true },
       orderBy: { name: "asc" }
     }),

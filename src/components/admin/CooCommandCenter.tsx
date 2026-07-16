@@ -87,7 +87,6 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
 
   const filterText = query.toLowerCase();
   const visibleHolds = useMemo(() => coo.holds.filter((item) => !hiddenReservations.has(item.id) && rowMatches(item, filterText)), [coo.holds, filterText, hiddenReservations]);
-  const visibleExpiredHolds = useMemo(() => coo.expiredHolds.filter((item) => !hiddenReservations.has(item.id) && rowMatches(item, filterText)), [coo.expiredHolds, filterText, hiddenReservations]);
   const visibleTasks = useMemo(() => [...coo.decorationTasks, ...coo.neutralizationTasks].filter((item) => !hiddenTasks.has(item.id) && taskMatches(item, filterText)), [coo.decorationTasks, coo.neutralizationTasks, filterText, hiddenTasks]);
   const filteredOperationTasks = useMemo(() => visibleTasks.filter((item) => {
     if (operationFilter === "decoration") return item.kind === "decoration";
@@ -214,7 +213,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
           <Metric label="Probleme" value={coo.health.issues} tone={coo.health.issues ? "red" : "green"} />
         </section>
 
-        {data.finance ? (
+        {data.finance?.hasActiveReport ? (
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Metric label="Rest incasat RON" value={money(data.finance.kpis.remainingReceivableRon)} tone="green" />
             <Metric label="Rest incasat EUR" value={money(data.finance.kpis.remainingReceivableEur)} tone="green" />
@@ -288,10 +287,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                   </div>
                 </Panel>
 
-                <div className="grid gap-5 xl:grid-cols-2">
-                  <HoldPanel title="Hold-uri active" rows={visibleHolds} busy={busy} onCommand={command} onChangePeriod={setPeriodTarget} />
-                  <HoldPanel title="Hold-uri expirate" rows={visibleExpiredHolds} busy={busy} onCommand={command} onChangePeriod={setPeriodTarget} expired />
-                </div>
+                <HoldPanel title="Hold-uri active" rows={visibleHolds} busy={busy} onCommand={command} onChangePeriod={setPeriodTarget} />
                 <div className="grid gap-5 xl:grid-cols-2">
                   <CampaignList title="Montaj fara data valida" rows={coo.missingInstallations} />
                   <CampaignList title="Neutralizare fara data valida" rows={coo.missingNeutralizations} />

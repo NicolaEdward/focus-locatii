@@ -17,6 +17,7 @@ function main() {
   operationMutationControlsRequireOperatePermission();
   dashboardLabelsAreClearRomanian();
   dashboardInventoryAndProblemsStayConsistent();
+  dashboardStatisticsUseCurrentActionableData();
   sellerReportsExcludeSystemAccountsAndEmptyRows();
 
   console.log(JSON.stringify({
@@ -31,6 +32,7 @@ function main() {
       "operation mutation controls require campaigns.operate",
       "dashboard labels are clearer Romanian labels",
       "COO inventory, problems and notification reads stay consistent",
+      "expired holds remain historical and statistics use current actionable data",
       "seller reports exclude system accounts, unassigned rows and empty sellers"
     ]
   }, null, 2));
@@ -66,7 +68,10 @@ function sellerReportsExcludeSystemAccountsAndEmptyRows() {
   }), false);
 
   const dashboard = read("src", "lib", "dashboard.ts");
-  assert(dashboard.includes("groupPerformance(monthlySales, reportableSellerName)"), "sales ranking must use filtered seller attribution");
+  assert(
+    dashboard.includes("groupPerformance(monthlySales, reportableSellerName, monthStart, monthEnd)"),
+    "sales ranking must use filtered seller attribution and the current reporting month"
+  );
   assert(dashboard.includes(".filter(hasSellerReportActivity)"), "empty seller rows must not remain in the COO report");
 }
 
@@ -168,6 +173,23 @@ function dashboardInventoryAndProblemsStayConsistent() {
   assert(dashboard.includes("uniqueCampaignCount(confirmed)"), "seller confirmed campaigns should not count every location row as a campaign");
   assert(!notificationsRoute.includes("syncFinancialNotifications"), "notification reads must not run financial synchronization");
   assert(notificationCron.includes("CRON_SECRET") && notificationCron.includes("syncFinancialNotifications"), "financial notification sync should run through the protected cron route");
+}
+
+function dashboardStatisticsUseCurrentActionableData() {
+  const dashboard = read("src", "lib", "dashboard.ts");
+  const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
+
+  assert(!dashboard.includes("input.expiredHolds.forEach"), "expired holds must not be emitted as active COO problems");
+  assert(!dashboard.includes("hold-uri expirate trebuie eliberate sau arhivate"), "expired hold history must not create an active alert");
+  assert(!commandCenter.includes('title="Hold-uri expirate"'), "expired hold history must not appear inside the active problems tab");
+  assert(dashboard.includes("findConflicts(campaigns, now)"), "conflicts must be evaluated against the current moment");
+  assert(dashboard.includes("if (item.periodEnd < now) return false"), "past contracts must not remain active conflict problems");
+  assert(dashboard.includes("holdIsActive(item, now)"), "expired HOLD/RESERVED rows must not create conflicts or active seller metrics");
+  assert(dashboard.includes("recognizedMonthlyRevenue"), "COO totals and seller performance must share the same pro-rata revenue calculation");
+  assert(dashboard.includes("campaignIds: new Set<string>()"), "performance rankings must count unique campaigns instead of location rows");
+  assert(dashboard.includes("neutralizationTasks.slice(0, 100)"), "the operational list must not silently stop at 30 tasks");
+  assert(dashboard.includes("inventoryByCity,"), "the inventory detail tab must receive all city groups");
+  assert(commandCenter.includes("data.finance?.hasActiveReport"), "COO finance KPI cards must stay hidden when no active report exists");
 }
 
 function blockFrom(source, start, end) {

@@ -345,7 +345,7 @@ export async function getDashboardData(session: AuthSession) {
     if (item.status !== "BOOKED" || item.periodStart < now || item.periodStart > inSevenDays) return false;
     return operationStatus(item.productionNotes, "decoration") !== "DONE";
   });
-  const conflicts = findConflicts(campaigns);
+  const conflicts = findConflicts(campaigns, now);
   const endingSoon = active
     .filter((item) => item.periodEnd <= inThirtyDays)
     .sort((a, b) => a.periodEnd.getTime() - b.periodEnd.getTime());
@@ -358,15 +358,12 @@ export async function getDashboardData(session: AuthSession) {
     (item) => item.status === "BOOKED" && item.periodStart <= monthEnd && item.periodEnd >= monthStart
   );
   const confirmedRevenue = roundMoney(
-    monthlySales.reduce((sum, item) => {
-      const monthly = item.amount ?? item.monthlyRentShare ?? (item.contractGroupId ? 0 : item.monthlyRentTotal ?? 0);
-      return sum + calculateProrata(monthly, item.periodStart, item.periodEnd, monthStart, monthEnd).amount;
-    }, 0)
+    monthlySales.reduce((sum, item) => sum + recognizedMonthlyRevenue(item, monthStart, monthEnd), 0)
   );
   const offerPipeline = countBy(offerRequests, (item) => item.status);
-  const agentPerformance = groupPerformance(monthlySales, reportableSellerName);
-  const cityPerformance = groupPerformance(monthlySales, (item) => item.location.city || "Fara oras");
-  const topClients = groupPerformance(monthlySales, (item) => item.clientName || "Fara client");
+  const agentPerformance = groupPerformance(monthlySales, reportableSellerName, monthStart, monthEnd);
+  const cityPerformance = groupPerformance(monthlySales, (item) => item.location.city || "Fara oras", monthStart, monthEnd);
+  const topClients = groupPerformance(monthlySales, (item) => item.clientName || "Fara client", monthStart, monthEnd);
   const legacyDecorationTasks = operationTasks(operationCampaigns, "decoration", now, operationWindowStart, decorationWindowEnd, session);
   const legacyNeutralizationTasks = operationTasks(operationCampaigns, "neutralization", now, operationWindowStart, neutralizationWindowEnd, session);
   const operationTaskReadResult = operationTaskReadsEnabled()
@@ -391,7 +388,7 @@ export async function getDashboardData(session: AuthSession) {
     neutralizations: neutralizationTasks.length,
     overdue: overdueTasks.length
   };
-  const sellers = sellerActivity(users, offerRequests, crmRows, campaigns, monthlySales, now);
+  const sellers = sellerActivity(users, offerRequests, crmRows, campaigns, monthlySales, now, monthStart, monthEnd);
   const crmLeads = [
     ...crmRows.map(serializeRealCrmLead),
     ...offerRequests
@@ -406,7 +403,6 @@ export async function getDashboardData(session: AuthSession) {
   const endingSoonGroups = serializeCampaignGroups(endingSoon);
   const structuredProblems = buildProblemCenter({
     conflicts,
-    expiredHolds,
     missingInstallations,
     missingNeutralizations,
     overdueTasks,
@@ -452,7 +448,6 @@ export async function getDashboardData(session: AuthSession) {
     operations,
     alerts: [
       ...(conflicts.length ? [{ tone: "red" as const, label: `${conflicts.length} conflicte de perioada necesita verificare` }] : []),
-      ...(expiredHolds.length ? [{ tone: "red" as const, label: `${expiredHolds.length} hold-uri expirate trebuie eliberate sau arhivate` }] : []),
       ...(atRisk.length ? [{ tone: "yellow" as const, label: `${atRisk.length} campanii pornesc in 7 zile fara decorare finalizata` }] : []),
       ...(overdueTasks.length ? [{ tone: "yellow" as const, label: `${overdueTasks.length} taskuri operationale intarziate` }] : []),
       ...(holds.length ? [{ tone: "blue" as const, label: `${holds.length} hold-uri active asteapta decizie` }] : []),
@@ -483,14 +478,14 @@ export async function getDashboardData(session: AuthSession) {
       blockedLocations: blockedLocations.slice(0, 20).map(serializeLocation),
       missingInstallations: missingInstallations.slice(0, 20).map(serializeCampaign),
       missingNeutralizations: missingNeutralizations.slice(0, 20).map(serializeCampaign),
-      decorationTasks: decorationTasks.slice(0, 30),
-      neutralizationTasks: neutralizationTasks.slice(0, 30),
-      overdueTasks: overdueTasks.slice(0, 20),
+      decorationTasks: decorationTasks.slice(0, 100),
+      neutralizationTasks: neutralizationTasks.slice(0, 100),
+      overdueTasks: overdueTasks.slice(0, 100),
       ...(operationTaskReadResult ? { operationTaskReadComparison: operationTaskReadResult.comparison } : {}),
       sellers,
       crmLeads,
-      inventoryByCity: inventoryByCity.slice(0, 12),
-      inventoryByType: inventoryByType.slice(0, 12),
+      inventoryByCity,
+      inventoryByType,
       approvalQueue: holds.slice(0, 20).map(serializeCampaign),
       reports: {
         availabilityUrl: "/api/admin/availability/excel",
@@ -800,7 +795,6 @@ function serializeRealCrmLead(lead: CrmLeadRow) {
 
 function buildProblemCenter(input: {
   conflicts: Array<[CampaignRow, CampaignRow]>;
-  expiredHolds: CampaignRow[];
   missingInstallations: CampaignRow[];
   missingNeutralizations: CampaignRow[];
   overdueTasks: ReturnType<typeof operationTasks>;
@@ -844,21 +838,6 @@ function buildProblemCenter(input: {
     ownerUserId: first.sellerUserId || second.sellerUserId,
     dueDate: first.periodStart.toISOString(),
     recommendedAction: "Verifica perioadele si corecteaza manual una dintre inchirieri.",
-    status: "open"
-  }));
-
-  input.expiredHolds.forEach((hold) => problems.push({
-    id: `expired-hold-${hold.id}`,
-    module: "Vanzari",
-    type: "expired_hold",
-    title: `Hold expirat pentru ${hold.location.code}`,
-    plainLanguageDescription: `Hold-ul pentru ${hold.clientName} a expirat si trebuie eliberat sau confirmat.`,
-    entityType: "reservation",
-    entityId: hold.id,
-    severity: "high",
-    ownerUserId: hold.sellerUserId || hold.ownerId,
-    dueDate: hold.holdExpiresAt?.toISOString() || null,
-    recommendedAction: "Elibereaza hold-ul sau confirma inchirierea daca s-a inchis.",
     status: "open"
   }));
 
@@ -989,7 +968,9 @@ function sellerActivity(
   crmRows: CrmLeadRow[],
   campaigns: CampaignRow[],
   monthlySales: CampaignRow[],
-  now: Date
+  now: Date,
+  monthStart: Date,
+  monthEnd: Date
 ) {
   const sellerNames = new Set<string>();
   const excludedUserNames = new Set(
@@ -1022,7 +1003,7 @@ function sellerActivity(
     );
     const sellerCampaigns = campaigns.filter((campaign) => reportableSellerName(campaign) === seller);
     const sellerSales = monthlySales.filter((campaign) => reportableSellerName(campaign) === seller);
-    const activeHolds = sellerCampaigns.filter((campaign) => ["HOLD", "RESERVED"].includes(campaign.status) && (!campaign.holdExpiresAt || campaign.holdExpiresAt > now));
+    const activeHolds = sellerCampaigns.filter((campaign) => ["HOLD", "RESERVED"].includes(campaign.status) && holdIsActive(campaign, now));
     const expiredHolds = sellerCampaigns.filter((campaign) => campaign.status === "EXPIRED");
     const confirmed = sellerCampaigns.filter((campaign) => campaign.status === "BOOKED");
     const openLeads = sellerRequests.filter((request) => ["NEW", "CONTACTED", "QUOTED"].includes(request.status));
@@ -1033,7 +1014,10 @@ function sellerActivity(
       openLeads.reduce((sum, request) => sum + (parseOfferRequestMeta(request.source).estimatedValue || 0), 0) +
       openCrmLeads.reduce((sum, lead) => sum + (lead.estimatedValue || 0), 0) +
       activeHolds.reduce((sum, campaign) => sum + (campaign.amount ?? campaign.monthlyRentShare ?? 0), 0);
-    const soldValue = sellerSales.reduce((sum, campaign) => sum + (campaign.amount ?? campaign.monthlyRentShare ?? 0), 0);
+    const soldValue = sellerSales.reduce(
+      (sum, campaign) => sum + recognizedMonthlyRevenue(campaign, monthStart, monthEnd),
+      0
+    );
     const overdueFollowUps = sellerRequests.filter((request) => {
       const followUp = parseOfferRequestMeta(request.source).nextFollowUpAt;
       return followUp ? new Date(followUp) < now && !["WON", "LOST", "ARCHIVED"].includes(request.status) : false;
@@ -1102,24 +1086,37 @@ function countBy<T>(items: T[], key: (item: T) => string) {
   }, {});
 }
 
-function groupPerformance(items: CampaignRow[], key: (item: CampaignRow) => string | null) {
-  const groups = new Map<string, { label: string; campaigns: number; revenue: number }>();
+function groupPerformance(
+  items: CampaignRow[],
+  key: (item: CampaignRow) => string | null,
+  monthStart: Date,
+  monthEnd: Date
+) {
+  const groups = new Map<string, { label: string; campaignIds: Set<string>; revenue: number }>();
   for (const item of items) {
     const label = key(item);
     if (!label) continue;
-    const current = groups.get(label) || { label, campaigns: 0, revenue: 0 };
-    current.campaigns += 1;
-    current.revenue += item.amount ?? item.monthlyRentShare ?? 0;
+    const current = groups.get(label) || { label, campaignIds: new Set<string>(), revenue: 0 };
+    current.campaignIds.add(item.campaignId || item.contractGroupId || item.id);
+    current.revenue += recognizedMonthlyRevenue(item, monthStart, monthEnd);
     groups.set(label, current);
   }
   return [...groups.values()]
-    .map((item) => ({ ...item, revenue: roundMoney(item.revenue) }))
+    .map((item) => ({
+      label: item.label,
+      campaigns: item.campaignIds.size,
+      revenue: roundMoney(item.revenue)
+    }))
     .sort((a, b) => b.revenue - a.revenue || b.campaigns - a.campaigns);
 }
 
-function findConflicts(items: CampaignRow[]) {
+function findConflicts(items: CampaignRow[], now: Date) {
   const active = items
-    .filter((item) => ["HOLD", "RESERVED", "BOOKED"].includes(item.status))
+    .filter((item) => {
+      if (item.periodEnd < now) return false;
+      if (item.status === "BOOKED") return true;
+      return ["HOLD", "RESERVED"].includes(item.status) && holdIsActive(item, now);
+    })
     .sort((a, b) => a.periodStart.getTime() - b.periodStart.getTime());
   const conflicts: Array<[CampaignRow, CampaignRow]> = [];
   const byLocation = new Map<string, CampaignRow[]>();
@@ -1132,6 +1129,11 @@ function findConflicts(items: CampaignRow[]) {
     byLocation.set(item.location.id, group);
   }
   return conflicts;
+}
+
+function recognizedMonthlyRevenue(item: CampaignRow, monthStart: Date, monthEnd: Date) {
+  const monthly = item.amount ?? item.monthlyRentShare ?? (item.contractGroupId ? 0 : item.monthlyRentTotal ?? 0);
+  return calculateProrata(monthly, item.periodStart, item.periodEnd, monthStart, monthEnd).amount;
 }
 
 function sellerName(item: CampaignRow) {

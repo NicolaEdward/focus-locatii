@@ -75,6 +75,7 @@ export function ReceivablesWorkspace({
   const [paymentTarget, setPaymentTarget] = useState<JsonMap | null>(null);
   const [allocationTarget, setAllocationTarget] = useState<JsonMap | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const allocationMutationRef = useRef(false);
 
   async function api(url: string, init?: RequestInit) {
     const response = await fetch(url, init);
@@ -115,13 +116,14 @@ export function ReceivablesWorkspace({
   }
 
   async function resolveRow(row: JsonMap, action: "confirm" | "create" | "ignore" | "confirm_credit") {
-    if (!canValidate || !preview) return;
+    if (!canValidate || !preview || allocationMutationRef.current) return;
     const select = document.getElementById(`client-${row.id}`) as HTMLSelectElement | null;
     const clientId = select?.value || row.clientId || null;
     const reason = action === "ignore" ? window.prompt("Motivul ignorării") : null;
     if (action === "ignore" && !reason) return;
     const saveAlias = action !== "ignore" && Boolean(clientId) && window.confirm("Salvez denumirea din raport ca alias pentru importurile viitoare?");
-    setBusy(true); setError(null);
+    allocationMutationRef.current = true;
+    setBusy(true); setError(null); setMessage(null);
     try {
       const payload = await api(`/api/admin/receivables-import/${preview.upload.id}/rows/${row.id}`, {
         method: "PATCH",
@@ -133,12 +135,12 @@ export function ReceivablesWorkspace({
       setMessage("Alocarea a fost salvată.");
       await refresh();
     } catch (resolveError) { setError(resolveError instanceof Error ? resolveError.message : "Alocarea nu a putut fi salvată."); }
-    finally { setBusy(false); }
+    finally { allocationMutationRef.current = false; setBusy(false); }
   }
 
   async function submitAllocation(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!allocationTarget || !preview || !canValidate) return;
+    if (!allocationTarget || !preview || !canValidate || allocationMutationRef.current) return;
     const data = new FormData(event.currentTarget);
     const action = String(data.get("action") || "create") as "confirm" | "create" | "confirm_credit";
     const currencyInput = window.prompt("Moneda rândului (RON sau EUR)", String(allocationTarget.currency || "RON"));
@@ -153,7 +155,8 @@ export function ReceivablesWorkspace({
       setError("Completează observația / motivul pentru corectarea monedei.");
       return;
     }
-    setBusy(true); setError(null);
+    allocationMutationRef.current = true;
+    setBusy(true); setError(null); setMessage(null);
     try {
       const payload = await api(`/api/admin/receivables-import/${preview.upload.id}/rows/${allocationTarget.id}`, {
         method: "PATCH",
@@ -176,7 +179,7 @@ export function ReceivablesWorkspace({
       setMessage("Alocarea manuală a fost salvată.");
       await refresh();
     } catch (allocationError) { setError(allocationError instanceof Error ? allocationError.message : "Alocarea nu a putut fi salvată."); }
-    finally { setBusy(false); }
+    finally { allocationMutationRef.current = false; setBusy(false); }
   }
 
   async function confirmImport() {

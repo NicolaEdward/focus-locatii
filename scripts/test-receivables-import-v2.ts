@@ -132,6 +132,9 @@ assert.match(workspace, /Moneda rândului \(RON sau EUR\)/);
 assert.match(rowRoute, /currency: z\.enum\(\["RON", "EUR"\]\)/);
 assert.match(service, /Motivul corectării monedei este obligatoriu/);
 assert.match(service, /previousCurrency: row\.currency, currency/);
+assert.match(service, /maxWait: 10_000/);
+assert.match(service, /timeout: 30_000/);
+assert.match(workspace, /allocationMutationRef\.current/);
 assert.doesNotMatch(publicApi, /FinancialReceivablePayment|financialReceivablePayment|FinancialClientCredit|financialClientCredit/);
 assert.doesNotMatch(migration, /\b(DROP\s+(?:TABLE|COLUMN|INDEX)|TRUNCATE\s+TABLE|DELETE\s+FROM)\b/i, "migration must be additive");
 

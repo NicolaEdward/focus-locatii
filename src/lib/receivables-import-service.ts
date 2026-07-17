@@ -266,6 +266,9 @@ export async function resolveReceivablesImportRow(input: {
         metadata: { action: input.action, clientId, reason: input.reason || null, saveAlias: Boolean(input.saveAlias), previousCurrency: row.currency, currency }
       }
     });
+  }, {
+    maxWait: 10_000,
+    timeout: 30_000
   });
   return getReceivablesImportPreview(input.uploadId);
 }

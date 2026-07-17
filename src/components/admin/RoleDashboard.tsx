@@ -5,6 +5,7 @@ import type { AuthSession } from "@/lib/auth";
 import { ROLE_LABELS } from "@/lib/rbac";
 import { CooCommandCenter } from "@/components/admin/CooCommandCenter";
 import { DashboardHoldActions } from "@/components/admin/DashboardHoldActions";
+import { DashboardNotificationsPanel } from "@/components/admin/DashboardNotificationsPanel";
 import { FinancialDashboardPanel } from "@/components/admin/FinancialDashboardPanel";
 import { adminCampaignHref, adminNewReservationHref, adminOperationalHref, adminReservationHref, adminReservationsHref } from "@/lib/admin-routes";
 
@@ -72,6 +73,10 @@ export function RoleDashboard({ session, data }: { session: AuthSession; data: D
               </div>
             ))}
           </section>
+        ) : null}
+
+        {["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role) ? (
+          <DashboardNotificationsPanel rows={data.notifications} title="Agenda mea" />
         ) : null}
 
         {showHoldActions ? (

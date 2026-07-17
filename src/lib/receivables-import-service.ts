@@ -563,16 +563,37 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
   });
 }
 
-export async function listReceivablesWorkspace(input?: { query?: string; status?: string; take?: number }) {
+export async function listReceivablesWorkspace(input?: {
+  query?: string;
+  status?: string;
+  companyCode?: string;
+  currency?: string;
+  take?: number;
+}) {
   const query = input?.query?.trim() || "";
   const take = Math.min(Math.max(input?.take || 100, 1), 300);
-  const [receivables, uploads, clients, aliases, payments, credits, campaigns, locations] = await Promise.all([
+  const today = startOfUtcDay(new Date());
+  const baseWhere: Prisma.FinancialReceivableWhereInput = {
+    includedInReport: true,
+    ...(input?.companyCode ? { companyCode: input.companyCode } : {}),
+    ...(input?.currency ? { currency: input.currency } : {}),
+    ...(query ? {
+      OR: [
+        { invoiceNumber: { contains: query } },
+        { clientName: { contains: query } },
+        { location: { contains: query } },
+        { campaignDetails: { contains: query } },
+        { client: { is: { companyName: { contains: query } } } }
+      ]
+    } : {})
+  };
+  const receivableWhere: Prisma.FinancialReceivableWhereInput = {
+    ...baseWhere,
+    ...receivableStatusWhere(input?.status || "", today)
+  };
+  const [receivables, summaryRows, issuerCompanies, uploads, clients, aliases, payments, credits, campaigns, locations] = await Promise.all([
     prisma.financialReceivable.findMany({
-      where: {
-        includedInReport: true,
-        ...(input?.status ? { status: input.status } : {}),
-        ...(query ? { OR: [{ invoiceNumber: { contains: query } }, { clientName: { contains: query } }, { location: { contains: query } }] } : {})
-      },
+      where: receivableWhere,
       include: {
         client: { select: { id: true, companyName: true } },
         payments: {
@@ -584,6 +605,24 @@ export async function listReceivablesWorkspace(input?: { query?: string; status?
       },
       orderBy: [{ dueDate: "asc" }, { remainingAmount: "desc" }],
       take
+    }),
+    prisma.financialReceivable.findMany({
+      where: baseWhere,
+      select: {
+        id: true,
+        currency: true,
+        dueDate: true,
+        invoicedAmount: true,
+        collectedAmount: true,
+        remainingAmount: true,
+        status: true
+      }
+    }),
+    prisma.financialReceivable.findMany({
+      where: { includedInReport: true },
+      select: { companyCode: true, companyName: true },
+      distinct: ["companyCode", "companyName"],
+      orderBy: { companyName: "asc" }
     }),
     prisma.financialReportUpload.findMany({
       where: { OR: [{ receivableImportRows: { some: {} } }, { receivables: { some: {} } }] },
@@ -630,6 +669,8 @@ export async function listReceivablesWorkspace(input?: { query?: string; status?
   ]);
   return {
     receivables: receivables.map(serializeReceivableLedger),
+    summary: buildReceivableSummary(summaryRows, today),
+    issuerCompanies,
     uploads: uploads.map((upload) => ({ ...upload, reportDate: upload.reportDate?.toISOString() || null, uploadedAt: upload.uploadedAt.toISOString() })),
     clients,
     aliases,
@@ -637,6 +678,52 @@ export async function listReceivablesWorkspace(input?: { query?: string; status?
     credits: credits.map((credit) => ({ ...credit, amount: credit.amount.toFixed(2), remainingAmount: credit.remainingAmount.toFixed(2), createdAt: credit.createdAt.toISOString() })),
     campaigns: campaigns.map((campaign) => ({ ...campaign, startDate: campaign.startDate?.toISOString() || null, endDate: campaign.endDate?.toISOString() || null })),
     locations
+  };
+}
+
+export async function getCustomerInvoiceDashboardData() {
+  const today = startOfUtcDay(new Date());
+  const rows = await prisma.financialReceivable.findMany({
+    where: { includedInReport: true },
+    select: {
+      id: true,
+      companyCode: true,
+      companyName: true,
+      clientName: true,
+      invoiceNumber: true,
+      currency: true,
+      dueDate: true,
+      invoicedAmount: true,
+      collectedAmount: true,
+      remainingAmount: true,
+      status: true,
+      client: { select: { companyName: true } }
+    },
+    orderBy: [{ dueDate: "asc" }, { remainingAmount: "desc" }],
+    take: 5000
+  });
+  const openRows = rows.filter((row) => money(row.remainingAmount).greaterThan(0));
+  const serialize = (row: (typeof rows)[number]) => ({
+    id: row.id,
+    companyCode: row.companyCode,
+    companyName: row.companyName,
+    clientName: row.client?.companyName || row.clientName || "Client nealocat",
+    invoiceNumber: row.invoiceNumber,
+    currency: row.currency,
+    dueDate: row.dueDate?.toISOString() || null,
+    remainingAmount: decimalString(row.remainingAmount),
+    status: receivableStatus({
+      invoiceAmount: row.invoicedAmount,
+      collectedAmount: row.collectedAmount,
+      dueDate: row.dueDate,
+      now: today
+    })
+  });
+  const inSevenDays = addDays(today, 7);
+  return {
+    summary: buildReceivableSummary(rows, today),
+    overdue: openRows.filter((row) => row.dueDate && row.dueDate < today).slice(0, 8).map(serialize),
+    dueSoon: openRows.filter((row) => row.dueDate && row.dueDate >= today && row.dueDate <= inSevenDays).slice(0, 8).map(serialize)
   };
 }
 
@@ -787,6 +874,11 @@ function importTotals(rows: ReturnType<typeof serializeImportRow>[]) {
 function serializeReceivableLedger(row: Record<string, any>) {
   return {
     ...row,
+    status: receivableStatus({
+      invoiceAmount: row.invoicedAmount,
+      collectedAmount: row.collectedAmount,
+      dueDate: row.dueDate
+    }),
     invoicedAmount: decimalString(row.invoicedAmount),
     collectedAmount: decimalString(row.collectedAmount),
     remainingAmount: decimalString(row.remainingAmount),
@@ -818,6 +910,109 @@ function decimalString(value: unknown) {
   if (value == null) return null;
   if (value instanceof Prisma.Decimal) return value.toFixed(2);
   return String(value);
+}
+
+function receivableStatusWhere(status: string, today: Date): Prisma.FinancialReceivableWhereInput {
+  if (!status) return {};
+  if (status === "open") return { remainingAmount: { gt: 0 } };
+  if (status === "overdue") return { remainingAmount: { gt: 0 }, dueDate: { lt: today } };
+  if (status === "in_term") return { remainingAmount: { gt: 0 }, dueDate: { gte: today } };
+  if (status === "due_soon") return { remainingAmount: { gt: 0 }, dueDate: { gte: today, lte: addDays(today, 7) } };
+  if (status === "missing_due") return { remainingAmount: { gt: 0 }, dueDate: null };
+  if (status === "collected_partial") return { collectedAmount: { gt: 0 }, remainingAmount: { gt: 0 } };
+  return { status };
+}
+
+function buildReceivableSummary(rows: Array<{
+  currency: string | null;
+  dueDate: Date | null;
+  invoicedAmount: Prisma.Decimal | null;
+  collectedAmount: Prisma.Decimal | null;
+  remainingAmount: Prisma.Decimal | null;
+  status: string;
+}>, today: Date) {
+  type Bucket = {
+    currency: string;
+    invoiceCount: number;
+    openCount: number;
+    collectedCount: number;
+    overdueCount: number;
+    inTermCount: number;
+    dueSoonCount: number;
+    missingDueCount: number;
+    invoiced: Prisma.Decimal;
+    collected: Prisma.Decimal;
+    remaining: Prisma.Decimal;
+    overdue: Prisma.Decimal;
+    inTerm: Prisma.Decimal;
+    dueSoon: Prisma.Decimal;
+  };
+  const buckets = new Map<string, Bucket>();
+  const inSevenDays = addDays(today, 7);
+  for (const row of rows) {
+    const currency = row.currency || "NECUNOSCUTĂ";
+    const bucket = buckets.get(currency) || {
+      currency,
+      invoiceCount: 0,
+      openCount: 0,
+      collectedCount: 0,
+      overdueCount: 0,
+      inTermCount: 0,
+      dueSoonCount: 0,
+      missingDueCount: 0,
+      invoiced: money(0),
+      collected: money(0),
+      remaining: money(0),
+      overdue: money(0),
+      inTerm: money(0),
+      dueSoon: money(0)
+    };
+    const invoiced = money(row.invoicedAmount);
+    const collected = money(row.collectedAmount);
+    const remaining = money(row.remainingAmount);
+    bucket.invoiceCount += 1;
+    bucket.invoiced = bucket.invoiced.plus(invoiced);
+    bucket.collected = bucket.collected.plus(collected);
+    bucket.remaining = bucket.remaining.plus(remaining);
+    if (remaining.greaterThan(0)) {
+      bucket.openCount += 1;
+      if (!row.dueDate) {
+        bucket.missingDueCount += 1;
+      } else if (row.dueDate < today) {
+        bucket.overdueCount += 1;
+        bucket.overdue = bucket.overdue.plus(remaining);
+      } else {
+        bucket.inTermCount += 1;
+        bucket.inTerm = bucket.inTerm.plus(remaining);
+        if (row.dueDate <= inSevenDays) {
+          bucket.dueSoonCount += 1;
+          bucket.dueSoon = bucket.dueSoon.plus(remaining);
+        }
+      }
+    } else if (row.status === "collected") {
+      bucket.collectedCount += 1;
+    }
+    buckets.set(currency, bucket);
+  }
+  return [...buckets.values()]
+    .sort((left, right) => left.currency.localeCompare(right.currency))
+    .map((bucket) => ({
+      ...bucket,
+      invoiced: bucket.invoiced.toFixed(2),
+      collected: bucket.collected.toFixed(2),
+      remaining: bucket.remaining.toFixed(2),
+      overdue: bucket.overdue.toFixed(2),
+      inTerm: bucket.inTerm.toFixed(2),
+      dueSoon: bucket.dueSoon.toFixed(2)
+    }));
+}
+
+function startOfUtcDay(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function addDays(date: Date, days: number) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
 }
 
 function companyName(code: ReceivablesCompanyCode) {

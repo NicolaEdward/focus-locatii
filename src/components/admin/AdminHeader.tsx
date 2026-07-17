@@ -76,8 +76,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
               icon={<CircleDollarSign size={18} />}
               label="Financiar"
             >
-              {canViewFinance ? <AdminMenuLink href="/admin/dashboard" active={false} icon={<CircleDollarSign size={17} />} label="SmartBill / rapoarte" /> : null}
-              {canViewFinance ? <AdminMenuLink href="/admin/financiar/incasari" active={isActiveAdminPath(pathname, "/admin/financiar/incasari")} icon={<ReceiptText size={17} />} label="Încasări și creanțe" /> : null}
+              {canViewFinance ? <AdminMenuLink href="/admin/financiar/incasari" active={isActiveAdminPath(pathname, "/admin/financiar/incasari")} icon={<ReceiptText size={17} />} label="Facturi clienți" /> : null}
               {canViewFinance ? <AdminMenuLink href="/admin/furnizori" active={isActiveAdminPath(pathname, "/admin/furnizori")} icon={<Truck size={17} />} label="Furnizori" /> : null}
               {canExportSales ? <SalesReportExportButton variant="menu" icon={<Download size={17} />} label="Export vanzari" /> : null}
             </AdminNavMenu>

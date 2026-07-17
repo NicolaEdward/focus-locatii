@@ -189,7 +189,8 @@ function dashboardStatisticsUseCurrentActionableData() {
   assert(dashboard.includes("campaignIds: new Set<string>()"), "performance rankings must count unique campaigns instead of location rows");
   assert(dashboard.includes("neutralizationTasks.slice(0, 100)"), "the operational list must not silently stop at 30 tasks");
   assert(dashboard.includes("inventoryByCity,"), "the inventory detail tab must receive all city groups");
-  assert(commandCenter.includes("data.finance?.hasActiveReport"), "COO finance KPI cards must stay hidden when no active report exists");
+  assert(commandCenter.includes("data.customerInvoices"), "COO finance cards must use the customer invoice ledger");
+  assert(!commandCenter.includes("<FinancialDashboardPanel"), "COO dashboard must not render the legacy SmartBill/report upload panel");
 }
 
 function blockFrom(source, start, end) {

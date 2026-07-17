@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import {
@@ -14,6 +13,7 @@ import {
   FileSpreadsheet,
   MapPinned,
   MoreHorizontal,
+  ReceiptText,
   ShieldAlert,
   UserPlus,
   Users,
@@ -25,11 +25,7 @@ import { adminNewReservationHref, adminReservationHref, adminReservationsHref } 
 import { hasPermission } from "@/lib/rbac";
 import { ReservationPeriodChangeDialog, type ReservationPeriodChangeTarget } from "@/components/admin/ReservationPeriodChangeDialog";
 import { SalesReportExportButton } from "@/components/admin/SalesReportExportButton";
-
-const FinancialDashboardPanel = dynamic(
-  () => import("@/components/admin/FinancialDashboardPanel").then((module) => module.FinancialDashboardPanel),
-  { loading: () => <div className="rounded-lg border border-focus-line p-6 text-sm font-bold text-slate-300">Se incarca datele financiare...</div> }
-);
+import { DashboardNotificationsPanel } from "@/components/admin/DashboardNotificationsPanel";
 
 type CooData = DashboardData["coo"];
 type CooTab = "overview" | "issues" | "sales" | "crm" | "operations" | "inventory" | "financial" | "exports" | "admin";
@@ -133,12 +129,12 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
           <Metric label="Probleme" value={coo.health.issues} tone={coo.health.issues ? "red" : "green"} />
         </section>
 
-        {data.finance?.hasActiveReport ? (
+        {data.customerInvoices ? (
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Metric label="Rest incasat RON" value={money(data.finance.kpis.remainingReceivableRon)} tone="green" />
-            <Metric label="Rest incasat EUR" value={money(data.finance.kpis.remainingReceivableEur)} tone="green" />
-            <Metric label="Rest plata RON" value={money(data.finance.kpis.remainingPayableRon)} tone="yellow" />
-            <Metric label="Rest plata EUR" value={money(data.finance.kpis.remainingPayableEur)} tone="yellow" />
+            <Metric label="De incasat RON" value={money(invoiceSummary(data, "RON")?.remaining)} tone="green" />
+            <Metric label="De incasat EUR" value={money(invoiceSummary(data, "EUR")?.remaining)} tone="green" />
+            <Metric label="Scadent RON" value={money(invoiceSummary(data, "RON")?.overdue)} tone={invoiceSummary(data, "RON")?.overdueCount ? "red" : "green"} />
+            <Metric label="Scadent EUR" value={money(invoiceSummary(data, "EUR")?.overdue)} tone={invoiceSummary(data, "EUR")?.overdueCount ? "red" : "green"} />
           </section>
         ) : null}
 
@@ -163,6 +159,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
 
             {activeTab === "overview" ? (
               <div className="grid gap-5">
+                <DashboardNotificationsPanel rows={data.notifications} title="Atenție azi" />
                 <Panel title="Stare operationala" icon={<ShieldAlert size={18} />} action={<Link className="text-xs font-black text-focus-yellow" href="/admin/locatii" prefetch={false}>Inventar</Link>}>
                   <div className="grid gap-3 md:grid-cols-4">
                     <Metric label="Ocupate" value={coo.health.occupiedLocations} />
@@ -256,7 +253,7 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
             ) : null}
 
             {activeTab === "financial" ? (
-              <FinancialDashboardPanel financial={data.finance} />
+              <CustomerInvoicePanel data={data.customerInvoices} />
             ) : null}
 
             {activeTab === "exports" ? (
@@ -264,7 +261,6 @@ export function CooCommandCenter({ data }: { data: DashboardData }) {
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <a className="focus-button" href={coo.reports.availabilityUrl}><FileSpreadsheet size={18} /> Disponibil complet</a>
                   <SalesReportExportButton icon={<Download size={18} />} label="Situatie vanzari" />
-                  <a className="focus-button secondary" href={coo.reports.billingUrl}><Download size={18} /> Financiar manual</a>
                   <Link className="focus-button secondary" href={adminReservationsHref()} prefetch={false}><ClipboardList size={18} /> Solicitari</Link>
                   <Link className="focus-button secondary" href="/admin/locatii/gps" prefetch={false}><MapPinned size={18} /> Audit GPS</Link>
                 </div>
@@ -313,6 +309,48 @@ function Metric({ label, value, tone = "neutral" }: { label: string; value: numb
     <p className="text-xs font-black uppercase text-slate-400">{label}</p>
     <p className={`mt-2 font-display text-3xl font-black uppercase ${toneClass}`}>{value}</p>
   </div>;
+}
+
+function CustomerInvoicePanel({ data }: { data: DashboardData["customerInvoices"] }) {
+  if (!data) return <Empty text="Situația facturilor clienți nu este disponibilă pentru acest rol." />;
+  return (
+    <section className="overflow-hidden rounded-lg border border-focus-line bg-focus-ink/65">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-focus-line px-5 py-4">
+        <div>
+          <p className="text-xs font-black uppercase text-focus-yellow">Financiar</p>
+          <h2 className="text-xl font-black text-white">Facturi clienți</h2>
+          <p className="mt-1 text-xs text-slate-400">Date din registrul nou de facturi și încasări. Fără importul SmartBill vechi.</p>
+        </div>
+        <Link className="focus-button" href="/admin/financiar/incasari" prefetch={false}><ReceiptText size={17} /> Deschide facturile</Link>
+      </div>
+      <div className="grid gap-px bg-focus-line sm:grid-cols-2 xl:grid-cols-4">
+        {data.summary.flatMap((item) => [
+          <div className="bg-focus-navy/90 p-4" key={`${item.currency}-remaining`}><p className="text-xs font-black uppercase text-slate-400">De încasat {item.currency}</p><strong className="mt-2 block text-2xl text-white">{money(item.remaining)} {item.currency}</strong><small className="text-slate-400">{item.openCount} facturi cu sold</small></div>,
+          <div className="bg-focus-navy/90 p-4" key={`${item.currency}-overdue`}><p className="text-xs font-black uppercase text-slate-400">Scadent {item.currency}</p><strong className={`mt-2 block text-2xl ${item.overdueCount ? "text-red-200" : "text-emerald-300"}`}>{money(item.overdue)} {item.currency}</strong><small className="text-slate-400">{item.overdueCount} facturi restante</small></div>
+        ])}
+      </div>
+      <div className="grid gap-5 p-5 xl:grid-cols-2">
+        <CustomerInvoiceList title="Restanțe prioritare" rows={data.overdue} empty="Nu există facturi scadente." />
+        <CustomerInvoiceList title="Scad în următoarele 7 zile" rows={data.dueSoon} empty="Nu există scadențe în următoarele 7 zile." />
+      </div>
+    </section>
+  );
+}
+
+function CustomerInvoiceList({
+  title,
+  rows,
+  empty
+}: {
+  title: string;
+  rows: NonNullable<DashboardData["customerInvoices"]>["overdue"];
+  empty: string;
+}) {
+  return <div><h3 className="text-sm font-black uppercase text-slate-200">{title}</h3>{rows.length ? <div className="mt-3 divide-y divide-focus-line">{rows.map((row) => <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-3 text-sm" key={row.id}><div className="min-w-0"><strong className="block truncate text-white">{row.clientName}</strong><span className="text-xs text-slate-400">{row.invoiceNumber || "Fără număr"} · {row.companyName}</span></div><div className="text-right"><strong className="block text-focus-yellow">{money(row.remainingAmount)} {row.currency}</strong><span className="text-xs text-slate-400">{row.dueDate ? date(row.dueDate) : "Fără scadență"}</span></div></div>)}</div> : <p className="mt-3 text-sm text-slate-400">{empty}</p>}</div>;
+}
+
+function invoiceSummary(data: DashboardData, currency: string) {
+  return data.customerInvoices?.summary.find((item) => item.currency === currency);
 }
 
 function Feedback({ tone, text }: { tone: "green" | "red"; text: string }) {
@@ -696,8 +734,8 @@ function dateTime(value: string) {
   return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Bucharest" }).format(new Date(value));
 }
 
-function money(value: number) {
-  return new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 0 }).format(value || 0);
+function money(value: number | string | null | undefined) {
+  return new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 0 }).format(Number(value || 0));
 }
 
 function formatCurrencyValues(values: Record<string, number>) {

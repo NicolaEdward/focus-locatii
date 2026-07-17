@@ -48,7 +48,10 @@ export async function syncFinancialNotifications(now = new Date()) {
   const [receivables, fallbackUsers] = await Promise.all([
     prisma.financialReceivable.findMany({
       where: {
-        uploadId: activeUpload?.id || "__no_active_financial_report__",
+        OR: [
+          { canonicalKey: { not: null } },
+          ...(activeUpload ? [{ uploadId: activeUpload.id }] : [])
+        ],
         includedInReport: true,
         needsReview: false,
         status: { notIn: ["collected", "included", "excluded", "archived"] },
@@ -118,6 +121,44 @@ export async function listNotificationsForUser(session: AuthSession) {
     orderBy: [{ status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
     take: 200
   });
+}
+
+export async function listDashboardNotifications(session: AuthSession, take = 8) {
+  const ownershipWhere =
+    ["COO", "SUPER_ADMIN"].includes(session.role)
+      ? {}
+      : session.role === "SALES_DIRECTOR"
+        ? { OR: [{ type: { notIn: crmNotificationTypes } }, { userId: session.id }] }
+        : { userId: session.id };
+  const rows = await prisma.appNotification.findMany({
+    where: {
+      ...ownershipWhere,
+      type: { notIn: legacyInvoiceNotificationTypes },
+      status: { in: ["open", "in_progress"] }
+    },
+    select: {
+      id: true,
+      type: true,
+      title: true,
+      message: true,
+      severity: true,
+      status: true,
+      dueDate: true,
+      recommendedAction: true,
+      entityType: true,
+      entityId: true,
+      metadata: true,
+      createdAt: true,
+      user: { select: { name: true } }
+    },
+    orderBy: [{ severity: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
+    take: Math.min(Math.max(take, 1), 20)
+  });
+  return rows.map((row) => ({
+    ...row,
+    dueDate: row.dueDate?.toISOString() || null,
+    createdAt: row.createdAt.toISOString()
+  }));
 }
 
 export async function syncCrmNotifications(now = new Date()) {

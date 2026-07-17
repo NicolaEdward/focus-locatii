@@ -4,7 +4,9 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BadgeCheck,
   Banknote,
+  CalendarClock,
   CircleAlert,
+  CircleDollarSign,
   FileClock,
   FileSpreadsheet,
   History,
@@ -12,6 +14,7 @@ import {
   Loader2,
   Plus,
   ReceiptText,
+  RotateCcw,
   Search,
   Trash2,
   Upload
@@ -20,6 +23,23 @@ import {
 type JsonMap = Record<string, any>;
 type Workspace = {
   receivables: JsonMap[];
+  summary: Array<{
+    currency: string;
+    invoiceCount: number;
+    openCount: number;
+    collectedCount: number;
+    overdueCount: number;
+    inTermCount: number;
+    dueSoonCount: number;
+    missingDueCount: number;
+    invoiced: string;
+    collected: string;
+    remaining: string;
+    overdue: string;
+    inTerm: string;
+    dueSoon: string;
+  }>;
+  issuerCompanies: Array<{ companyCode: string | null; companyName: string }>;
   uploads: JsonMap[];
   clients: Array<{ id: string; companyName: string; taxId: string | null }>;
   aliases: JsonMap[];
@@ -30,7 +50,7 @@ type Workspace = {
 };
 
 const tabs = [
-  ["receivables", "Creanțe", ReceiptText],
+  ["receivables", "Facturi clienți", ReceiptText],
   ["import", "Import nou", Upload],
   ["history", "Istoric importuri", FileClock],
   ["payments", "Istoric încasări", History],
@@ -69,10 +89,13 @@ export function ReceivablesWorkspace({
   const [previewGroup, setPreviewGroup] = useState("allocated_auto");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
+  const [companyCode, setCompanyCode] = useState("");
+  const [currency, setCurrency] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<JsonMap | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
   const [allocationTarget, setAllocationTarget] = useState<JsonMap | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const allocationMutationRef = useRef(false);
@@ -84,8 +107,15 @@ export function ReceivablesWorkspace({
     return payload;
   }
 
-  async function refresh(nextQuery = query, nextStatus = status) {
-    const payload = await api(`/api/admin/receivables-workspace?q=${encodeURIComponent(nextQuery)}&status=${encodeURIComponent(nextStatus)}&take=100`);
+  async function refresh(nextQuery = query, nextStatus = status, nextCompanyCode = companyCode, nextCurrency = currency) {
+    const params = new URLSearchParams({
+      q: nextQuery,
+      status: nextStatus,
+      companyCode: nextCompanyCode,
+      currency: nextCurrency,
+      take: "100"
+    });
+    const payload = await api(`/api/admin/receivables-workspace?${params.toString()}`);
     setWorkspace(payload.workspace);
   }
 
@@ -209,8 +239,14 @@ export function ReceivablesWorkspace({
         confirmOverpayment: data.get("confirmOverpayment") === "on",
         requestKey: crypto.randomUUID()
       };
-      await api(`/api/admin/receivables/${paymentTarget.id}/payments`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const payload = await api(`/api/admin/receivables/${paymentTarget.id}/payments`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      setWorkspace((current) => ({
+        ...current,
+        receivables: current.receivables.map((row) => row.id === paymentTarget.id ? { ...row, ...payload.receivable } : row),
+        payments: payload.payment ? [payload.payment, ...current.payments].slice(0, 100) : current.payments
+      }));
       setPaymentTarget(null);
+      setPaymentAmount("");
       setMessage("Încasarea a fost înregistrată și soldul a fost recalculat.");
       await refresh();
     } catch (paymentError) { setError(paymentError instanceof Error ? paymentError.message : "Încasarea nu a putut fi salvată."); }
@@ -282,6 +318,18 @@ export function ReceivablesWorkspace({
   }
 
   const visibleReceivables = useMemo(() => workspace.receivables, [workspace.receivables]);
+  const paymentPreview = useMemo(() => {
+    if (!paymentTarget) return null;
+    const previous = Number(paymentTarget.collectedAmount || 0);
+    const amount = Number(paymentAmount.replace(",", ".") || 0);
+    const invoice = Number(paymentTarget.invoicedAmount || 0);
+    return {
+      previous,
+      amount,
+      nextCollected: previous + amount,
+      nextRemaining: Math.max(invoice - previous - amount, 0)
+    };
+  }, [paymentAmount, paymentTarget]);
   const activeGroupRows = preview?.groups?.[previewGroup] || [];
   const blockers = preview ? ["needs_confirmation", "manual", "conflict"].reduce((sum, key) => sum + (preview.groups?.[key]?.length || 0), 0) : 0;
 
@@ -290,8 +338,8 @@ export function ReceivablesWorkspace({
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-focus-line pb-6">
         <div>
           <p className="text-xs font-black uppercase text-focus-yellow">Financiar</p>
-          <h1 className="mt-1 text-3xl font-black text-white">Încasări și creanțe</h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-300">Importă lista de încasări, reconciliază facturile și păstrează fiecare plată într-un registru auditabil.</p>
+          <h1 className="mt-1 text-3xl font-black text-white">Facturi clienți și încasări</h1>
+          <p className="mt-2 max-w-3xl text-sm text-slate-300">Urmărește facturile emise, scadențele și încasările cumulative, separat pentru fiecare firmă și monedă.</p>
         </div>
         {canImport ? <button className="focus-button" type="button" onClick={() => { setTab("import"); setTimeout(() => fileRef.current?.focus(), 0); }}><Plus size={18} /> Import nou</button> : null}
       </div>
@@ -307,21 +355,49 @@ export function ReceivablesWorkspace({
 
       {tab === "receivables" ? (
         <section aria-labelledby="receivables-title">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div><h2 id="receivables-title" className="text-xl font-black text-white">Creanțe</h2><p className="text-sm text-slate-400">Soldurile sunt calculate din încasările active, nu dintr-un total suprascris.</p></div>
-            <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); refresh(); }}>
-              <label className="relative"><Search className="absolute left-3 top-3 text-slate-400" size={16} /><input className="focus-input min-w-64 pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Client, factură sau locație" /></label>
-              <select className="focus-input" value={status} onChange={(event) => { setStatus(event.target.value); refresh(query, event.target.value); }}><option value="">Toate stările</option><option value="overdue">Scadente</option><option value="in_term">În termen</option><option value="collected_partial">Parțial încasate</option><option value="collected">Încasate</option><option value="client_credit">Credit client</option></select>
-              <button className="focus-button secondary" type="submit">Caută</button>
-            </form>
+          <div>
+            <h2 id="receivables-title" className="text-xl font-black text-white">Facturi clienți</h2>
+            <p className="text-sm text-slate-400">Fiecare plată se adaugă în registru, iar totalul încasat și soldul se recalculează automat.</p>
           </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {workspace.summary.map((item) => (
+              <article className="rounded-lg border border-focus-line bg-focus-ink/70 p-4" key={item.currency}>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-black uppercase text-slate-400">Total de încasat</p>
+                    <p className="mt-1 text-3xl font-black text-white">{moneyLabel(item.remaining, item.currency)}</p>
+                  </div>
+                  <span className="rounded-md bg-focus-yellow px-2.5 py-1 text-xs font-black text-focus-navy">{item.currency}</span>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-x-5 gap-y-3 border-t border-focus-line pt-4 sm:grid-cols-4">
+                  <InvoiceMetric label="Facturat" value={moneyLabel(item.invoiced, item.currency)} detail={`${item.invoiceCount} facturi`} icon={<CircleDollarSign size={15} />} />
+                  <InvoiceMetric label="Încasat" value={moneyLabel(item.collected, item.currency)} detail={`${item.collectedCount} achitate`} icon={<Banknote size={15} />} tone="green" />
+                  <InvoiceMetric label="Scadent" value={moneyLabel(item.overdue, item.currency)} detail={`${item.overdueCount} facturi`} icon={<CircleAlert size={15} />} tone={item.overdueCount ? "red" : "green"} />
+                  <InvoiceMetric label="În termen" value={moneyLabel(item.inTerm, item.currency)} detail={`${item.inTermCount} facturi`} icon={<CalendarClock size={15} />} />
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <form className="mt-5 grid gap-3 border-y border-focus-line py-4 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.5fr)_repeat(3,minmax(170px,0.7fr))_auto]" onSubmit={(event) => { event.preventDefault(); refresh(); }}>
+            <label className="relative"><span className="sr-only">Caută</span><Search className="absolute left-3 top-3 text-slate-400" size={16} /><input className="focus-input w-full pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Client, factură, campanie sau locație" /></label>
+            <label><span className="sr-only">Firma emitentă</span><select className="focus-input w-full" value={companyCode} onChange={(event) => { const value = event.target.value; setCompanyCode(value); void refresh(query, status, value, currency); }}><option value="">Toate firmele</option>{workspace.issuerCompanies.map((company) => <option key={`${company.companyCode}-${company.companyName}`} value={company.companyCode || ""}>{company.companyName}</option>)}</select></label>
+            <label><span className="sr-only">Moneda</span><select className="focus-input w-full" value={currency} onChange={(event) => { const value = event.target.value; setCurrency(value); void refresh(query, status, companyCode, value); }}><option value="">Toate monedele</option><option value="RON">RON</option><option value="EUR">EUR</option></select></label>
+            <label><span className="sr-only">Starea facturii</span><select className="focus-input w-full" value={status} onChange={(event) => { const value = event.target.value; setStatus(value); void refresh(query, value, companyCode, currency); }}><option value="">Toate stările</option><option value="open">Sold deschis</option><option value="overdue">Scadente</option><option value="due_soon">Scad în 7 zile</option><option value="in_term">În termen</option><option value="missing_due">Fără scadență</option><option value="collected_partial">Parțial încasate</option><option value="collected">Încasate</option><option value="client_credit">Credit client</option></select></label>
+            <div className="flex gap-2">
+              <button className="focus-button" type="submit">Aplică</button>
+              <button className="focus-button secondary" type="button" title="Resetează filtrele" onClick={() => { setQuery(""); setStatus(""); setCompanyCode(""); setCurrency(""); void refresh("", "", "", ""); }}><RotateCcw size={17} /><span className="sr-only">Resetează</span></button>
+            </div>
+          </form>
+
           <div className="mt-4 overflow-x-auto rounded-lg border border-focus-line">
             <table className="w-full min-w-[980px] text-left text-sm">
               <thead className="bg-focus-navy text-xs uppercase text-slate-300"><tr><th className="p-3">Client / factură</th><th className="p-3">Firmă</th><th className="p-3">Scadență</th><th className="p-3 text-right">Facturat</th><th className="p-3 text-right">Încasat</th><th className="p-3 text-right">Rest</th><th className="p-3">Stare</th><th className="p-3">Acțiune</th></tr></thead>
-              <tbody>{visibleReceivables.map((row) => <tr key={row.id} className="border-t border-focus-line bg-focus-panel/50"><td className="p-3"><strong className="block text-white">{row.client?.companyName || row.clientName || "Client nealocat"}</strong><span className="text-slate-400">{row.invoiceNumber || "Fără număr"}</span></td><td className="p-3 text-slate-200">{row.companyName}</td><td className="p-3 text-slate-200">{formatDate(row.dueDate)}</td><td className="p-3 text-right font-bold text-white">{moneyLabel(row.invoicedAmount, row.currency)}</td><td className="p-3 text-right text-emerald-300">{moneyLabel(row.collectedAmount, row.currency)}</td><td className="p-3 text-right font-black text-focus-yellow">{moneyLabel(row.remainingAmount, row.currency)}</td><td className="p-3"><StatusBadge value={row.status} /></td><td className="p-3">{canValidate && row.status !== "collected" ? <button className="focus-button" type="button" onClick={() => setPaymentTarget(row)}><Banknote size={16} /> Înregistrează încasare</button> : null}</td></tr>)}</tbody>
+              <tbody>{visibleReceivables.map((row) => <tr key={row.id} className="border-t border-focus-line bg-focus-panel/50"><td className="p-3"><strong className="block text-white">{row.client?.companyName || row.clientName || "Client nealocat"}</strong><span className="text-slate-400">{row.invoiceNumber || "Fără număr"}</span></td><td className="p-3 text-slate-200"><span className="block">{row.companyName}</span><small className="text-slate-500">{row.companyCode || "-"}</small></td><td className="p-3 text-slate-200">{formatDate(row.dueDate)}</td><td className="p-3 text-right font-bold text-white">{moneyLabel(row.invoicedAmount, row.currency)}</td><td className="p-3 text-right text-emerald-300">{moneyLabel(row.collectedAmount, row.currency)}</td><td className="p-3 text-right font-black text-focus-yellow">{moneyLabel(row.remainingAmount, row.currency)}</td><td className="p-3"><StatusBadge value={row.status} /></td><td className="p-3">{canValidate && Number(row.remainingAmount || 0) > 0 ? <button className="focus-button min-w-44 justify-center" type="button" onClick={() => { setPaymentTarget(row); setPaymentAmount(String(row.remainingAmount || "")); }}><Banknote size={16} /> Înregistrează plată</button> : <span className="text-xs text-slate-500">{Number(row.remainingAmount || 0) > 0 ? "Doar vizualizare" : "Fără sold"}</span>}</td></tr>)}</tbody>
             </table>
           </div>
-          {!visibleReceivables.length ? <Empty text="Nu există creanțe pentru filtrele selectate." /> : null}
+          {!visibleReceivables.length ? <Empty text="Nu există facturi pentru filtrele selectate." /> : null}
         </section>
       ) : null}
 
@@ -353,7 +429,48 @@ export function ReceivablesWorkspace({
       {tab === "payments" ? <SimpleTable title="Istoric încasări" headers={["Client / factură", "Data", "Sumă", "Sursă", "Utilizator", "Stare", "Acțiune"]} rows={workspace.payments.map((payment) => [`${payment.receivable?.clientName || "-"} · ${payment.receivable?.invoiceNumber || "-"}`, formatDate(payment.receivedAt), moneyLabel(payment.amount, payment.currency), payment.source, payment.createdBy?.name || "Sistem", <StatusBadge value={payment.status} />, canValidate && payment.status === "active" ? <div className="flex gap-2"><button className="focus-button secondary" type="button" onClick={() => correctPayment(payment)}>Corectează</button><button className="focus-button secondary" type="button" onClick={() => cancelPayment(payment)}><Trash2 size={15} /> Anulează</button></div> : "-"])} /> : null}
       {tab === "aliases" ? <SimpleTable title="Aliasuri clienți" subtitle="Mapările apar numai după confirmarea unui utilizator." headers={["Firmă", "Alias raport", "Client canonic", "Creat de", "Acțiune"]} rows={workspace.aliases.map((alias) => [alias.companyCode, alias.aliasName, alias.client.companyName, alias.createdBy?.name || "-", canManage ? <div className="flex gap-2"><button className="focus-button secondary" type="button" onClick={() => editAlias(alias)}>Editează</button><button className="focus-button secondary" type="button" onClick={() => deleteAlias(alias.id)}><Trash2 size={15} /> Șterge</button></div> : "-"])} /> : null}
 
-      {paymentTarget ? <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4" role="dialog" aria-modal="true"><form className="focus-card max-h-[92vh] w-full max-w-xl overflow-auto rounded-lg p-5" onSubmit={submitPayment}><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase text-focus-yellow">Încasare</p><h2 className="text-xl font-black text-white">{paymentTarget.client?.companyName || paymentTarget.clientName}</h2><p className="text-sm text-slate-400">{paymentTarget.invoiceNumber} · sold {moneyLabel(paymentTarget.remainingAmount, paymentTarget.currency)}</p></div><button className="focus-button secondary" type="button" onClick={() => setPaymentTarget(null)}>Închide</button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="grid gap-1 text-sm font-bold text-slate-200">Suma încasată<input className="focus-input" required name="amount" inputMode="decimal" defaultValue={paymentTarget.remainingAmount} /></label><label className="grid gap-1 text-sm font-bold text-slate-200">Moneda<input className="focus-input" value={paymentTarget.currency || ""} readOnly /></label><label className="grid gap-1 text-sm font-bold text-slate-200">Data încasării<input className="focus-input" required name="receivedAt" type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></label><label className="grid gap-1 text-sm font-bold text-slate-200">Metoda de plată<select className="focus-input" name="paymentMethod"><option value="transfer_bancar">Transfer bancar</option><option value="numerar">Numerar</option><option value="card">Card</option><option value="alta">Altă metodă</option></select></label><label className="grid gap-1 text-sm font-bold text-slate-200 sm:col-span-2">Referință operațiune<input className="focus-input" name="paymentReference" /></label><label className="grid gap-1 text-sm font-bold text-slate-200 sm:col-span-2">Observații<textarea className="focus-input min-h-20" name="notes" /></label><label className="flex items-start gap-2 text-sm text-amber-100 sm:col-span-2"><input className="mt-1" type="checkbox" name="confirmOverpayment" /> Confirm explicit înregistrarea diferenței ca avans / credit client dacă suma depășește soldul.</label></div><button className="focus-button mt-5 w-full justify-center" disabled={busy} type="submit"><Banknote size={18} /> Salvează încasarea</button></form></div> : null}
+      {paymentTarget ? (
+        <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4" role="dialog" aria-modal="true">
+          <form className="focus-card max-h-[92vh] w-full max-w-xl overflow-auto rounded-lg p-5" onSubmit={submitPayment}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase text-focus-yellow">Înregistrează plată</p>
+                <h2 className="text-xl font-black text-white">{paymentTarget.client?.companyName || paymentTarget.clientName}</h2>
+                <p className="text-sm text-slate-400">Factura {paymentTarget.invoiceNumber || "fără număr"} · {paymentTarget.companyName}</p>
+              </div>
+              <button className="focus-button secondary" type="button" onClick={() => { setPaymentTarget(null); setPaymentAmount(""); }}>Închide</button>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 rounded-lg bg-focus-navy/65 p-4 sm:grid-cols-4">
+              <PaymentPreviewMetric label="Facturat" value={moneyLabel(paymentTarget.invoicedAmount, paymentTarget.currency)} />
+              <PaymentPreviewMetric label="Încasat anterior" value={moneyLabel(paymentPreview?.previous, paymentTarget.currency)} tone="green" />
+              <PaymentPreviewMetric label="După această plată" value={moneyLabel(paymentPreview?.nextCollected, paymentTarget.currency)} tone="green" />
+              <PaymentPreviewMetric label="Sold rămas" value={moneyLabel(paymentPreview?.nextRemaining, paymentTarget.currency)} tone="yellow" />
+            </div>
+            <p className="mt-2 text-xs text-slate-400">Noua sumă se adaugă la încasările anterioare. Istoricul nu este suprascris.</p>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="grid gap-1 text-sm font-bold text-slate-200">
+                Suma plătită
+                <input className="focus-input" required name="amount" inputMode="decimal" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} />
+              </label>
+              <label className="grid gap-1 text-sm font-bold text-slate-200">
+                Moneda
+                <input className="focus-input" value={paymentTarget.currency || ""} readOnly />
+              </label>
+              <button className="focus-button secondary sm:col-span-2 sm:justify-self-start" type="button" onClick={() => setPaymentAmount(String(paymentTarget.remainingAmount || ""))}>
+                <Banknote size={16} /> Încasează tot soldul
+              </button>
+              <label className="grid gap-1 text-sm font-bold text-slate-200">Data încasării<input className="focus-input" required name="receivedAt" type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></label>
+              <label className="grid gap-1 text-sm font-bold text-slate-200">Metoda de plată<select className="focus-input" name="paymentMethod"><option value="transfer_bancar">Transfer bancar</option><option value="numerar">Numerar</option><option value="card">Card</option><option value="alta">Altă metodă</option></select></label>
+              <label className="grid gap-1 text-sm font-bold text-slate-200 sm:col-span-2">Referință operațiune<input className="focus-input" name="paymentReference" /></label>
+              <label className="grid gap-1 text-sm font-bold text-slate-200 sm:col-span-2">Observații<textarea className="focus-input min-h-20" name="notes" /></label>
+              <label className="flex items-start gap-2 text-sm text-amber-100 sm:col-span-2"><input className="mt-1" type="checkbox" name="confirmOverpayment" /> Confirm explicit înregistrarea diferenței ca avans / credit client dacă suma depășește soldul.</label>
+            </div>
+            <button className="focus-button mt-5 w-full justify-center" disabled={busy || !paymentAmount} type="submit"><Banknote size={18} /> {busy ? "Se salvează..." : "Salvează plata"}</button>
+          </form>
+        </div>
+      ) : null}
       {allocationTarget ? <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4" role="dialog" aria-modal="true"><form className="focus-card max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg p-5" onSubmit={submitAllocation}><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase text-focus-yellow">Alocare manuală</p><h2 className="text-xl font-black text-white">{allocationTarget.clientNameRaw || "Rând fără client"}</h2><p className="text-sm text-slate-400">{allocationTarget.rawInvoiceNumber || "Fără număr factură"}</p></div><button className="focus-button secondary" type="button" onClick={() => setAllocationTarget(null)}>Închide</button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="grid gap-1 text-sm font-bold text-slate-200">Firmă emitentă<select className="focus-input" name="companyCode" defaultValue={allocationTarget.companyCode}><option value="FOCUS_MEDIA">Focus Media Outdoor</option><option value="EXCELLENCE_MEDIA">Excellence Media Production</option><option value="FOCUS_BG">Focus Media EOOD Bulgaria</option></select></label><label className="grid gap-1 text-sm font-bold text-slate-200">Client<select className="focus-input" required name="clientId" defaultValue={allocationTarget.clientId || ""}><option value="">Selectează clientul</option>{workspace.clients.map((client) => <option key={client.id} value={client.id}>{client.companyName}{client.taxId ? ` · ${client.taxId}` : ""}</option>)}</select></label><label className="grid gap-1 text-sm font-bold text-slate-200 sm:col-span-2">Factură existentă<select className="focus-input" name="receivableId" defaultValue={allocationTarget.receivableId || ""}><option value="">Creează creanță nouă</option>{workspace.receivables.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNumber || "Fără număr"} · {invoice.client?.companyName || invoice.clientName || "Nealocat"} · {moneyLabel(invoice.invoicedAmount, invoice.currency)}</option>)}</select></label><label className="grid gap-1 text-sm font-bold text-slate-200">Campanie<select className="focus-input" name="campaignId" defaultValue={allocationTarget.campaignId || ""}><option value="">Fără campanie</option>{workspace.campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.campaignName}</option>)}</select></label><label className="grid gap-1 text-sm font-bold text-slate-200">Locație<select className="focus-input" name="locationId" defaultValue={allocationTarget.locationId || ""}><option value="">Fără locație</option>{workspace.locations.map((location) => <option key={location.id} value={location.id}>{location.code} · {location.address || location.city || "-"}</option>)}</select></label><label className="grid gap-1 text-sm font-bold text-slate-200">Acțiune<select className="focus-input" name="action" defaultValue={Number(allocationTarget.reportRemainingAmount) < 0 ? "confirm_credit" : "create"}><option value="create">Creează / actualizează creanța</option><option value="confirm">Confirmă potrivirea</option><option value="confirm_credit">Confirmă și creditul clientului</option></select></label><label className="flex items-center gap-2 text-sm font-bold text-slate-200"><input type="checkbox" name="saveAlias" /> Salvează denumirea ca alias confirmat</label><label className="grid gap-1 text-sm font-bold text-slate-200 sm:col-span-2">Observație / motiv<textarea className="focus-input min-h-20" name="reason" placeholder="Opțional pentru alocare; obligatoriu doar la ignorare." /></label></div><button className="focus-button mt-5 w-full justify-center" disabled={busy} type="submit"><BadgeCheck size={18} /> Salvează alocarea</button></form></div> : null}
     </main>
   );
@@ -361,6 +478,28 @@ export function ReceivablesWorkspace({
 
 function SimpleTable({ title, subtitle, headers, rows }: { title: string; subtitle?: string; headers: string[]; rows: ReactNode[][] }) {
   return <section><h2 className="text-xl font-black text-white">{title}</h2>{subtitle ? <p className="mt-1 text-sm text-slate-400">{subtitle}</p> : null}<div className="mt-4 overflow-x-auto rounded-lg border border-focus-line"><table className="w-full min-w-[820px] text-left text-sm"><thead className="bg-focus-navy text-xs uppercase text-slate-300"><tr>{headers.map((header) => <th className="p-3" key={header}>{header}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr className="border-t border-focus-line bg-focus-panel/50" key={index}>{row.map((cell, cellIndex) => <td className="p-3 text-slate-200" key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>{!rows.length ? <Empty text="Nu există înregistrări." /> : null}</section>;
+}
+
+function InvoiceMetric({
+  label,
+  value,
+  detail,
+  icon,
+  tone = "neutral"
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  icon: ReactNode;
+  tone?: "neutral" | "green" | "red";
+}) {
+  const toneClass = tone === "green" ? "text-emerald-300" : tone === "red" ? "text-red-200" : "text-white";
+  return <div className="min-w-0"><p className="flex items-center gap-1.5 text-[11px] font-black uppercase text-slate-400">{icon}{label}</p><strong className={`mt-1 block truncate text-sm ${toneClass}`} title={value}>{value}</strong><small className="text-xs text-slate-500">{detail}</small></div>;
+}
+
+function PaymentPreviewMetric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "green" | "yellow" }) {
+  const toneClass = tone === "green" ? "text-emerald-300" : tone === "yellow" ? "text-focus-yellow" : "text-white";
+  return <div><p className="text-[11px] font-black uppercase text-slate-400">{label}</p><strong className={`mt-1 block text-sm ${toneClass}`}>{value}</strong></div>;
 }
 
 function Empty({ text }: { text: string }) { return <div className="mt-4 rounded-lg border border-dashed border-focus-line p-6 text-center text-sm text-slate-400">{text}</div>; }

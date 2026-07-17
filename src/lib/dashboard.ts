@@ -6,6 +6,8 @@ import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HIS
 import { hasAnyPermission, hasPermission } from "@/lib/rbac";
 import { parseOfferRequestMeta } from "@/lib/offer-request-meta";
 import { getFinancialDashboardData } from "@/lib/financial-dashboard";
+import { getCustomerInvoiceDashboardData } from "@/lib/receivables-import-service";
+import { listDashboardNotifications } from "@/lib/notifications";
 import { sortOperationalLocations } from "@/lib/location-order";
 import { calculateLocationProfit } from "@/lib/profit";
 import { getCrmTeamDashboardData } from "@/lib/crm-dashboard";
@@ -243,12 +245,14 @@ export async function getDashboardData(session: AuthSession) {
       ? { OR: [{ sellerUserId: session.id }, { ownerId: session.id }, { ownerId: null, salesperson: { in: [session.name, session.email] } }] }
       : {};
 
-  const financePromise = hasPermission(session.role, "finance.view") ? getFinancialDashboardData() : Promise.resolve(null);
+  const financePromise = session.role === "FINANCE_OPERATOR" ? getFinancialDashboardData() : Promise.resolve(null);
+  const customerInvoicesPromise = hasPermission(session.role, "finance.view") ? getCustomerInvoiceDashboardData() : Promise.resolve(null);
+  const notificationsPromise = listDashboardNotifications(session);
   const canReadCrm = hasAnyPermission(session.role, ["leads.view", "leads.view.own"]);
   const crmTeamPromise = ["COO", "SUPER_ADMIN"].includes(session.role)
     ? getCrmTeamDashboardData(now)
     : Promise.resolve(null);
-  const [locations, campaigns, operationCampaigns, offerRequests, users, auditLogs, crmRows, finance, crmTeam] = await Promise.all([
+  const [locations, campaigns, operationCampaigns, offerRequests, users, auditLogs, crmRows, finance, customerInvoices, notifications, crmTeam] = await Promise.all([
     financeOnly
       ? Promise.resolve([]) as Promise<LocationRow[]>
       : prisma.location.findMany({
@@ -373,6 +377,8 @@ export async function getDashboardData(session: AuthSession) {
       ? Promise.resolve([]) as Promise<CrmLeadRow[]>
       : listDashboardCrmRows(session),
     financePromise,
+    customerInvoicesPromise,
+    notificationsPromise,
     crmTeamPromise
   ]);
 
@@ -508,7 +514,9 @@ export async function getDashboardData(session: AuthSession) {
       ...(atRisk.length ? [{ tone: "yellow" as const, label: `${atRisk.length} campanii pornesc in 7 zile fara decorare finalizata` }] : []),
       ...(overdueTasks.length ? [{ tone: "yellow" as const, label: `${overdueTasks.length} taskuri operationale intarziate` }] : []),
       ...(holds.length ? [{ tone: "blue" as const, label: `${holds.length} hold-uri active asteapta decizie` }] : []),
-      ...(finance && !finance.todayReportLoaded ? [{ tone: "yellow" as const, label: "Raportul financiar de azi nu a fost incarcat." }] : [])
+      ...(customerInvoices?.summary.some((item) => item.overdueCount > 0)
+        ? [{ tone: "yellow" as const, label: `${customerInvoices.summary.reduce((total, item) => total + item.overdueCount, 0)} facturi clienti sunt scadente.` }]
+        : [])
     ],
     recentCampaigns: campaigns.slice(0, 8).map(serializeCampaign),
     upcomingCampaigns: future.slice(0, 8).map(serializeCampaign),
@@ -559,7 +567,9 @@ export async function getDashboardData(session: AuthSession) {
       createdAt: item.createdAt.toISOString()
     })),
     usersByRole: countBy(users.filter((item) => item.active), (item) => item.role),
-    finance
+    finance,
+    customerInvoices,
+    notifications
   };
 }
 

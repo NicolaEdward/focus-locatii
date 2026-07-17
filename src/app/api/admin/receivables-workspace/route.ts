@@ -10,6 +10,8 @@ export async function GET(request: NextRequest) {
   const workspace = await listReceivablesWorkspace({
     query: request.nextUrl.searchParams.get("q") || "",
     status: request.nextUrl.searchParams.get("status") || "",
+    companyCode: request.nextUrl.searchParams.get("companyCode") || "",
+    currency: request.nextUrl.searchParams.get("currency") || "",
     take: Number(request.nextUrl.searchParams.get("take") || 100)
   });
   return NextResponse.json({ workspace });

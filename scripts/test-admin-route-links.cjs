@@ -41,6 +41,8 @@ assert(
   "Selector oferta should live inside the Comercial workflow menu."
 );
 assert.match(header, /label="Financiar"/, "AdminHeader should group finance workflows under Financiar.");
+assert.match(header, /label="Facturi clienți"/, "Finance navigation should use the customer invoice workflow label.");
+assert.equal(header.includes("SmartBill / rapoarte"), false, "Legacy SmartBill reports should not be a COO/admin navigation entry.");
 assert(
   header.indexOf('label="Financiar"') < header.indexOf('href="/admin/furnizori"'),
   "Furnizori should live inside the Financiar workflow menu."

@@ -163,6 +163,7 @@ model Location {
   reservations Reservation[]
   availabilityOverrides LocationAvailabilityOverride[]
   operationTasks OperationTask[]
+  financialImportRows FinancialReceivableImportRow[]
 
   @@index([categoryId])
   @@index([status])
@@ -320,6 +321,11 @@ model User {
   resolvedFinancialIssues FinancialImportIssue[] @relation("FinancialIssueResolver")
   reviewedFinancialPayables FinancialPayable[] @relation("FinancialPayableReviewer")
   reviewedFinancialReceivables FinancialReceivable[] @relation("FinancialReceivableReviewer")
+  resolvedReceivableImportRows FinancialReceivableImportRow[] @relation("FinancialReceivableImportRowResolver")
+  createdReceivablePayments FinancialReceivablePayment[] @relation("FinancialReceivablePaymentCreator")
+  cancelledReceivablePayments FinancialReceivablePayment[] @relation("FinancialReceivablePaymentCanceller")
+  createdFinancialClientAliases FinancialClientAlias[] @relation("FinancialClientAliasCreator")
+  createdFinancialClientCredits FinancialClientCredit[] @relation("FinancialClientCreditCreator")
   assignedCrmLeads CrmLead[] @relation("CrmLeadAssignee")
   createdCrmLeads CrmLead[] @relation("CrmLeadCreator")
   crmActivities CrmActivity[]
@@ -384,6 +390,9 @@ model ClientAccount {
   crmLeads CrmLead[]
   billingItems BillingItem[]
   financialReceivables FinancialReceivable[]
+  financialImportRows FinancialReceivableImportRow[]
+  financialAliases FinancialClientAlias[]
+  financialCredits FinancialClientCredit[]
   documents ClientDocument[] @relation("ClientDocuments")
 
   @@index([normalizedName])
@@ -428,6 +437,7 @@ model Campaign {
   createdBy User? @relation("CampaignCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
   reservations Reservation[]
   receivables FinancialReceivable[]
+  receivableImportRows FinancialReceivableImportRow[]
   documents ClientDocument[] @relation("CampaignDocuments")
   operationTasks OperationTask[]
 
@@ -521,6 +531,7 @@ model FinancialReportUpload {
   payables FinancialPayable[]
   receivables FinancialReceivable[]
   issues FinancialImportIssue[]
+  receivableImportRows FinancialReceivableImportRow[]
 
   @@index([uploadedByUserId])
   @@index([reportDate])
@@ -626,6 +637,7 @@ model FinancialReceivable {
   companyCode     String?
   invoiceNumber   String?
   normalizedInvoiceNumber String?
+  canonicalKey    String?  @unique
   invoiceDate     DateTime?
   location        String?  @db.Text
   campaignDetails String?  @db.Text
@@ -648,6 +660,9 @@ model FinancialReceivable {
   reviewedAt      DateTime?
   excludeReason   String?  @db.Text
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  lastReportDate  DateTime?
+  lastImportedAt  DateTime?
 
   upload FinancialReportUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
   client ClientAccount? @relation(fields: [clientId], references: [id], onDelete: SetNull)
@@ -655,6 +670,9 @@ model FinancialReceivable {
   billingItem BillingItem? @relation(fields: [billingItemId], references: [id], onDelete: SetNull)
   reviewedBy User? @relation("FinancialReceivableReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
   documents ClientDocument[] @relation("ReceivableDocuments")
+  payments FinancialReceivablePayment[]
+  importRows FinancialReceivableImportRow[]
+  credits FinancialClientCredit[]
 
   @@index([uploadId])
   @@index([clientId])
@@ -663,6 +681,8 @@ model FinancialReceivable {
   @@index([accountOwnerUserId])
   @@index([companyCode])
   @@index([normalizedInvoiceNumber])
+  @@index([companyCode, normalizedInvoiceNumber, currency])
+  @@index([clientId, dueDate])
   @@index([invoiceDate])
   @@index([clientName])
   @@index([dueDate])
@@ -672,6 +692,143 @@ model FinancialReceivable {
   @@index([includedInReport])
   @@index([reviewedByUserId])
   @@map("portfolio_financial_receivables")
+}
+
+model FinancialReceivableImportRow {
+  id                      String   @id @default(cuid())
+  uploadId                String
+  receivableId            String?
+  clientId                String?
+  campaignId              String?
+  locationId              String?
+  companyName             String
+  companyCode             String
+  sheetName               String
+  rowNumber               Int
+  sourceRowKey            String
+  sourceHash              String
+  rawInvoiceNumber        String?
+  normalizedInvoiceNumber String?
+  invoiceDate             DateTime?
+  dueDate                 DateTime?
+  currency                String?  @db.VarChar(3)
+  invoiceAmount           Decimal? @db.Decimal(14, 2)
+  reportCollectedAmount   Decimal? @db.Decimal(14, 2)
+  reportRemainingAmount   Decimal? @db.Decimal(14, 2)
+  locationText            String?  @db.Text
+  campaignDetails         String?  @db.Text
+  clientNameRaw           String?
+  normalizedClientName    String?
+  status                  String   @default("pending")
+  confidenceLevel         String   @default("unmatched")
+  confidenceScore         Int      @default(0)
+  matchReason             String?  @db.Text
+  proposedAction          String?
+  resolutionAction        String?
+  resolutionReason        String?  @db.Text
+  resolvedByUserId        String?
+  resolvedAt              DateTime?
+  rawRowJson              Json?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  upload     FinancialReportUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  receivable FinancialReceivable?   @relation(fields: [receivableId], references: [id], onDelete: SetNull)
+  client     ClientAccount?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  campaign   Campaign?              @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  location   Location?              @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  resolvedBy User?                  @relation("FinancialReceivableImportRowResolver", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+  payments   FinancialReceivablePayment[]
+
+  @@unique([uploadId, sourceRowKey])
+  @@index([uploadId, status])
+  @@index([sourceHash])
+  @@index([companyCode, normalizedInvoiceNumber, currency])
+  @@index([clientId])
+  @@index([receivableId])
+  @@index([confidenceLevel])
+  @@map("portfolio_financial_receivable_import_rows")
+}
+
+model FinancialReceivablePayment {
+  id                 String   @id @default(cuid())
+  receivableId       String
+  sourceImportRowId  String?  @unique
+  requestKey         String?  @unique
+  amount             Decimal  @db.Decimal(14, 2)
+  currency           String   @db.VarChar(3)
+  receivedAt         DateTime
+  paymentMethod      String?
+  paymentReference   String?
+  notes              String?  @db.Text
+  source             String   @default("manual")
+  status             String   @default("active")
+  correctsPaymentId  String?
+  createdByUserId    String?
+  cancelledByUserId  String?
+  cancelledAt        DateTime?
+  cancellationReason String?  @db.Text
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  receivable      FinancialReceivable          @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  sourceImportRow FinancialReceivableImportRow? @relation(fields: [sourceImportRowId], references: [id], onDelete: SetNull)
+  createdBy       User? @relation("FinancialReceivablePaymentCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  cancelledBy     User? @relation("FinancialReceivablePaymentCanceller", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  correctsPayment FinancialReceivablePayment? @relation("FinancialReceivablePaymentCorrections", fields: [correctsPaymentId], references: [id], onDelete: SetNull)
+  corrections     FinancialReceivablePayment[] @relation("FinancialReceivablePaymentCorrections")
+  credit          FinancialClientCredit?
+
+  @@index([receivableId, status, receivedAt])
+  @@index([sourceImportRowId])
+  @@index([createdByUserId])
+  @@index([correctsPaymentId])
+  @@map("portfolio_financial_receivable_payments")
+}
+
+model FinancialClientAlias {
+  id              String   @id @default(cuid())
+  companyCode     String
+  aliasName       String
+  normalizedAlias String
+  clientId        String
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  client    ClientAccount @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("FinancialClientAliasCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([companyCode, normalizedAlias])
+  @@index([clientId])
+  @@map("portfolio_financial_client_aliases")
+}
+
+model FinancialClientCredit {
+  id              String   @id @default(cuid())
+  clientId        String
+  receivableId    String?
+  sourcePaymentId String?  @unique
+  companyName     String
+  companyCode     String
+  currency        String   @db.VarChar(3)
+  amount          Decimal  @db.Decimal(14, 2)
+  remainingAmount Decimal  @db.Decimal(14, 2)
+  status          String   @default("available")
+  reason          String?  @db.Text
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  client        ClientAccount @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  receivable    FinancialReceivable? @relation(fields: [receivableId], references: [id], onDelete: SetNull)
+  sourcePayment FinancialReceivablePayment? @relation(fields: [sourcePaymentId], references: [id], onDelete: SetNull)
+  createdBy     User? @relation("FinancialClientCreditCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([clientId, status])
+  @@index([companyCode, currency, status])
+  @@index([receivableId])
+  @@map("portfolio_financial_client_credits")
 }
 
 model Supplier {

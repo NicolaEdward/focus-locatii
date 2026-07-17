@@ -14,6 +14,7 @@ import {
   ListChecks,
   Map,
   MapPin,
+  ReceiptText,
   Settings,
   Shield,
   Truck,
@@ -71,11 +72,12 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           {canViewOperational ? <AdminNavLink href="/admin/operational" active={isActiveAdminPath(pathname, "/admin/operational")}><Truck size={18} />Operational</AdminNavLink> : null}
           {hasFinanceMenu ? (
             <AdminNavMenu
-              active={isActiveAnyAdminPath(pathname, ["/admin/furnizori"])}
+              active={isActiveAnyAdminPath(pathname, ["/admin/furnizori", "/admin/financiar"])}
               icon={<CircleDollarSign size={18} />}
               label="Financiar"
             >
               {canViewFinance ? <AdminMenuLink href="/admin/dashboard" active={false} icon={<CircleDollarSign size={17} />} label="SmartBill / rapoarte" /> : null}
+              {canViewFinance ? <AdminMenuLink href="/admin/financiar/incasari" active={isActiveAdminPath(pathname, "/admin/financiar/incasari")} icon={<ReceiptText size={17} />} label="Încasări și creanțe" /> : null}
               {canViewFinance ? <AdminMenuLink href="/admin/furnizori" active={isActiveAdminPath(pathname, "/admin/furnizori")} icon={<Truck size={17} />} label="Furnizori" /> : null}
               {canExportSales ? <SalesReportExportButton variant="menu" icon={<Download size={17} />} label="Export vanzari" /> : null}
             </AdminNavMenu>

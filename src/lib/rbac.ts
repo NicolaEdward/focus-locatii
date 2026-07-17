@@ -128,7 +128,8 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "campaigns.view",
     "finance.view",
     "finance.upload",
-    "finance.validate"
+    "finance.validate",
+    "finance.confirm"
   ],
   FIELD_OPERATOR: [
     "dashboard.operations.view"

@@ -175,14 +175,31 @@ export async function mergeClientAccounts(input: {
       },
       data: { clientId: primary.id }
     });
+    const receivableWhere: Prisma.FinancialReceivableWhereInput = {
+      OR: [
+        { clientId: duplicate.id },
+        ...(duplicateCampaignIds.length ? [{ campaignId: { in: duplicateCampaignIds } }] : [])
+      ]
+    };
+    await tx.financialReceivable.updateMany({
+      where: { AND: [receivableWhere, { canonicalKey: { not: null } }] },
+      data: { canonicalKey: null }
+    });
     const receivables = await tx.financialReceivable.updateMany({
-      where: {
-        OR: [
-          { clientId: duplicate.id },
-          ...(duplicateCampaignIds.length ? [{ campaignId: { in: duplicateCampaignIds } }] : [])
-        ]
-      },
+      where: receivableWhere,
       data: { clientId: primary.id, accountOwnerUserId: primary.accountOwnerUserId }
+    });
+    const financialImportRows = await tx.financialReceivableImportRow.updateMany({
+      where: { clientId: duplicate.id },
+      data: { clientId: primary.id }
+    });
+    const financialAliases = await tx.financialClientAlias.updateMany({
+      where: { clientId: duplicate.id },
+      data: { clientId: primary.id }
+    });
+    const financialCredits = await tx.financialClientCredit.updateMany({
+      where: { clientId: duplicate.id },
+      data: { clientId: primary.id }
     });
     const crmLeads = await tx.crmLead.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
     const contacts = await tx.clientContact.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
@@ -216,6 +233,9 @@ export async function mergeClientAccounts(input: {
         reservations: reservations.count,
         billingItems: billingItems.count,
         receivables: receivables.count,
+        financialImportRows: financialImportRows.count,
+        financialAliases: financialAliases.count,
+        financialCredits: financialCredits.count,
         crmLeads: crmLeads.count,
         contacts: contacts.count,
         documents: documents.count

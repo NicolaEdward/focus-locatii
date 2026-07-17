@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
@@ -7,6 +7,7 @@ import { normalizeInvoiceNumber } from "@/lib/clients";
 import { companyCodeForEntity, companyEntityOrThrow } from "@/lib/company-entities";
 import { financialStatus, recalculateFinancialSnapshots } from "@/lib/financial-review";
 import { prisma } from "@/lib/prisma";
+import { normalizeReceivableInvoiceNumber, receivableCanonicalKey, receivableStatus } from "@/lib/receivables-domain";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -18,9 +19,8 @@ const noStoreHeaders = {
 
 const money = z.preprocess((value) => {
   if (value === "" || value == null) return null;
-  const parsed = Number(String(value).replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : null;
-}, z.number().nullable().optional());
+  return String(value).trim().replace(",", ".");
+}, z.string().regex(/^-?\d+(?:\.\d{1,2})?$/).transform((value) => new Prisma.Decimal(value)).nullable().optional());
 
 const date = z.preprocess((value) => {
   if (value === "" || value == null) return null;
@@ -55,12 +55,25 @@ export async function POST(request: NextRequest) {
 
   try {
     const input = schema.parse(await request.json());
-    const amount = input.amount ?? 0;
-    const paidOrCollected = input.paidOrCollected ?? 0;
-    const remaining = input.remaining ?? Math.max(0, roundMoney(amount - paidOrCollected));
+    const amount = input.amount ?? new Prisma.Decimal(0);
+    const paidOrCollected = input.paidOrCollected ?? new Prisma.Decimal(0);
+    if (amount.isNegative() || paidOrCollected.isNegative()) throw new Error("Valorile financiare nu pot fi negative.");
+    if (input.kind === "receivable" && paidOrCollected.greaterThan(amount)) {
+      throw new Error("Supraplata se înregistrează din registrul creanței, cu confirmare explicită pentru credit client.");
+    }
+    const calculatedRemaining = Prisma.Decimal.max(amount.minus(paidOrCollected), 0);
+    if (input.remaining && input.remaining.minus(calculatedRemaining).abs().greaterThan("0.01")) {
+      throw new Error("Restul introdus nu corespunde diferenței dintre valoare și suma plătită/încasată.");
+    }
+    const remaining = calculatedRemaining;
     const companyName = companyEntityOrThrow(input.companyName);
     const companyCode = input.companyCode || companyCodeForEntity(companyName) || normalizeCompanyCode(companyName);
-    const normalizedInvoiceNumber = normalizeInvoiceNumber(input.invoiceNumber);
+    const normalizedInvoiceNumber = input.kind === "receivable"
+      ? normalizeReceivableInvoiceNumber(input.invoiceNumber)
+      : normalizeInvoiceNumber(input.invoiceNumber);
+    if (input.kind === "receivable" && !normalizedInvoiceNumber) {
+      return NextResponse.json({ error: "Numărul facturii este obligatoriu pentru o creanță." }, { status: 400, headers: noStoreHeaders });
+    }
     const [client, campaign, supplier] = await Promise.all([
       input.kind === "receivable" && input.clientId
         ? prisma.clientAccount.findUnique({ where: { id: input.clientId }, include: { accountOwner: { select: { id: true } } } })
@@ -117,7 +130,7 @@ export async function POST(request: NextRequest) {
       dueDate: input.dueDate
     });
     const needsReview = status === "needs_review";
-    const upload = await prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx) => {
       let activeUpload = await tx.financialReportUpload.findFirst({
         where: { activeVersion: true, status: "confirmed" },
         orderBy: { uploadedAt: "desc" }
@@ -143,7 +156,7 @@ export async function POST(request: NextRequest) {
       } satisfies Prisma.InputJsonObject;
 
       if (input.kind === "payable") {
-        await tx.financialPayable.create({
+        const payable = await tx.financialPayable.create({
           data: {
             uploadId: activeUpload.id,
             supplierId: supplier?.id || null,
@@ -169,8 +182,15 @@ export async function POST(request: NextRequest) {
             reviewedAt: new Date()
           }
         });
+        return { upload: activeUpload, entityId: payable.id };
       } else {
-        await tx.financialReceivable.create({
+        const canonicalKey = receivableCanonicalKey({
+          companyCode,
+          normalizedInvoiceNumber,
+          currency: input.currency,
+          clientId: client!.id
+        });
+        const receivable = await tx.financialReceivable.create({
           data: {
             uploadId: activeUpload.id,
             clientId: client?.id || null,
@@ -180,16 +200,17 @@ export async function POST(request: NextRequest) {
             companyCode,
             invoiceNumber: input.invoiceNumber || null,
             normalizedInvoiceNumber,
+            canonicalKey,
             invoiceDate: input.invoiceDate,
             location: input.location || null,
             campaignDetails: campaign?.campaignName || input.campaignDetails || input.documentDescription || null,
             clientName: client?.companyName || input.name || null,
             dueDate: input.dueDate,
             invoicedAmount: amount,
-            collectedAmount: paidOrCollected,
-            remainingAmount: remaining,
+            collectedAmount: new Prisma.Decimal(0),
+            remainingAmount: amount,
             currency: input.currency,
-            status,
+            status: receivableStatus({ invoiceAmount: amount, collectedAmount: 0, dueDate: input.dueDate }),
             rawRowJson,
             needsReview,
             includedInReport: true,
@@ -199,21 +220,52 @@ export async function POST(request: NextRequest) {
             reviewedAt: new Date()
           }
         });
+        if (paidOrCollected.greaterThan(0)) {
+          const payment = await tx.financialReceivablePayment.create({
+            data: {
+              receivableId: receivable.id,
+              amount: paidOrCollected,
+              currency: input.currency,
+              receivedAt: input.invoiceDate || new Date(),
+              notes: input.note || "Încasare introdusă odată cu creanța manuală.",
+              source: "manual_opening_payment",
+              createdByUserId: session.id
+            }
+          });
+          await tx.financialReceivable.update({
+            where: { id: receivable.id },
+            data: {
+              collectedAmount: paidOrCollected,
+              remainingAmount: remaining,
+              collectedAt: remaining.equals(0) ? payment.receivedAt : null,
+              status: receivableStatus({ invoiceAmount: amount, collectedAmount: paidOrCollected, dueDate: input.dueDate })
+            }
+          });
+          await tx.auditLog.create({
+            data: {
+              userId: session.id,
+              action: "receivable.payment_created",
+              entityType: "financial_receivable_payment",
+              entityId: payment.id,
+              metadata: { receivableId: receivable.id, amount: paidOrCollected.toFixed(2), currency: input.currency, source: "manual_opening_payment" }
+            }
+          });
+        }
+        return { upload: activeUpload, entityId: receivable.id };
       }
-      return activeUpload;
     });
 
-    await recalculateFinancialSnapshots(upload.id);
+    await recalculateFinancialSnapshots(created.upload.id);
     await recordAudit({
       actor: session,
       action: "financial.manual_entry",
       entityType: `financial_${input.kind}`,
-      entityId: upload.id,
-      metadata: { input: { ...input, companyName, amount, paidOrCollected, remaining, status, companyCode } },
+      entityId: created.entityId,
+      metadata: { input: { ...input, companyName, amount: amount.toFixed(2), paidOrCollected: paidOrCollected.toFixed(2), remaining: remaining.toFixed(2), status, companyCode } },
       request
     });
 
-    return NextResponse.json({ ok: true, uploadId: upload.id, status }, { headers: noStoreHeaders });
+    return NextResponse.json({ ok: true, uploadId: created.upload.id, entityId: created.entityId, status }, { headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Randul financiar nu a putut fi introdus manual." },
@@ -238,8 +290,4 @@ function normalizeCompanyCode(value: string) {
 
 function startOfUtcDay(date: Date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
 }

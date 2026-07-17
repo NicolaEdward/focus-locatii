@@ -1,0 +1,16 @@
+import { NextRequest, NextResponse } from "next/server";
+import { requireAnyPermission } from "@/lib/auth";
+import { listReceivablesWorkspace } from "@/lib/receivables-import-service";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(request: NextRequest) {
+  const { session, response } = await requireAnyPermission(request, ["finance.view", "finance.validate", "finance.manage"]);
+  if (response || !session) return response;
+  const workspace = await listReceivablesWorkspace({
+    query: request.nextUrl.searchParams.get("q") || "",
+    status: request.nextUrl.searchParams.get("status") || "",
+    take: Number(request.nextUrl.searchParams.get("take") || 100)
+  });
+  return NextResponse.json({ workspace });
+}

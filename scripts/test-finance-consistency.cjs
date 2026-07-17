@@ -134,13 +134,16 @@ assert.throws(
 
 const rowRoute = read("src", "app", "api", "admin", "financial", "rows", "[kind]", "[id]", "route.ts");
 const paymentRoute = read("src", "app", "api", "admin", "receivables", "[id]", "payment", "route.ts");
+const paymentService = read("src", "lib", "receivables-payment-service.ts");
 const mergeRoute = read("src", "app", "api", "admin", "receivables", "merge", "route.ts");
 assert(rowRoute.includes("matchingFinancialIssueIds"), "row edit route must use stable issue matching");
 assert(rowRoute.includes("where: { id: { in: issueIds }, resolvedAt: null }"), "row edit route must resolve only matched issue ids");
 assert(!/financialImportIssue\.updateMany\(\{\s*where:\s*\{\s*uploadId:\s*row\.uploadId,\s*rowNumber/s.test(rowRoute), "row edit route must not update issues by rowNumber alone");
 assert(paymentRoute.includes(".strict()"), "payment route must reject unexpected status/body fields");
-assert(paymentRoute.includes("recordAudit"), "payment update must write audit");
-assert(paymentRoute.includes("prisma.$transaction"), "payment update must be transactional");
+assert(paymentRoute.includes("recordReceivablePayment"), "payment route must use the canonical payment ledger");
+assert(paymentService.includes("auditLog.create"), "payment update must write audit");
+assert(paymentService.includes("prisma.$transaction"), "payment update must be transactional");
+assert(paymentService.includes("financialReceivablePayment.create"), "payment update must create an immutable ledger entry");
 assert(mergeRoute.includes("validateReceivableDuplicateMerge(primary, duplicate)"), "merge route must validate duplicates before archiving");
 assert(mergeRoute.includes("prisma.$transaction"), "merge route must archive transactionally");
 assert(mergeRoute.includes("recordAudit"), "successful merge must write audit");

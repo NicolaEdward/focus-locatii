@@ -49,7 +49,12 @@ export async function getFinancialDashboardData() {
       orderBy: [{ dueDate: "asc" }, { remainingAmount: "desc" }]
     }),
     prisma.financialReceivable.findMany({
-      where: { uploadId: { in: uploadIds } },
+      where: {
+        OR: [
+          { uploadId: { in: uploadIds } },
+          { canonicalKey: { not: null } }
+        ]
+      },
       orderBy: [{ dueDate: "asc" }, { remainingAmount: "desc" }]
     }),
     prisma.financialImportIssue.findMany({

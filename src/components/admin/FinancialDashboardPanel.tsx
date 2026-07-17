@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, PlusCircle, UploadCloud, XCircle } from "lucide-react";
+import { AlertTriangle, Banknote, CheckCircle2, Download, FileSpreadsheet, PlusCircle, UploadCloud, XCircle } from "lucide-react";
 import type { DashboardData } from "@/lib/dashboard";
 import { companyEntities } from "@/lib/company-entities";
 
@@ -465,24 +465,16 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
       <section className="rounded-lg border border-focus-line bg-focus-ink/70 p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-black uppercase text-focus-yellow">Upload raport zilnic</p>
-            <h2 className="font-display text-2xl font-black uppercase text-white">Financiar</h2>
+            <p className="text-xs font-black uppercase text-focus-yellow">Încasări și creanțe</p>
+            <h2 className="font-display text-2xl font-black uppercase text-white">Registru financiar auditabil</h2>
             <p className="mt-1 text-sm font-bold text-slate-400">
-              Ultimul raport activ: {data.activeUpload ? `${data.activeUpload.originalFileName} (${date(data.activeUpload.reportDate || data.activeUpload.uploadedAt)})` : "niciun raport confirmat"}
+              Importul Excel, alocarea clienților și încasările individuale sunt gestionate în spațiul dedicat.
             </p>
           </div>
-          <a className="focus-button secondary" href="/api/admin/financial/export">
-            <Download size={18} /> Export financiar
-          </a>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto]">
-          <input key={fileInputKey} className="focus-input" type="file" accept=".xlsx,.xls,.xlsm" onChange={(event) => setFile(event.target.files?.[0] || null)} />
-          <button className="focus-button secondary" type="button" onClick={clearFile} disabled={busy || !file}>
-            <XCircle size={18} /> Sterge fisier
-          </button>
-          <button className="focus-button" type="button" onClick={uploadReport} disabled={busy}>
-            <UploadCloud size={18} /> {busy ? "Se proceseaza..." : "Incarca si previzualizeaza"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <a className="focus-button" href="/admin/financiar/incasari"><Banknote size={18} /> Deschide încasări</a>
+            <a className="focus-button secondary" href="/api/admin/financial/export"><Download size={18} /> Export financiar</a>
+          </div>
         </div>
       </section>
 

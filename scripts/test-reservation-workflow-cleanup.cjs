@@ -40,12 +40,13 @@ function periodPromptsAreReplaced() {
     assert(!source.includes("Data noua de final campanie"), "old end-date prompt text must be removed");
   }
   assert(holdActions.includes("ReservationPeriodChangeDialog"), "hold quick actions should use the period dialog");
-  assert(commandCenter.includes("ReservationPeriodChangeDialog"), "COO reservation mini-card should use the period dialog");
+  assert(!commandCenter.includes("ReservationPeriodChangeDialog"), "the read-only COO dashboard must not expose reservation mutation dialogs");
 }
 
 function periodDialogValidatesAndRequiresPreview() {
   const dialog = read("src", "components", "admin", "ReservationPeriodChangeDialog.tsx");
-  assert(dialog.includes("Data de final trebuie sa fie dupa data de start."), "dialog should reject invalid date ranges");
+  assert(dialog.includes("Data de final nu poate fi inainte de data de start."), "dialog should reject reversed date ranges while allowing one-day periods");
+  assert(dialog.includes("if (end < start)"), "dialog should follow the inclusive reservation interval convention");
   assert(dialog.includes("Verifica disponibilitatea inainte de salvare."), "dialog should require a preview before save");
   assert(dialog.includes("currentPreview.conflicts.length === 0"), "dialog should block saving when conflicts exist");
   assert(dialog.includes("/api/admin/reservations/conflict-preview"), "dialog should call the preview endpoint");
@@ -55,7 +56,7 @@ function periodDialogValidatesAndRequiresPreview() {
 function conflictPreviewIsReadOnlyAndExcludesCurrentReservation() {
   const route = read("src", "app", "api", "admin", "reservations", "conflict-preview", "route.ts");
   assert(route.includes("id: { not: currentReservation.id }"), "preview must exclude the reservation being edited");
-  assert(route.includes('status: { in: ["HOLD", "RESERVED", "BOOKED"] }'), "preview must check active blocking statuses");
+  assert(route.includes("effectiveBlockingReservationWhere(new Date())"), "preview must use the canonical effective blocking rule");
   assert(route.includes("periodStart: { lte: periodEnd }"), "preview should match inclusive reservation conflict logic");
   assert(route.includes("periodEnd: { gte: periodStart }"), "preview should match inclusive reservation conflict logic");
   assert(!/prisma\.\w+\.(create|update|updateMany|delete|deleteMany|upsert)\(/.test(route), "preview route must not mutate data");
@@ -66,7 +67,7 @@ function dashboardActionsUseSafeChangePeriodFlow() {
   const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
   const commandRoute = read("src", "app", "api", "admin", "command-center", "route.ts");
   assert(holdActions.includes('"changePeriod", { periodStart, periodEnd }'), "hold dialog should call existing command-center changePeriod action");
-  assert(commandCenter.includes('"changePeriod", { periodStart, periodEnd }'), "COO dialog should call existing command-center changePeriod action");
+  assert(!commandCenter.includes("/api/admin/command-center"), "the read-only COO dashboard must not call reservation mutation commands");
   assert(commandRoute.includes("updateReservation(reservation.id, { periodStart: input.periodStart, periodEnd: input.periodEnd }, session)"), "command-center changePeriod must still use reservation domain update flow");
 }
 
@@ -83,11 +84,9 @@ function dirtyResetConfirmationIsInApp() {
 
 function statusActionsAreHiddenWhenInvalid() {
   const holdActions = read("src", "components", "admin", "DashboardHoldActions.tsx");
-  const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
   const reservationsPanel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
 
   assert(holdActions.includes('const isActiveHold = ["HOLD", "RESERVED"].includes(row.status) && !expired'), "hold panel should gate hold actions to active holds");
-  assert(commandCenter.includes('const isActiveHold = ["HOLD", "RESERVED"].includes(row.status) && !expired'), "COO reservation mini-card should gate hold actions to active holds");
   assert(reservationsPanel.includes("const canCancelReservation = canDelete && activeReservationStatuses.includes(reservation.status)"), "cancel action should only show for active reservations");
 }
 
@@ -95,10 +94,8 @@ function operationControlsRemainPermissionGated() {
   const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
   const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
   assert(panel.includes('const canUpdateOperationStatus = hasPermission(session.role, "campaigns.operate")'), "reservation operation controls must require campaigns.operate");
-  assert(commandCenter.includes('hasPermission(data.role, "campaigns.operate")'), "COO operation controls must require campaigns.operate");
-  assert(commandCenter.includes("canOperate={canOperateCampaigns}"), "COO mini-card operation task actions should receive the operation permission gate");
+  assert(!commandCenter.includes("fetch("), "COO command center must remain read-only");
   assert(!commandCenter.includes('note: "Follow-up operational pentru hold."'), "HOLD actions must not create decoration tasks");
-  assert(commandCenter.includes("Doar vizualizare"), "non-operators should see read-only operation status");
 }
 
 function groupEditContextIsClear() {

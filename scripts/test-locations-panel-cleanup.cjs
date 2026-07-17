@@ -177,13 +177,15 @@ function locationWorkspaceLoadsSummaryDataFirst() {
   const dashboard = read("src", "components", "admin", "AdminDashboard.tsx");
   const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
   const reservations = read("src", "lib", "reservations.ts");
+  const locations = read("src", "lib", "locations.ts");
   const detailRoute = read("src", "app", "api", "reservations", "[id]", "route.ts");
   assert(page.includes("includeDetails: false"), "locations page should load reservation summaries without nested history/photos");
   assert(!page.includes("listOperationReservations"), "locations page must not load the operational reservation dataset twice");
   assert(!dashboard.includes("operationReservations="), "locations dashboard should not serialize operational history into the page");
   assert(panel.includes('fetch(`/api/reservations/${summary.id}`'), "reservation detail should load only when edit is opened");
   assert(reservations.includes("reservationSummaryInclude"), "reservation summary query should use a narrow relation set");
-  assert(read("src", "lib", "locations.ts").includes("legacyHoldCutoff"), "location summaries must ignore expired legacy holds without relying on a write during page load");
+  assert(locations.includes("effectiveBlockingReservationWhere"), "location summaries must use the canonical effective reservation rule");
+  assert(!locations.includes("await expireStaleHolds()"), "location summaries must ignore expired holds without relying on a write during page load");
   assert(detailRoute.includes("getReservation(id, session)"), "reservation detail route should enforce authenticated ownership");
 }
 

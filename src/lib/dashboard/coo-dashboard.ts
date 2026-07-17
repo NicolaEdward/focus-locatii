@@ -5,8 +5,8 @@ import { effectiveNeutralizationDate } from "@/lib/neutralization-date";
 import { operationStatus } from "@/lib/operation-status";
 import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
-import { HOLD_DURATION_DAYS } from "@/lib/reservation-lifecycle";
-import { addUtcDays, activeHoldExpiry, daysFromToday, decimalString, startOfUtcDay } from "@/lib/dashboard/dashboard-utils";
+import { effectiveHoldExpiresAt, effectiveHoldWhere } from "@/lib/reservation-lifecycle";
+import { addUtcDays, daysFromToday, decimalString, startOfUtcDay } from "@/lib/dashboard/dashboard-utils";
 
 export type DashboardMoney = { currency: string; amount: string; count: number };
 
@@ -115,8 +115,8 @@ export async function getCooDashboardData(session: AuthSession, now = new Date()
       orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }], take: 400
     }),
     prisma.reservation.findMany({
-      where: { status: { in: ["HOLD", "RESERVED"] } },
-      select: { id: true, clientName: true, campaignName: true, createdAt: true, holdExpiresAt: true, sellerUser: { select: { name: true } }, location: { select: { id: true, code: true } } },
+      where: effectiveHoldWhere(now),
+      select: { id: true, status: true, clientName: true, campaignName: true, periodStart: true, periodEnd: true, createdAt: true, holdExpiresAt: true, sellerUser: { select: { name: true } }, location: { select: { id: true, code: true } } },
       orderBy: { holdExpiresAt: "asc" }, take: 300
     }),
     prisma.location.findMany({
@@ -161,11 +161,13 @@ export async function getCooDashboardData(session: AuthSession, now = new Date()
 
   const operations = operationalItems(operationalReservations, today, inThirtyDays);
   const activeHolds = holdRows
-    .map((row) => ({ ...row, expiresAt: activeHoldExpiry(row, HOLD_DURATION_DAYS) }))
-    .filter((row) => row.expiresAt >= today);
-  const expiringHolds = activeHolds.filter((row) => row.expiresAt <= addUtcDays(today, 3));
+    .filter((row) => row.status === "HOLD" || row.status === "RESERVED")
+    .map((row) => ({ ...row, expiresAt: effectiveHoldExpiresAt(row) }));
+  const expiringHolds = activeHolds.filter((row) => row.expiresAt <= addUtcDays(now, 3));
   const occupiedIds = new Set(occupiedLocationRows.map((row) => row.locationId));
-  const heldIds = new Set(activeHolds.map((row) => row.location.id));
+  const heldIds = new Set(activeHolds
+    .filter((row) => row.periodStart <= today && row.periodEnd >= today)
+    .map((row) => row.location.id));
   const overrideIds = new Set(activeOverrides.map((row) => row.locationId));
   const blockedIds = new Set(locations.filter((row) => row.lifecycleStatus !== "ACTIVE" || overrideIds.has(row.id) || manualBlockActive(row, today)).map((row) => row.id));
   const activeLocationIds = locations.filter((row) => row.lifecycleStatus === "ACTIVE").map((row) => row.id);

@@ -14,7 +14,7 @@ import { getCrmTeamDashboardData } from "@/lib/crm-dashboard";
 import { crmCurrentOpportunityValue, crmNextActionLabel } from "@/lib/crm-domain";
 import { effectiveInstallationDate, hasMissingInstallationSchedule } from "@/lib/installation-date";
 import { effectiveNeutralizationDate, hasMissingNeutralizationSchedule } from "@/lib/neutralization-date";
-import { HOLD_DURATION_DAYS } from "@/lib/reservation-lifecycle";
+import { isEffectiveHold } from "@/lib/reservation-lifecycle";
 import {
   listOperationalTasksWithFallback,
   operationTaskReadsEnabled,
@@ -1139,11 +1139,8 @@ function uniqueCampaignCount(items: CampaignRow[]) {
   return new Set(items.map((item) => item.campaignId || item.contractGroupId || item.id)).size;
 }
 
-function holdIsActive(item: Pick<CampaignRow, "holdExpiresAt" | "createdAt">, now: Date) {
-  if (item.holdExpiresAt) return item.holdExpiresAt > now;
-  const legacyCutoff = new Date(now);
-  legacyCutoff.setUTCDate(legacyCutoff.getUTCDate() - HOLD_DURATION_DAYS);
-  return item.createdAt > legacyCutoff;
+function holdIsActive(item: Pick<CampaignRow, "status" | "holdExpiresAt" | "createdAt">, now: Date) {
+  return isEffectiveHold(item, now);
 }
 
 function countBy<T>(items: T[], key: (item: T) => string) {

@@ -4,6 +4,7 @@ import { requireAnyPermission, type AuthSession } from "@/lib/auth";
 import { hasAnyPermission } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { legacyManualBlockConflict, listLocationAvailabilityOverrideConflicts } from "@/lib/location-availability-overrides";
+import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -35,8 +36,8 @@ export async function POST(request: NextRequest) {
     if (!periodStart || !periodEnd) {
       return NextResponse.json({ error: "Datele nu sunt valide." }, { status: 400, headers: noStoreHeaders });
     }
-    if (periodEnd <= periodStart) {
-      return NextResponse.json({ error: "Data de final trebuie sa fie dupa data de start." }, { status: 400, headers: noStoreHeaders });
+    if (periodEnd < periodStart) {
+      return NextResponse.json({ error: "Data de final nu poate fi inainte de data de start." }, { status: 400, headers: noStoreHeaders });
     }
 
     const canViewAll = hasAnyPermission(session.role, ["reservations.view", "reservations.manage"]);
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
         where: {
           locationId: { in: locationIds },
           ...(currentReservation ? { id: { not: currentReservation.id } } : {}),
-          status: { in: ["HOLD", "RESERVED", "BOOKED"] },
+          ...effectiveBlockingReservationWhere(new Date()),
           periodStart: { lte: periodEnd },
           periodEnd: { gte: periodStart }
         },

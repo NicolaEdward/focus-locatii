@@ -22,6 +22,8 @@ assert(cooService.includes("includedInReport: true, needsReview: false"), "COO f
 assert(cooService.includes("take: 20"), "COO attention rows must be limited");
 assert(!cooService.includes("prisma.mediaPlan"), "dashboard must not query the inactive Media Plan model");
 assert(!cooService.includes("operationTaskReadsEnabled"), "dashboard must not enable or query disabled OperationTask reads");
+assert(cooService.includes("effectiveHoldWhere(now)"), "COO active HOLD count must use the canonical exact-expiry rule");
+assert(cooService.includes("row.periodStart <= today && row.periodEnd >= today"), "COO current occupancy must not count future HOLD periods");
 assert(!coo.includes("SmartBillDashboard"), "COO must not render legacy SmartBill widgets");
 assert(!coo.includes("FinancialDashboardPanel"), "COO must not render the import/report dashboard");
 assert(!coo.includes("Creanțe"), "COO must use Facturi clienți terminology");
@@ -37,6 +39,8 @@ assert(salesService.includes("accountOwnerUserId: ownerId"), "seller invoice own
 assert(salesService.includes("sellerUserId: ownerId"), "seller campaign ownership must be explicit");
 assert(salesService.includes("AND: [") && salesService.includes("campaignOwnership"), "campaign date filters must not override ownership filters");
 assert(!salesService.includes("prisma.mediaPlan"), "sales agenda must not depend on Media Plan");
+assert(salesService.includes("effectiveHoldWhere(now)"), "sales agenda must exclude expired HOLDs at query time");
+assert(!salesService.includes("addUtcDays(row.createdAt, 14)"), "sales agenda must use the five-day canonical HOLD fallback");
 assert(!salesService.includes("create(") && !salesService.includes("update("), "sales dashboard load must remain read-only");
 assert(salesService.includes("/admin/clienti?tab=invoices"), "sales invoices must link to the role-safe client workspace");
 

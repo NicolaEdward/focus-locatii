@@ -15,6 +15,12 @@ const conflictPreview = read("src", "app", "api", "admin", "reservations", "conf
 const editor = read("src", "components", "admin", "LocationEditor.tsx");
 const validation = read("src", "lib", "validation.ts");
 const locations = read("src", "lib", "locations.ts");
+const lifecycle = read("src", "lib", "reservation-lifecycle.ts");
+const reservations = read("src", "lib", "reservations.ts");
+const timeline = read("src", "app", "api", "admin", "locations", "[id]", "availability-timeline", "route.ts");
+const campaigns = read("src", "lib", "campaigns.ts");
+const cooDashboard = read("src", "lib", "dashboard", "coo-dashboard.ts");
+const salesDashboard = read("src", "lib", "dashboard", "sales-dashboard.ts");
 const publicSerialization = read("scripts", "test-public-location-serialization.cjs");
 
 assert(schema.includes("enum LocationLifecycleStatus"), "schema must separate location lifecycle status");
@@ -44,6 +50,21 @@ assert(selectionAvailability.includes("isManualAvailabilityStatus"), "selector l
 assert(selectionAvailability.includes("current.openEnded || isManualAvailabilityStatus(current.status)"), "open-ended manual blocks must not become fake available-from dates");
 assert(selectionAvailability.includes("Blocat din"), "open-ended manual blocks should show a block label, not an artificial availability date");
 assert(!selectionAvailability.includes("Locatie blocata: ${location.blockedReason}"), "manual block must not be a duplicate warning beside conflict state");
+assert(lifecycle.includes("effectiveBlockingReservationWhere"), "reservation lifecycle must expose one canonical effective blocking query");
+assert(lifecycle.includes("effectiveHoldWhere"), "reservation lifecycle must expose one canonical effective HOLD query");
+assert(lifecycle.includes("isEffectiveBlockingReservation"), "in-memory availability must share the canonical effective rule");
+assert(selectionAvailability.includes("effectiveBlockingReservationWhere"), "selector must use the canonical effective reservation rule");
+assert(!selectionAvailability.includes("function activeBlockingReservationWhere"), "selector must not keep a parallel HOLD expiry query");
+assert(conflictPreview.includes("effectiveBlockingReservationWhere"), "conflict preview must ignore expired HOLDs through the canonical rule");
+assert(timeline.includes("effectiveBlockingReservationWhere"), "location timeline must ignore expired HOLDs through the canonical rule");
+assert(reservations.includes("...effectiveBlockingReservationWhere(new Date())"), "reservation writes must recheck canonical effective conflicts inside the transaction");
+assert(locations.includes("effectiveBlockingReservationWhere"), "public and inventory availability must query only effective blockers");
+assert(locations.includes("isEffectiveBlockingReservation"), "location serialization must not depend on cleanup for correctness");
+assert(!locations.includes("await expireStaleHolds()"), "read-only location requests must not mutate HOLD status");
+assert(campaigns.includes("effectiveBlockingReservationWhere"), "campaign active-rental guards must not count expired HOLDs");
+assert(cooDashboard.includes("effectiveHoldWhere(now)"), "COO HOLD counts must use exact effective expiry");
+assert(salesDashboard.includes("effectiveHoldWhere(now)"), "Sales HOLD lists must use exact effective expiry");
+assert(!salesDashboard.includes("addUtcDays(row.createdAt, 14)"), "Sales dashboard must not use the old 14-day HOLD fallback");
 
 assert(availability.includes("manualAvailabilityIntervals"), "shared availability calculator must treat manual blocks as occupied intervals");
 assert(availability.includes("lifecycleStatus"), "shared availability calculator must understand lifecycle status");

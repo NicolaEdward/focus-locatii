@@ -21,14 +21,14 @@ export function CooCommandCenter({ data }: { data: CooDashboardData }) {
   const eur = currencyRow(data, "EUR");
   return (
     <main className="focus-shell py-7">
-      <div className="focus-container grid min-w-0 gap-7">
+      <div className="focus-container grid min-w-0 grid-cols-[minmax(0,1fr)] gap-7">
         <header className="flex flex-wrap items-end justify-between gap-5 border-b border-focus-line pb-6">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-black uppercase text-focus-yellow">Centru de comandă COO</p>
             <h1 className="mt-1 font-display text-3xl font-black uppercase text-white sm:text-4xl">Rezumat executiv</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-300">Sănătatea companiei și excepțiile care cer o decizie. Date calculate live din registrele canonice.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex min-w-0 flex-wrap gap-2">
             <Link className="focus-button" href="/admin/financiar/incasari?status=overdue" prefetch={false}><ReceiptText size={18} /> Facturi scadente</Link>
             <Link className="focus-button secondary" href="/admin/operational" prefetch={false}><Wrench size={18} /> Operațional</Link>
           </div>
@@ -126,11 +126,11 @@ export function CooCommandCenter({ data }: { data: CooDashboardData }) {
 
 function ExecutiveCard({ icon, label, value, detail, href, tone }: { icon: React.ReactNode; label: string; value: string | number; detail: string; href: string; tone: "neutral" | "green" | "yellow" | "red" }) {
   const toneClass = { neutral: "text-white", green: "text-emerald-200", yellow: "text-focus-yellow", red: "text-red-200" }[tone];
-  return <Link className="group min-h-36 rounded-lg border border-focus-line bg-focus-ink/65 p-4 transition hover:border-focus-yellow hover:bg-focus-ink" href={href} prefetch={false}><div className="flex items-center justify-between text-slate-400"><span className="text-xs font-black uppercase">{label}</span>{icon}</div><strong className={`mt-4 block text-2xl font-black ${toneClass}`}>{value}</strong><span className="mt-2 block text-xs leading-5 text-slate-400">{detail}</span><span className="mt-3 inline-flex items-center gap-1 text-xs font-black text-focus-yellow opacity-80 group-hover:opacity-100">Deschide <ArrowRight size={13} /></span></Link>;
+  return <Link className="group min-h-36 min-w-0 rounded-lg border border-focus-line bg-focus-ink/65 p-4 transition hover:border-focus-yellow hover:bg-focus-ink" href={href} prefetch={false}><div className="flex items-center justify-between text-slate-400"><span className="text-xs font-black uppercase">{label}</span>{icon}</div><strong className={`mt-4 block break-words text-2xl font-black ${toneClass}`}>{value}</strong><span className="mt-2 block text-xs leading-5 text-slate-400">{detail}</span><span className="mt-3 inline-flex items-center gap-1 text-xs font-black text-focus-yellow opacity-80 group-hover:opacity-100">Deschide <ArrowRight size={13} /></span></Link>;
 }
 
 function SectionHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
-  return <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-black uppercase text-focus-yellow">{eyebrow}</p><h2 className="mt-1 text-2xl font-black text-white">{title}</h2><p className="mt-1 max-w-3xl text-sm text-slate-400">{description}</p></div>{action}</div>;
+  return <div className="flex min-w-0 flex-wrap items-end justify-between gap-3"><div className="min-w-0"><p className="text-xs font-black uppercase text-focus-yellow">{eyebrow}</p><h2 className="mt-1 text-2xl font-black text-white">{title}</h2><p className="mt-1 max-w-3xl text-sm text-slate-400">{description}</p></div>{action}</div>;
 }
 
 function AttentionRow({ item }: { item: CooAttentionItem }) {

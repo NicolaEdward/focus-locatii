@@ -166,13 +166,13 @@ function operationalDashboardKeepsDelayedWorkVisible() {
 }
 
 function sellerDashboardShowsScopedProofPhotos() {
-  const dashboard = read("src", "lib", "dashboard.ts");
-  const roleDashboard = read("src", "components", "admin", "RoleDashboard.tsx");
-  assert(dashboard.includes("OPERATIONAL_PROOF_DOCUMENT_TYPE"), "dashboard should fetch only operational proof documents");
-  assert(dashboard.includes("canViewOperationalProofPhoto(viewer"), "dashboard proof photos must use sales-wide proof view access");
-  assert(dashboard.includes("operationalProofDownloadPath(document.id)"), "dashboard proof photos should use authenticated admin download URLs");
-  assert(roleDashboard.includes("row.proofPhotos?.length"), "role dashboard should render proof photo availability when authorized");
-  assert(roleDashboard.includes("poze dovada"), "seller dashboard should clearly label proof photos");
+  const dashboard = read("src", "lib", "dashboard", "sales-dashboard.ts");
+  const commandCenter = read("src", "components", "admin", "SalesCommandCenter.tsx");
+  assert(dashboard.includes("OPERATIONAL_PROOF_DOCUMENT_TYPE"), "sales dashboard should count only operational proof documents");
+  assert(dashboard.includes("proofPhotoCount: row._count.documents"), "sales dashboard should expose a lightweight proof count");
+  assert(!dashboard.includes("operationalProofDownloadPath"), "sales dashboard must not preload proof-photo URLs");
+  assert(commandCenter.includes("row.proofPhotoCount"), "sales dashboard should render proof photo availability");
+  assert(commandCenter.includes("poze dovadă"), "seller dashboard should clearly label proof photos");
 }
 
 function operationalDateDelayWorkflowIsAudited() {

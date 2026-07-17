@@ -36,7 +36,13 @@ const prisma = {
   })
 };
 
-const { expireStaleHolds } = loadTsModule(path.join(process.cwd(), "src", "lib", "reservation-lifecycle.ts"), {
+const {
+  effectiveBlockingReservationWhere,
+  effectiveHoldExpiresAt,
+  expireStaleHolds,
+  isEffectiveBlockingReservation,
+  isEffectiveHold
+} = loadTsModule(path.join(process.cwd(), "src", "lib", "reservation-lifecycle.ts"), {
   "@/lib/prisma": { prisma },
   "@/lib/audit": {
     recordAudit: async (input) => {
@@ -51,6 +57,16 @@ main().catch((error) => {
 });
 
 async function main() {
+  assert.equal(isEffectiveHold(find("active-hold"), now), true, "active HOLD blocks before its exact expiry");
+  assert.equal(isEffectiveHold(find("expired-hold"), now), false, "expired HOLD stops blocking without cleanup");
+  assert.equal(isEffectiveHold(find("legacy-reserved"), now), false, "legacy HOLD without expiry uses the five-day fallback");
+  assert.equal(isEffectiveBlockingReservation(find("booked"), now), true, "BOOKED remains blocking");
+  assert.equal(isEffectiveBlockingReservation(find("cancelled"), now), false, "CANCELLED remains non-blocking");
+  assert.equal(effectiveHoldExpiresAt(find("legacy-reserved")).toISOString(), "2026-06-20T00:00:00.000Z", "legacy HOLD expiry is deterministic");
+  const blockingWhere = effectiveBlockingReservationWhere(now);
+  assert.equal(blockingWhere.OR[0].status, "BOOKED", "canonical query keeps BOOKED blocking");
+  assert.equal(blockingWhere.OR[1].status.in.join(","), "HOLD,RESERVED", "canonical query includes only temporary hold statuses");
+
   const first = await expireStaleHolds(now);
   assert.equal(first, 2, "eligible hold/reserved rows expire");
   assert.equal(find("active-hold").status, "HOLD", "active hold before expiry remains active");
@@ -70,6 +86,8 @@ async function main() {
     ok: true,
     checked: [
       "active hold before expiry remains active",
+      "expired HOLD is non-blocking before cleanup",
+      "one canonical blocking query covers BOOKED and active HOLD",
       "eligible hold expires",
       "BOOKED never expires",
       "CANCELLED/LOST not changed",

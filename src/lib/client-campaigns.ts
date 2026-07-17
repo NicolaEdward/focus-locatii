@@ -2,6 +2,7 @@ import type { AuthSession } from "@/lib/auth";
 import { normalizeClientName, normalizeInvoiceNumber, validAccountOwners } from "@/lib/clients";
 import { moneyNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
+import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
 
 export type ClientCampaignsData = {
   clients: ClientCampaignSummary[];
@@ -275,7 +276,7 @@ export async function getClientCampaignsData(session: AuthSession, query = ""): 
         client: { include: { accountOwner: { select: { id: true, name: true, email: true, role: true } } } },
         sellerUser: { select: { id: true, name: true, email: true } },
         reservations: {
-          where: { status: { in: ["BOOKED", "HOLD", "RESERVED"] } },
+          where: effectiveBlockingReservationWhere(),
           include: { location: { select: { code: true, city: true } } },
           orderBy: [{ periodStart: "asc" }]
         }

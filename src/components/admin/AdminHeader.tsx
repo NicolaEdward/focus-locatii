@@ -46,8 +46,8 @@ export function AdminHeader({ session }: { session: AuthSession }) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-focus-line bg-focus-navy/95 backdrop-blur">
-      <div className="focus-container grid min-h-20 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3 2xl:flex">
-        <div className="flex shrink-0 items-center gap-4">
+      <div className="focus-container grid min-h-20 min-w-0 grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 py-3 2xl:flex">
+        <div className="flex min-w-0 shrink-0 items-center gap-4">
           <FocusLogo href="/admin/dashboard" prefetch={false} />
           <div className="hidden border-l border-focus-line pl-4 lg:block">
             <p className="text-sm font-bold text-white">{session.name}</p>

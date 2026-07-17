@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -8,7 +9,7 @@ const NODE_BIN = process.execPath;
 const NEXT_BIN = require.resolve("next/dist/bin/next");
 const PORT = Number(process.env.VISUAL_SMOKE_PORT || 3013);
 const DEBUG_PORT = Number(process.env.VISUAL_CHROME_PORT || 9223);
-const BASE_URL = `http://127.0.0.1:${PORT}`;
+const BASE_URL = `http://localhost:${PORT}`;
 const CHROME = process.env.CHROME_PATH || "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const OUT_DIR = path.join(process.cwd(), "tmp", "visual-smoke");
 
@@ -156,7 +157,7 @@ async function inspectPage({ name, url, width, height, adminCookie, expectedText
     await client.send("Network.setCookie", {
       name: cookieName,
       value: cookieValue,
-      domain: "127.0.0.1",
+      domain: new URL(BASE_URL).hostname,
       path: "/",
       httpOnly: true,
       sameSite: "Lax"
@@ -240,7 +241,7 @@ async function inspectFinancialTab({ adminCookie }) {
   await client.send("Network.setCookie", {
     name: cookieName,
     value: cookieValue,
-    domain: "127.0.0.1",
+    domain: new URL(BASE_URL).hostname,
     path: "/",
     httpOnly: true,
     sameSite: "Lax"
@@ -298,11 +299,10 @@ async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const chromeUserData = fs.mkdtempSync(path.join(os.tmpdir(), "focus-chrome-"));
   const prisma = new PrismaClient();
-  let temporaryCooId = null;
 
   const server = spawn(NODE_BIN, [NEXT_BIN, "start", "-p", String(PORT), "-H", "127.0.0.1"], {
     cwd: process.cwd(),
-    env: process.env,
+    env: { ...process.env, NEXT_PUBLIC_BASE_URL: BASE_URL },
     stdio: ["ignore", "pipe", "pipe"]
   });
 
@@ -323,82 +323,57 @@ async function main() {
   try {
     await waitForServer();
     await waitForChrome();
-    const adminCookie = await loginCookie();
-    const cooEmail = `visual-coo-${Date.now()}@focusmedia.test`;
-    const cooPassword = `Visual-${Date.now()}-COO!`;
-    const cooResponse = await fetch(`${BASE_URL}/api/admin/users`, {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie: adminCookie },
-      body: JSON.stringify({ name: "Visual COO", email: cooEmail, password: cooPassword, role: "COO" })
-    });
-    assert(cooResponse.ok, "Could not create temporary COO for visual smoke.");
-    temporaryCooId = (await cooResponse.json()).user.id;
-    const cooCookie = await loginCookie(cooEmail, cooPassword);
+    const [coo, seller] = await Promise.all([
+      prisma.user.findFirst({ where: { active: true, role: { in: ["COO", "SUPER_ADMIN"] } }, select: { id: true, email: true, name: true, role: true, tokenVersion: true } }),
+      prisma.user.findFirst({ where: { active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } }, select: { id: true, email: true, name: true, role: true, tokenVersion: true } })
+    ]);
+    assert(coo, "No active COO/SUPER_ADMIN user is available for visual smoke.");
+    assert(seller, "No active Sales user is available for visual smoke.");
+    const cooCookie = sessionCookieFor(coo);
+    const sellerCookie = sessionCookieFor(seller);
     const screenshots = [];
 
-    screenshots.push(
-      await inspectPage({
-        name: "public-desktop",
-        url: `${BASE_URL}/locatii`,
-        width: 1440,
-        height: 1000,
-        expectedText: "Media plan"
-      })
-    );
-    screenshots.push(
-      await inspectPage({
-        name: "dashboard-desktop",
+    const viewports = [
+      { name: "desktop", width: 1440, height: 900 },
+      { name: "laptop", width: 1366, height: 768 },
+      { name: "tablet", width: 768, height: 1024 },
+      { name: "mobile", width: 390, height: 844 }
+    ];
+    for (const viewport of viewports) {
+      screenshots.push(await inspectPage({
+        ...viewport,
+        name: `coo-${viewport.name}`,
         url: `${BASE_URL}/admin/dashboard`,
-        width: 1440,
-        height: 1000,
-        adminCookie,
-        expectedText: "Buna, Administrator"
-      })
-    );
-    screenshots.push(
-      await inspectPage({
-        name: "coo-command-center-desktop",
-        url: `${BASE_URL}/admin/dashboard`,
-        width: 1440,
-        height: 1100,
         adminCookie: cooCookie,
-        expectedText: "Control operational OOH"
-      })
-    );
-    screenshots.push(await inspectFinancialTab({ adminCookie: cooCookie }));
-    screenshots.push(
-      await inspectPage({
-        name: "dashboard-mobile",
+        expectedText: "Rezumat executiv"
+      }));
+      screenshots.push(await inspectPage({
+        ...viewport,
+        name: `sales-${viewport.name}`,
         url: `${BASE_URL}/admin/dashboard`,
-        width: 390,
-        height: 844,
-        adminCookie,
-        expectedText: "Buna, Administrator"
-      })
-    );
-    screenshots.push(
-      await inspectPage({
-        name: "public-mobile",
-        url: `${BASE_URL}/locatii`,
-        width: 390,
-        height: 844,
-        expectedText: "Selectie locatii"
-      })
-    );
-    screenshots.push(
-      await inspectPage({
-        name: "admin-desktop",
-        url: `${BASE_URL}/admin/locatii`,
-        width: 1440,
-        height: 1100,
-        adminCookie,
-        expectedText: "Vanzari inchise in luna selectata"
-      })
-    );
+        adminCookie: sellerCookie,
+        expectedText: "Agenda mea"
+      }));
+    }
+    screenshots.push(await inspectPage({
+      name: "facturi-clienti-laptop",
+      url: `${BASE_URL}/admin/financiar/incasari?status=overdue`,
+      width: 1366,
+      height: 768,
+      adminCookie: cooCookie,
+      expectedText: "Facturi clienți"
+    }));
+    screenshots.push(await inspectPage({
+      name: "selector-laptop",
+      url: `${BASE_URL}/admin/selectie-locatii`,
+      width: 1366,
+      height: 768,
+      adminCookie: cooCookie,
+      expectedText: "Selector oferta"
+    }));
 
     console.log(JSON.stringify({ ok: true, screenshots }, null, 2));
   } finally {
-    if (temporaryCooId) await prisma.user.delete({ where: { id: temporaryCooId } }).catch(() => null);
     await prisma.$disconnect();
     server.kill();
     chrome.kill();
@@ -407,6 +382,18 @@ async function main() {
     if (!chrome.killed) chrome.kill("SIGKILL");
     fs.rmSync(chromeUserData, { recursive: true, force: true });
   }
+}
+
+function sessionCookieFor(user) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = base64url(JSON.stringify({ ...user, iat: now, exp: now + 60 * 60 * 12 }));
+  const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "focus-media-local-development-secret-change-me";
+  const signature = base64url(crypto.createHmac("sha256", secret).update(payload).digest());
+  return `focus_admin_session=${payload}.${signature}`;
+}
+
+function base64url(value) {
+  return Buffer.from(value).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 main().catch((error) => {

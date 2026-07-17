@@ -53,6 +53,10 @@ async function main() {
     () => createHold(ctx.locationA.id, "2026-01-05", "2026-01-12", agentSession),
     "overlapping create is rejected"
   );
+  await rejects(
+    () => createHold(ctx.locationA.id, "2026-01-10", "2026-01-15", agentSession),
+    "same-day boundary is rejected under inclusive interval semantics"
+  );
 
   const nonOverlap = await createHold(ctx.locationA.id, "2026-01-11", "2026-01-20", agentSession);
   assert.equal(nonOverlap.status, "RESERVED", "non-overlapping create succeeds");

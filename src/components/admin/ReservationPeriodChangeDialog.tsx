@@ -249,7 +249,7 @@ function periodValidationError(periodStart: string, periodEnd: string) {
   const start = Date.parse(`${periodStart}T00:00:00.000Z`);
   const end = Date.parse(`${periodEnd}T00:00:00.000Z`);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return "Datele nu sunt valide.";
-  if (end <= start) return "Data de final trebuie sa fie dupa data de start.";
+  if (end < start) return "Data de final nu poate fi inainte de data de start.";
   return null;
 }
 

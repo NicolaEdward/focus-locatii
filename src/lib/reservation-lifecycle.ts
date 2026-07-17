@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { recordAudit, type AuditActor } from "@/lib/audit";
 
@@ -8,6 +9,44 @@ export function holdExpirationFrom(value = new Date()) {
   const expiresAt = new Date(value);
   expiresAt.setUTCDate(expiresAt.getUTCDate() + HOLD_DURATION_DAYS);
   return expiresAt;
+}
+
+export function effectiveHoldExpiresAt(input: { holdExpiresAt: Date | null; createdAt: Date }) {
+  return input.holdExpiresAt || holdExpirationFrom(input.createdAt);
+}
+
+export function isEffectiveHold(
+  input: { status: string; holdExpiresAt: Date | null; createdAt: Date },
+  now = new Date()
+) {
+  return holdStatuses.includes(input.status as (typeof holdStatuses)[number]) && effectiveHoldExpiresAt(input) > now;
+}
+
+export function isEffectiveBlockingReservation(
+  input: { status: string; holdExpiresAt: Date | null; createdAt: Date },
+  now = new Date()
+) {
+  return input.status === "BOOKED" || isEffectiveHold(input, now);
+}
+
+export function effectiveHoldWhere(now = new Date()): Prisma.ReservationWhereInput {
+  const legacyCutoff = holdLegacyCutoff(now);
+  return {
+    status: { in: [...holdStatuses] },
+    OR: [
+      { holdExpiresAt: { gt: now } },
+      { holdExpiresAt: null, createdAt: { gt: legacyCutoff } }
+    ]
+  };
+}
+
+export function effectiveBlockingReservationWhere(now = new Date()): Prisma.ReservationWhereInput {
+  return {
+    OR: [
+      { status: "BOOKED" },
+      effectiveHoldWhere(now)
+    ]
+  };
 }
 
 export function reservationLifecycleData(status: string, existingBookedAt?: Date | null, now = new Date()) {
@@ -39,8 +78,7 @@ export async function expireStaleHoldsCommand(input: {
   actor?: AuditActor | null;
 } = {}) {
   const now = input.now || new Date();
-  const legacyCutoff = new Date(now);
-  legacyCutoff.setUTCDate(legacyCutoff.getUTCDate() - HOLD_DURATION_DAYS);
+  const legacyCutoff = holdLegacyCutoff(now);
 
   const result = await prisma.$transaction(async (tx) => {
     const eligible = await tx.reservation.findMany({
@@ -79,6 +117,12 @@ export async function expireStaleHoldsCommand(input: {
   }
 
   return result.count;
+}
+
+function holdLegacyCutoff(now: Date) {
+  const legacyCutoff = new Date(now);
+  legacyCutoff.setUTCDate(legacyCutoff.getUTCDate() - HOLD_DURATION_DAYS);
+  return legacyCutoff;
 }
 
 function staleHoldWhere(now: Date, legacyCutoff: Date) {

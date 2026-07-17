@@ -18,7 +18,3 @@ export function decimalString(value: Prisma.Decimal | number | string | null | u
 export function daysFromToday(value: Date, today: Date) {
   return Math.floor((startOfUtcDay(value).getTime() - today.getTime()) / DAY_MS);
 }
-
-export function activeHoldExpiry(input: { holdExpiresAt: Date | null; createdAt: Date }, holdDurationDays = 14) {
-  return input.holdExpiresAt || addUtcDays(input.createdAt, holdDurationDays);
-}

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import type { AuthSession } from "@/lib/auth";
 import { paymentTermDays } from "@/lib/billing";
 import { companyEntityOrDefault, companyEntityOrThrow } from "@/lib/company-entities";
+import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
 
 const optionalText = z.preprocess((value) => {
   if (value == null || value === "") return null;
@@ -77,7 +78,7 @@ export async function updateCampaign(id: string, input: unknown, actor: AuthSess
   if (!existing) throw new Error("Campania nu exista.");
   assertCanMutateCampaign(existing, actor);
   if (parsed.clientId && parsed.clientId !== existing.clientId) {
-    const activeRentals = await prisma.reservation.count({ where: { campaignId: id, status: { in: ["BOOKED", "HOLD", "RESERVED"] } } });
+    const activeRentals = await prisma.reservation.count({ where: { campaignId: id, ...effectiveBlockingReservationWhere() } });
     if (activeRentals > 0) {
       throw new Error("Nu poti schimba clientul unei campanii cu inchirieri sau hold-uri active. Muta/anuleaza intai inregistrarile legate.");
     }
@@ -104,7 +105,7 @@ export async function archiveCampaign(id: string, actor: AuthSession) {
   const existing = await prisma.campaign.findUnique({ where: { id }, include: { client: true } });
   if (!existing) throw new Error("Campania nu exista.");
   assertCanMutateCampaign(existing, actor);
-  const activeRentals = await prisma.reservation.count({ where: { campaignId: id, status: { in: ["BOOKED", "HOLD", "RESERVED"] } } });
+  const activeRentals = await prisma.reservation.count({ where: { campaignId: id, ...effectiveBlockingReservationWhere() } });
   if (activeRentals > 0) {
     throw new Error("Campania are inchirieri/hold-uri active. Anuleaza-le sau muta-le inainte de arhivare.");
   }

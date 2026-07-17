@@ -4,12 +4,11 @@ import { serializeLocation } from "@/lib/locations";
 import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/rbac";
 import type { AuthSession } from "@/lib/auth";
+import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
 
 type Context = {
   params: Promise<{ id: string }>;
 };
-
-const activeTimelineStatuses = ["HOLD", "RESERVED", "BOOKED"] as const;
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,7 +22,8 @@ export async function GET(request: NextRequest, context: Context) {
   if (response || !session) return response;
 
   const { id } = await context.params;
-  const today = startOfUtcDay(new Date());
+  const now = new Date();
+  const today = startOfUtcDay(now);
 
   const location = await prisma.location.findUnique({
     where: { id },
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest, context: Context) {
       },
       reservations: {
         where: {
-          status: { in: [...activeTimelineStatuses] },
+          ...effectiveBlockingReservationWhere(now),
           periodEnd: { gte: today }
         },
         orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest, context: Context) {
   const reservations = await prisma.reservation.findMany({
     where: {
       locationId: id,
-      status: { in: [...activeTimelineStatuses] },
+      ...effectiveBlockingReservationWhere(now),
       periodEnd: { gte: today }
     },
     include: {

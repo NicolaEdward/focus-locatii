@@ -3,7 +3,9 @@ import type { AuthSession } from "@/lib/auth";
 import { effectiveInstallationDate } from "@/lib/installation-date";
 import { effectiveNeutralizationDate } from "@/lib/neutralization-date";
 import { operationStatus } from "@/lib/operation-status";
+import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
+import { effectiveHoldExpiresAt, effectiveHoldWhere } from "@/lib/reservation-lifecycle";
 import { addUtcDays, daysFromToday, decimalString, startOfUtcDay } from "@/lib/dashboard/dashboard-utils";
 
 export type SalesAgendaItem = {
@@ -81,13 +83,14 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
       where: { status: "BOOKED", ...reservationOwnership, periodEnd: { gte: addUtcDays(today, -90) } },
       select: {
         id: true, campaignId: true, clientName: true, campaignName: true, periodStart: true, periodEnd: true,
-        installationDate: true, neutralizationDate: true, productionNotes: true, location: { select: { code: true } }
+        installationDate: true, neutralizationDate: true, productionNotes: true, location: { select: { code: true } },
+        _count: { select: { documents: { where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active" } } } }
       },
       orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }], take: 180
     }),
     prisma.reservation.findMany({
-      where: { status: { in: ["HOLD", "RESERVED"] }, ...reservationOwnership },
-      select: { id: true, clientName: true, campaignName: true, holdExpiresAt: true, createdAt: true, location: { select: { code: true } } },
+      where: { AND: [effectiveHoldWhere(now), reservationOwnership] },
+      select: { id: true, status: true, clientName: true, campaignName: true, holdExpiresAt: true, createdAt: true, location: { select: { code: true } } },
       orderBy: { holdExpiresAt: "asc" }, take: 30
     }),
     Promise.all([
@@ -184,11 +187,11 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
       href: `/admin/campanii?campaignId=${encodeURIComponent(row.id)}`
     })),
     operations: operationalItems.slice(0, 10),
-    holds: holds.map((row) => ({
+    holds: holds.filter((row) => row.status === "HOLD" || row.status === "RESERVED").map((row) => ({
       id: row.id, locationCode: row.location.code, clientName: row.clientName, campaignName: row.campaignName,
-      expiresAt: (row.holdExpiresAt || addUtcDays(row.createdAt, 14)).toISOString(),
+      expiresAt: effectiveHoldExpiresAt(row).toISOString(),
       href: `/admin/locatii?reservationId=${encodeURIComponent(row.id)}#rezervari`
-    })).filter((row) => new Date(row.expiresAt) >= today).slice(0, 8)
+    })).slice(0, 8)
   };
 }
 
@@ -197,6 +200,7 @@ function salesOperation(row: any, kind: "decoration" | "neutralization", date: D
     id: `${kind}-${row.id}`, reservationId: row.id, campaignId: row.campaignId || null, kind,
     status: operationStatus(row.productionNotes, kind), locationCode: row.location.code,
     clientName: row.clientName, campaignName: row.campaignName || null, dueDate: date?.toISOString() || null,
+    proofPhotoCount: row._count.documents,
     overdue: Boolean(date && startOfUtcDay(date) < today),
     href: `/admin/operational?panel=${kind === "decoration" ? "decorations" : "neutralizations"}&reservationId=${encodeURIComponent(row.id)}`
   };

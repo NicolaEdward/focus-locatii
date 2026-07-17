@@ -550,7 +550,12 @@ export function AdminReservationsPanel({
     () =>
       reservations
         .filter((reservation) => ["HOLD", "RESERVED"].includes(reservation.status))
-        .filter((reservation) => !reservation.holdExpiresAt || new Date(reservation.holdExpiresAt) > new Date())
+        .filter((reservation) => {
+          const expiresAt = reservation.holdExpiresAt
+            ? new Date(reservation.holdExpiresAt)
+            : addDays(new Date(reservation.createdAt), 5);
+          return expiresAt > new Date();
+        })
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     [reservations]
   );
@@ -3822,7 +3827,7 @@ function reservationPeriodError(periodStart: string, periodEnd: string) {
   const start = Date.parse(`${periodStart}T00:00:00.000Z`);
   const end = Date.parse(`${periodEnd}T00:00:00.000Z`);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return "Perioada campaniei nu este valida.";
-  if (end <= start) return "Data de final trebuie sa fie dupa data de start.";
+  if (end < start) return "Data de final nu poate fi inainte de data de start.";
   return null;
 }
 

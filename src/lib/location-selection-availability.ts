@@ -1,8 +1,7 @@
-import type { ReservationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { hasGlobalDataAccess } from "@/lib/rbac";
 import type { AuthSession } from "@/lib/auth";
-import { HOLD_DURATION_DAYS } from "@/lib/reservation-lifecycle";
+import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
 import {
   isManualAvailabilityStatus,
   legacyManualBlockConflict,
@@ -62,7 +61,7 @@ export async function getLocationSelectionAvailability(input: {
       prisma.reservation.findMany({
         where: {
           locationId: { in: locationIds },
-          ...activeBlockingReservationWhere(referenceDate),
+          ...effectiveBlockingReservationWhere(new Date()),
           periodEnd: { gte: referenceDate }
         },
         select: {
@@ -119,7 +118,7 @@ export async function getLocationSelectionAvailability(input: {
     prisma.reservation.findMany({
       where: {
         locationId: { in: locationIds },
-        ...activeBlockingReservationWhere(new Date()),
+        ...effectiveBlockingReservationWhere(new Date()),
         periodStart: { lte: periodEnd },
         periodEnd: { gte: periodStart }
       },
@@ -529,22 +528,6 @@ function parseDate(value?: string | null) {
 
 function unique(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
-}
-
-function activeBlockingReservationWhere(now: Date) {
-  const legacyHoldCutoff = addDays(now, -HOLD_DURATION_DAYS);
-  return {
-    OR: [
-      { status: "BOOKED" as ReservationStatus },
-      {
-        status: { in: ["HOLD", "RESERVED"] as ReservationStatus[] },
-        OR: [
-          { holdExpiresAt: { gt: now } },
-          { holdExpiresAt: null, createdAt: { gt: legacyHoldCutoff } }
-        ]
-      }
-    ]
-  };
 }
 
 function groupByLocationId<T extends { locationId: string }>(rows: T[]) {

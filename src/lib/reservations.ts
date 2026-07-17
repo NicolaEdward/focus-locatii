@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { expireStaleHolds, reservationLifecycleData } from "@/lib/reservation-lifecycle";
+import { effectiveBlockingReservationWhere, expireStaleHolds, reservationLifecycleData } from "@/lib/reservation-lifecycle";
 import type { ReservationDTO } from "@/types/location";
 import type { AuthSession } from "@/lib/auth";
 import { assertReservationTransition } from "@/lib/reservation-workflow";
@@ -203,7 +203,6 @@ export async function listReservations(filters: {
   from?: string | null;
   to?: string | null;
 } = {}, actor?: AuthSession | null, options: { includeDetails?: boolean } = {}) {
-  await expireStaleHolds();
   const from = parseDate(filters.from);
   const to = parseDate(filters.to);
   const where: Prisma.ReservationWhereInput = {
@@ -973,7 +972,7 @@ async function assertNoReservationConflict(
   const conflict = await client.reservation.findFirst({
     where: {
       locationId,
-      status: { in: [...activeReservationStatuses] },
+      ...effectiveBlockingReservationWhere(new Date()),
       ...(ignoreId ? { id: { not: ignoreId } } : {}),
       periodStart: { lte: periodEnd },
       periodEnd: { gte: periodStart }

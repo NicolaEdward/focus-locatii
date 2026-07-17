@@ -11,10 +11,17 @@ import {
   crmLeadAttention,
   crmLeadClassificationAttention,
   crmLeadScope,
+  crmOpportunityPriority,
+  crmQualificationScore,
+  crmStageAgeDays,
+  crmStageIsStalled,
+  crmStatusAtLeast,
   monthlyCrmOutcomes,
+  normalizeCrmQualificationData,
   normalizeCrmStatus,
   summarizeCrmLeads,
-  validateCrmState
+  validateCrmState,
+  type CrmQualificationData
 } from "@/lib/crm";
 import { prisma } from "@/lib/prisma";
 
@@ -47,10 +54,12 @@ export async function listCrmLeads(input: CrmListInput, actor: AuthSession) {
         ? [{
             OR: [
               { companyName: { contains: query } },
+              { opportunityName: { contains: query } },
               { contactName: { contains: query } },
               { email: { contains: query } },
               { phone: { contains: query } },
               { locationsInterested: { contains: query } },
+              { nextStep: { contains: query } },
               { assignedTo: { name: { contains: query } } }
             ]
           }]
@@ -78,7 +87,13 @@ export async function listCrmLeads(input: CrmListInput, actor: AuthSession) {
         estimatedValue: true,
         currency: true,
         probability: true,
-        updatedAt: true
+        updatedAt: true,
+        stageChangedAt: true,
+        firstContactedAt: true,
+        qualifiedAt: true,
+        lastActivityAt: true,
+        qualificationData: true,
+        noResponseCount: true
       }
     }),
     prisma.crmActivity.findMany({
@@ -155,6 +170,7 @@ export async function getCrmLead(id: string, actor: AuthSession) {
 export async function createCrmLead(input: {
   leadDate?: Date | null;
   companyName: string;
+  opportunityName?: string | null;
   clientType?: string | null;
   clientId?: string | null;
   contactName?: string | null;
@@ -169,6 +185,8 @@ export async function createCrmLead(input: {
   probability?: number | null;
   expectedCloseDate?: Date | null;
   nextFollowUpDate?: Date | null;
+  nextStep?: string | null;
+  qualificationData?: Partial<CrmQualificationData> | null;
   locationsInterested?: string | null;
   notes?: string | null;
 }, actor: AuthSession) {
@@ -180,9 +198,14 @@ export async function createCrmLead(input: {
     clientId: input.clientId
   });
   const probability = input.probability ?? crmDefaultProbability(status);
+  const now = new Date();
+  const firstContactedAt = crmStatusAtLeast(status, "contacted") ? now : null;
+  const qualifiedAt = crmStatusAtLeast(status, "qualified") ? now : null;
+  const nextStep = input.nextStep?.trim() || "Contact initial";
   return prisma.crmLead.create({
     data: {
       companyName: input.companyName,
+      opportunityName: input.opportunityName,
       leadDate: input.leadDate || new Date(),
       clientType: input.clientType,
       clientId: input.clientId,
@@ -198,8 +221,15 @@ export async function createCrmLead(input: {
       probability,
       expectedCloseDate: input.expectedCloseDate,
       nextFollowUpDate: input.nextFollowUpDate,
+      nextStep,
+      qualificationData: normalizeCrmQualificationData(input.qualificationData) as Prisma.InputJsonValue,
       locationsInterested: input.locationsInterested,
       notes: input.notes,
+      stageChangedAt: now,
+      firstContactedAt,
+      qualifiedAt,
+      lastContactAt: firstContactedAt,
+      lastActivityAt: now,
       contacts: input.contactName
         ? {
             create: {
@@ -220,7 +250,7 @@ export async function createCrmLead(input: {
           details: input.notes || "Lead creat.",
           locations: input.locationsInterested,
           nextFollowUpDate: input.nextFollowUpDate,
-          nextStep: "Contact initial",
+          nextStep,
           note: input.notes || "Lead creat."
         }
       }
@@ -235,6 +265,7 @@ export async function createCrmLead(input: {
 
 export async function updateCrmLead(id: string, patch: {
   companyName?: string;
+  opportunityName?: string | null;
   leadDate?: Date | null;
   clientType?: string | null;
   clientId?: string | null;
@@ -249,9 +280,12 @@ export async function updateCrmLead(id: string, patch: {
   probability?: number | null;
   expectedCloseDate?: Date | null;
   nextFollowUpDate?: Date | null;
+  nextStep?: string | null;
+  qualificationData?: Partial<CrmQualificationData> | null;
   locationsInterested?: string | null;
   notes?: string | null;
   lostReason?: string | null;
+  lostReasonCode?: string | null;
   activityNote?: string | null;
 }, actor: AuthSession) {
   const existing = await prisma.crmLead.findUnique({ where: { id } });
@@ -264,10 +298,17 @@ export async function updateCrmLead(id: string, patch: {
   const nextClientId = patch.clientId === undefined ? existing.clientId : patch.clientId;
   const nextFollowUpDate = patch.nextFollowUpDate === undefined ? existing.nextFollowUpDate : patch.nextFollowUpDate;
   const nextLostReason = patch.lostReason === undefined ? existing.lostReason : patch.lostReason;
+  const nextLostReasonCode = patch.lostReasonCode === undefined ? existing.lostReasonCode : patch.lostReasonCode;
+  const nextNextStep = isTerminalStatus(nextStatus)
+    ? null
+    : patch.nextStep === undefined
+      ? existing.nextStep
+      : patch.nextStep;
   validateCrmState({
     status: nextStatus,
     nextFollowUpDate,
     lostReason: nextLostReason,
+    lostReasonCode: nextLostReasonCode,
     clientId: nextClientId
   });
   const statusChanged = nextStatus !== normalizeCrmStatus(existing.status);
@@ -280,11 +321,18 @@ export async function updateCrmLead(id: string, patch: {
     : shouldApplyStageProbability
       ? crmDefaultProbability(nextStatus)
       : existing.probability;
+  const now = new Date();
+  const firstContactedAt = existing.firstContactedAt
+    || (crmStatusAtLeast(nextStatus, "contacted") ? now : null);
+  const qualifiedAt = existing.qualifiedAt
+    || (crmStatusAtLeast(nextStatus, "qualified") ? now : null);
+  const activityChanged = statusChanged || ownerChanged || Boolean(patch.activityNote);
 
   return prisma.crmLead.update({
     where: { id },
     data: {
       ...(patch.companyName !== undefined ? { companyName: patch.companyName } : {}),
+      ...(patch.opportunityName !== undefined ? { opportunityName: patch.opportunityName } : {}),
       ...(patch.leadDate !== undefined ? { leadDate: patch.leadDate } : {}),
       ...(patch.clientType !== undefined ? { clientType: patch.clientType } : {}),
       ...(patch.clientId !== undefined ? { clientId: patch.clientId } : {}),
@@ -299,10 +347,19 @@ export async function updateCrmLead(id: string, patch: {
       ...(patch.probability !== undefined || shouldApplyStageProbability ? { probability: nextProbability } : {}),
       ...(patch.expectedCloseDate !== undefined ? { expectedCloseDate: patch.expectedCloseDate } : {}),
       ...(patch.nextFollowUpDate !== undefined ? { nextFollowUpDate: patch.nextFollowUpDate } : {}),
+      ...(patch.nextStep !== undefined || isTerminalStatus(nextStatus) ? { nextStep: nextNextStep } : {}),
+      ...(patch.qualificationData !== undefined
+        ? { qualificationData: normalizeCrmQualificationData(patch.qualificationData) as Prisma.InputJsonValue }
+        : {}),
       ...(patch.locationsInterested !== undefined ? { locationsInterested: patch.locationsInterested } : {}),
       ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
       ...(patch.lostReason !== undefined ? { lostReason: patch.lostReason } : {}),
-      activities: statusChanged || ownerChanged || patch.activityNote
+      ...(patch.lostReasonCode !== undefined ? { lostReasonCode: patch.lostReasonCode } : {}),
+      ...(statusChanged ? { stageChangedAt: now } : {}),
+      ...(firstContactedAt && !existing.firstContactedAt ? { firstContactedAt } : {}),
+      ...(qualifiedAt && !existing.qualifiedAt ? { qualifiedAt } : {}),
+      ...(activityChanged ? { lastActivityAt: now } : {}),
+      activities: activityChanged
         ? {
             create: {
               userId: actor.id,
@@ -312,7 +369,7 @@ export async function updateCrmLead(id: string, patch: {
               details: patch.activityNote || (ownerChanged ? "Responsabil CRM schimbat." : null),
               locations: patch.locationsInterested,
               nextFollowUpDate,
-              nextStep: isTerminalStatus(nextStatus) ? null : "Continua follow-up-ul comercial.",
+              nextStep: isTerminalStatus(nextStatus) ? null : nextNextStep || "Continua follow-up-ul comercial.",
               note: patch.activityNote || (statusChanged ? `Status schimbat din ${normalizeCrmStatus(existing.status)} in ${nextStatus}.` : "Lead actualizat.")
             }
           }
@@ -355,10 +412,19 @@ export async function addCrmActivity(leadId: string, input: {
     status: nextStatus,
     nextFollowUpDate,
     lostReason: lead.lostReason,
+    lostReasonCode: lead.lostReasonCode,
     clientId: lead.clientId
   });
   const shouldApplyStageProbability = nextStatus !== currentStatus
     && (lead.probability == null || lead.probability === crmDefaultProbability(currentStatus));
+  const activityDate = input.activityDate || new Date();
+  const isNoResponse = input.actionType === "call_no_answer";
+  const isContactAttempt = crmContactActionTypes.has(input.actionType) || isNoResponse;
+  const isConfirmedContact = crmConfirmedContactActionTypes.has(input.actionType);
+  const firstContactedAt = lead.firstContactedAt
+    || (isConfirmedContact || crmStatusAtLeast(nextStatus, "contacted") ? activityDate : null);
+  const qualifiedAt = lead.qualifiedAt
+    || (crmStatusAtLeast(nextStatus, "qualified") ? activityDate : null);
   return prisma.$transaction(async (tx) => {
     const activity = await tx.crmActivity.create({
       data: {
@@ -366,7 +432,7 @@ export async function addCrmActivity(leadId: string, input: {
         userId: actor.id,
         type: input.actionType,
         actionType: input.actionType,
-        activityDate: input.activityDate || new Date(),
+        activityDate,
         statusAtTime: nextStatus,
         details: input.details,
         locations: input.locations,
@@ -380,8 +446,19 @@ export async function addCrmActivity(leadId: string, input: {
       where: { id: leadId },
       data: {
         nextFollowUpDate,
+        nextStep: input.nextStep === undefined ? lead.nextStep : input.nextStep,
         ...(nextStatus !== currentStatus ? { status: nextStatus } : {}),
+        ...(nextStatus !== currentStatus ? { stageChangedAt: activityDate } : {}),
         ...(shouldApplyStageProbability ? { probability: crmDefaultProbability(nextStatus) } : {}),
+        ...(firstContactedAt && !lead.firstContactedAt ? { firstContactedAt } : {}),
+        ...(qualifiedAt && !lead.qualifiedAt ? { qualifiedAt } : {}),
+        ...(isContactAttempt ? { lastContactAt: activityDate } : {}),
+        lastActivityAt: activityDate,
+        ...(isNoResponse
+          ? { noResponseCount: { increment: 1 } }
+          : isConfirmedContact
+            ? { noResponseCount: 0 }
+            : {}),
         ...(input.locations !== undefined ? { locationsInterested: input.locations } : {})
       }
     });
@@ -421,6 +498,7 @@ export async function findCrmDuplicates(query: string, actor: AuthSession) {
       select: {
         id: true,
         companyName: true,
+        opportunityName: true,
         status: true,
         assignedTo: { select: { id: true, name: true } }
       },
@@ -482,6 +560,10 @@ export async function convertCrmLeadToClient(input: {
         clientId: client.id,
         status: "won",
         nextFollowUpDate: null,
+        nextStep: null,
+        probability: 100,
+        stageChangedAt: new Date(),
+        lastActivityAt: new Date(),
         activities: {
           create: {
             userId: actor.id,
@@ -588,6 +670,7 @@ const crmLeadSummarySelect = {
   id: true,
   leadDate: true,
   companyName: true,
+  opportunityName: true,
   clientType: true,
   contactName: true,
   phone: true,
@@ -601,8 +684,17 @@ const crmLeadSummarySelect = {
   probability: true,
   expectedCloseDate: true,
   nextFollowUpDate: true,
+  nextStep: true,
+  qualificationData: true,
   locationsInterested: true,
   lostReason: true,
+  lostReasonCode: true,
+  stageChangedAt: true,
+  firstContactedAt: true,
+  qualifiedAt: true,
+  lastContactAt: true,
+  lastActivityAt: true,
+  noResponseCount: true,
   createdAt: true,
   updatedAt: true,
   assignedTo: { select: { id: true, name: true, email: true, role: true } },
@@ -623,6 +715,7 @@ const crmLeadSummarySelect = {
 } satisfies Prisma.CrmLeadSelect;
 
 function serializeCrmLeadSummary(row: Prisma.CrmLeadGetPayload<{ select: typeof crmLeadSummarySelect }>) {
+  const qualification = crmQualificationScore(row.qualificationData);
   return {
     ...row,
     status: normalizeCrmStatus(row.status),
@@ -633,6 +726,15 @@ function serializeCrmLeadSummary(row: Prisma.CrmLeadGetPayload<{ select: typeof 
     updatedAt: row.updatedAt.toISOString(),
     attention: crmLeadAttention(row),
     classificationAttention: crmLeadClassificationAttention(row),
+    qualification,
+    stageAgeDays: crmStageAgeDays(row.stageChangedAt),
+    stageStalled: crmStageIsStalled(row),
+    priority: crmOpportunityPriority(row),
+    stageChangedAt: row.stageChangedAt.toISOString(),
+    firstContactedAt: row.firstContactedAt?.toISOString() || null,
+    qualifiedAt: row.qualifiedAt?.toISOString() || null,
+    lastContactAt: row.lastContactAt?.toISOString() || null,
+    lastActivityAt: row.lastActivityAt?.toISOString() || null,
     latestActivity: row.activities[0]
       ? {
           ...row.activities[0],
@@ -648,6 +750,7 @@ function serializeCrmLeadDetail(
   lead: Awaited<ReturnType<typeof prisma.crmLead.findFirst>> & Record<string, any>,
   campaigns: Array<Record<string, any>>
 ) {
+  const qualification = crmQualificationScore(lead.qualificationData);
   return {
     ...lead,
     status: normalizeCrmStatus(lead.status),
@@ -656,6 +759,16 @@ function serializeCrmLeadDetail(
     nextFollowUpDate: lead.nextFollowUpDate?.toISOString() || null,
     createdAt: lead.createdAt.toISOString(),
     updatedAt: lead.updatedAt.toISOString(),
+    qualificationData: normalizeCrmQualificationData(lead.qualificationData),
+    qualification,
+    stageAgeDays: crmStageAgeDays(lead.stageChangedAt),
+    stageStalled: crmStageIsStalled(lead),
+    priority: crmOpportunityPriority(lead),
+    stageChangedAt: lead.stageChangedAt.toISOString(),
+    firstContactedAt: lead.firstContactedAt?.toISOString() || null,
+    qualifiedAt: lead.qualifiedAt?.toISOString() || null,
+    lastContactAt: lead.lastContactAt?.toISOString() || null,
+    lastActivityAt: lead.lastActivityAt?.toISOString() || null,
     activities: (lead.activities || []).map((activity: Record<string, any>) => ({
       ...activity,
       activityDate: activity.activityDate.toISOString(),
@@ -694,3 +807,25 @@ async function resolveCrmAssignee(actor: AuthSession, requestedId?: string | nul
 function isTerminalStatus(status: string) {
   return ["won", "lost", "inactive"].includes(normalizeCrmStatus(status));
 }
+
+const crmContactActionTypes = new Set([
+  "telefon",
+  "email",
+  "whatsapp",
+  "meeting",
+  "vizita",
+  "call_connected",
+  "email_sent",
+  "meeting_held"
+]);
+
+const crmConfirmedContactActionTypes = new Set([
+  "telefon",
+  "email",
+  "whatsapp",
+  "meeting",
+  "vizita",
+  "call_connected",
+  "email_sent",
+  "meeting_held"
+]);

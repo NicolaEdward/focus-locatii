@@ -4,6 +4,8 @@ import { recordAudit } from "@/lib/audit";
 import {
   CRM_ACTIVE_DB_STATUSES,
   crmLeadClassificationAttention,
+  crmStageAgeDays,
+  crmStageIsStalled,
   crmStatusLabel,
   normalizeCrmStatus,
   startOfUtcDay
@@ -20,7 +22,9 @@ const crmNotificationTypes = [
   "crm_followup_due_today",
   "crm_followup_due_tomorrow",
   "crm_next_step_missing",
-  "crm_classification_due"
+  "crm_classification_due",
+  "crm_stage_stalled",
+  "crm_no_response_attention"
 ];
 
 type OperationalNotificationInput = {
@@ -115,9 +119,13 @@ export async function syncCrmNotifications(now = new Date()) {
     select: {
       id: true,
       companyName: true,
+      opportunityName: true,
       status: true,
       assignedToUserId: true,
       nextFollowUpDate: true,
+      nextStep: true,
+      stageChangedAt: true,
+      noResponseCount: true,
       updatedAt: true
     },
     take: 2000
@@ -128,6 +136,7 @@ export async function syncCrmNotifications(now = new Date()) {
   for (const lead of leads) {
     if (!lead.assignedToUserId) continue;
     const classificationAttention = crmLeadClassificationAttention(lead, now);
+    const stageStalled = crmStageIsStalled(lead, now);
     const type = !lead.nextFollowUpDate
       ? "crm_next_step_missing"
       : lead.nextFollowUpDate < today
@@ -136,9 +145,13 @@ export async function syncCrmNotifications(now = new Date()) {
           ? "crm_followup_due_today"
           : lead.nextFollowUpDate < dayAfterTomorrow
             ? "crm_followup_due_tomorrow"
-            : classificationAttention
-              ? "crm_classification_due"
-              : null;
+            : lead.noResponseCount >= 3
+              ? "crm_no_response_attention"
+              : classificationAttention
+                ? "crm_classification_due"
+                : stageStalled
+                  ? "crm_stage_stalled"
+                  : null;
     if (!type) continue;
     desiredKeys.add(notificationKey(lead.assignedToUserId, type, "crm_lead", lead.id));
     const classificationTitle = classificationAttention === "cold"
@@ -153,23 +166,36 @@ export async function syncCrmNotifications(now = new Date()) {
           ? "Follow-up CRM pentru azi"
           : type === "crm_followup_due_tomorrow"
             ? "Follow-up CRM pentru maine"
-            : type === "crm_classification_due"
-              ? classificationTitle
-              : "Lead fara urmator pas",
-      message: `${lead.companyName} este in etapa ${crmStatusLabel(lead.status)}.`,
+            : type === "crm_no_response_attention"
+              ? "Client greu de contactat"
+              : type === "crm_classification_due"
+                ? classificationTitle
+                : type === "crm_stage_stalled"
+                  ? "Oportunitate blocata in etapa"
+                  : "Lead fara urmator pas",
+      message: `${lead.companyName}${lead.opportunityName ? ` / ${lead.opportunityName}` : ""} este in etapa ${crmStatusLabel(lead.status)}.`,
       entityType: "crm_lead",
       entityId: lead.id,
       severity: type === "crm_followup_overdue" ? "high" : "medium",
-      dueDate: type === "crm_classification_due" ? today : lead.nextFollowUpDate,
-      recommendedAction: type === "crm_classification_due"
-        ? classificationAttention === "cold"
-          ? "Contacteaza prospectul sau inchide-l daca nu mai este relevant."
-          : "Confirma nevoia, perioada si bugetul, apoi actualizeaza etapa."
-        : "Deschide lead-ul si inregistreaza urmatoarea activitate.",
+      dueDate: ["crm_classification_due", "crm_stage_stalled", "crm_no_response_attention"].includes(type)
+        ? today
+        : lead.nextFollowUpDate,
+      recommendedAction: type === "crm_no_response_attention"
+        ? "Schimba canalul de contact sau decide daca oportunitatea ramane activa."
+        : type === "crm_classification_due"
+          ? classificationAttention === "cold"
+            ? "Contacteaza prospectul sau inchide-l daca nu mai este relevant."
+            : "Confirma nevoia, perioada si bugetul, apoi actualizeaza etapa."
+          : type === "crm_stage_stalled"
+            ? `Oportunitatea este in aceeasi etapa de ${crmStageAgeDays(lead.stageChangedAt, now)} zile. Stabileste decizia urmatoare.`
+            : "Deschide lead-ul si inregistreaza urmatoarea activitate.",
       metadata: {
         companyName: lead.companyName,
         crmStatus: normalizeCrmStatus(lead.status),
-        classificationAttention
+        classificationAttention,
+        stageAgeDays: crmStageAgeDays(lead.stageChangedAt, now),
+        noResponseCount: lead.noResponseCount,
+        nextStep: lead.nextStep
       }
     });
   }

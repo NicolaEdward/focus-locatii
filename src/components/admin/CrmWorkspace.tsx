@@ -22,10 +22,14 @@ import {
   X
 } from "lucide-react";
 import {
+  CRM_LOST_REASON_OPTIONS,
+  CRM_QUALIFICATION_ITEMS,
+  CRM_SOURCE_OPTIONS,
   CRM_STATUS_OPTIONS,
   crmDefaultProbability,
   crmStatusDescription,
   isActiveCrmStatus,
+  type CrmQualificationData,
   type CrmStatus
 } from "@/lib/crm";
 
@@ -37,6 +41,11 @@ type Summary = {
   dueToday: number;
   missingNextStep: number;
   dormant: number;
+  stalled: number;
+  needsQualification: number;
+  noResponseAttention: number;
+  contacted: number;
+  qualified: number;
   wonThisMonth: number;
   lostThisMonth: number;
   pipelineByCurrency: Record<string, number>;
@@ -46,6 +55,7 @@ type LeadSummary = {
   id: string;
   leadDate: string | null;
   companyName: string;
+  opportunityName: string | null;
   clientType: string | null;
   contactName: string | null;
   phone: string | null;
@@ -59,8 +69,21 @@ type LeadSummary = {
   probability: number | null;
   expectedCloseDate: string | null;
   nextFollowUpDate: string | null;
+  nextStep: string | null;
+  qualificationData: CrmQualificationData;
+  qualification: { completed: number; total: number; percent: number; missing: string[] };
   locationsInterested: string | null;
   lostReason: string | null;
+  lostReasonCode: string | null;
+  stageChangedAt: string;
+  firstContactedAt: string | null;
+  qualifiedAt: string | null;
+  lastContactAt: string | null;
+  lastActivityAt: string | null;
+  noResponseCount: number;
+  stageAgeDays: number;
+  stageStalled: boolean;
+  priority: "urgent" | "high" | "normal";
   createdAt: string;
   updatedAt: string;
   attention: "missing" | "overdue" | "today" | "dormant" | null;
@@ -113,10 +136,10 @@ type LeadDetail = LeadSummary & {
 };
 type DuplicateResults = {
   clients: Array<{ id: string; companyName: string; status: string; clientType: string; accountOwner: { id: string; name: string } | null }>;
-  leads: Array<{ id: string; companyName: string; status: string; assignedTo: { id: string; name: string } | null; canOpen: boolean }>;
+  leads: Array<{ id: string; companyName: string; opportunityName: string | null; status: string; assignedTo: { id: string; name: string } | null; canOpen: boolean }>;
 };
 type ViewMode = "today" | "pipeline" | "all";
-type QuickActionKey = "contacted" | "no_answer" | "email_sent" | "qualified" | "follow_up_7";
+type QuickActionKey = "contacted" | "no_answer" | "email_sent" | "qualified" | "brief_received" | "offer_sent" | "follow_up_7";
 
 const emptySummary: Summary = {
   total: 0,
@@ -125,6 +148,11 @@ const emptySummary: Summary = {
   dueToday: 0,
   missingNextStep: 0,
   dormant: 0,
+  stalled: 0,
+  needsQualification: 0,
+  noResponseAttention: 0,
+  contacted: 0,
+  qualified: 0,
   wonThisMonth: 0,
   lostThisMonth: 0,
   pipelineByCurrency: {},
@@ -132,6 +160,12 @@ const emptySummary: Summary = {
 };
 
 const actionTypes = [
+  ["call_connected", "Apel - contactat"],
+  ["call_no_answer", "Apel - fara raspuns"],
+  ["email_sent", "E-mail trimis"],
+  ["meeting_held", "Intalnire realizata"],
+  ["qualification", "Calificare"],
+  ["brief_received", "Brief primit"],
   ["telefon", "Apel"],
   ["email", "E-mail"],
   ["whatsapp", "WhatsApp"],
@@ -227,10 +261,10 @@ export function CrmWorkspace({
     try {
       const response = await fetch(`/api/admin/crm/leads/${id}`, { cache: "no-store" });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Lead-ul nu a putut fi deschis.");
+      if (!response.ok) throw new Error(payload.error || "Oportunitatea nu a putut fi deschisa.");
       setSelectedLead(payload.lead);
     } catch (openError) {
-      setError(openError instanceof Error ? openError.message : "Lead-ul nu a putut fi deschis.");
+      setError(openError instanceof Error ? openError.message : "Oportunitatea nu a putut fi deschisa.");
     } finally {
       setBusy(null);
     }
@@ -247,13 +281,13 @@ export function CrmWorkspace({
         body: JSON.stringify(input)
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Lead-ul nu a putut fi creat.");
+      if (!response.ok) throw new Error(payload.error || "Oportunitatea nu a putut fi creata.");
       setShowCreate(false);
-      setMessage("Lead-ul a fost creat si are urmatorul pas programat.");
+      setMessage("Oportunitatea a fost creata si are urmatorul pas programat.");
       await loadLeads();
       await openLead(payload.lead.id);
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : "Lead-ul nu a putut fi creat.");
+      setError(createError instanceof Error ? createError.message : "Oportunitatea nu a putut fi creata.");
     } finally {
       setBusy(null);
     }
@@ -270,11 +304,11 @@ export function CrmWorkspace({
         body: JSON.stringify(patch)
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Lead-ul nu a putut fi actualizat.");
-      setMessage("Lead-ul a fost actualizat.");
+      if (!response.ok) throw new Error(payload.error || "Oportunitatea nu a putut fi actualizata.");
+      setMessage("Oportunitatea a fost actualizata.");
       await Promise.all([loadLeads(), openLead(id)]);
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : "Lead-ul nu a putut fi actualizat.");
+      setError(updateError instanceof Error ? updateError.message : "Oportunitatea nu a putut fi actualizata.");
     } finally {
       setBusy(null);
     }
@@ -386,14 +420,21 @@ export function CrmWorkspace({
 
   const todayGroups = useMemo(() => {
     const urgentAttention = new Set(["overdue", "today", "missing"]);
+    const alreadyUrgent = (lead: LeadSummary) => urgentAttention.has(lead.attention || "");
     return {
       overdue: leads.filter((lead) => lead.attention === "overdue"),
       today: leads.filter((lead) => lead.attention === "today"),
       missing: leads.filter((lead) => lead.attention === "missing"),
+      noResponse: leads.filter((lead) => lead.noResponseCount >= 3 && !alreadyUrgent(lead)),
       classification: leads.filter((lead) =>
-        Boolean(lead.classificationAttention) && !urgentAttention.has(lead.attention || "")
+        Boolean(lead.classificationAttention) && !alreadyUrgent(lead) && lead.noResponseCount < 3
       ),
-      dormant: leads.filter((lead) => lead.attention === "dormant" && !lead.classificationAttention)
+      stalled: leads.filter((lead) =>
+        lead.stageStalled && !alreadyUrgent(lead) && !lead.classificationAttention && lead.noResponseCount < 3
+      ),
+      dormant: leads.filter((lead) =>
+        lead.attention === "dormant" && !lead.stageStalled && !lead.classificationAttention && lead.noResponseCount < 3
+      )
     };
   }, [leads]);
 
@@ -409,18 +450,20 @@ export function CrmWorkspace({
             </p>
           </div>
           <button className="focus-button" type="button" onClick={() => setShowCreate(true)}>
-            <Plus size={18} /> Lead nou
+            <Plus size={18} /> Oportunitate noua
           </button>
         </section>
 
         {message ? <Feedback tone="green" text={message} onClose={() => setMessage(null)} /> : null}
         {error ? <Feedback tone="red" text={error} onClose={() => setError(null)} /> : null}
 
-        <section className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-          <Metric label="Lead-uri active" value={summary.active} icon={<BriefcaseBusiness size={18} />} />
+        <section className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Metric label="Oportunitati active" value={summary.active} icon={<BriefcaseBusiness size={18} />} />
           <Metric label="Restante" value={summary.overdue} icon={<AlertTriangle size={18} />} tone={summary.overdue ? "red" : "green"} />
           <Metric label="Pentru azi" value={summary.dueToday} icon={<CalendarClock size={18} />} tone="yellow" />
           <Metric label="Fara urmator pas" value={summary.missingNextStep} icon={<Clock3 size={18} />} tone={summary.missingNextStep ? "red" : "green"} />
+          <Metric label="Etape blocate" value={summary.stalled} icon={<AlertTriangle size={18} />} tone={summary.stalled ? "yellow" : "green"} />
+          <Metric label="De calificat" value={summary.needsQualification} icon={<Target size={18} />} tone={summary.needsQualification ? "yellow" : "green"} />
           <Metric label="Castigate luna" value={summary.wonThisMonth} icon={<Check size={18} />} tone="green" />
           <Metric label="Forecast ponderat" value={formatCurrencyValues(summary.weightedByCurrency)} icon={<Target size={18} />} />
         </section>
@@ -428,7 +471,7 @@ export function CrmWorkspace({
         <section className="flex flex-wrap items-center gap-2 border-b border-focus-line pb-4" aria-label="Vederi CRM">
           <ViewButton active={view === "today"} onClick={() => changeView("today")} icon={<CalendarClock size={17} />}>Astazi</ViewButton>
           <ViewButton active={view === "pipeline"} onClick={() => changeView("pipeline")} icon={<Target size={17} />}>Pipeline</ViewButton>
-          <ViewButton active={view === "all"} onClick={() => changeView("all")} icon={<Users size={17} />}>Toate lead-urile</ViewButton>
+          <ViewButton active={view === "all"} onClick={() => changeView("all")} icon={<Users size={17} />}>Toate oportunitatile</ViewButton>
         </section>
 
         <CrmFilters
@@ -577,7 +620,7 @@ function TodayView({
   onOpen,
   onQuick
 }: {
-  groups: Record<"overdue" | "today" | "missing" | "classification" | "dormant", LeadSummary[]>;
+  groups: Record<"overdue" | "today" | "missing" | "noResponse" | "classification" | "stalled" | "dormant", LeadSummary[]>;
   busy: string | null;
   onOpen: (id: string) => void;
   onQuick: (id: string, input: Record<string, unknown>) => void;
@@ -586,9 +629,11 @@ function TodayView({
     <LeadSection title="Restante" description="Follow-up-uri care trebuiau deja facute." rows={groups.overdue} tone="red" busy={busy} onOpen={onOpen} onQuick={onQuick} />
     <LeadSection title="Astazi" description="Discutii si actiuni programate pentru azi." rows={groups.today} tone="yellow" busy={busy} onOpen={onOpen} onQuick={onQuick} />
     <LeadSection title="Fara urmator pas" description="Lead-uri active care trebuie planificate." rows={groups.missing} tone="red" busy={busy} onOpen={onOpen} onQuick={onQuick} />
+    <LeadSection title="Fara raspuns" description="Cel putin trei tentative consecutive; schimba canalul sau decide urmatorul pas." rows={groups.noResponse} tone="red" busy={busy} onOpen={onOpen} onQuick={onQuick} />
     <LeadSection title="De clasificat" description="Prospecti Cold sau Contactati care asteapta o decizie comerciala." rows={groups.classification} tone="yellow" busy={busy} onOpen={onOpen} onQuick={onQuick} />
+    <LeadSection title="Etape blocate" description="Oportunitati ramase prea mult in aceeasi etapa comerciala." rows={groups.stalled} tone="yellow" busy={busy} onOpen={onOpen} onQuick={onQuick} />
     {groups.dormant.length ? <LeadSection title="Fara activitate recenta" description="Lead-uri active neactualizate de peste 14 zile." rows={groups.dormant} tone="neutral" busy={busy} onOpen={onOpen} onQuick={onQuick} /> : null}
-    {!groups.overdue.length && !groups.today.length && !groups.missing.length && !groups.classification.length && !groups.dormant.length ? (
+    {!groups.overdue.length && !groups.today.length && !groups.missing.length && !groups.noResponse.length && !groups.classification.length && !groups.stalled.length && !groups.dormant.length ? (
       <section className="border-y border-focus-line py-10 text-center">
         <Check className="mx-auto h-10 w-10 text-emerald-300" />
         <h2 className="mt-3 text-xl font-black text-white">Agenda CRM este la zi</h2>
@@ -647,15 +692,18 @@ function LeadCard({
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <p className="truncate text-lg font-black text-white">{lead.companyName}</p>
+        <p className="truncate text-sm font-bold text-slate-200">{lead.opportunityName || "Oportunitate generala"}</p>
         <p className="truncate text-xs text-slate-400">{lead.contactName || "Fara contact"}{lead.assignedTo?.name ? ` / ${lead.assignedTo.name}` : ""}</p>
       </div>
-      <StatusBadge status={lead.status} />
+      <div className="flex flex-wrap justify-end gap-2"><PriorityBadge priority={lead.priority} /><StatusBadge status={lead.status} /></div>
     </div>
     <div className="grid gap-2 text-xs sm:grid-cols-2">
       <InfoLine label="Follow-up" value={lead.nextFollowUpDate ? date(lead.nextFollowUpDate) : "Nesetat"} />
+      <InfoLine label="Urmatorul pas" value={lead.nextStep || "Nesetat"} />
       <InfoLine label="Valoare" value={lead.estimatedValue ? `${money(lead.estimatedValue)} ${lead.currency || "EUR"}` : "Nesetata"} />
       <InfoLine label="Ultima activitate" value={lead.latestActivity ? dateTime(lead.latestActivity.activityDate) : "Fara activitate"} />
-      <InfoLine label="Probabilitate" value={lead.probability == null ? "-" : `${lead.probability}%`} />
+      <InfoLine label="Calificare" value={`${lead.qualification.completed}/${lead.qualification.total}`} />
+      <InfoLine label="Etapa" value={`${lead.stageAgeDays} zile`} />
     </div>
     <div className="mt-auto flex flex-wrap gap-2">
       {onQuick ? <>
@@ -701,7 +749,8 @@ function PipelineView({
             {rows.map((lead) => <article className="rounded-md border border-focus-line bg-focus-navy/55 p-3" key={lead.id}>
               <button className="block w-full text-left" type="button" onClick={() => onOpen(lead.id)}>
                 <strong className="block truncate text-white">{lead.companyName}</strong>
-                <span className="mt-1 block truncate text-xs text-slate-400">{lead.contactName || lead.assignedTo?.name || "Fara contact"}</span>
+                <span className="mt-1 block truncate text-xs font-bold text-slate-200">{lead.opportunityName || "Oportunitate generala"}</span>
+                <span className="mt-1 block truncate text-xs text-slate-400">{lead.contactName || lead.assignedTo?.name || "Fara contact"} / {lead.stageAgeDays} zile</span>
                 <span className={`mt-2 block text-xs font-black ${lead.attention === "overdue" || lead.attention === "missing" ? "text-red-100" : lead.attention === "today" ? "text-focus-yellow" : "text-slate-300"}`}>
                   {attentionLabel(lead)}
                 </span>
@@ -747,7 +796,7 @@ function LeadList({ leads, busy, onOpen }: { leads: LeadSummary[]; busy: string 
           </tr>
         </thead>
         <tbody>{leads.map((lead) => <tr className="border-t border-focus-line" key={lead.id}>
-          <td className="px-3 py-3"><strong className="text-white">{lead.companyName}</strong><small className="block text-slate-400">{lead.contactName || lead.email || lead.phone || "Fara contact"}</small></td>
+          <td className="px-3 py-3"><strong className="text-white">{lead.companyName}</strong><small className="block font-bold text-slate-300">{lead.opportunityName || "Oportunitate generala"}</small><small className="block text-slate-400">{lead.contactName || lead.email || lead.phone || "Fara contact"}</small></td>
           <td className="px-3 py-3"><StatusBadge status={lead.status} /></td>
           <td className="px-3 py-3">{lead.assignedTo?.name || "Nealocat"}</td>
           <td className="px-3 py-3"><span className={lead.attention === "overdue" || lead.attention === "missing" ? "font-black text-red-100" : ""}>{lead.nextFollowUpDate ? date(lead.nextFollowUpDate) : "Nesetat"}</span></td>
@@ -779,6 +828,7 @@ function CreateLeadDialog({
 }) {
   const [form, setForm] = useState({
     companyName: "",
+    opportunityName: "",
     clientType: "direct_client",
     clientId: "",
     contactName: "",
@@ -793,6 +843,7 @@ function CreateLeadDialog({
     probability: String(crmDefaultProbability("cold")),
     expectedCloseDate: "",
     nextFollowUpDate: tomorrowInput(),
+    nextStep: "Contact initial",
     locationsInterested: "",
     notes: ""
   });
@@ -824,7 +875,10 @@ function CreateLeadDialog({
     };
   }, [form.companyName]);
 
-  const valid = form.companyName.trim().length >= 2 && form.nextFollowUpDate && form.assignedToUserId;
+  const valid = form.companyName.trim().length >= 2
+    && form.nextFollowUpDate
+    && form.nextStep.trim().length >= 2
+    && form.assignedToUserId;
 
   function changeInitialStatus(status: CrmStatus) {
     const currentSuggestedProbability = crmDefaultProbability(form.status);
@@ -837,35 +891,43 @@ function CreateLeadDialog({
     });
   }
 
-  return <ModalShell title="Lead CRM nou" onClose={onClose}>
+  return <ModalShell title="Oportunitate CRM noua" onClose={onClose}>
     <div className="grid gap-4">
-      <p className="text-sm text-slate-300">Adauga informatia minima si stabileste urmatorul pas. Detaliile pot fi completate ulterior in dosarul lead-ului.</p>
+      <p className="text-sm text-slate-300">Completeaza compania si urmatoarea actiune. Restul poate fi adaugat cand discutia avanseaza.</p>
       <div className="grid gap-3 md:grid-cols-2">
         <Field label="Companie"><input className="focus-input" value={form.companyName} onChange={(event) => setForm({ ...form, companyName: event.target.value, clientId: "" })} autoFocus /></Field>
-        <Field label="Tip client"><select className="focus-input" value={form.clientType} onChange={(event) => setForm({ ...form, clientType: event.target.value })}><option value="direct_client">Client direct</option><option value="agency">Agentie</option></select></Field>
+        <Field label="Oportunitate / campanie"><input className="focus-input" value={form.opportunityName} onChange={(event) => setForm({ ...form, opportunityName: event.target.value })} placeholder="Ex: Lansare toamna 2026" /></Field>
         <Field label="Contact"><input className="focus-input" value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })} /></Field>
-        <Field label="Functie"><input className="focus-input" value={form.contactRole} onChange={(event) => setForm({ ...form, contactRole: event.target.value })} /></Field>
         <Field label="Telefon"><input className="focus-input" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></Field>
-        <Field label="E-mail"><input className="focus-input" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
-        <Field label="Sursa"><input className="focus-input" value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} /></Field>
-        <Field label="Etapa initiala"><select className="focus-input" value={form.status} onChange={(event) => changeInitialStatus(event.target.value as CrmStatus)}>{CRM_STATUS_OPTIONS.filter((option) => isActiveCrmStatus(option.value)).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
-        {canViewTeam ? <Field label="Agent responsabil"><select className="focus-input" value={form.assignedToUserId} onChange={(event) => setForm({ ...form, assignedToUserId: event.target.value })}><option value="">Alege agent</option>{assignees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></Field> : null}
-        <Field label="Valoare estimata"><input className="focus-input" inputMode="decimal" value={form.estimatedValue} onChange={(event) => setForm({ ...form, estimatedValue: event.target.value })} /></Field>
-        <Field label="Moneda"><select className="focus-input" value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option>EUR</option><option>RON</option></select></Field>
-        <Field label="Probabilitate"><input className="focus-input" type="number" min="0" max="100" value={form.probability} onChange={(event) => setForm({ ...form, probability: event.target.value })} /></Field>
-        <Field label="Data estimata inchidere"><input className="focus-input" type="date" value={form.expectedCloseDate} onChange={(event) => setForm({ ...form, expectedCloseDate: event.target.value })} /></Field>
+        <Field label="Sursa"><select className="focus-input" value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })}>{CRM_SOURCE_OPTIONS.map((source) => <option key={source}>{source}</option>)}</select></Field>
         <Field label="Urmatorul follow-up"><input className="focus-input" type="date" min={todayInput()} value={form.nextFollowUpDate} onChange={(event) => setForm({ ...form, nextFollowUpDate: event.target.value })} /></Field>
-        <Field label="Interes OOH"><input className="focus-input" value={form.locationsInterested} onChange={(event) => setForm({ ...form, locationsInterested: event.target.value })} placeholder="Orase, formate, coduri" /></Field>
+        <Field label="Urmatorul pas"><input className="focus-input" value={form.nextStep} onChange={(event) => setForm({ ...form, nextStep: event.target.value })} /></Field>
+        {canViewTeam ? <Field label="Agent responsabil"><select className="focus-input" value={form.assignedToUserId} onChange={(event) => setForm({ ...form, assignedToUserId: event.target.value })}><option value="">Alege agent</option>{assignees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></Field> : null}
       </div>
-      <p className="text-xs text-slate-400">{crmStatusDescription(form.status)}</p>
-      <Field label="Brief / urmator pas"><textarea className="focus-input min-h-24" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></Field>
+
+      <details className="border-y border-focus-line py-3">
+        <summary className="cursor-pointer text-sm font-black text-focus-yellow">Detalii comerciale optionale</summary>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <Field label="Tip client"><select className="focus-input" value={form.clientType} onChange={(event) => setForm({ ...form, clientType: event.target.value })}><option value="direct_client">Client direct</option><option value="agency">Agentie</option></select></Field>
+          <Field label="Functie contact"><input className="focus-input" value={form.contactRole} onChange={(event) => setForm({ ...form, contactRole: event.target.value })} /></Field>
+          <Field label="E-mail"><input className="focus-input" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
+          <Field label="Etapa initiala"><select className="focus-input" value={form.status} onChange={(event) => changeInitialStatus(event.target.value as CrmStatus)}>{CRM_STATUS_OPTIONS.filter((option) => isActiveCrmStatus(option.value)).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
+          <Field label="Valoare estimata"><input className="focus-input" inputMode="decimal" value={form.estimatedValue} onChange={(event) => setForm({ ...form, estimatedValue: event.target.value })} /></Field>
+          <Field label="Moneda"><select className="focus-input" value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option>EUR</option><option>RON</option></select></Field>
+          <Field label="Probabilitate"><input className="focus-input" type="number" min="0" max="100" value={form.probability} onChange={(event) => setForm({ ...form, probability: event.target.value })} /></Field>
+          <Field label="Data estimata inchidere"><input className="focus-input" type="date" value={form.expectedCloseDate} onChange={(event) => setForm({ ...form, expectedCloseDate: event.target.value })} /></Field>
+          <Field label="Interes OOH"><input className="focus-input" value={form.locationsInterested} onChange={(event) => setForm({ ...form, locationsInterested: event.target.value })} placeholder="Orase, formate, coduri" /></Field>
+        </div>
+        <p className="mt-3 text-xs text-slate-400">{crmStatusDescription(form.status)}</p>
+        <Field label="Note"><textarea className="focus-input mt-3 min-h-20" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></Field>
+      </details>
 
       {(duplicates.clients.length || duplicates.leads.length) ? (
         <section className="rounded-md border border-focus-yellow/40 bg-focus-yellow/5 p-3">
           <h3 className="text-xs font-black uppercase text-focus-yellow">Posibile inregistrari existente</h3>
           <div className="mt-2 grid gap-2">
             {duplicates.clients.map((client) => <button className="flex items-center justify-between gap-3 rounded-md border border-focus-line px-3 py-2 text-left text-sm" type="button" key={client.id} onClick={() => setForm({ ...form, clientId: client.id, companyName: client.companyName })}><span><strong className="text-white">{client.companyName}</strong><small className="block text-slate-400">Client existent / {client.accountOwner?.name || "fara owner"}</small></span><span className="text-focus-yellow">Leaga</span></button>)}
-            {duplicates.leads.map((lead) => <button className="flex items-center justify-between gap-3 rounded-md border border-focus-line px-3 py-2 text-left text-sm" type="button" key={lead.id} disabled={!lead.canOpen} onClick={() => lead.canOpen && onOpenExisting(lead.id)}><span><strong className="text-white">{lead.companyName}</strong><small className="block text-slate-400">Lead activ / {lead.assignedTo?.name || "neacordat"}</small></span><span className="text-focus-yellow">{lead.canOpen ? "Deschide" : "Exista la alt agent"}</span></button>)}
+            {duplicates.leads.map((lead) => <button className="flex items-center justify-between gap-3 rounded-md border border-focus-line px-3 py-2 text-left text-sm" type="button" key={lead.id} disabled={!lead.canOpen} onClick={() => lead.canOpen && onOpenExisting(lead.id)}><span><strong className="text-white">{lead.companyName}</strong><small className="block text-slate-400">{lead.opportunityName || "Oportunitate activa"} / {lead.assignedTo?.name || "neacordat"}</small></span><span className="text-focus-yellow">{lead.canOpen ? "Deschide" : "Exista la alt agent"}</span></button>)}
           </div>
         </section>
       ) : null}
@@ -875,10 +937,12 @@ function CreateLeadDialog({
         <button className="focus-button" type="button" disabled={!valid || busy} onClick={() => onCreate({
           ...form,
           clientId: form.clientId || null,
+          opportunityName: form.opportunityName || null,
+          nextStep: form.nextStep || "Contact initial",
           estimatedValue: form.estimatedValue ? Number(form.estimatedValue.replace(",", ".")) : null,
           probability: form.probability ? Number(form.probability) : null,
           expectedCloseDate: form.expectedCloseDate || null
-        })}>{busy ? "Se salveaza..." : "Creeaza lead"}</button>
+        })}>{busy ? "Se salveaza..." : "Creeaza oportunitate"}</button>
       </div>
     </div>
   </ModalShell>;
@@ -910,21 +974,26 @@ function LeadDrawer({
   onOpenLead: (id: string) => void;
 }) {
   const [draft, setDraft] = useState({
+    opportunityName: lead.opportunityName || "",
     status: lead.status,
+    source: lead.source || "Prospectare directa",
     assignedToUserId: lead.assignedToUserId || "",
     estimatedValue: lead.estimatedValue == null ? "" : String(lead.estimatedValue),
     currency: lead.currency || "EUR",
     probability: lead.probability == null ? "" : String(lead.probability),
     expectedCloseDate: lead.expectedCloseDate?.slice(0, 10) || "",
     nextFollowUpDate: lead.nextFollowUpDate?.slice(0, 10) || "",
+    nextStep: lead.nextStep || "",
+    qualificationData: { ...lead.qualificationData },
     locationsInterested: lead.locationsInterested || "",
     notes: lead.notes || "",
-    lostReason: lead.lostReason || ""
+    lostReason: lead.lostReason || "",
+    lostReasonCode: lead.lostReasonCode || ""
   });
   const [activity, setActivity] = useState({
     actionType: "telefon",
     details: "",
-    nextStep: "",
+    nextStep: lead.nextStep || "",
     nextFollowUpDate: lead.nextFollowUpDate?.slice(0, 10) || tomorrowInput(),
     locations: lead.locationsInterested || ""
   });
@@ -933,18 +1002,32 @@ function LeadDrawer({
 
   useEffect(() => {
     setDraft({
+      opportunityName: lead.opportunityName || "",
       status: lead.status,
+      source: lead.source || "Prospectare directa",
       assignedToUserId: lead.assignedToUserId || "",
       estimatedValue: lead.estimatedValue == null ? "" : String(lead.estimatedValue),
       currency: lead.currency || "EUR",
       probability: lead.probability == null ? "" : String(lead.probability),
       expectedCloseDate: lead.expectedCloseDate?.slice(0, 10) || "",
       nextFollowUpDate: lead.nextFollowUpDate?.slice(0, 10) || "",
+      nextStep: lead.nextStep || "",
+      qualificationData: { ...lead.qualificationData },
       locationsInterested: lead.locationsInterested || "",
       notes: lead.notes || "",
-      lostReason: lead.lostReason || ""
+      lostReason: lead.lostReason || "",
+      lostReasonCode: lead.lostReasonCode || ""
     });
   }, [lead]);
+
+  useEffect(() => {
+    setActivity((current) => ({
+      ...current,
+      nextStep: lead.nextStep || current.nextStep,
+      nextFollowUpDate: lead.nextFollowUpDate?.slice(0, 10) || current.nextFollowUpDate,
+      locations: lead.locationsInterested || current.locations
+    }));
+  }, [lead.id, lead.locationsInterested, lead.nextFollowUpDate, lead.nextStep]);
 
   useEffect(() => {
     if (lead.clientId) {
@@ -957,7 +1040,12 @@ function LeadDrawer({
       .catch(() => undefined);
   }, [lead.clientId, lead.companyName]);
 
-  const saveDisabled = isActiveCrmStatus(draft.status) && !draft.nextFollowUpDate;
+  const lostDetailsMissing = draft.status === "lost"
+    && (!draft.lostReasonCode || draft.lostReason.trim().length < 2);
+  const saveDisabled = lostDetailsMissing || (
+    isActiveCrmStatus(draft.status)
+    && (!draft.nextFollowUpDate || draft.nextStep.trim().length < 2)
+  );
 
   function changeDraftStatus(status: CrmStatus) {
     const currentSuggestedProbability = crmDefaultProbability(draft.status);
@@ -970,23 +1058,34 @@ function LeadDrawer({
     });
   }
 
-  return <div className="fixed inset-0 z-[70] flex justify-end bg-black/65" role="dialog" aria-modal="true" aria-label={`Lead ${lead.companyName}`}>
+  const draftQualificationCompleted = qualificationCompleted(draft.qualificationData);
+
+  return <div className="fixed inset-0 z-[70] flex justify-end bg-black/65" role="dialog" aria-modal="true" aria-label={`Oportunitate ${lead.companyName}`}>
     <div className="h-full w-full max-w-[860px] overflow-y-auto border-l border-focus-line bg-focus-navy shadow-2xl">
       <div className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-focus-line bg-focus-navy/98 px-5 py-4">
         <div>
-          <p className="text-xs font-black uppercase text-focus-yellow">Dosar CRM</p>
+          <p className="text-xs font-black uppercase text-focus-yellow">Dosar oportunitate</p>
           <h2 className="text-2xl font-black text-white">{lead.companyName}</h2>
+          <p className="mt-1 text-sm font-bold text-slate-200">{lead.opportunityName || "Oportunitate generala"}</p>
           <p className="mt-1 text-xs text-slate-400">{lead.assignedTo?.name || "Nealocat"} / actualizat {dateTime(lead.updatedAt)}</p>
         </div>
         <button className="focus-button secondary" type="button" onClick={onClose} aria-label="Inchide"><X size={18} /></button>
       </div>
 
       <div className="grid gap-6 p-5">
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <MiniMetric label="Etapa" value={statusLabel(lead.status)} />
+          <MiniMetric label="Vechime etapa" value={`${lead.stageAgeDays} zile`} tone={lead.stageStalled ? "red" : "neutral"} />
+          <MiniMetric label="Calificare" value={`${lead.qualification.completed}/${lead.qualification.total}`} />
           <MiniMetric label="Valoare" value={lead.estimatedValue ? `${money(lead.estimatedValue)} ${lead.currency || "EUR"}` : "-"} />
           <MiniMetric label="Probabilitate" value={lead.probability == null ? "-" : `${lead.probability}%`} />
           <MiniMetric label="Follow-up" value={lead.nextFollowUpDate ? date(lead.nextFollowUpDate) : "Nesetat"} tone={lead.attention === "overdue" || lead.attention === "missing" ? "red" : "neutral"} />
+        </section>
+
+        <section className="rounded-md border border-focus-yellow/40 bg-focus-yellow/5 p-4">
+          <p className="text-xs font-black uppercase text-focus-yellow">Urmatorul pas</p>
+          <p className="mt-2 text-base font-black text-white">{lead.nextStep || "Nesetat"}</p>
+          <p className="mt-1 text-xs text-slate-400">{lead.nextFollowUpDate ? date(lead.nextFollowUpDate) : "Fara termen"}{lead.noResponseCount ? ` / ${lead.noResponseCount} tentative fara raspuns` : ""}</p>
         </section>
 
         <section className="border-y border-focus-line py-5">
@@ -998,31 +1097,60 @@ function LeadDrawer({
             {!lead.clientId ? <button className="focus-button" type="button" disabled={busy === `convert-${lead.id}`} onClick={() => onConvert(lead.id)}><UserPlus size={17} /> Converteste in client</button> : <span className="text-xs font-black text-emerald-200">Client asociat: {lead.client?.companyName}</span>}
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <Field label="Oportunitate / campanie"><input className="focus-input" value={draft.opportunityName} onChange={(event) => setDraft({ ...draft, opportunityName: event.target.value })} /></Field>
             <Field label="Etapa"><select className="focus-input" value={draft.status} onChange={(event) => changeDraftStatus(event.target.value as CrmStatus)}>{CRM_STATUS_OPTIONS.filter((option) => option.value !== "won" || lead.clientId).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
+            <Field label="Sursa"><select className="focus-input" value={draft.source} onChange={(event) => setDraft({ ...draft, source: event.target.value })}>{CRM_SOURCE_OPTIONS.map((source) => <option key={source}>{source}</option>)}</select></Field>
             {canViewTeam ? <Field label="Agent"><select className="focus-input" value={draft.assignedToUserId} onChange={(event) => setDraft({ ...draft, assignedToUserId: event.target.value })}>{assignees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></Field> : null}
             <Field label="Valoare"><input className="focus-input" inputMode="decimal" value={draft.estimatedValue} onChange={(event) => setDraft({ ...draft, estimatedValue: event.target.value })} /></Field>
             <Field label="Moneda"><select className="focus-input" value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value })}><option>EUR</option><option>RON</option></select></Field>
             <Field label="Probabilitate"><input className="focus-input" type="number" min="0" max="100" value={draft.probability} onChange={(event) => setDraft({ ...draft, probability: event.target.value })} /></Field>
             <Field label="Data estimata inchidere"><input className="focus-input" type="date" value={draft.expectedCloseDate} onChange={(event) => setDraft({ ...draft, expectedCloseDate: event.target.value })} /></Field>
             <Field label="Urmatorul follow-up"><input className="focus-input" type="date" value={draft.nextFollowUpDate} onChange={(event) => setDraft({ ...draft, nextFollowUpDate: event.target.value })} /></Field>
+            <Field label="Urmatorul pas"><input className="focus-input" value={draft.nextStep} onChange={(event) => setDraft({ ...draft, nextStep: event.target.value })} /></Field>
             <Field label="Interes OOH"><input className="focus-input" value={draft.locationsInterested} onChange={(event) => setDraft({ ...draft, locationsInterested: event.target.value })} /></Field>
           </div>
           <p className="mt-3 text-xs text-slate-400">{crmStatusDescription(draft.status)}</p>
-          {draft.status === "lost" ? <Field label="Motiv pierdere"><textarea className="focus-input mt-3 min-h-20" value={draft.lostReason} onChange={(event) => setDraft({ ...draft, lostReason: event.target.value })} /></Field> : null}
+          {draft.status === "lost" ? <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <Field label="Categorie pierdere"><select className="focus-input" value={draft.lostReasonCode} onChange={(event) => setDraft({ ...draft, lostReasonCode: event.target.value })}><option value="">Alege motivul</option>{CRM_LOST_REASON_OPTIONS.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}</select></Field>
+            <Field label="Detalii pierdere"><textarea className="focus-input min-h-20" value={draft.lostReason} onChange={(event) => setDraft({ ...draft, lostReason: event.target.value })} /></Field>
+            {lostDetailsMissing ? <p className="text-xs font-bold text-red-100 md:col-span-2">Alege categoria si noteaza pe scurt de ce s-a pierdut oportunitatea.</p> : null}
+          </div> : null}
+
+          <details className="mt-4 border-y border-focus-line py-3" open={lead.qualification.completed < 4}>
+            <summary className="cursor-pointer text-sm font-black text-focus-yellow">Calificare OOH: {draftQualificationCompleted}/{CRM_QUALIFICATION_ITEMS.length}</summary>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-focus-ink">
+              <span className="block h-full bg-focus-yellow" style={{ width: `${Math.round((draftQualificationCompleted / CRM_QUALIFICATION_ITEMS.length) * 100)}%` }} />
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {CRM_QUALIFICATION_ITEMS.map((item) => <label className="flex items-center gap-2 rounded-md border border-focus-line px-3 py-2 text-sm font-bold text-slate-200" key={item.key}>
+                <input type="checkbox" checked={draft.qualificationData[item.key]} onChange={(event) => setDraft({
+                  ...draft,
+                  qualificationData: { ...draft.qualificationData, [item.key]: event.target.checked }
+                })} />
+                {item.label}
+              </label>)}
+            </div>
+          </details>
+
           <Field label="Note interne"><textarea className="focus-input mt-3 min-h-24" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></Field>
           <div className="mt-4 flex justify-end">
             <button className="focus-button" type="button" disabled={saveDisabled || busy === `update-${lead.id}`} onClick={() => onUpdate(lead.id, {
+              opportunityName: draft.opportunityName || null,
               status: draft.status,
+              source: draft.source,
               assignedToUserId: draft.assignedToUserId,
               estimatedValue: draft.estimatedValue ? Number(draft.estimatedValue.replace(",", ".")) : null,
               currency: draft.currency,
               probability: draft.probability ? Number(draft.probability) : null,
               expectedCloseDate: draft.expectedCloseDate || null,
               nextFollowUpDate: draft.nextFollowUpDate || null,
+              nextStep: draft.nextStep || null,
+              qualificationData: draft.qualificationData,
               locationsInterested: draft.locationsInterested || null,
               notes: draft.notes || null,
-              lostReason: draft.lostReason || null
-            })}>{busy === `update-${lead.id}` ? "Se salveaza..." : "Salveaza lead"}</button>
+              lostReason: draft.lostReason || null,
+              lostReasonCode: draft.lostReasonCode || null
+            })}>{busy === `update-${lead.id}` ? "Se salveaza..." : "Salveaza oportunitate"}</button>
           </div>
         </section>
 
@@ -1042,6 +1170,8 @@ function LeadDrawer({
             <button className="focus-button secondary" type="button" disabled={busy === `activity-${lead.id}`} onClick={() => onActivity(lead.id, quickActionPayload("no_answer", lead))}><Clock3 size={16} /> Nu raspunde</button>
             <button className="focus-button secondary" type="button" disabled={busy === `activity-${lead.id}`} onClick={() => onActivity(lead.id, quickActionPayload("email_sent", lead))}><Mail size={16} /> E-mail trimis</button>
             <button className="focus-button secondary" type="button" disabled={busy === `activity-${lead.id}`} onClick={() => onActivity(lead.id, quickActionPayload("qualified", lead))}><Target size={16} /> Calificat</button>
+            <button className="focus-button secondary" type="button" disabled={busy === `activity-${lead.id}`} onClick={() => onActivity(lead.id, quickActionPayload("brief_received", lead))}><MessageSquareText size={16} /> Brief primit</button>
+            <button className="focus-button secondary" type="button" disabled={busy === `activity-${lead.id}`} onClick={() => onActivity(lead.id, quickActionPayload("offer_sent", lead))}><BriefcaseBusiness size={16} /> Oferta trimisa</button>
             <button className="focus-button secondary" type="button" disabled={busy === `activity-${lead.id}`} onClick={() => onActivity(lead.id, quickActionPayload("follow_up_7", lead))}><CalendarClock size={16} /> Revino in 7 zile</button>
           </div>
         </section> : null}
@@ -1055,9 +1185,9 @@ function LeadDrawer({
             <Field label="Interes OOH"><input className="focus-input" value={activity.locations} onChange={(event) => setActivity({ ...activity, locations: event.target.value })} /></Field>
           </div>
           <Field label="Rezumat activitate"><textarea className="focus-input mt-3 min-h-24" value={activity.details} onChange={(event) => setActivity({ ...activity, details: event.target.value })} /></Field>
-          <div className="mt-3 flex justify-end"><button className="focus-button" type="button" disabled={activity.details.trim().length < 2 || (isActiveCrmStatus(lead.status) && !activity.nextFollowUpDate) || busy === `activity-${lead.id}`} onClick={() => {
+          <div className="mt-3 flex justify-end"><button className="focus-button" type="button" disabled={activity.details.trim().length < 2 || (isActiveCrmStatus(lead.status) && (!activity.nextFollowUpDate || activity.nextStep.trim().length < 2)) || busy === `activity-${lead.id}`} onClick={() => {
             onActivity(lead.id, activity);
-            setActivity((current) => ({ ...current, details: "", nextStep: "" }));
+            setActivity((current) => ({ ...current, details: "" }));
           }}>{busy === `activity-${lead.id}` ? "Se salveaza..." : "Salveaza activitate"}</button></div>
         </section>
 
@@ -1104,9 +1234,9 @@ function LeadDrawer({
 
         {duplicates.leads.filter((row) => row.id !== lead.id).length ? (
           <section>
-            <h3 className="text-sm font-black uppercase text-focus-yellow">Lead-uri similare</h3>
+            <h3 className="text-sm font-black uppercase text-focus-yellow">Oportunitati similare</h3>
             <div className="mt-3 grid gap-2">
-              {duplicates.leads.filter((row) => row.id !== lead.id).map((row) => <button className="rounded-md border border-focus-line px-3 py-3 text-left" type="button" disabled={!row.canOpen} key={row.id} onClick={() => row.canOpen && onOpenLead(row.id)}><strong className="text-white">{row.companyName}</strong><small className="block text-slate-400">{statusLabel(row.status)} / {row.assignedTo?.name || "neacordat"}</small></button>)}
+              {duplicates.leads.filter((row) => row.id !== lead.id).map((row) => <button className="rounded-md border border-focus-line px-3 py-3 text-left" type="button" disabled={!row.canOpen} key={row.id} onClick={() => row.canOpen && onOpenLead(row.id)}><strong className="text-white">{row.companyName}</strong><small className="block text-slate-300">{row.opportunityName || "Oportunitate generala"}</small><small className="block text-slate-400">{statusLabel(row.status)} / {row.assignedTo?.name || "neacordat"}</small></button>)}
             </div>
           </section>
         ) : null}
@@ -1164,6 +1294,13 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black uppercase ${className}`}>{option?.label || status}</span>;
 }
 
+function PriorityBadge({ priority }: { priority: LeadSummary["priority"] }) {
+  if (priority === "normal") return null;
+  return <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black uppercase ${priority === "urgent" ? "border-red-300/50 bg-red-400/10 text-red-100" : "border-focus-yellow/60 bg-focus-yellow/10 text-focus-yellow"}`}>
+    {priority === "urgent" ? "Urgent" : "Prioritar"}
+  </span>;
+}
+
 function Feedback({ tone, text, onClose }: { tone: "green" | "red"; text: string; onClose: () => void }) {
   return <div className={`flex items-center justify-between gap-3 rounded-md border px-4 py-3 text-sm font-bold ${tone === "green" ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100" : "border-red-300/30 bg-red-500/10 text-red-100"}`}><span>{text}</span><button type="button" onClick={onClose}><X size={16} /></button></div>;
 }
@@ -1173,11 +1310,11 @@ function LoadingState() {
 }
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
-  return <section className="grid min-h-64 place-items-center border-y border-focus-line py-10 text-center"><div><Users className="mx-auto h-10 w-10 text-focus-yellow" /><h2 className="mt-3 text-xl font-black text-white">CRM-ul este pregatit</h2><p className="mt-1 max-w-md text-sm text-slate-400">Creeaza primul lead si stabileste urmatorul follow-up pentru a porni pipeline-ul.</p><button className="focus-button mx-auto mt-4" type="button" onClick={onCreate}><Plus size={17} /> Lead nou</button></div></section>;
+  return <section className="grid min-h-64 place-items-center border-y border-focus-line py-10 text-center"><div><Users className="mx-auto h-10 w-10 text-focus-yellow" /><h2 className="mt-3 text-xl font-black text-white">CRM-ul este pregatit</h2><p className="mt-1 max-w-md text-sm text-slate-400">Creeaza prima oportunitate si stabileste urmatorul follow-up pentru a porni pipeline-ul.</p><button className="focus-button mx-auto mt-4" type="button" onClick={onCreate}><Plus size={17} /> Oportunitate noua</button></div></section>;
 }
 
 function Pagination({ page, pages, total, onPage }: { page: number; pages: number; total: number; onPage: (page: number) => void }) {
-  return <div className="flex flex-wrap items-center justify-between gap-3 border-t border-focus-line pt-4"><p className="text-xs font-bold text-slate-400">{total} lead-uri / pagina {page} din {pages}</p><div className="flex gap-2"><button className="focus-button secondary" type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}><ArrowLeft size={16} /> Inapoi</button><button className="focus-button secondary" type="button" disabled={page >= pages} onClick={() => onPage(page + 1)}>Inainte <ArrowRight size={16} /></button></div></div>;
+  return <div className="flex flex-wrap items-center justify-between gap-3 border-t border-focus-line pt-4"><p className="text-xs font-bold text-slate-400">{total} oportunitati / pagina {page} din {pages}</p><div className="flex gap-2"><button className="focus-button secondary" type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}><ArrowLeft size={16} /> Inapoi</button><button className="focus-button secondary" type="button" disabled={page >= pages} onClick={() => onPage(page + 1)}>Inainte <ArrowRight size={16} /></button></div></div>;
 }
 
 function attentionLabel(lead: LeadSummary) {
@@ -1203,7 +1340,7 @@ function quickActionPayload(action: QuickActionKey, lead: Pick<LeadSummary, "sta
   if (action === "contacted") {
     return {
       ...common,
-      actionType: "telefon",
+      actionType: "call_connected",
       details: "Contact comercial realizat.",
       nextStep: "Clarifica nevoia OOH, perioada si bugetul.",
       nextFollowUpDate: dateInputAfter(3),
@@ -1213,7 +1350,7 @@ function quickActionPayload(action: QuickActionKey, lead: Pick<LeadSummary, "sta
   if (action === "no_answer") {
     return {
       ...common,
-      actionType: "telefon",
+      actionType: "call_no_answer",
       details: "Apel efectuat, fara raspuns.",
       nextStep: "Revenire telefonica.",
       nextFollowUpDate: dateInputAfter(1)
@@ -1222,7 +1359,7 @@ function quickActionPayload(action: QuickActionKey, lead: Pick<LeadSummary, "sta
   if (action === "email_sent") {
     return {
       ...common,
-      actionType: "email",
+      actionType: "email_sent",
       details: "E-mail comercial trimis.",
       nextStep: "Verifica raspunsul clientului.",
       nextFollowUpDate: dateInputAfter(3),
@@ -1232,11 +1369,31 @@ function quickActionPayload(action: QuickActionKey, lead: Pick<LeadSummary, "sta
   if (action === "qualified") {
     return {
       ...common,
-      actionType: "follow_up",
+      actionType: "qualification",
       details: "Oportunitate calificata comercial.",
       nextStep: "Colecteaza sau confirma brief-ul OOH.",
       nextFollowUpDate: dateInputAfter(3),
       ...(["cold", "contacted"].includes(lead.status) ? { status: "qualified" } : {})
+    };
+  }
+  if (action === "brief_received") {
+    return {
+      ...common,
+      actionType: "brief_received",
+      details: "Brief OOH primit de la client.",
+      nextStep: "Pregateste propunerea comerciala.",
+      nextFollowUpDate: dateInputAfter(2),
+      ...(["cold", "contacted", "qualified"].includes(lead.status) ? { status: "brief_received" } : {})
+    };
+  }
+  if (action === "offer_sent") {
+    return {
+      ...common,
+      actionType: "offer_sent",
+      details: "Oferta comerciala a fost trimisa.",
+      nextStep: "Confirma primirea si obtine feedback-ul clientului.",
+      nextFollowUpDate: dateInputAfter(3),
+      ...(["cold", "contacted", "qualified", "brief_received", "in_offer"].includes(lead.status) ? { status: "offer_sent" } : {})
     };
   }
   return {
@@ -1246,6 +1403,10 @@ function quickActionPayload(action: QuickActionKey, lead: Pick<LeadSummary, "sta
     nextStep: "Reia discutia cu clientul.",
     nextFollowUpDate: dateInputAfter(7)
   };
+}
+
+function qualificationCompleted(data: CrmQualificationData) {
+  return CRM_QUALIFICATION_ITEMS.filter((item) => data[item.key]).length;
 }
 
 function formatCurrencyValues(values: Record<string, number>) {

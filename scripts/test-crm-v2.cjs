@@ -23,6 +23,22 @@ function main() {
   assert.equal(crm.crmDefaultProbability("cold"), 10);
   assert.equal(crm.crmDefaultProbability("contacted"), 20);
   assert.equal(crm.crmDefaultProbability("qualified"), 35);
+  const qualification = crm.crmQualificationScore({
+    needConfirmed: true,
+    periodKnown: true,
+    geographyKnown: true,
+    formatsKnown: false,
+    budgetKnown: true
+  });
+  assert.equal(qualification.completed, 4);
+  assert.equal(qualification.total, 6);
+  assert.equal(qualification.percent, 67);
+  assert.equal(crm.crmStageAgeDays("2026-07-01T00:00:00.000Z", now), 15);
+  assert.equal(crm.crmStageIsStalled({ status: "in_offer", stageChangedAt: "2026-07-01T00:00:00.000Z" }, now), true);
+  assert.equal(crm.crmOpportunityPriority({
+    status: "qualified",
+    nextFollowUpDate: "2026-07-15T00:00:00.000Z"
+  }, now), "urgent");
   assert.equal(crm.crmLeadScope(seller).assignedToUserId, "seller-1");
   assert.equal(Object.keys(crm.crmLeadScope(coo)).length, 0);
   assert.equal(Object.keys(crm.crmLeadScope(director)).length, 0);
@@ -38,6 +54,15 @@ function main() {
     () => crm.validateCrmState({ status: "lost", lostReason: "" }),
     /motivul/
   );
+  assert.throws(
+    () => crm.validateCrmState({ status: "lost", lostReason: "Buget insuficient", lostReasonCode: "" }),
+    /categoria/
+  );
+  assert.equal(crm.validateCrmState({
+    status: "lost",
+    lostReason: "Buget insuficient",
+    lostReasonCode: "price"
+  }), "lost");
   assert.throws(
     () => crm.validateCrmState({ status: "won", clientId: null }),
     /client/
@@ -110,6 +135,8 @@ function main() {
       "OOH Cold and Contactat stages remain distinct",
       "stage probability suggestions preserve deterministic forecast defaults",
       "stale Cold and Contactat leads are identified for classification",
+      "qualification score is deterministic and optional at creation",
+      "stage aging and opportunity priority are calculated automatically",
       "sales agents see only owned leads",
       "Sales Director can use and coordinate CRM",
       "active leads require a next follow-up",
@@ -138,6 +165,8 @@ function sourceArchitectureChecks() {
   const activityRoute = read("src/app/api/admin/crm/leads/[id]/activities/route.ts");
   const contactsRoute = read("src/app/api/admin/crm/leads/[id]/contacts/route.ts");
   const assigneesRoute = read("src/app/api/admin/crm/assignees/route.ts");
+  const schema = read("prisma/schema.prisma");
+  const migration = read("prisma/migrations/20260716000000_crm_opportunity_productivity_v3/migration.sql");
 
   assert(service.includes("skip: (page - 1) * limit"), "CRM list must be paginated");
   assert(service.includes("take: limit"), "CRM list must have a bounded page size");
@@ -155,6 +184,11 @@ function sourceArchitectureChecks() {
   assert(workspace.includes("Actiuni rapide"), "CRM must provide fast seller actions");
   assert(workspace.includes("Nu raspunde"), "CRM must support a no-answer follow-up preset");
   assert(workspace.includes("De clasificat"), "daily CRM must surface stale Cold and Contactat leads");
+  assert(workspace.includes("Calificare OOH"), "CRM detail must offer a compact OOH qualification checklist");
+  assert(workspace.includes("Detalii comerciale optionale"), "new opportunity form must keep secondary fields progressive");
+  assert(workspace.includes("Oportunitate / campanie"), "CRM must separate company from the commercial opportunity");
+  assert(workspace.includes("Brief primit"), "CRM must offer a one-click brief-received workflow");
+  assert(workspace.includes("Oferta trimisa"), "CRM must offer a one-click offer-sent workflow");
   assert(workspace.includes('status: "contacted"'), "quick contact action must classify a Cold prospect as Contactat");
   assert(workspace.includes("initialLeadId"), "notification deep links must open lead detail without client search-param coupling");
   assert(!workspace.includes("grid-flow-col"), "CRM pipeline must wrap instead of extending indefinitely to the right");
@@ -178,6 +212,12 @@ function sourceArchitectureChecks() {
   assert(contactsRoute.includes("const optionalEmail = z.preprocess"), "CRM contacts must accept an omitted email");
   assert(activityRoute.includes("status: z.string().trim().refine(isKnownCrmStatus"), "quick actions must validate CRM stage changes");
   assert(assigneesRoute.includes('["leads.view"]'), "only global CRM roles may list all CRM assignees");
+  for (const field of ["opportunityName", "qualificationData", "nextStep", "stageChangedAt", "lastActivityAt", "noResponseCount"]) {
+    assert(schema.includes(field), `CRM schema must include additive ${field}`);
+    assert(migration.includes("`" + field + "`"), `CRM migration must add ${field}`);
+  }
+  assert(!migration.includes("DROP TABLE"), "CRM migration must not drop tables");
+  assert(!migration.includes("DROP COLUMN"), "CRM migration must not drop columns");
 }
 
 function row(status, nextFollowUpDate, estimatedValue, currency, probability, updatedAt) {

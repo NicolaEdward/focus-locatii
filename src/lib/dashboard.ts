@@ -145,6 +145,7 @@ type CrmLeadRow = {
   id: string;
   leadDate: Date | null;
   companyName: string;
+  opportunityName: string | null;
   clientType: string | null;
   contactName: string | null;
   phone: string | null;
@@ -158,9 +159,11 @@ type CrmLeadRow = {
   probability: number | null;
   expectedCloseDate: Date | null;
   nextFollowUpDate: Date | null;
+  nextStep: string | null;
   locationsInterested: string | null;
   notes: string | null;
   lostReason: string | null;
+  lastActivityAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   assignedTo: { name: string; email: string } | null;
@@ -791,10 +794,10 @@ function serializeRealCrmLead(lead: CrmLeadRow) {
     expectedCloseDate: lead.expectedCloseDate?.toISOString() || null,
     nextFollowUpAt: lead.nextFollowUpDate?.toISOString() || null,
     locationsInterested: lead.locationsInterested,
-    notes: lead.notes,
-    lastActivityAt: lead.updatedAt.toISOString(),
+    notes: lead.nextStep || lead.notes,
+    lastActivityAt: (lead.lastActivityAt || lead.updatedAt).toISOString(),
     selectedCodes: null,
-    message: lead.lostReason || lead.source,
+    message: lead.opportunityName || lead.lostReason || lead.source,
     relatedCampaigns: [],
     createdAt: lead.createdAt.toISOString()
   };

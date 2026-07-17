@@ -18,6 +18,41 @@ export const CRM_STATUS_OPTIONS = [
 export type CrmStatus = (typeof CRM_STATUS_OPTIONS)[number]["value"];
 export type CrmDueFilter = "all" | "attention" | "overdue" | "today" | "upcoming" | "missing";
 export type CrmClassificationAttention = "cold" | "contacted" | null;
+export type CrmOpportunityPriority = "urgent" | "high" | "normal";
+
+export const CRM_SOURCE_OPTIONS = [
+  "Prospectare directa",
+  "Recomandare",
+  "Client existent",
+  "Agentie",
+  "Cerere website",
+  "Eveniment",
+  "Campanie reactivata",
+  "Alta sursa"
+] as const;
+
+export const CRM_LOST_REASON_OPTIONS = [
+  { value: "price", label: "Pret / buget" },
+  { value: "availability", label: "Locatii indisponibile" },
+  { value: "timing", label: "Termen sau perioada nepotrivita" },
+  { value: "competitor", label: "A ales concurenta" },
+  { value: "cancelled", label: "Campanie anulata" },
+  { value: "no_response", label: "Nu mai raspunde" },
+  { value: "not_qualified", label: "Nevoie necalificata" },
+  { value: "other", label: "Alt motiv" }
+] as const;
+
+export const CRM_QUALIFICATION_ITEMS = [
+  { key: "needConfirmed", label: "Nevoie OOH confirmata" },
+  { key: "periodKnown", label: "Perioada cunoscuta" },
+  { key: "geographyKnown", label: "Orase / zone cunoscute" },
+  { key: "formatsKnown", label: "Formate de interes cunoscute" },
+  { key: "budgetKnown", label: "Buget orientativ cunoscut" },
+  { key: "decisionMakerKnown", label: "Decident identificat" }
+] as const;
+
+export type CrmQualificationKey = (typeof CRM_QUALIFICATION_ITEMS)[number]["key"];
+export type CrmQualificationData = Record<CrmQualificationKey, boolean>;
 
 const crmStatusAliases: Record<string, CrmStatus> = {
   new: "cold",
@@ -41,6 +76,20 @@ const dbStatusesByCanonical: Record<CrmStatus, string[]> = {
   won: ["won", "account_management"],
   lost: ["lost"],
   inactive: ["inactive"]
+};
+
+const crmStageSlaDays: Record<CrmStatus, number | null> = {
+  cold: 7,
+  contacted: 5,
+  qualified: 10,
+  brief_received: 7,
+  in_offer: 5,
+  offer_sent: 7,
+  in_negotiation: 10,
+  on_hold: 30,
+  won: null,
+  lost: null,
+  inactive: null
 };
 
 export const CRM_ACTIVE_STATUSES: CrmStatus[] = [
@@ -96,6 +145,75 @@ export function crmDefaultProbability(value?: string | null) {
   return CRM_STATUS_OPTIONS.find((option) => option.value === status)?.defaultProbability ?? 0;
 }
 
+export function normalizeCrmQualificationData(value: unknown): CrmQualificationData {
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return CRM_QUALIFICATION_ITEMS.reduce<CrmQualificationData>((result, item) => {
+    result[item.key] = source[item.key] === true;
+    return result;
+  }, {} as CrmQualificationData);
+}
+
+export function crmQualificationScore(value: unknown) {
+  const data = normalizeCrmQualificationData(value);
+  const completed = CRM_QUALIFICATION_ITEMS.filter((item) => data[item.key]).length;
+  return {
+    completed,
+    total: CRM_QUALIFICATION_ITEMS.length,
+    percent: Math.round((completed / CRM_QUALIFICATION_ITEMS.length) * 100),
+    missing: CRM_QUALIFICATION_ITEMS.filter((item) => !data[item.key]).map((item) => item.label)
+  };
+}
+
+export function crmStatusAtLeast(value: string, target: "contacted" | "qualified") {
+  const activeOrder: CrmStatus[] = [
+    "cold",
+    "contacted",
+    "qualified",
+    "brief_received",
+    "in_offer",
+    "offer_sent",
+    "in_negotiation",
+    "on_hold",
+    "won"
+  ];
+  const statusIndex = activeOrder.indexOf(normalizeCrmStatus(value));
+  const targetIndex = activeOrder.indexOf(target);
+  return statusIndex >= targetIndex;
+}
+
+export function crmStageAgeDays(stageChangedAt: Date | string | null | undefined, now = new Date()) {
+  if (!stageChangedAt) return 0;
+  return Math.max(0, Math.floor((startOfUtcDay(now).getTime() - startOfUtcDay(new Date(stageChangedAt)).getTime()) / 86400000));
+}
+
+export function crmStageIsStalled(input: {
+  status: string;
+  stageChangedAt?: Date | string | null;
+}, now = new Date()) {
+  const status = normalizeCrmStatus(input.status);
+  const slaDays = crmStageSlaDays[status];
+  return slaDays != null && crmStageAgeDays(input.stageChangedAt, now) > slaDays;
+}
+
+export function crmOpportunityPriority(input: {
+  status: string;
+  nextFollowUpDate?: Date | string | null;
+  stageChangedAt?: Date | string | null;
+  expectedCloseDate?: Date | string | null;
+  noResponseCount?: number | null;
+}, now = new Date()): CrmOpportunityPriority {
+  const today = startOfUtcDay(now);
+  if (input.nextFollowUpDate && new Date(input.nextFollowUpDate) < today) return "urgent";
+  if ((input.noResponseCount || 0) >= 3) return "urgent";
+  if (crmStageIsStalled(input, now)) return "high";
+  const status = normalizeCrmStatus(input.status);
+  if (["offer_sent", "in_negotiation"].includes(status)) return "high";
+  if (input.expectedCloseDate && new Date(input.expectedCloseDate) <= addDays(today, 7)) return "high";
+  return "normal";
+}
+
 export function isActiveCrmStatus(value?: string | null) {
   return CRM_ACTIVE_STATUSES.includes(normalizeCrmStatus(value));
 }
@@ -120,6 +238,7 @@ export function validateCrmState(input: {
   status: string;
   nextFollowUpDate?: Date | null;
   lostReason?: string | null;
+  lostReasonCode?: string | null;
   clientId?: string | null;
 }) {
   const status = normalizeCrmStatus(input.status);
@@ -128,6 +247,9 @@ export function validateCrmState(input: {
   }
   if (status === "lost" && !input.lostReason?.trim()) {
     throw new Error("Completeaza motivul pentru care lead-ul a fost pierdut.");
+  }
+  if (status === "lost" && !input.lostReasonCode?.trim()) {
+    throw new Error("Alege categoria pentru care oportunitatea a fost pierduta.");
   }
   if (status === "won" && !input.clientId) {
     throw new Error("Leaga sau converteste lead-ul intr-un client inainte de a-l marca castigat.");
@@ -140,20 +262,30 @@ export function crmDueWhere(filter: CrmDueFilter, now = new Date()): Prisma.CrmL
   const todayStart = startOfUtcDay(now);
   const tomorrow = addDays(todayStart, 1);
   if (filter === "attention") {
+    const stalledWhere = CRM_ACTIVE_STATUSES.flatMap((status) => {
+      const slaDays = crmStageSlaDays[status];
+      return slaDays == null
+        ? []
+        : [{
+            status: { in: crmDbStatusesFor(status) },
+            stageChangedAt: { lte: addDays(todayStart, -slaDays - 1) }
+          }];
+    });
     return {
       status: { in: CRM_ACTIVE_DB_STATUSES },
       OR: [
         { nextFollowUpDate: null },
         { nextFollowUpDate: { lt: tomorrow } },
-        { updatedAt: { lt: addDays(now, -14) } },
+        { lastActivityAt: { lt: addDays(todayStart, -14) } },
         {
           status: { in: crmDbStatusesFor("cold") },
-          updatedAt: { lte: addDays(now, -7) }
+          stageChangedAt: { lte: addDays(todayStart, -7) }
         },
         {
           status: { in: crmDbStatusesFor("contacted") },
-          updatedAt: { lte: addDays(now, -5) }
-        }
+          stageChangedAt: { lte: addDays(todayStart, -5) }
+        },
+        ...stalledWhere
       ]
     };
   }
@@ -173,6 +305,7 @@ export function crmLeadAttention(input: {
   status: string;
   nextFollowUpDate: Date | string | null;
   updatedAt: Date | string;
+  lastActivityAt?: Date | string | null;
 }, now = new Date()) {
   const status = normalizeCrmStatus(input.status);
   if (!isActiveCrmStatus(status)) return null;
@@ -182,18 +315,19 @@ export function crmLeadAttention(input: {
   const tomorrow = addDays(todayStart, 1);
   if (followUp < todayStart) return "overdue";
   if (followUp < tomorrow) return "today";
-  if (new Date(input.updatedAt) < addDays(now, -14)) return "dormant";
+  if (new Date(input.lastActivityAt || input.updatedAt) < addDays(now, -14)) return "dormant";
   return null;
 }
 
 export function crmLeadClassificationAttention(input: {
   status: string;
   updatedAt: Date | string;
+  stageChangedAt?: Date | string | null;
 }, now = new Date()): CrmClassificationAttention {
   const status = normalizeCrmStatus(input.status);
-  const updatedAt = new Date(input.updatedAt);
-  if (status === "cold" && updatedAt <= addDays(now, -7)) return "cold";
-  if (status === "contacted" && updatedAt <= addDays(now, -5)) return "contacted";
+  const stageChangedAt = new Date(input.stageChangedAt || input.updatedAt);
+  if (status === "cold" && stageChangedAt <= addDays(now, -7)) return "cold";
+  if (status === "contacted" && stageChangedAt <= addDays(now, -5)) return "contacted";
   return null;
 }
 
@@ -209,6 +343,12 @@ export function summarizeCrmLeads(
     currency: string | null;
     probability: number | null;
     updatedAt: Date;
+    stageChangedAt?: Date | null;
+    firstContactedAt?: Date | null;
+    qualifiedAt?: Date | null;
+    lastActivityAt?: Date | null;
+    qualificationData?: unknown;
+    noResponseCount?: number | null;
   }>,
   now = new Date()
 ) {
@@ -224,7 +364,14 @@ export function summarizeCrmLeads(
     overdue: active.filter((row) => row.nextFollowUpDate && row.nextFollowUpDate < todayStart).length,
     dueToday: active.filter((row) => row.nextFollowUpDate && row.nextFollowUpDate >= todayStart && row.nextFollowUpDate < tomorrow).length,
     missingNextStep: active.filter((row) => !row.nextFollowUpDate).length,
-    dormant: active.filter((row) => row.updatedAt < addDays(now, -14)).length,
+    dormant: active.filter((row) => (row.lastActivityAt || row.updatedAt) < addDays(now, -14)).length,
+    stalled: active.filter((row) => crmStageIsStalled(row, now)).length,
+    needsQualification: active.filter((row) =>
+      crmStatusAtLeast(row.status, "qualified") && crmQualificationScore(row.qualificationData).completed < 4
+    ).length,
+    noResponseAttention: active.filter((row) => (row.noResponseCount || 0) >= 3).length,
+    contacted: rows.filter((row) => Boolean(row.firstContactedAt) || crmStatusAtLeast(row.status, "contacted")).length,
+    qualified: rows.filter((row) => Boolean(row.qualifiedAt) || crmStatusAtLeast(row.status, "qualified")).length,
     wonThisMonth: rows.filter((row) => normalizeCrmStatus(row.status) === "won" && row.updatedAt >= monthStart).length,
     lostThisMonth: rows.filter((row) => normalizeCrmStatus(row.status) === "lost" && row.updatedAt >= monthStart).length,
     pipelineByCurrency,

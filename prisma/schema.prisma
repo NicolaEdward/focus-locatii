@@ -716,6 +716,7 @@ model CrmLead {
   id                String   @id @default(cuid())
   leadDate          DateTime?
   companyName       String
+  opportunityName   String?
   clientType        String?
   contactName       String?
   phone             String?
@@ -730,10 +731,19 @@ model CrmLead {
   probability       Int?
   expectedCloseDate DateTime?
   nextFollowUpDate  DateTime?
+  nextStep          String?  @db.Text
+  qualificationData Json?
   locationsInterested String? @db.Text
   notes             String?  @db.Text
   lostReason        String?  @db.Text
+  lostReasonCode    String?
   sourceOfferRequestId String?
+  stageChangedAt    DateTime @default(now())
+  firstContactedAt  DateTime?
+  qualifiedAt       DateTime?
+  lastContactAt     DateTime?
+  lastActivityAt    DateTime?
+  noResponseCount   Int      @default(0)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -748,6 +758,9 @@ model CrmLead {
   @@index([createdByUserId])
   @@index([status])
   @@index([nextFollowUpDate])
+  @@index([stageChangedAt])
+  @@index([lastContactAt])
+  @@index([lastActivityAt])
   @@index([sourceOfferRequestId])
   @@map("portfolio_crm_leads")
 }

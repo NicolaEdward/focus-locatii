@@ -22,9 +22,19 @@ const optionalEmail = z.preprocess(
   z.string().trim().email().nullable().optional()
 );
 
+const qualificationSchema = z.object({
+  needConfirmed: z.boolean().optional(),
+  periodKnown: z.boolean().optional(),
+  geographyKnown: z.boolean().optional(),
+  formatsKnown: z.boolean().optional(),
+  budgetKnown: z.boolean().optional(),
+  decisionMakerKnown: z.boolean().optional()
+}).nullable().optional();
+
 const patchSchema = z.object({
   leadDate: z.string().trim().nullable().optional(),
   companyName: z.string().trim().min(2).max(191).optional(),
+  opportunityName: z.string().trim().max(191).nullable().optional(),
   clientType: z.enum(["direct_client", "agency"]).nullable().optional(),
   clientId: z.string().trim().nullable().optional(),
   contactName: z.string().trim().max(191).nullable().optional(),
@@ -38,9 +48,12 @@ const patchSchema = z.object({
   probability: z.coerce.number().int().min(0).max(100).nullable().optional(),
   expectedCloseDate: z.string().trim().nullable().optional(),
   nextFollowUpDate: z.string().trim().nullable().optional(),
+  nextStep: z.string().trim().max(2000).nullable().optional(),
+  qualificationData: qualificationSchema,
   locationsInterested: z.string().trim().max(5000).nullable().optional(),
   notes: z.string().trim().max(5000).nullable().optional(),
   lostReason: z.string().trim().max(1000).nullable().optional(),
+  lostReasonCode: z.string().trim().max(191).nullable().optional(),
   activityNote: z.string().trim().max(2000).nullable().optional()
 });
 

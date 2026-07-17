@@ -19,7 +19,23 @@ const noStoreHeaders = {
 
 const activitySchema = z.object({
   activityDate: z.string().trim().nullable().optional(),
-  actionType: z.enum(["prospectare", "telefon", "email", "vizita", "whatsapp", "meeting", "note", "offer_sent", "follow_up"]),
+  actionType: z.enum([
+    "prospectare",
+    "telefon",
+    "email",
+    "vizita",
+    "whatsapp",
+    "meeting",
+    "note",
+    "offer_sent",
+    "follow_up",
+    "call_connected",
+    "call_no_answer",
+    "email_sent",
+    "meeting_held",
+    "qualification",
+    "brief_received"
+  ]),
   details: z.string().trim().min(2).max(5000),
   locations: z.string().trim().max(5000).nullable().optional(),
   nextStep: z.string().trim().max(2000).nullable().optional(),

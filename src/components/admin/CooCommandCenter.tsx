@@ -497,13 +497,16 @@ function CrmTeamPanel({ data }: { data: CooData["crmTeam"] }) {
       icon={<Users size={18} />}
       action={<Link className="focus-button" href="/admin/crm" prefetch={false}>Deschide CRM</Link>}
     >
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <Metric label="Lead-uri active" value={data.summary.active} tone="green" />
         <Metric label="Follow-up restant" value={data.summary.overdue} tone={data.summary.overdue ? "red" : "green"} />
         <Metric label="Fara urmator pas" value={data.summary.missingNextStep} tone={data.summary.missingNextStep ? "yellow" : "green"} />
-        <Metric label="Activitati 7 zile" value={data.activities7Days} />
+        <Metric label="Etape blocate" value={data.summary.stalled} tone={data.summary.stalled ? "yellow" : "green"} />
+        <Metric label="De calificat" value={data.summary.needsQualification} tone={data.summary.needsQualification ? "yellow" : "green"} />
+        <Metric label="Fara raspuns" value={data.summary.noResponseAttention} tone={data.summary.noResponseAttention ? "red" : "green"} />
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Metric label="Activitati 7 zile" value={data.activities7Days} />
         <CrmMoneyMetric label="Pipeline" values={data.summary.pipelineByCurrency} />
         <CrmMoneyMetric label="Forecast ponderat" values={data.summary.weightedByCurrency} />
         <Metric label="Castigate luna" value={data.summary.wonThisMonth} tone="green" />
@@ -513,7 +516,7 @@ function CrmTeamPanel({ data }: { data: CooData["crmTeam"] }) {
 
     <Panel title="Activitate agenti CRM" icon={<Users size={18} />}>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px] text-sm">
+        <table className="w-full min-w-[1180px] text-sm">
           <thead className="bg-focus-navy/70 text-left text-xs uppercase text-slate-400">
             <tr>
               <th className="px-3 py-2">Agent</th>
@@ -521,6 +524,8 @@ function CrmTeamPanel({ data }: { data: CooData["crmTeam"] }) {
               <th className="px-3 py-2">Follow-up</th>
               <th className="px-3 py-2">Activitati</th>
               <th className="px-3 py-2">Disciplina</th>
+              <th className="px-3 py-2">Calificare</th>
+              <th className="px-3 py-2">Blocaje</th>
               <th className="px-3 py-2">Forecast</th>
               <th className="px-3 py-2">Conversie</th>
             </tr>
@@ -532,10 +537,12 @@ function CrmTeamPanel({ data }: { data: CooData["crmTeam"] }) {
               <td className="px-3 py-3"><span className={seller.overdue ? "font-black text-red-100" : ""}>{seller.overdue} restante</span><small className="block text-slate-400">{seller.dueToday} azi / {seller.missingNextStep} fara pas</small></td>
               <td className="px-3 py-3">{seller.activities7Days} / 7 zile<small className="block text-slate-400">{seller.activities30Days} / 30 zile</small></td>
               <td className="px-3 py-3">{seller.followUpCompliance}%</td>
+              <td className="px-3 py-3">{seller.qualificationRate == null ? "-" : `${seller.qualificationRate}%`}<small className="block text-slate-400">{seller.qualified} din {seller.contacted} contactate</small></td>
+              <td className="px-3 py-3"><span className={seller.stalled || seller.noResponseAttention ? "font-black text-red-100" : ""}>{seller.stalled} blocate</span><small className="block text-slate-400">{seller.noResponseAttention} fara raspuns / medie {seller.averageStageAgeDays} zile</small></td>
               <td className="px-3 py-3">{formatCurrencyValues(seller.weightedByCurrency)}</td>
               <td className="px-3 py-3">{seller.conversionRate == null ? "-" : `${seller.conversionRate}%`}<small className="block text-slate-400">{seller.won} castigate / {seller.lost} pierdute</small></td>
             </tr>
-          )) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={7}>Nu exista agenti CRM activi.</td></tr>}</tbody>
+          )) : <tr><td className="px-3 py-8 text-center text-slate-400" colSpan={9}>Nu exista agenti CRM activi.</td></tr>}</tbody>
         </table>
       </div>
     </Panel>

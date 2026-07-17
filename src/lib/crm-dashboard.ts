@@ -1,5 +1,7 @@
 import {
   CRM_STATUS_OPTIONS,
+  crmStageAgeDays,
+  crmStageIsStalled,
   isActiveCrmStatus,
   monthlyCrmOutcomes,
   normalizeCrmStatus,
@@ -29,6 +31,12 @@ export async function getCrmTeamDashboardData(now = new Date()) {
         estimatedValue: true,
         currency: true,
         probability: true,
+        stageChangedAt: true,
+        firstContactedAt: true,
+        qualifiedAt: true,
+        lastActivityAt: true,
+        qualificationData: true,
+        noResponseCount: true,
         updatedAt: true
       }
     }),
@@ -69,6 +77,8 @@ export async function getCrmTeamDashboardData(now = new Date()) {
     const won = ownLeads.filter((lead) => normalizeCrmStatus(lead.status) === "won").length;
     const lost = ownLeads.filter((lead) => normalizeCrmStatus(lead.status) === "lost").length;
     const active = ownLeads.filter((lead) => isActiveCrmStatus(lead.status));
+    const contacted = ownLeads.filter((lead) => Boolean(lead.firstContactedAt)).length;
+    const qualified = ownLeads.filter((lead) => Boolean(lead.qualifiedAt)).length;
     return {
       id: seller.id,
       name: seller.name,
@@ -78,6 +88,11 @@ export async function getCrmTeamDashboardData(now = new Date()) {
       dueToday: ownSummary.dueToday,
       missingNextStep: ownSummary.missingNextStep,
       dormant: ownSummary.dormant,
+      stalled: active.filter((lead) => crmStageIsStalled(lead, now)).length,
+      noResponseAttention: active.filter((lead) => lead.noResponseCount >= 3).length,
+      averageStageAgeDays: active.length
+        ? Math.round(active.reduce((sum, lead) => sum + crmStageAgeDays(lead.stageChangedAt, now), 0) / active.length)
+        : 0,
       pipelineByCurrency: ownSummary.pipelineByCurrency,
       weightedByCurrency: ownSummary.weightedByCurrency,
       activities7Days: activityCount(activities7, seller.id),
@@ -85,6 +100,9 @@ export async function getCrmTeamDashboardData(now = new Date()) {
       followUpCompliance: active.length
         ? Math.round((active.filter((lead) => lead.nextFollowUpDate).length / active.length) * 100)
         : 100,
+      qualificationRate: contacted ? Math.round((qualified / contacted) * 100) : null,
+      contacted,
+      qualified,
       conversionRate: won + lost ? Math.round((won / (won + lost)) * 100) : null,
       won,
       lost

@@ -132,15 +132,24 @@ async function main() {
     crmLead("crm-missing", "Client fara pas", "new", null, "2026-06-25"),
     crmLead("crm-tomorrow", "Client maine", "offer_sent", "2026-06-27", "2026-06-25"),
     crmLead("crm-classify", "Prospect vechi", "cold", "2026-07-10", "2026-06-10"),
+    crmLead("crm-no-answer", "Client fara raspuns", "qualified", "2026-07-10", "2026-06-25", {
+      noResponseCount: 3,
+      stageChangedAt: "2026-06-25"
+    }),
+    crmLead("crm-stalled", "Oportunitate blocata", "in_offer", "2026-07-10", "2026-06-25", {
+      stageChangedAt: "2026-06-01"
+    }),
     crmLead("crm-future", "Client viitor", "offer_sent", "2026-06-28", "2026-06-25")
   ];
   const crmCreated = await syncCrmNotifications(now);
-  assert.equal(crmCreated, 5, "CRM sync creates overdue, today, tomorrow, missing-step and classification notifications");
+  assert.equal(crmCreated, 7, "CRM sync creates due, classification, no-answer and stalled-stage notifications");
   assert(openNotification("crm-overdue", "crm_followup_overdue"), "overdue CRM notification is created");
   assert(openNotification("crm-today", "crm_followup_due_today"), "today CRM notification is created");
   assert(openNotification("crm-missing", "crm_next_step_missing"), "missing-next-step CRM notification is created");
   assert(openNotification("crm-tomorrow", "crm_followup_due_tomorrow"), "tomorrow CRM notification is created");
   assert(openNotification("crm-classify", "crm_classification_due"), "stale Cold prospect receives a classification reminder");
+  assert(openNotification("crm-no-answer", "crm_no_response_attention"), "repeated no-answer attempts create one attention reminder");
+  assert(openNotification("crm-stalled", "crm_stage_stalled"), "a stalled commercial stage creates one attention reminder");
   assert.equal(await syncCrmNotifications(now), 0, "CRM notifications remain idempotent");
 
   crmLeads = [
@@ -196,6 +205,7 @@ async function main() {
       "duplicate notification not repeatedly created",
       "CRM due and missing-next-step notifications are idempotent",
       "CRM tomorrow and stale-classification reminders are generated without duplicate noise",
+      "CRM no-answer and stalled-stage reminders are generated without duplicate noise",
       "saving CRM work resolves its active reminder immediately",
       "stale CRM notifications are archived",
       "operational completion notification is scoped and idempotent",
@@ -215,13 +225,18 @@ function receivable(id, dueDate, ownerId) {
   };
 }
 
-function crmLead(id, companyName, status, nextFollowUpDate, updatedAt) {
+function crmLead(id, companyName, status, nextFollowUpDate, updatedAt, extra = {}) {
   return {
     id,
     companyName,
+    opportunityName: null,
     status,
     assignedToUserId: "seller-1",
     nextFollowUpDate: nextFollowUpDate ? new Date(`${nextFollowUpDate}T00:00:00.000Z`) : null,
+    nextStep: "Revenire comerciala",
+    stageChangedAt: new Date(`${extra.stageChangedAt || updatedAt}T00:00:00.000Z`),
+    lastActivityAt: new Date(`${updatedAt}T00:00:00.000Z`),
+    noResponseCount: extra.noResponseCount || 0,
     updatedAt: new Date(`${updatedAt}T00:00:00.000Z`)
   };
 }

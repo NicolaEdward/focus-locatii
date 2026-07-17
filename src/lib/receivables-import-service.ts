@@ -407,6 +407,7 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
         }
       }
 
+      let ledger = receivable.payments.reduce((total, payment) => total.plus(payment.amount), money(0));
       if (!receivable.payments.length && money(receivable.collectedAmount).greaterThan(0)) {
         await tx.financialReceivablePayment.create({
           data: {
@@ -420,8 +421,8 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
             createdByUserId: input.actor.id
           }
         });
+        ledger = ledger.plus(receivable.collectedAmount || money(0));
       }
-      const ledger = await activePaymentTotal(tx, receivable.id);
       const reconciliation = reconcileReceivableAmounts({
         invoiceAmount: row.invoiceAmount,
         ledgerCollectedAmount: ledger,
@@ -450,7 +451,7 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
         });
         importPaymentId = payment.id;
       }
-      const collected = await activePaymentTotal(tx, receivable.id);
+      const collected = ledger.plus(reconciliation.importDelta);
       const remaining = Prisma.Decimal.max(money(row.invoiceAmount).minus(collected), 0);
       const credit = Prisma.Decimal.max(collected.minus(money(row.invoiceAmount)), 0);
       if (credit.greaterThan(0) && importPaymentId) {
@@ -555,7 +556,11 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
       }
     });
     return result;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
+  }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 15_000,
+    timeout: 120_000
+  });
 }
 
 export async function listReceivablesWorkspace(input?: { query?: string; status?: string; take?: number }) {
@@ -777,14 +782,6 @@ function importTotals(rows: ReturnType<typeof serializeImportRow>[]) {
     result.set(key, current);
   }
   return [...result.values()].map((item) => ({ ...item, invoiceAmount: item.invoiceAmount.toFixed(2), collectedAmount: item.collectedAmount.toFixed(2), remainingAmount: item.remainingAmount.toFixed(2) }));
-}
-
-async function activePaymentTotal(tx: Prisma.TransactionClient, receivableId: string) {
-  const aggregate = await tx.financialReceivablePayment.aggregate({
-    where: { receivableId, status: ACTIVE_PAYMENT_STATUS },
-    _sum: { amount: true }
-  });
-  return money(aggregate._sum.amount);
 }
 
 function serializeReceivableLedger(row: Record<string, any>) {

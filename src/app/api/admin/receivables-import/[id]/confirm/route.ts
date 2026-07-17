@@ -4,6 +4,7 @@ import { confirmReceivablesImport, getReceivablesImportPreview } from "@/lib/rec
 
 type Context = { params: Promise<{ id: string }> };
 export const dynamic = "force-dynamic";
+export const maxDuration = 180;
 
 export async function POST(request: NextRequest, context: Context) {
   const { session, response } = await requireAnyPermission(request, ["finance.confirm", "finance.manage"]);

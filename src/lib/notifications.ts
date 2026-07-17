@@ -3,6 +3,8 @@ import type { Prisma } from "@prisma/client";
 import { recordAudit } from "@/lib/audit";
 import {
   CRM_ACTIVE_DB_STATUSES,
+  crmEffectiveProbability,
+  crmForecastCategoryForStatus,
   crmLeadClassificationAttention,
   crmStageAgeDays,
   crmStageIsStalled,
@@ -142,6 +144,7 @@ export async function syncCrmNotifications(now = new Date()) {
       nextStep: true,
       estimatedValue: true,
       currency: true,
+      probability: true,
       forecastCategory: true,
       expectedCloseDate: true,
       stageChangedAt: true,
@@ -176,7 +179,7 @@ export async function syncCrmNotifications(now = new Date()) {
     if (
       lead.expectedCloseDate
       && lead.expectedCloseDate < nextWeek
-      && ["best_case", "commit"].includes(lead.forecastCategory || "")
+      && ["best_case", "commit"].includes(crmForecastCategoryForStatus(lead.status, lead.probability))
     ) {
       reminderTypes.push(lead.expectedCloseDate < today ? "crm_close_overdue" : "crm_close_due_soon");
     }
@@ -236,7 +239,8 @@ export async function syncCrmNotifications(now = new Date()) {
           nextStep: lead.nextStep,
           estimatedValue: lead.estimatedValue,
           currency: lead.currency,
-          forecastCategory: lead.forecastCategory,
+          probability: crmEffectiveProbability(lead.probability, lead.status),
+          forecastCategory: crmForecastCategoryForStatus(lead.status, lead.probability),
           expectedCloseDate: lead.expectedCloseDate?.toISOString() || null
         }
       });

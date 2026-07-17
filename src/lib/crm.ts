@@ -175,6 +175,14 @@ export function crmDefaultProbability(value?: string | null) {
   return CRM_STATUS_OPTIONS.find((option) => option.value === status)?.defaultProbability ?? 0;
 }
 
+export function crmEffectiveProbability(value: number | null | undefined, status?: string | null) {
+  if (value == null) return crmDefaultProbability(status);
+  if (!Number.isInteger(value) || value < 0 || value > 100) {
+    throw new Error("Sansele de castig trebuie sa fie un numar intreg intre 0 si 100.");
+  }
+  return value;
+}
+
 export function normalizeCrmForecastCategory(value?: string | null): CrmForecastCategory {
   const normalized = String(value || "pipeline").trim().toLowerCase();
   return CRM_FORECAST_CATEGORY_OPTIONS.some((option) => option.value === normalized)
@@ -196,44 +204,56 @@ export function crmForecastCategoryDescription(value?: string | null) {
   return CRM_FORECAST_CATEGORY_OPTIONS.find((option) => option.value === category)?.description || "";
 }
 
-export function crmForecastCategoryForStatus(status?: string | null): CrmForecastCategory {
+export function crmForecastCategoryForStatus(
+  status?: string | null,
+  probability?: number | null
+): CrmForecastCategory {
   const normalized = normalizeCrmStatus(status);
   if (normalized === "won") return "closed";
   if (["lost", "inactive", "on_hold"].includes(normalized)) return "omitted";
+  const effectiveProbability = crmEffectiveProbability(probability, normalized);
+  if (effectiveProbability >= 80) return "commit";
+  if (effectiveProbability >= 50) return "best_case";
   return "pipeline";
 }
 
 export function nextCrmForecastCategory(input: {
-  currentCategory?: string | null;
-  currentStatus?: string | null;
   nextStatus?: string | null;
-  requestedCategory?: string | null;
+  probability?: number | null;
 }) {
-  const nextStatus = normalizeCrmStatus(input.nextStatus);
-  if (["won", "lost", "inactive", "on_hold"].includes(nextStatus)) return crmForecastCategoryForStatus(nextStatus);
-  if (input.requestedCategory != null) return normalizeCrmForecastCategory(input.requestedCategory);
-  const currentCategory = normalizeCrmForecastCategory(input.currentCategory);
-  return normalizeCrmStatus(input.currentStatus) === "on_hold" && currentCategory === "omitted"
-    ? "pipeline"
-    : currentCategory;
+  return crmForecastCategoryForStatus(input.nextStatus, input.probability);
+}
+
+export function crmProbabilityForUpdate(input: {
+  currentProbability?: number | null;
+  requestedProbability?: number | null;
+  nextStatus?: string | null;
+}) {
+  const status = normalizeCrmStatus(input.nextStatus);
+  if (status === "won") return 100;
+  if (status === "lost") return 0;
+  const value = input.requestedProbability === undefined
+    ? input.currentProbability
+    : input.requestedProbability;
+  return crmEffectiveProbability(value, status);
 }
 
 export function validateCrmForecast(input: {
   status: string;
-  forecastCategory?: string | null;
+  probability?: number | null;
   estimatedValue?: number | null;
   expectedCloseDate?: Date | null;
 }) {
   const status = normalizeCrmStatus(input.status);
-  const category = normalizeCrmForecastCategory(input.forecastCategory);
-  const forcedCategory = crmForecastCategoryForStatus(status);
-  if (!isActiveCrmStatus(status)) return forcedCategory;
-  if (["best_case", "commit"].includes(category)) {
+  const probability = crmEffectiveProbability(input.probability, status);
+  const category = crmForecastCategoryForStatus(status, probability);
+  if (!isActiveCrmStatus(status) || status === "on_hold") return category;
+  if (probability >= 50) {
     if (!input.estimatedValue || input.estimatedValue <= 0) {
-      throw new Error("Completeaza valoarea integrala inainte de a include oportunitatea in estimare.");
+      throw new Error("Pentru minimum 50% sanse, completeaza valoarea integrala a oportunitatii.");
     }
     if (!input.expectedCloseDate) {
-      throw new Error("Alege luna estimata de inchidere pentru Posibil sau Angajament.");
+      throw new Error("Pentru minimum 50% sanse, alege data estimata de inchidere.");
     }
   }
   return category;
@@ -431,6 +451,7 @@ export function summarizeCrmLeads(
     nextFollowUpDate: Date | null;
     estimatedValue: number | null;
     currency: string | null;
+    probability?: number | null;
     forecastCategory?: string | null;
     expectedCloseDate?: Date | null;
     updatedAt: Date;
@@ -451,11 +472,15 @@ export function summarizeCrmLeads(
   const pipelineByCurrency = moneyByCurrency(active, (row) => row.estimatedValue || 0);
   const closingThisMonth = active.filter((row) => row.expectedCloseDate && row.expectedCloseDate >= monthStart && row.expectedCloseDate < monthEnd);
   const bestCaseByCurrency = moneyByCurrency(
-    closingThisMonth.filter((row) => normalizeCrmForecastCategory(row.forecastCategory) === "best_case"),
+    closingThisMonth.filter((row) => crmForecastCategoryForStatus(row.status, row.probability) === "best_case"),
     (row) => row.estimatedValue || 0
   );
   const commitByCurrency = moneyByCurrency(
-    closingThisMonth.filter((row) => normalizeCrmForecastCategory(row.forecastCategory) === "commit"),
+    closingThisMonth.filter((row) => crmForecastCategoryForStatus(row.status, row.probability) === "commit"),
+    (row) => row.estimatedValue || 0
+  );
+  const likelyByCurrency = moneyByCurrency(
+    closingThisMonth.filter((row) => ["best_case", "commit"].includes(crmForecastCategoryForStatus(row.status, row.probability))),
     (row) => row.estimatedValue || 0
   );
   return {
@@ -475,6 +500,7 @@ export function summarizeCrmLeads(
     wonThisMonth: rows.filter((row) => normalizeCrmStatus(row.status) === "won" && row.updatedAt >= monthStart).length,
     lostThisMonth: rows.filter((row) => normalizeCrmStatus(row.status) === "lost" && row.updatedAt >= monthStart).length,
     pipelineByCurrency,
+    likelyByCurrency,
     bestCaseByCurrency,
     commitByCurrency
   };

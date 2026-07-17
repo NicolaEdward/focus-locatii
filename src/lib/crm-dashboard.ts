@@ -30,6 +30,7 @@ export async function getCrmTeamDashboardData(now = new Date()) {
         nextFollowUpDate: true,
         estimatedValue: true,
         currency: true,
+        probability: true,
         forecastCategory: true,
         expectedCloseDate: true,
         stageChangedAt: true,

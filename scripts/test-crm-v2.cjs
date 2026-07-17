@@ -31,19 +31,32 @@ async function main() {
   assert.equal(crm.isKnownCrmStatus("contacted"), true);
   assert.equal(crm.isKnownCrmStatus("not-a-real-stage"), false);
   assert.equal(crm.crmForecastCategoryForStatus("cold"), "pipeline");
+  assert.equal(crm.crmForecastCategoryForStatus("qualified", 49), "pipeline");
+  assert.equal(crm.crmForecastCategoryForStatus("qualified", 50), "best_case");
+  assert.equal(crm.crmForecastCategoryForStatus("qualified", 79), "best_case");
+  assert.equal(crm.crmForecastCategoryForStatus("qualified", 80), "commit");
   assert.equal(crm.crmForecastCategoryForStatus("on_hold"), "omitted");
   assert.equal(crm.crmForecastCategoryForStatus("won"), "closed");
-  assert.equal(crm.nextCrmForecastCategory({ currentCategory: "commit", currentStatus: "in_negotiation", nextStatus: "offer_sent" }), "commit");
-  assert.equal(crm.nextCrmForecastCategory({ currentCategory: "omitted", currentStatus: "on_hold", nextStatus: "contacted" }), "pipeline");
-  assert.equal(crm.nextCrmForecastCategory({ currentCategory: "pipeline", nextStatus: "won", requestedCategory: "commit" }), "closed");
+  assert.equal(crm.nextCrmForecastCategory({ nextStatus: "offer_sent", probability: 80 }), "commit");
+  assert.equal(crm.nextCrmForecastCategory({ nextStatus: "contacted", probability: 20 }), "pipeline");
+  assert.equal(crm.nextCrmForecastCategory({ nextStatus: "won", probability: 80 }), "closed");
+  assert.equal(crm.crmEffectiveProbability(null, "in_negotiation"), 80, "legacy leads use the stage suggestion without a data backfill");
+  for (const invalid of [-1, 101, 50.5]) {
+    assert.throws(() => crm.crmEffectiveProbability(invalid, "qualified"), /numar intreg intre 0 si 100/);
+  }
+  assert.equal(crm.crmProbabilityForUpdate({ currentProbability: 80, nextStatus: "contacted" }), 80, "stage changes preserve manually entered probability");
+  assert.equal(crm.crmProbabilityForUpdate({ currentProbability: null, nextStatus: "contacted" }), 20, "legacy null probability follows the new stage suggestion");
+  assert.equal(crm.crmProbabilityForUpdate({ currentProbability: 80, requestedProbability: 55, nextStatus: "qualified" }), 55, "explicit probability edits are saved");
+  assert.equal(crm.crmProbabilityForUpdate({ currentProbability: 80, nextStatus: "won" }), 100);
+  assert.equal(crm.crmProbabilityForUpdate({ currentProbability: 80, nextStatus: "lost" }), 0);
   assert.throws(
-    () => crm.validateCrmForecast({ status: "offer_sent", forecastCategory: "commit", estimatedValue: 1000, expectedCloseDate: null }),
-    /luna estimata/
+    () => crm.validateCrmForecast({ status: "offer_sent", probability: 80, estimatedValue: 1000, expectedCloseDate: null }),
+    /data estimata/
   );
   assert.equal(crm.validateCrmForecast({
     status: "offer_sent",
-    forecastCategory: "commit",
-    estimatedValue: 1000,
+    probability: 80,
+    estimatedValue: 4000,
     expectedCloseDate: new Date("2026-07-30T00:00:00.000Z")
   }), "commit");
   const qualification = crm.crmQualificationScore({
@@ -124,11 +137,11 @@ async function main() {
   }, now), null);
 
   const summary = crm.summarizeCrmLeads([
-    row("qualified", "2026-07-15", 100, "EUR", "pipeline", "2026-08-15", "2026-07-15"),
-    row("in_offer", "2026-07-16", 200, "RON", "best_case", "2026-07-28", "2026-07-16"),
-    row("in_negotiation", null, 300, "EUR", "commit", "2026-07-30", "2026-07-16"),
-    row("won", null, 500, "EUR", "closed", "2026-07-10", "2026-07-10"),
-    row("lost", null, 100, "RON", "omitted", "2026-07-11", "2026-07-11")
+    row("qualified", "2026-07-15", 100, "EUR", 35, "2026-08-15", "2026-07-15"),
+    row("in_offer", "2026-07-16", 200, "RON", 60, "2026-07-28", "2026-07-16"),
+    row("in_negotiation", null, 4000, "EUR", 80, "2026-07-30", "2026-07-16"),
+    row("won", null, 500, "EUR", 100, "2026-07-10", "2026-07-10"),
+    row("lost", null, 100, "RON", 0, "2026-07-11", "2026-07-11")
   ], now);
   assert.equal(summary.active, 3);
   assert.equal(summary.overdue, 1);
@@ -136,10 +149,20 @@ async function main() {
   assert.equal(summary.missingNextStep, 1);
   assert.equal(summary.wonThisMonth, 1);
   assert.equal(summary.lostThisMonth, 1);
-  assert.equal(summary.pipelineByCurrency.EUR, 400);
+  assert.equal(summary.pipelineByCurrency.EUR, 4100);
   assert.equal(summary.pipelineByCurrency.RON, 200);
   assert.equal(summary.bestCaseByCurrency.RON, 200);
-  assert.equal(summary.commitByCurrency.EUR, 300);
+  assert.equal(summary.commitByCurrency.EUR, 4000, "4000 EUR at 80% enters forecast as the full 4000 EUR");
+  assert.equal(summary.likelyByCurrency.EUR, 4000);
+  assert.equal(summary.likelyByCurrency.RON, 200);
+  assert.notEqual(summary.commitByCurrency.EUR, 3200, "the CRM must never multiply opportunity value by probability");
+
+  const fullValueTotals = crm.summarizeCrmLeads([
+    row("in_negotiation", "2026-07-20", 4000, "EUR", 80, "2026-07-25", "2026-07-16"),
+    row("brief_received", "2026-07-20", 2000, "EUR", 50, "2026-07-26", "2026-07-16")
+  ], now);
+  assert.equal(fullValueTotals.pipelineByCurrency.EUR, 6000);
+  assert.equal(fullValueTotals.likelyByCurrency.EUR, 6000, "multiple opportunities are summed at full value regardless of probability");
   const outcomes = crm.monthlyCrmOutcomes([
     { leadId: "lead-1", statusAtTime: "lost", activityDate: "2026-07-03T10:00:00.000Z" },
     { leadId: "lead-1", statusAtTime: "won", activityDate: "2026-07-08T10:00:00.000Z" },
@@ -191,9 +214,10 @@ async function testCrmExport() {
     email: "contact@example.test",
     source: "Recomandare",
     status: "qualified",
-    estimatedValue: 1000,
+    estimatedValue: 4000,
     currency: "EUR",
-    forecastCategory: "pipeline",
+    probability: 80,
+    forecastCategory: "commit",
     expectedCloseDate: new Date("2026-08-01T00:00:00.000Z"),
     nextFollowUpDate: new Date("2026-07-20T00:00:00.000Z"),
     nextStep: "Apel",
@@ -238,6 +262,8 @@ async function testCrmExport() {
     },
     "@/lib/audit": { recordAudit: async () => null },
     "@/lib/crm": {
+      crmEffectiveProbability: (value) => value,
+      crmForecastCategoryForStatus: (_status, probability) => probability >= 80 ? "commit" : probability >= 50 ? "best_case" : "pipeline",
       crmForecastCategoryLabel: (value) => value,
       crmStatusLabel: (value) => value
     },
@@ -254,6 +280,10 @@ async function testCrmExport() {
   const activityRows = XLSX.utils.sheet_to_json(workbook.Sheets["Istoric observatii"]);
   assert.equal(leadRows[0]["Domeniu activitate"], "Retail");
   assert.equal(leadRows[0]["Observatii vanzator"], "Observatie vanzator");
+  assert.equal(leadRows[0]["Valoare oportunitate"], 4000);
+  assert.equal(leadRows[0]["Sanse de castig (%)"], 80);
+  assert.equal(leadRows[0]["Nivel forecast"], "commit");
+  assert.equal(leadRows[0]["Valoare estimata"], undefined);
   assert.equal(contactRows[0]["Persoana contact"], "Contact Principal");
   assert.equal(activityRows[0].Observatii, "Revine vineri");
 
@@ -273,6 +303,7 @@ function sourceArchitectureChecks() {
   const cron = read("src/app/api/cron/sync-financial-notifications/route.ts");
   const rbac = read("src/lib/rbac.ts");
   const listRoute = read("src/app/api/admin/crm/leads/route.ts");
+  const detailRoute = read("src/app/api/admin/crm/leads/[id]/route.ts");
   const activityRoute = read("src/app/api/admin/crm/leads/[id]/activities/route.ts");
   const contactsRoute = read("src/app/api/admin/crm/leads/[id]/contacts/route.ts");
   const assigneesRoute = read("src/app/api/admin/crm/assignees/route.ts");
@@ -306,7 +337,7 @@ function sourceArchitectureChecks() {
   assert(workspace.includes("Nu raspunde"), "CRM must support a no-answer follow-up preset");
   assert(workspace.includes("De clasificat"), "daily CRM must surface stale Cold and Contactat leads");
   assert(workspace.includes("Calificare OOH"), "CRM detail must offer a compact OOH qualification checklist");
-  assert(workspace.includes("Detalii comerciale optionale"), "new opportunity form must keep secondary fields progressive");
+  assert(workspace.includes("Situatie comerciala"), "new opportunity form must group commercial fields clearly");
   assert(workspace.includes("Oportunitate / campanie"), "CRM must separate company from the commercial opportunity");
   assert(workspace.includes("CUI / CIF"), "new CRM opportunities must request the company CUI");
   assert(workspace.includes("Domeniu de activitate"), "new CRM opportunities must request the business industry");
@@ -320,10 +351,14 @@ function sourceArchitectureChecks() {
   assert(workspace.includes("Creeaza client si marcheaza castigata"), "client creation must happen only as part of a won close flow");
   assert(!workspace.includes("Converteste in client"), "standalone client conversion must not remain visible");
   assert(!workspace.includes("Forecast ponderat"), "seller CRM must not show misleading weighted forecast");
-  assert(!workspace.includes('label="Probabilitate"'), "seller CRM must not ask for manual probability");
+  assert(!workspace.includes("Valoare ponderata"), "seller CRM must never label a weighted amount");
+  assert(workspace.includes('label="Sanse de castig (%)"'), "seller CRM must expose editable win probability");
+  assert(workspace.includes("Valoarea intra integral in forecast"), "seller CRM must explain the full-value rule");
+  assert(!workspace.includes("CRM_FORECAST_CATEGORY_OPTIONS"), "seller CRM must not expose a second manual forecast category");
   assert(!cooCommandCenter.includes("Forecast ponderat"), "COO dashboard must use full-value forecast categories");
+  assert(!cooCommandCenter.includes("Valoare ponderata"), "COO dashboard must not present weighted values");
   assert(!cooCommandCenter.includes(">Disciplina<"), "COO dashboard must not show a vacuous discipline score");
-  assert(cooCommandCenter.includes("Angajament luna"), "COO dashboard must show the seller commitment for the month");
+  assert(cooCommandCenter.includes("Sanse >=80% luna"), "COO dashboard must show high-confidence opportunities at full value");
   assert(workspace.includes("Brief primit"), "CRM must offer a one-click brief-received workflow");
   assert(workspace.includes("Oferta trimisa"), "CRM must offer a one-click offer-sent workflow");
   assert(workspace.includes('status: "contacted"'), "quick contact action must classify a Cold prospect as Contactat");
@@ -355,11 +390,19 @@ function sourceArchitectureChecks() {
   assert(duplicatesRoute.includes('searchParams.get("taxId")'), "duplicate lookup must accept CUI as a strict identifier");
   assert(listRoute.includes('searchParams.get("industry")'), "CRM list API must support industry filtering");
   assert(listRoute.includes('industry: z.string().trim().min(2'), "new CRM leads must require an industry");
+  assert(listRoute.includes('probability: z.number().int().min(0).max(100)'), "CRM create API must validate probability from 0 to 100");
+  assert(detailRoute.includes('probability: z.number().int().min(0).max(100)'), "CRM update API must validate probability from 0 to 100");
+  assert(service.includes("probability: crmEffectiveProbability(row.probability, row.status)"), "CRM list DTO must expose effective probability");
+  assert(service.includes("probability: crmEffectiveProbability(lead.probability, lead.status)"), "CRM detail DTO must expose effective probability");
+  assert(service.includes("forecastCategory: nextForecastCategory"), "stored forecast category must be server-derived");
   assert(exportRoute.includes('["COO", "SUPER_ADMIN"]'), "full CRM export must be restricted to COO and super admin");
   assert(exportRoute.includes('"Lead-uri"'), "CRM export must contain a lead sheet");
   assert(exportRoute.includes('"Persoane contact"'), "CRM export must contain a contact sheet");
   assert(exportRoute.includes('"Istoric observatii"'), "CRM export must contain an activity and notes sheet");
   assert(exportRoute.includes('"Observatii vanzator"'), "CRM export must contain seller observations");
+  assert(exportRoute.includes('"Valoare oportunitate"'), "CRM export must include the full opportunity value");
+  assert(exportRoute.includes('"Sanse de castig (%)"'), "CRM export must include probability separately");
+  assert(exportRoute.includes('"Nivel forecast"'), "CRM export must include the derived forecast level");
   assert(schema.includes("forecastCategory"), "CRM schema must store an explicit forecast category");
   assert(schema.includes("taxId             String?"), "CRM schema must store normalized company CUI additively");
   assert(schema.includes("industry          String?"), "CRM schema must store business industry additively");
@@ -380,13 +423,14 @@ function sourceArchitectureChecks() {
   assert(!migration.includes("DROP COLUMN"), "CRM migration must not drop columns");
 }
 
-function row(status, nextFollowUpDate, estimatedValue, currency, forecastCategory, expectedCloseDate, updatedAt) {
+function row(status, nextFollowUpDate, estimatedValue, currency, probability, expectedCloseDate, updatedAt) {
   return {
     status,
     nextFollowUpDate: nextFollowUpDate ? new Date(`${nextFollowUpDate}T00:00:00.000Z`) : null,
     estimatedValue,
     currency,
-    forecastCategory,
+    probability,
+    forecastCategory: crm.crmForecastCategoryForStatus(status, probability),
     expectedCloseDate: expectedCloseDate ? new Date(`${expectedCloseDate}T00:00:00.000Z`) : null,
     updatedAt: new Date(`${updatedAt}T00:00:00.000Z`)
   };

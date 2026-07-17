@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
-import { crmForecastCategoryLabel, crmStatusLabel } from "@/lib/crm";
+import {
+  crmEffectiveProbability,
+  crmForecastCategoryForStatus,
+  crmForecastCategoryLabel,
+  crmStatusLabel
+} from "@/lib/crm";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +37,7 @@ export async function GET(request: NextRequest) {
       status: true,
       estimatedValue: true,
       currency: true,
+      probability: true,
       forecastCategory: true,
       expectedCloseDate: true,
       nextFollowUpDate: true,
@@ -92,9 +98,10 @@ export async function GET(request: NextRequest) {
     Etapa: crmStatusLabel(lead.status),
     Vanzator: lead.assignedTo?.name || "Nealocat",
     "Email vanzator": lead.assignedTo?.email || "",
-    "Valoare estimata": lead.estimatedValue ?? "",
+    "Valoare oportunitate": lead.estimatedValue ?? "",
     Moneda: lead.currency || "",
-    Forecast: crmForecastCategoryLabel(lead.forecastCategory),
+    "Sanse de castig (%)": crmEffectiveProbability(lead.probability, lead.status),
+    "Nivel forecast": crmForecastCategoryLabel(crmForecastCategoryForStatus(lead.status, lead.probability)),
     "Data estimata inchidere": dateValue(lead.expectedCloseDate),
     "Urmator follow-up": dateValue(lead.nextFollowUpDate),
     "Urmatorul pas": lead.nextStep || "",
@@ -142,7 +149,7 @@ export async function GET(request: NextRequest) {
   })));
   const activitySheet = XLSX.utils.json_to_sheet(activityRows.length ? activityRows : [{ Mesaj: "Nu exista activitati CRM." }]);
 
-  leadSheet["!cols"] = columnWidths([14, 28, 16, 24, 28, 14, 24, 16, 28, 20, 18, 22, 28, 16, 10, 16, 16, 16, 30, 28, 36, 28, 20, 24, 20, 20, 20]);
+  leadSheet["!cols"] = columnWidths([14, 28, 16, 24, 28, 14, 24, 16, 28, 20, 18, 22, 28, 18, 10, 18, 18, 18, 30, 28, 36, 28, 20, 24, 20, 20, 20, 20]);
   contactSheet["!cols"] = columnWidths([28, 16, 24, 28, 22, 24, 20, 16, 28, 10, 36, 20]);
   activitySheet["!cols"] = columnWidths([28, 16, 24, 28, 22, 20, 20, 20, 36, 36, 30, 16, 24]);
   XLSX.utils.book_append_sheet(workbook, leadSheet, "Lead-uri");

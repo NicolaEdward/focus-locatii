@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
-import { isKnownCrmForecastCategory, isKnownCrmStatus } from "@/lib/crm";
+import { isKnownCrmStatus } from "@/lib/crm";
 import { createCrmLead, listCrmLeads } from "@/lib/crm-service";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,7 @@ const leadSchema = z.object({
   status: z.string().trim().refine(isKnownCrmStatus, "Etapa CRM nu este valida.").default("cold"),
   estimatedValue: z.coerce.number().nonnegative().nullable().optional(),
   currency: z.enum(["RON", "EUR"]).default("EUR"),
-  forecastCategory: z.string().trim().refine(isKnownCrmForecastCategory, "Categoria de estimare nu este valida.").optional(),
+  probability: z.number().int().min(0).max(100).nullable().optional(),
   expectedCloseDate: z.string().trim().nullable().optional(),
   nextFollowUpDate: z.string().trim().nullable().optional(),
   nextStep: z.string().trim().max(2000).nullable().optional(),

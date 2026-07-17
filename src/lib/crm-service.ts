@@ -7,11 +7,13 @@ import {
   CRM_STATUS_OPTIONS,
   crmDbStatusesFor,
   crmDueWhere,
+  crmEffectiveProbability,
   crmForecastCategoryForStatus,
   crmLeadAttention,
   crmLeadClassificationAttention,
   crmLeadScope,
   crmOpportunityPriority,
+  crmProbabilityForUpdate,
   crmQualificationScore,
   crmStageAgeDays,
   crmStageIsStalled,
@@ -20,7 +22,6 @@ import {
   monthlyCrmOutcomes,
   nextCrmForecastCategory,
   normalizeCrmQualificationData,
-  normalizeCrmForecastCategory,
   normalizeCrmStatus,
   summarizeCrmLeads,
   validateCrmForecast,
@@ -94,6 +95,7 @@ export async function listCrmLeads(input: CrmListInput, actor: AuthSession) {
         nextFollowUpDate: true,
         estimatedValue: true,
         currency: true,
+        probability: true,
         forecastCategory: true,
         expectedCloseDate: true,
         updatedAt: true,
@@ -201,7 +203,7 @@ export async function createCrmLead(input: {
   status: string;
   estimatedValue?: number | null;
   currency?: string | null;
-  forecastCategory?: string | null;
+  probability?: number | null;
   expectedCloseDate?: Date | null;
   nextFollowUpDate?: Date | null;
   nextStep?: string | null;
@@ -225,9 +227,10 @@ export async function createCrmLead(input: {
     nextFollowUpDate: input.nextFollowUpDate,
     clientId: input.clientId
   });
+  const probability = crmEffectiveProbability(input.probability, status);
   const forecastCategory = validateCrmForecast({
     status,
-    forecastCategory: input.forecastCategory ?? crmForecastCategoryForStatus(status),
+    probability,
     estimatedValue: input.estimatedValue,
     expectedCloseDate: input.expectedCloseDate
   });
@@ -253,6 +256,7 @@ export async function createCrmLead(input: {
       status,
       estimatedValue: input.estimatedValue,
       currency: input.currency || "EUR",
+      probability,
       forecastCategory,
       expectedCloseDate: input.expectedCloseDate,
       nextFollowUpDate: input.nextFollowUpDate,
@@ -314,7 +318,7 @@ export async function updateCrmLead(id: string, patch: {
   status?: string;
   estimatedValue?: number | null;
   currency?: string | null;
-  forecastCategory?: string | null;
+  probability?: number | null;
   expectedCloseDate?: Date | null;
   nextFollowUpDate?: Date | null;
   nextStep?: string | null;
@@ -353,11 +357,14 @@ export async function updateCrmLead(id: string, patch: {
   const nextLostReasonCode = patch.lostReasonCode === undefined ? existing.lostReasonCode : patch.lostReasonCode;
   const nextEstimatedValue = patch.estimatedValue === undefined ? existing.estimatedValue : patch.estimatedValue;
   const nextExpectedCloseDate = patch.expectedCloseDate === undefined ? existing.expectedCloseDate : patch.expectedCloseDate;
+  const nextProbability = crmProbabilityForUpdate({
+    currentProbability: existing.probability,
+    requestedProbability: patch.probability,
+    nextStatus
+  });
   const nextForecastCategory = nextCrmForecastCategory({
-    currentCategory: existing.forecastCategory,
-    currentStatus: existing.status,
     nextStatus,
-    requestedCategory: patch.forecastCategory
+    probability: nextProbability
   });
   const nextNextStep = isTerminalStatus(nextStatus)
     ? null
@@ -373,7 +380,7 @@ export async function updateCrmLead(id: string, patch: {
   });
   validateCrmForecast({
     status: nextStatus,
-    forecastCategory: nextForecastCategory,
+    probability: nextProbability,
     estimatedValue: nextEstimatedValue,
     expectedCloseDate: nextExpectedCloseDate
   });
@@ -404,7 +411,8 @@ export async function updateCrmLead(id: string, patch: {
       ...(patch.status !== undefined ? { status: nextStatus } : {}),
       ...(patch.estimatedValue !== undefined ? { estimatedValue: patch.estimatedValue } : {}),
       ...(patch.currency !== undefined ? { currency: patch.currency } : {}),
-      ...(patch.forecastCategory !== undefined || statusChanged ? { forecastCategory: nextForecastCategory } : {}),
+      ...(patch.probability !== undefined || ["won", "lost"].includes(nextStatus) ? { probability: nextProbability } : {}),
+      forecastCategory: nextForecastCategory,
       ...(patch.expectedCloseDate !== undefined ? { expectedCloseDate: patch.expectedCloseDate } : {}),
       ...(patch.nextFollowUpDate !== undefined ? { nextFollowUpDate: patch.nextFollowUpDate } : {}),
       ...(patch.nextStep !== undefined || isTerminalStatus(nextStatus) ? { nextStep: nextNextStep } : {}),
@@ -472,9 +480,8 @@ export async function addCrmActivity(leadId: string, input: {
     throw new Error("Foloseste actiunea Inchide oportunitatea pentru a confirma castigarea si clientul.");
   }
   const nextForecastCategory = nextCrmForecastCategory({
-    currentCategory: lead.forecastCategory,
-    currentStatus,
-    nextStatus
+    nextStatus,
+    probability: crmEffectiveProbability(lead.probability, nextStatus)
   });
   validateCrmState({
     status: nextStatus,
@@ -485,7 +492,7 @@ export async function addCrmActivity(leadId: string, input: {
   });
   validateCrmForecast({
     status: nextStatus,
-    forecastCategory: nextForecastCategory,
+    probability: crmEffectiveProbability(lead.probability, nextStatus),
     estimatedValue: lead.estimatedValue,
     expectedCloseDate: lead.expectedCloseDate
   });
@@ -521,7 +528,7 @@ export async function addCrmActivity(leadId: string, input: {
         nextStep: input.nextStep === undefined ? lead.nextStep : input.nextStep,
         ...(nextStatus !== currentStatus ? { status: nextStatus } : {}),
         ...(nextStatus !== currentStatus ? { stageChangedAt: activityDate } : {}),
-        ...(nextStatus !== currentStatus ? { forecastCategory: nextForecastCategory } : {}),
+        forecastCategory: nextForecastCategory,
         ...(firstContactedAt && !lead.firstContactedAt ? { firstContactedAt } : {}),
         ...(qualifiedAt && !lead.qualifiedAt ? { qualifiedAt } : {}),
         ...(isContactAttempt ? { lastContactAt: activityDate } : {}),
@@ -664,12 +671,11 @@ export async function listCrmDailyAgenda(input: { assignee?: string | null }, ac
       where: {
         ...leadOwnerWhere,
         status: { in: CRM_ACTIVE_DB_STATUSES },
-        forecastCategory: { in: ["best_case", "commit"] },
         expectedCloseDate: { lt: nextWeek }
       },
       select: crmLeadSummarySelect,
       orderBy: [{ expectedCloseDate: "asc" }, { updatedAt: "desc" }],
-      take: 30
+      take: 60
     })
   ]);
 
@@ -683,14 +689,21 @@ export async function listCrmDailyAgenda(input: { assignee?: string | null }, ac
           uploadedAt: activeFinancialUpload.uploadedAt.toISOString()
         }
       : { available: false, reportDate: null, uploadedAt: null },
-    counts: { calls: calls.length, receivables: receivables.length, opportunities: opportunities.length },
+    counts: {
+      calls: calls.length,
+      receivables: receivables.length,
+      opportunities: opportunities.filter((lead) => ["best_case", "commit"].includes(crmForecastCategoryForStatus(lead.status, lead.probability))).slice(0, 30).length
+    },
     calls: calls.map(serializeCrmLeadSummary),
     receivables: receivables.map((row) => ({
       ...row,
       dueDate: row.dueDate?.toISOString() || null,
       remainingAmount: row.remainingAmount == null ? null : Number(row.remainingAmount)
     })),
-    opportunities: opportunities.map(serializeCrmLeadSummary)
+    opportunities: opportunities
+      .filter((lead) => ["best_case", "commit"].includes(crmForecastCategoryForStatus(lead.status, lead.probability)))
+      .slice(0, 30)
+      .map(serializeCrmLeadSummary)
   };
 }
 
@@ -784,6 +797,7 @@ export async function convertCrmLeadToClient(input: {
       data: {
         clientId: client.id,
         status: "won",
+        probability: 100,
         nextFollowUpDate: null,
         nextStep: null,
         forecastCategory: "closed",
@@ -908,6 +922,7 @@ const crmLeadSummarySelect = {
   assignedToUserId: true,
   estimatedValue: true,
   currency: true,
+  probability: true,
   forecastCategory: true,
   expectedCloseDate: true,
   nextFollowUpDate: true,
@@ -946,7 +961,8 @@ function serializeCrmLeadSummary(row: Prisma.CrmLeadGetPayload<{ select: typeof 
   return {
     ...row,
     status: normalizeCrmStatus(row.status),
-    forecastCategory: normalizeCrmForecastCategory(row.forecastCategory),
+    probability: crmEffectiveProbability(row.probability, row.status),
+    forecastCategory: crmForecastCategoryForStatus(row.status, row.probability),
     leadDate: row.leadDate?.toISOString() || null,
     expectedCloseDate: row.expectedCloseDate?.toISOString() || null,
     nextFollowUpDate: row.nextFollowUpDate?.toISOString() || null,
@@ -983,8 +999,8 @@ function serializeCrmLeadDetail(
   return {
     ...lead,
     status: normalizeCrmStatus(lead.status),
-    probability: undefined,
-    forecastCategory: normalizeCrmForecastCategory(lead.forecastCategory),
+    probability: crmEffectiveProbability(lead.probability, lead.status),
+    forecastCategory: crmForecastCategoryForStatus(lead.status, lead.probability),
     leadDate: lead.leadDate?.toISOString() || null,
     expectedCloseDate: lead.expectedCloseDate?.toISOString() || null,
     nextFollowUpDate: lead.nextFollowUpDate?.toISOString() || null,

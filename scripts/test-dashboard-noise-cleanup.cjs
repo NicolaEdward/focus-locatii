@@ -112,18 +112,17 @@ function dashboardConflictGroupingUsesLocationId() {
 
 function cooDashboardRemovesDuplicateTaskSections() {
   const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
-  assert(commandCenter.includes('type OperationTaskFilter = "all" | "decoration" | "neutralization" | "overdue"'), "COO task list should use practical filters");
-  assert(commandCenter.includes('TaskPanel title="Operatiuni de facut"'), "COO should keep one clear operational list");
-  assert(!commandCenter.includes('TaskPanel title="Decorari"'), "COO must not render a second decoration task table");
-  assert(!commandCenter.includes('TaskPanel title="Neutralizari"'), "COO must not render a second neutralization task table");
+  assert(commandCenter.includes('title="Operațional"'), "COO should keep one clear operational summary");
+  assert(commandCenter.includes("data.operations.delayed"), "COO operational summary should prioritize delayed work");
+  assert(!commandCenter.includes("<TaskPanel"), "COO must not render the legacy operational task tables");
   assert(!commandCenter.includes("Taskuri operationale active"), "old noisy task title must be removed");
 }
 
 function cooConflictActionsAreManualOnly() {
   const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
-  assert(commandCenter.includes("Rezolvare manuala necesara"), "conflict rows should explain manual resolution");
-  assert(!/onCommand\([^)]*"markResolved"/s.test(commandCenter), "markResolved must not be exposed as a conflict resolve button");
-  assert(!/onCommand\([^)]*"approveException"/s.test(commandCenter), "approveException must not be exposed as a conflict resolve button");
+  assert(!commandCenter.includes('fetch("/api/admin/command-center"'), "COO dashboard must not mutate workflow data");
+  assert(!commandCenter.includes("markResolved"), "markResolved must not be exposed from the executive dashboard");
+  assert(!commandCenter.includes("approveException"), "approveException must not be exposed from the executive dashboard");
 
   const dashboard = read("src", "lib", "dashboard.ts");
   assert(!dashboard.includes("aproba exceptia"), "dashboard must not recommend fake exception approval as conflict resolution");
@@ -137,9 +136,8 @@ function operationMutationControlsRequireOperatePermission() {
   assert(!canEditBlock.includes("reservations.manage.own"), "sales ownership must not enable operation mutation controls");
 
   const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
-  assert(commandCenter.includes('hasPermission(data.role, "campaigns.operate")'), "COO task buttons should be gated by campaigns.operate");
-  assert(commandCenter.includes("canOperate={canOperateCampaigns}"), "operation task panel must receive explicit permission gate");
-  assert(commandCenter.includes("Doar vizualizare"), "users without operation permission should get read-only state");
+  assert(!commandCenter.includes("method: \"POST\""), "COO dashboard must remain a read-only command center");
+  assert(commandCenter.includes('href="/admin/operational"'), "operational changes should be delegated to the protected workspace");
 }
 
 function dashboardLabelsAreClearRomanian() {
@@ -147,7 +145,7 @@ function dashboardLabelsAreClearRomanian() {
   for (const oldLabel of ["Operational Health", "Conflict Center", "Taskuri operationale active"]) {
     assert(!commandCenter.includes(oldLabel), `${oldLabel} should not render in dashboard`);
   }
-  for (const newLabel of ["Stare operationala", "Suprapuneri contracte", "Operatiuni de facut", "Prioritati", "Inventar"]) {
+  for (const newLabel of ["Rezumat executiv", "Atenție azi", "Financiar", "Operațional", "Inventar", "Decizii recomandate"]) {
     assert(commandCenter.includes(newLabel), `${newLabel} should render in dashboard`);
   }
 
@@ -177,6 +175,7 @@ function dashboardInventoryAndProblemsStayConsistent() {
 
 function dashboardStatisticsUseCurrentActionableData() {
   const dashboard = read("src", "lib", "dashboard.ts");
+  const cooDashboard = read("src", "lib", "dashboard", "coo-dashboard.ts");
   const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
 
   assert(!dashboard.includes("input.expiredHolds.forEach"), "expired holds must not be emitted as active COO problems");
@@ -189,7 +188,8 @@ function dashboardStatisticsUseCurrentActionableData() {
   assert(dashboard.includes("campaignIds: new Set<string>()"), "performance rankings must count unique campaigns instead of location rows");
   assert(dashboard.includes("neutralizationTasks.slice(0, 100)"), "the operational list must not silently stop at 30 tasks");
   assert(dashboard.includes("inventoryByCity,"), "the inventory detail tab must receive all city groups");
-  assert(commandCenter.includes("data.customerInvoices"), "COO finance cards must use the customer invoice ledger");
+  assert(cooDashboard.includes("prisma.financialReceivable.groupBy"), "COO finance cards must use aggregate queries against the canonical invoice ledger");
+  assert(cooDashboard.includes("includedInReport: true, needsReview: false"), "COO finance metrics must use validated canonical invoice rows");
   assert(!commandCenter.includes("<FinancialDashboardPanel"), "COO dashboard must not render the legacy SmartBill/report upload panel");
 }
 

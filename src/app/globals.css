@@ -658,3 +658,15 @@ button {
     box-shadow: none;
   }
 }
+.section-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: #ffb800;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.section-link:hover {
+  color: #ffffff;
+}

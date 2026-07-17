@@ -27,6 +27,7 @@ assert.equal(hasPermission("FINANCE_OPERATOR", "users.manage"), false);
 assert.equal(hasPermission("SALES_AGENT", "finance.view"), false);
 assert.equal(ROLE_LABELS.FIELD_OPERATOR, "Alpinist / montaj");
 assert.equal(dashboardPathForRole("FIELD_OPERATOR"), "/admin/operational");
+assert.equal(dashboardPathForRole("FINANCE_OPERATOR"), "/admin/financiar/incasari");
 assert.equal(hasPermission("FIELD_OPERATOR", "dashboard.operations.view"), true);
 assert.equal(hasPermission("FIELD_OPERATOR", "campaigns.operate"), false);
 assert.equal(hasPermission("FIELD_OPERATOR", "reservations.manage"), false);

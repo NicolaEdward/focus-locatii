@@ -28,7 +28,8 @@ import type { AuthSession } from "@/lib/auth";
 import { hasAnyPermission } from "@/lib/rbac";
 import { companyEntities, normalizeCompanyEntity } from "@/lib/company-entities";
 
-type WorkspaceTab = "clients" | "campaigns" | "invoices" | "cleanup" | "documents";
+export type ClientCampaignsWorkspaceTab = "clients" | "campaigns" | "invoices" | "cleanup" | "documents";
+type WorkspaceTab = ClientCampaignsWorkspaceTab;
 
 type ClientForm = {
   companyName: string;

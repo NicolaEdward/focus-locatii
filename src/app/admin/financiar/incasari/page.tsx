@@ -8,16 +8,30 @@ import { listReceivablesWorkspace } from "@/lib/receivables-import-service";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function ReceivablesPage() {
+export default async function ReceivablesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await getAuthSession();
   if (!session) redirect("/admin/login");
   if (!hasPermission(session.role, "finance.view")) redirect("/admin/dashboard");
-  const workspace = await listReceivablesWorkspace({ take: 100 });
+  const params = await searchParams;
+  const filters = {
+    query: firstParam(params.q),
+    status: firstParam(params.status),
+    companyCode: firstParam(params.companyCode),
+    currency: firstParam(params.currency)
+  };
+  const workspace = await listReceivablesWorkspace({
+    query: filters.query,
+    status: filters.status,
+    companyCode: filters.companyCode,
+    currency: filters.currency,
+    take: 100
+  });
   return (
     <>
       <AdminHeader session={session} />
       <ReceivablesWorkspace
         initialWorkspace={workspace}
+        initialFilters={filters}
         canImport={hasPermission(session.role, "finance.upload")}
         canValidate={hasPermission(session.role, "finance.validate")}
         canConfirm={hasPermission(session.role, "finance.confirm")}
@@ -25,4 +39,8 @@ export default async function ReceivablesPage() {
       />
     </>
   );
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] || "" : value || "";
 }

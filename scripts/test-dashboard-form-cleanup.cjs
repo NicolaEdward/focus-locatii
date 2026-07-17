@@ -109,10 +109,9 @@ function cooLegacyReassignmentPanelRetired() {
 
 function cooTaskActionOmitsNullTaskId() {
   const commandCenter = read("src", "components", "admin", "CooCommandCenter.tsx");
-  assert(commandCenter.includes("function operationStatusBody"), "COO task buttons should share operation status body helper");
-  assert(commandCenter.includes('typeof row.taskId === "string" && row.taskId.trim()'), "base task payload must only include non-empty string taskId");
-  assert(commandCenter.includes("...(taskId ? { taskId } : {})"), "base task payload must omit null taskId");
-  assert(!commandCenter.includes("taskId: row.taskId }, \"Taskul"), "task buttons must not pass taskId directly when it is null");
+  assert(!commandCenter.includes("operationStatusBody"), "COO dashboard should not build operational mutation payloads");
+  assert(!commandCenter.includes('fetch("/api/admin/command-center"'), "COO dashboard should not call the command mutation endpoint");
+  assert(commandCenter.includes('href="/admin/operational"'), "COO should delegate operational actions to the dedicated protected workspace");
 }
 
 function read(...segments) {

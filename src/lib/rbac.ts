@@ -161,6 +161,7 @@ export function hasAnyPermission(role: UserRole, permissions: readonly Permissio
 
 export function dashboardPathForRole(role: UserRole) {
   if (role === "FIELD_OPERATOR") return "/admin/operational";
+  if (role === "FINANCE_OPERATOR") return "/admin/financiar/incasari";
   return "/admin/dashboard";
 }
 

@@ -1,0 +1,99 @@
+import assert from "node:assert/strict";
+import { ADMIN_COOKIE, createSessionToken } from "../src/lib/auth";
+import { prisma } from "../src/lib/prisma";
+
+const baseUrl = process.env.DASHBOARD_SMOKE_URL || "http://127.0.0.1:3014";
+
+async function main() {
+  const before = await businessCounts();
+  const [coo, seller, finance] = await Promise.all([
+    prisma.user.findFirst({ where: { active: true, role: { in: ["COO", "SUPER_ADMIN"] } }, select: userSelect }),
+    prisma.user.findFirst({ where: { active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } }, select: userSelect }),
+    prisma.user.findFirst({ where: { active: true, role: "FINANCE_OPERATOR" }, select: userSelect })
+  ]);
+  assert(coo, "Nu există utilizator COO/SUPER_ADMIN activ pentru smoke.");
+  assert(seller, "Nu există utilizator Sales activ pentru smoke.");
+
+  await waitForServer();
+  await timedPage("COO warm-up", "/admin/dashboard", cookieFor(coo), ["Rezumat executiv", "Atenție azi"]);
+  const cooResult = await timedPage("COO dashboard", "/admin/dashboard", cookieFor(coo), ["Rezumat executiv", "Atenție azi", "Decizii recomandate"]);
+  await timedPage("Sales warm-up", "/admin/dashboard", cookieFor(seller), ["Agenda mea"]);
+  const salesResult = await timedPage("Sales dashboard", "/admin/dashboard", cookieFor(seller), ["Agenda mea", "Ce am de făcut azi", "Scadențe clienții mei"]);
+  const invoicesResult = await timedPage("Facturi clienți", "/admin/financiar/incasari?status=overdue", cookieFor(coo), ["Facturi clienți", "Scadente"]);
+  const filterResult = await timedJson("Filtru financiar", "/api/admin/receivables-workspace?status=overdue&take=10", cookieFor(coo), 200);
+  const sellerFinance = await timedJson("Blocare API financiar Sales", "/api/admin/receivables-workspace?status=overdue&take=10", cookieFor(seller), 403);
+
+  let financeRedirect: { status: number; location: string | null } | null = null;
+  if (finance) {
+    const response = await fetch(`${baseUrl}/admin/dashboard`, { headers: { cookie: cookieFor(finance) }, redirect: "manual" });
+    financeRedirect = { status: response.status, location: response.headers.get("location") };
+    assert([302, 303, 307, 308].includes(response.status), "Dashboardul Finance trebuie să redirecționeze.");
+    assert(financeRedirect.location?.includes("/admin/financiar/incasari"), "Finance trebuie redirecționat la Facturi clienți.");
+  }
+
+  const after = await businessCounts();
+  assert.deepEqual(after, before, "Smoke-ul dashboard a modificat date de business.");
+  console.log(JSON.stringify({
+    ok: true,
+    baseUrl,
+    roles: { coo: coo.role, sales: seller.role, finance: finance?.role || "missing" },
+    timings: [cooResult, salesResult, invoicesResult, filterResult, sellerFinance],
+    financeRedirect,
+    databaseBefore: before,
+    databaseAfter: after
+  }, null, 2));
+}
+
+const userSelect = { id: true, email: true, name: true, role: true, tokenVersion: true } as const;
+
+function cookieFor(user: { id: string; email: string; name: string; role: "SUPER_ADMIN" | "COO" | "SALES_DIRECTOR" | "SALES_AGENT" | "FINANCE_OPERATOR" | "FIELD_OPERATOR"; tokenVersion: number }) {
+  return `${ADMIN_COOKIE}=${createSessionToken(user)}`;
+}
+
+async function businessCounts() {
+  const [reservations, holds, booked, receivables, payments, notifications] = await Promise.all([
+    prisma.reservation.count(),
+    prisma.reservation.count({ where: { status: "HOLD" } }),
+    prisma.reservation.count({ where: { status: "BOOKED" } }),
+    prisma.financialReceivable.count(),
+    prisma.financialReceivablePayment.count(),
+    prisma.appNotification.count()
+  ]);
+  return { reservations, holds, booked, receivables, payments, notifications };
+}
+
+async function timedPage(label: string, pathname: string, cookie: string, expected: string[]) {
+  const started = performance.now();
+  const response = await fetch(`${baseUrl}${pathname}`, { headers: { cookie }, redirect: "manual" });
+  const body = await response.text();
+  const durationMs = Math.round(performance.now() - started);
+  assert.equal(response.status, 200, `${label} a răspuns cu ${response.status}.`);
+  for (const text of expected) assert(body.includes(text), `${label} nu conține „${text}”.`);
+  return { label, durationMs, status: response.status, bytes: Buffer.byteLength(body) };
+}
+
+async function timedJson(label: string, pathname: string, cookie: string, expectedStatus: number) {
+  const started = performance.now();
+  const response = await fetch(`${baseUrl}${pathname}`, { headers: { cookie }, redirect: "manual" });
+  const body = await response.text();
+  const durationMs = Math.round(performance.now() - started);
+  assert.equal(response.status, expectedStatus, `${label} a răspuns cu ${response.status}.`);
+  return { label, durationMs, status: response.status, bytes: Buffer.byteLength(body) };
+}
+
+async function waitForServer() {
+  const timeoutAt = Date.now() + 30_000;
+  while (Date.now() < timeoutAt) {
+    try {
+      const response = await fetch(`${baseUrl}/api/health/db`);
+      if (response.ok) return;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  throw new Error("Serverul local nu a devenit disponibil în 30 secunde.");
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.stack : error);
+  process.exitCode = 1;
+}).finally(() => prisma.$disconnect());

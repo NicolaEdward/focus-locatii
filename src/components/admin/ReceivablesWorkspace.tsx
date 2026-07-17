@@ -72,12 +72,14 @@ const groupLabels: Record<string, string> = {
 
 export function ReceivablesWorkspace({
   initialWorkspace,
+  initialFilters,
   canImport,
   canValidate,
   canConfirm,
   canManage
 }: {
   initialWorkspace: Workspace;
+  initialFilters?: { query?: string; status?: string; companyCode?: string; currency?: string };
   canImport: boolean;
   canValidate: boolean;
   canConfirm: boolean;
@@ -87,10 +89,10 @@ export function ReceivablesWorkspace({
   const [tab, setTab] = useState<(typeof tabs)[number][0]>("receivables");
   const [preview, setPreview] = useState<JsonMap | null>(null);
   const [previewGroup, setPreviewGroup] = useState("allocated_auto");
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("");
-  const [companyCode, setCompanyCode] = useState("");
-  const [currency, setCurrency] = useState("");
+  const [query, setQuery] = useState(initialFilters?.query || "");
+  const [status, setStatus] = useState(initialFilters?.status || "");
+  const [companyCode, setCompanyCode] = useState(initialFilters?.companyCode || "");
+  const [currency, setCurrency] = useState(initialFilters?.currency || "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

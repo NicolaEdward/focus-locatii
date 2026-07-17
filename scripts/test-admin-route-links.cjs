@@ -105,7 +105,8 @@ assert.equal(auth.includes('"dashboard.operations.view",\n    "dashboard.agent.v
 const coo = read("src/components/admin/CooCommandCenter.tsx");
 assert.equal(coo.includes("Marcheaza rezolvat"), false, "COO conflict note-only resolve button should not be visible.");
 assert.equal(coo.includes("Aproba exceptie"), false, "COO conflict note-only exception button should not be visible.");
-assert.match(coo, /Rezolvare manuala necesara/, "COO conflict menu should explain that manual correction is needed.");
+assert.equal(coo.includes('fetch("/api/admin/command-center"'), false, "COO dashboard should be read-only and delegate actions to domain workspaces.");
+assert.match(coo, /href="\/admin\/operational"/, "COO operational summaries should link to the dedicated workspace.");
 
 console.log(JSON.stringify({
   ok: true,

@@ -587,7 +587,14 @@ export function CrmWorkspace({
           <TodayView agenda={agenda} agendaLoading={agendaLoading} groups={todayGroups} busy={busy} onOpen={openLead} onQuick={addQuickActivity} />
         ) : null}
         {!loading && view === "pipeline" ? (
-          <PipelineView leads={leads} total={pagination.total} busy={busy} onOpen={openLead} onStatus={updateLead} />
+          <PipelineView
+            leads={leads}
+            total={pagination.total}
+            selectedStatus={statusFilter}
+            busy={busy}
+            onOpen={openLead}
+            onStatus={updateLead}
+          />
         ) : null}
         {!loading && view === "all" ? (
           <LeadList leads={leads} busy={busy} onOpen={openLead} />
@@ -883,17 +890,21 @@ function LeadCard({
 function PipelineView({
   leads,
   total,
+  selectedStatus,
   busy,
   onOpen,
   onStatus
 }: {
   leads: LeadSummary[];
   total: number;
+  selectedStatus: string;
   busy: string | null;
   onOpen: (id: string) => void;
   onStatus: (id: string, patch: Record<string, unknown>) => void;
 }) {
-  const columns = CRM_STATUS_OPTIONS.filter((option) => option.value !== "inactive");
+  const columns = selectedStatus
+    ? CRM_STATUS_OPTIONS.filter((option) => option.value === selectedStatus)
+    : CRM_STATUS_OPTIONS.filter((option) => option.value !== "inactive");
   return <section className="min-w-0">
     {total > leads.length ? <p className="mb-3 text-xs font-bold text-focus-yellow">Sunt afisate primele {leads.length} din {total} lead-uri. Foloseste filtrele pentru un pipeline mai precis.</p> : null}
     <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">

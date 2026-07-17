@@ -365,6 +365,8 @@ function sourceArchitectureChecks() {
   assert(workspace.includes("initialLeadId"), "notification deep links must open lead detail without client search-param coupling");
   assert(!workspace.includes("grid-flow-col"), "CRM pipeline must wrap instead of extending indefinitely to the right");
   assert(workspace.includes("md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"), "CRM pipeline must use responsive wrapped columns");
+  assert(workspace.includes("selectedStatus={statusFilter}"), "CRM pipeline must receive the selected stage filter");
+  assert(workspace.includes("option.value === selectedStatus"), "CRM pipeline must render only the selected stage column");
   assert(workspace.includes("grid gap-3 xl:hidden"), "CRM lead list must use cards below wide desktop");
   assert(workspace.includes("hidden overflow-x-auto xl:block"), "wide CRM table must be isolated to desktop widths");
   assert(adminHeader.includes("order-3 col-span-3"), "admin navigation must move to a dedicated responsive row");

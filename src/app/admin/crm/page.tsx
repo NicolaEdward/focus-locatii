@@ -14,6 +14,7 @@ export default async function CrmPage() {
     <AdminHeader session={session} />
     <CrmWorkspaceV4
       canViewTeam={hasGlobalDataAccess(session.role)}
+      canEdit={hasAnyPermission(session.role, ["leads.manage", "leads.manage.own"])}
       sessionUserId={session.id}
     />
   </>;

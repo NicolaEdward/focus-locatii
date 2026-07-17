@@ -68,7 +68,7 @@ const primaryButton = "inline-flex min-h-10 items-center justify-center gap-2 ro
 const secondaryButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-600 bg-focus-navy/60 px-4 py-2 text-sm font-bold text-white transition hover:border-focus-yellow/60 hover:bg-focus-navy disabled:cursor-not-allowed disabled:opacity-50";
 const fieldClass = "min-h-10 w-full rounded-md border border-slate-600 bg-focus-ink/85 px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-focus-yellow focus:ring-2 focus:ring-focus-yellow/15";
 
-export function CrmWorkspaceV4({ canViewTeam, sessionUserId }: { canViewTeam: boolean; sessionUserId: string }) {
+export function CrmWorkspaceV4({ canViewTeam, canEdit, sessionUserId }: { canViewTeam: boolean; canEdit: boolean; sessionUserId: string }) {
   const initial = useMemo(readInitialUrlState, []);
   const [view, setView] = useState<View>(initial.view);
   const [query, setQuery] = useState(initial.query);
@@ -144,8 +144,8 @@ export function CrmWorkspaceV4({ canViewTeam, sessionUserId }: { canViewTeam: bo
         </div>
         <div className="flex flex-wrap gap-2">
           <a className={secondaryButton} href="/api/admin/crm/export.xlsx"><Download size={17} /> Export CRM</a>
-          <button className={secondaryButton} type="button" onClick={() => setCreateMode("inbound")}><BriefcaseBusiness size={17} /> Inbound</button>
-          <button className={primaryButton} type="button" onClick={() => setCreateMode("prospect")}><Plus size={18} /> Prospect nou</button>
+          {canEdit ? <><button className={secondaryButton} type="button" onClick={() => setCreateMode("inbound")}><BriefcaseBusiness size={17} /> Inbound</button>
+          <button className={primaryButton} type="button" onClick={() => setCreateMode("prospect")}><Plus size={18} /> Prospect nou</button></> : <span className="inline-flex min-h-10 items-center rounded-md border border-slate-600 bg-focus-navy/60 px-4 text-sm font-bold text-slate-300">Mod vizualizare</span>}
         </div>
       </div>
     </header>
@@ -195,8 +195,8 @@ export function CrmWorkspaceV4({ canViewTeam, sessionUserId }: { canViewTeam: bo
     {error ? <ErrorState message={error} onRetry={() => void load()} /> : loading && !data ? <LoadingState /> : <WorkspaceBody view={view} data={data} onOpen={(kind, id) => setSelected({ kind, id })} />}
 
     {data && data.pagination.pages > 1 && view !== "opportunities" ? <Pagination pagination={data.pagination} onPage={setPage} /> : null}
-    {createMode ? <CreateDialog mode={createMode} owners={owners} canViewTeam={canViewTeam} sessionUserId={sessionUserId} onClose={() => setCreateMode(null)} onCreated={(message) => { setCreateMode(null); completed(message); }} /> : null}
-    {selected ? <RecordDrawer selected={selected} onClose={() => setSelected(null)} onChanged={completed} /> : null}
+    {canEdit && createMode ? <CreateDialog mode={createMode} owners={owners} canViewTeam={canViewTeam} sessionUserId={sessionUserId} onClose={() => setCreateMode(null)} onCreated={(message) => { setCreateMode(null); completed(message); }} /> : null}
+    {selected ? <RecordDrawer selected={selected} canEdit={canEdit} onClose={() => setSelected(null)} onChanged={completed} /> : null}
   </main>;
 }
 
@@ -323,7 +323,7 @@ function CreateDialog({ mode, owners, canViewTeam, sessionUserId, onClose, onCre
   </ModalShell>;
 }
 
-function RecordDrawer({ selected, onClose, onChanged }: { selected: { kind: RecordKind; id: string }; onClose: () => void; onChanged: (message: string) => void }) {
+function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { kind: RecordKind; id: string }; canEdit: boolean; onClose: () => void; onChanged: (message: string) => void }) {
   const [detail, setDetail] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -368,10 +368,11 @@ function RecordDrawer({ selected, onClose, onChanged }: { selected: { kind: Reco
             <SectionTitle title="Următorul pas" count={detail.nextAction ? 1 : 0} />
             <ActionSummary action={detail.nextAction} />
           </section>
-          {selected.kind === "prospect" && detail.status === "prospecting" ? <QualifyPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, payload.action === "qualify_prospect" ? "Prospectul a fost calificat." : "Prospectul a fost calificat și oportunitatea a fost creată.")} /> : null}
-          {selected.kind === "opportunity" && ["opportunity", "quoted", "negotiation", "contracting"].includes(detail.stage) ? <OpportunityTransitionPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Etapa oportunității a fost actualizată.")} /> : null}
-          <ActivityPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Update-ul a fost adăugat în istoric.")} />
-          <details className="rounded-lg border border-slate-700 bg-focus-navy/25"><summary className="cursor-pointer px-4 py-3 font-black text-white">Firmă și contacte</summary><div className="border-t border-slate-700 p-4"><CompanyContacts detail={detail} pending={pending} command={command} /></div></details>
+          {!canEdit ? <p className="rounded-md border border-slate-700 bg-focus-navy/40 px-4 py-3 text-sm text-slate-300">Ai acces complet la informații și istoric, fără drept de modificare.</p> : null}
+          {canEdit && selected.kind === "prospect" && detail.status === "prospecting" ? <QualifyPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, payload.action === "qualify_prospect" ? "Prospectul a fost calificat." : "Prospectul a fost calificat și oportunitatea a fost creată.")} /> : null}
+          {canEdit && selected.kind === "opportunity" && ["opportunity", "quoted", "negotiation", "contracting"].includes(detail.stage) ? <OpportunityTransitionPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Etapa oportunității a fost actualizată.")} /> : null}
+          {canEdit ? <ActivityPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Update-ul a fost adăugat în istoric.")} /> : null}
+          <details className="rounded-lg border border-slate-700 bg-focus-navy/25"><summary className="cursor-pointer px-4 py-3 font-black text-white">Firmă și contacte</summary><div className="border-t border-slate-700 p-4"><CompanyContacts detail={detail} canEdit={canEdit} pending={pending} command={command} /></div></details>
           <section><SectionTitle title="Istoric" count={events.length} /><Timeline rows={events} /></section>
         </> : null}
       </div>
@@ -440,13 +441,13 @@ function ActivityPanel({ detail, pending, onSubmit }: { detail: any; pending: bo
   </form></section>;
 }
 
-function CompanyContacts({ detail, pending, command }: { detail: any; pending: boolean; command: (payload: Record<string, unknown>, message: string) => Promise<void> }) {
+function CompanyContacts({ detail, canEdit, pending, command }: { detail: any; canEdit: boolean; pending: boolean; command: (payload: Record<string, unknown>, message: string) => Promise<void> }) {
   const company = detail.company;
   function saveCompany(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); void command({ action: "update_company", companyId: company.id, version: company.version, name: textValue(form, "name"), taxId: textValue(form, "taxId"), industry: textValue(form, "industry"), website: textValue(form, "website") }, "Datele firmei au fost actualizate."); }
   function addContact(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); void command({ action: "add_contact", companyId: company.id, name: textValue(form, "name"), role: textValue(form, "role"), email: textValue(form, "email"), phone: textValue(form, "phone"), isPrimary: company.contacts.length === 0 }, "Contactul a fost adăugat."); event.currentTarget.reset(); }
-  return <div className="space-y-5"><form className="grid gap-3 sm:grid-cols-2" onSubmit={saveCompany}><Field label="Firmă"><input className={fieldClass} name="name" defaultValue={company.name} required /></Field><Field label="CUI"><input className={fieldClass} name="taxId" defaultValue={company.taxId || ""} /></Field><Field label="Domeniu"><input className={fieldClass} name="industry" defaultValue={company.industry || ""} /></Field><Field label="Website"><input className={fieldClass} name="website" defaultValue={company.website || ""} /></Field><div className="sm:col-span-2 flex justify-end"><button className={secondaryButton} disabled={pending}>Salvează firma</button></div></form>
+  return <div className="space-y-5">{canEdit ? <form className="grid gap-3 sm:grid-cols-2" onSubmit={saveCompany}><Field label="Firmă"><input className={fieldClass} name="name" defaultValue={company.name} required /></Field><Field label="CUI"><input className={fieldClass} name="taxId" defaultValue={company.taxId || ""} /></Field><Field label="Domeniu"><input className={fieldClass} name="industry" defaultValue={company.industry || ""} /></Field><Field label="Website"><input className={fieldClass} name="website" defaultValue={company.website || ""} /></Field><div className="sm:col-span-2 flex justify-end"><button className={secondaryButton} disabled={pending}>Salvează firma</button></div></form> : <div className="grid gap-3 text-sm sm:grid-cols-2"><MiniMetric label="Firmă" value={company.name} /><MiniMetric label="CUI" value={company.taxId || "-"} /><MiniMetric label="Domeniu" value={company.industry || "-"} /><MiniMetric label="Website" value={company.website || "-"} /></div>}
     <div className="space-y-2">{company.contacts?.map((contact: any) => <div className="grid gap-2 rounded-md bg-white/[.035] p-3 text-sm sm:grid-cols-[1fr_auto]" key={contact.id}><span><strong className="text-white">{contact.name}</strong><small className="block text-slate-400">{contact.role || "Funcție nesetată"}</small></span><span className="text-slate-300">{contact.email ? <span className="block"><Mail className="mr-1 inline" size={13} />{contact.email}</span> : null}{contact.phone ? <span className="block"><Phone className="mr-1 inline" size={13} />{contact.phone}</span> : null}</span></div>)}</div>
-    <form className="grid gap-3 sm:grid-cols-2" onSubmit={addContact}><Field label="Contact nou *"><input className={fieldClass} name="name" required /></Field><Field label="Funcție"><input className={fieldClass} name="role" /></Field><Field label="Email"><input className={fieldClass} name="email" type="email" /></Field><Field label="Telefon"><input className={fieldClass} name="phone" /></Field><div className="sm:col-span-2 flex justify-end"><button className={secondaryButton} disabled={pending}><Plus size={16} /> Adaugă contact</button></div></form>
+    {canEdit ? <form className="grid gap-3 sm:grid-cols-2" onSubmit={addContact}><Field label="Contact nou *"><input className={fieldClass} name="name" required /></Field><Field label="Funcție"><input className={fieldClass} name="role" /></Field><Field label="Email"><input className={fieldClass} name="email" type="email" /></Field><Field label="Telefon"><input className={fieldClass} name="phone" /></Field><div className="sm:col-span-2 flex justify-end"><button className={secondaryButton} disabled={pending}><Plus size={16} /> Adaugă contact</button></div></form> : null}
   </div>;
 }
 

@@ -105,12 +105,15 @@ assert.equal(hasPermission("FINANCE_OPERATOR", "finance.upload"), true);
 assert.equal(hasPermission("FINANCE_OPERATOR", "finance.validate"), true);
 assert.equal(hasPermission("FINANCE_OPERATOR", "finance.confirm"), true);
 assert.equal(hasPermission("SALES_AGENT", "finance.view"), false);
+assert.equal(hasPermission("COO", "leads.view"), true);
+assert.equal(hasPermission("COO", "leads.manage"), false);
 
 const root = path.resolve(process.cwd());
 const service = read("src/lib/receivables-import-service.ts");
 const payments = read("src/lib/receivables-payment-service.ts");
 const manualFinancialRoute = read("src/app/api/admin/financial/manual/route.ts");
 const workspace = read("src/components/admin/ReceivablesWorkspace.tsx");
+const rowRoute = read("src/app/api/admin/receivables-import/[id]/rows/[rowId]/route.ts");
 const publicApi = read("src/app/api/locations/route.ts");
 const migration = read("prisma/migrations/20260719000000_receivables_import_reconciliation/migration.sql");
 assert.match(service, /\$transaction/);
@@ -125,6 +128,10 @@ assert.match(manualFinancialRoute, /receivableCanonicalKey/, "manual receivables
 assert.match(workspace, /Înregistrează încasare/);
 assert.match(workspace, /LISTA ÎNCASĂRI/);
 assert.match(workspace, /Aliasuri clienți/);
+assert.match(workspace, /Moneda rândului \(RON sau EUR\)/);
+assert.match(rowRoute, /currency: z\.enum\(\["RON", "EUR"\]\)/);
+assert.match(service, /Motivul corectării monedei este obligatoriu/);
+assert.match(service, /previousCurrency: row\.currency, currency/);
 assert.doesNotMatch(publicApi, /FinancialReceivablePayment|financialReceivablePayment|FinancialClientCredit|financialClientCredit/);
 assert.doesNotMatch(migration, /\b(DROP\s+(?:TABLE|COLUMN|INDEX)|TRUNCATE\s+TABLE|DELETE\s+FROM)\b/i, "migration must be additive");
 

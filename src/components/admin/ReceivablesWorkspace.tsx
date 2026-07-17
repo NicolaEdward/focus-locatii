@@ -141,6 +141,18 @@ export function ReceivablesWorkspace({
     if (!allocationTarget || !preview || !canValidate) return;
     const data = new FormData(event.currentTarget);
     const action = String(data.get("action") || "create") as "confirm" | "create" | "confirm_credit";
+    const currencyInput = window.prompt("Moneda rândului (RON sau EUR)", String(allocationTarget.currency || "RON"));
+    if (currencyInput === null) return;
+    const currency = currencyInput.trim().toUpperCase();
+    if (!["RON", "EUR"].includes(currency)) {
+      setError("Moneda trebuie să fie RON sau EUR.");
+      return;
+    }
+    const reason = String(data.get("reason") || "").trim();
+    if (currency !== allocationTarget.currency && !reason) {
+      setError("Completează observația / motivul pentru corectarea monedei.");
+      return;
+    }
     setBusy(true); setError(null);
     try {
       const payload = await api(`/api/admin/receivables-import/${preview.upload.id}/rows/${allocationTarget.id}`, {
@@ -149,11 +161,12 @@ export function ReceivablesWorkspace({
         body: JSON.stringify({
           action,
           companyCode: String(data.get("companyCode") || allocationTarget.companyCode),
+          currency,
           clientId: String(data.get("clientId") || "") || null,
           receivableId: String(data.get("receivableId") || "") || null,
           campaignId: String(data.get("campaignId") || "") || null,
           locationId: String(data.get("locationId") || "") || null,
-          reason: String(data.get("reason") || "") || null,
+          reason: reason || null,
           saveAlias: data.get("saveAlias") === "on"
         })
       });

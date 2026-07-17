@@ -13,6 +13,7 @@ const schema = z.object({
   campaignId: z.string().trim().nullable().optional(),
   locationId: z.string().trim().nullable().optional(),
   companyCode: z.enum(["FOCUS_MEDIA", "EXCELLENCE_MEDIA", "FOCUS_BG"]).nullable().optional(),
+  currency: z.enum(["RON", "EUR"]).nullable().optional(),
   reason: z.string().trim().max(2000).nullable().optional(),
   saveAlias: z.boolean().optional()
 }).strict();

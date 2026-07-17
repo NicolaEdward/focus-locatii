@@ -24,6 +24,9 @@ const baseSchema = z.object({ action: z.string().min(1), idempotencyKey: z.strin
 export async function POST(request: NextRequest) {
   const { session, response } = await requireAnyPermission(request, ["leads.manage", "leads.manage.own"]);
   if (response || !session) return response;
+  if (session.role === "COO") {
+    return NextResponse.json({ error: "Rolul COO are acces CRM doar pentru vizualizare." }, { status: 403 });
+  }
   try {
     const raw = baseSchema.parse(await request.json());
     const result = await executeCommand(raw, session);

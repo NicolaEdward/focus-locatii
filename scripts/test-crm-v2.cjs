@@ -90,6 +90,7 @@ function sourceArchitectureRules() {
   const exportRoute = read("src/app/api/admin/crm/export.xlsx/route.ts");
   const notifications = read("src/lib/notifications.ts");
   const dashboard = read("src/lib/crm-dashboard.ts");
+  const rbac = read("src/lib/rbac.ts");
 
   for (const model of ["CrmCompany", "CrmCompanyContact", "CrmProspect", "CrmOpportunity", "CrmNextAction", "CrmEvent"]) {
     assert(schema.includes(`model ${model} {`), `missing ${model}`);
@@ -147,6 +148,13 @@ function sourceArchitectureRules() {
 
   assert(queryRoute.includes('["leads.view", "leads.view.own"]'));
   assert(commands.includes('["leads.manage", "leads.manage.own"]'));
+  assert(commands.includes('session.role === "COO"'), "COO CRM commands need an API-level read-only guard");
+  const cooPermissions = rbac.slice(rbac.indexOf("COO: ["), rbac.indexOf("SALES_DIRECTOR: ["));
+  assert(cooPermissions.includes('"leads.view"'));
+  assert(cooPermissions.includes('"opportunities.view"'));
+  assert(!cooPermissions.includes('"leads.manage"'), "COO must not manage CRM leads");
+  assert(!cooPermissions.includes('"opportunities.manage"'), "COO must not manage CRM opportunities");
+  assert(workspace.includes("Mod vizualizare"));
   assert(detailRoute.includes('["leads.view", "leads.view.own"]'));
   assert(service.includes("skip: (page - 1) * limit"));
   assert(service.includes("take: 30"), "timeline must be bounded and cursor-ready");

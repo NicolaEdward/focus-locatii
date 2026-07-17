@@ -207,6 +207,7 @@ export async function resolveReceivablesImportRow(input: {
   campaignId?: string | null;
   locationId?: string | null;
   companyCode?: ReceivablesCompanyCode | null;
+  currency?: "RON" | "EUR" | null;
   reason?: string | null;
   saveAlias?: boolean;
 }) {
@@ -216,7 +217,10 @@ export async function resolveReceivablesImportRow(input: {
   if (input.action === "ignore" && !input.reason?.trim()) throw new Error("Motivul ignorării este obligatoriu.");
   const clientId = input.clientId || row.clientId;
   if (input.action !== "ignore" && !clientId) throw new Error("Selectează clientul înainte de confirmare.");
-  if (input.action !== "ignore" && (!row.normalizedInvoiceNumber || !row.currency || row.invoiceAmount == null)) {
+  const currency = input.currency || row.currency;
+  const currencyChanged = Boolean(input.currency && input.currency !== row.currency);
+  if (currencyChanged && !input.reason?.trim()) throw new Error("Motivul corectării monedei este obligatoriu.");
+  if (input.action !== "ignore" && (!row.normalizedInvoiceNumber || !currency || row.invoiceAmount == null)) {
     throw new Error("Numărul facturii, moneda și valoarea sunt obligatorii.");
   }
   const companyCode = input.companyCode || row.companyCode;
@@ -226,6 +230,7 @@ export async function resolveReceivablesImportRow(input: {
       where: { id: row.id },
       data: {
         companyCode,
+        currency,
         clientId: input.action === "ignore" ? row.clientId : clientId,
         receivableId: input.receivableId || row.receivableId,
         campaignId: input.campaignId ?? row.campaignId,
@@ -258,7 +263,7 @@ export async function resolveReceivablesImportRow(input: {
         action: "receivables.import_row_resolved",
         entityType: "financial_receivable_import_row",
         entityId: row.id,
-        metadata: { action: input.action, clientId, reason: input.reason || null, saveAlias: Boolean(input.saveAlias) }
+        metadata: { action: input.action, clientId, reason: input.reason || null, saveAlias: Boolean(input.saveAlias), previousCurrency: row.currency, currency }
       }
     });
   });

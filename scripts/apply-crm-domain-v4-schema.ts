@@ -53,7 +53,9 @@ async function main() {
     throw new Error("Aplicarea necesita CRM_DOMAIN_V4_APPLY=YES.");
   }
 
-  const sql = fs.readFileSync(migrationPath, "utf8");
+  const collation = await databaseCollation();
+  const sql = fs.readFileSync(migrationPath, "utf8")
+    .replace(/COLLATE\s+utf8mb4_[a-z0-9_]+/gi, `COLLATE ${collation}`);
   const statements = sql
     .replace(/^\s*--.*$/gm, "")
     .split(";")
@@ -77,6 +79,17 @@ async function main() {
   if (Object.values(validation).some((value) => !value)) {
     throw new Error("Verificarea migrarii CRM v4 nu a trecut integral.");
   }
+}
+
+async function databaseCollation() {
+  const rows = await prisma.$queryRawUnsafe<Array<{ collationName: string }>>(
+    "SELECT DEFAULT_COLLATION_NAME collationName FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = DATABASE()"
+  );
+  const collation = rows[0]?.collationName;
+  if (!collation || !/^utf8mb4_[a-z0-9_]+$/i.test(collation)) {
+    throw new Error("Collation-ul bazei nu a putut fi validat.");
+  }
+  return collation;
 }
 
 async function existingTables() {

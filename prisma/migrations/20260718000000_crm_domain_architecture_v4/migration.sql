@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS `portfolio_crm_companies` (
   PRIMARY KEY (`id`),
   CONSTRAINT `portfolio_crm_companies_ownerId_fkey` FOREIGN KEY (`ownerId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_crm_companies_createdByUserId_fkey` FOREIGN KEY (`createdByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `portfolio_crm_company_contacts` (
   `id` VARCHAR(191) NOT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS `portfolio_crm_company_contacts` (
   PRIMARY KEY (`id`),
   CONSTRAINT `portfolio_crm_company_contacts_companyId_fkey` FOREIGN KEY (`companyId`) REFERENCES `portfolio_crm_companies`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `portfolio_crm_company_contacts_createdByUserId_fkey` FOREIGN KEY (`createdByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `portfolio_crm_prospects` (
   `id` VARCHAR(191) NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS `portfolio_crm_prospects` (
   CONSTRAINT `portfolio_crm_prospects_companyId_fkey` FOREIGN KEY (`companyId`) REFERENCES `portfolio_crm_companies`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `portfolio_crm_prospects_ownerId_fkey` FOREIGN KEY (`ownerId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_crm_prospects_createdByUserId_fkey` FOREIGN KEY (`createdByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `portfolio_crm_opportunities` (
   `id` VARCHAR(191) NOT NULL,
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS `portfolio_crm_opportunities` (
   CONSTRAINT `portfolio_crm_opportunities_sourceProspectId_fkey` FOREIGN KEY (`sourceProspectId`) REFERENCES `portfolio_crm_prospects`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_crm_opportunities_ownerId_fkey` FOREIGN KEY (`ownerId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_crm_opportunities_createdByUserId_fkey` FOREIGN KEY (`createdByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `portfolio_crm_next_actions` (
   `id` VARCHAR(191) NOT NULL,
@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS `portfolio_crm_next_actions` (
   CONSTRAINT `portfolio_crm_next_actions_ownerId_fkey` FOREIGN KEY (`ownerId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_crm_next_actions_createdByUserId_fkey` FOREIGN KEY (`createdByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_crm_next_actions_completedByUserId_fkey` FOREIGN KEY (`completedByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `portfolio_crm_events` (
   `id` VARCHAR(191) NOT NULL,
@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS `portfolio_crm_events` (
   CONSTRAINT `portfolio_crm_events_prospectId_fkey` FOREIGN KEY (`prospectId`) REFERENCES `portfolio_crm_prospects`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `portfolio_crm_events_opportunityId_fkey` FOREIGN KEY (`opportunityId`) REFERENCES `portfolio_crm_opportunities`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `portfolio_crm_events_actorUserId_fkey` FOREIGN KEY (`actorUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 -- Preserve legacy records and create deterministic CRM v4 counterparts.
 INSERT IGNORE INTO `portfolio_crm_companies` (
@@ -209,9 +209,9 @@ SELECT
   CONCAT('crmcc_', contact.`id`), CONCAT('crmco_', contact.`leadId`), contact.`name`, contact.`role`,
   contact.`email`, LOWER(TRIM(contact.`email`)), contact.`phone`,
   NULLIF(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(contact.`phone`, '')), ' ', ''), '-', ''), '(', ''), ')', ''), ''),
-  false, contact.`isPrimary`, lead.`createdByUserId`, contact.`createdAt`, contact.`updatedAt`
+  false, contact.`isPrimary`, legacyLead.`createdByUserId`, contact.`createdAt`, contact.`updatedAt`
 FROM `portfolio_crm_contacts` contact
-JOIN `portfolio_crm_leads` lead ON lead.`id` = contact.`leadId`;
+JOIN `portfolio_crm_leads` legacyLead ON legacyLead.`id` = contact.`leadId`;
 
 INSERT IGNORE INTO `portfolio_crm_prospects` (
   `id`, `companyId`, `ownerId`, `createdByUserId`, `legacyLeadId`, `source`, `status`, `priority`,
@@ -277,34 +277,34 @@ INSERT IGNORE INTO `portfolio_crm_next_actions` (
   `dueAt`, `priority`, `status`, `version`, `createdAt`, `updatedAt`
 )
 SELECT
-  CONCAT('crmna_', lead.`id`), CONCAT('crmco_', lead.`id`), CONCAT('crmp_', lead.`id`), opportunity.`id`,
-  lead.`assignedToUserId`, lead.`createdByUserId`, 'other', COALESCE(lead.`nextStep`, 'Continua urmatorul pas comercial.'),
-  COALESCE(lead.`nextFollowUpDate`, DATE_ADD(lead.`createdAt`, INTERVAL 3 DAY)), 'normal', 'open', 0, lead.`createdAt`, lead.`updatedAt`
-FROM `portfolio_crm_leads` lead
-LEFT JOIN `portfolio_crm_opportunities` opportunity ON opportunity.`legacyLeadId` = lead.`id`
-WHERE lead.`status` NOT IN ('won', 'account_management', 'lost', 'inactive');
+  CONCAT('crmna_', legacyLead.`id`), CONCAT('crmco_', legacyLead.`id`), CONCAT('crmp_', legacyLead.`id`), opportunity.`id`,
+  legacyLead.`assignedToUserId`, legacyLead.`createdByUserId`, 'other', COALESCE(legacyLead.`nextStep`, 'Continua urmatorul pas comercial.'),
+  COALESCE(legacyLead.`nextFollowUpDate`, DATE_ADD(legacyLead.`createdAt`, INTERVAL 3 DAY)), 'normal', 'open', 0, legacyLead.`createdAt`, legacyLead.`updatedAt`
+FROM `portfolio_crm_leads` legacyLead
+LEFT JOIN `portfolio_crm_opportunities` opportunity ON opportunity.`legacyLeadId` = legacyLead.`id`
+WHERE legacyLead.`status` NOT IN ('won', 'account_management', 'lost', 'inactive');
 
 INSERT IGNORE INTO `portfolio_crm_events` (
   `id`, `companyId`, `prospectId`, `opportunityId`, `actorUserId`, `type`, `source`, `summary`,
   `metadata`, `idempotencyKey`, `occurredAt`, `createdAt`
 )
 SELECT
-  CONCAT('crme_migration_', lead.`id`), CONCAT('crmco_', lead.`id`), CONCAT('crmp_', lead.`id`), opportunity.`id`,
-  lead.`createdByUserId`, 'MIGRATED_FROM_LEGACY', 'CRM_MIGRATION', 'Inregistrare migrata fara modificarea datelor comerciale.',
-  JSON_OBJECT('legacyLeadId', lead.`id`, 'legacyStatus', lead.`status`), CONCAT('migration:v4:', lead.`id`), lead.`createdAt`, CURRENT_TIMESTAMP(3)
-FROM `portfolio_crm_leads` lead
-LEFT JOIN `portfolio_crm_opportunities` opportunity ON opportunity.`legacyLeadId` = lead.`id`;
+  CONCAT('crme_migration_', legacyLead.`id`), CONCAT('crmco_', legacyLead.`id`), CONCAT('crmp_', legacyLead.`id`), opportunity.`id`,
+  legacyLead.`createdByUserId`, 'MIGRATED_FROM_LEGACY', 'CRM_MIGRATION', 'Inregistrare migrata fara modificarea datelor comerciale.',
+  JSON_OBJECT('legacyLeadId', legacyLead.`id`, 'legacyStatus', legacyLead.`status`), CONCAT('migration:v4:', legacyLead.`id`), legacyLead.`createdAt`, CURRENT_TIMESTAMP(3)
+FROM `portfolio_crm_leads` legacyLead
+LEFT JOIN `portfolio_crm_opportunities` opportunity ON opportunity.`legacyLeadId` = legacyLead.`id`;
 
 INSERT IGNORE INTO `portfolio_crm_events` (
   `id`, `companyId`, `prospectId`, `opportunityId`, `actorUserId`, `type`, `source`, `summary`, `result`,
   `metadata`, `idempotencyKey`, `occurredAt`, `createdAt`
 )
 SELECT
-  CONCAT('crme_', activity.`id`), CONCAT('crmco_', lead.`id`), CONCAT('crmp_', lead.`id`), opportunity.`id`, activity.`userId`,
+  CONCAT('crme_', activity.`id`), CONCAT('crmco_', legacyLead.`id`), CONCAT('crmp_', legacyLead.`id`), opportunity.`id`, activity.`userId`,
   COALESCE(NULLIF(activity.`actionType`, ''), activity.`type`), 'LEGACY_ACTIVITY',
   COALESCE(NULLIF(activity.`note`, ''), NULLIF(activity.`details`, ''), activity.`type`), activity.`details`,
   JSON_OBJECT('legacyActivityId', activity.`id`, 'legacyStatus', activity.`statusAtTime`, 'nextStep', activity.`nextStep`, 'nextFollowUpDate', activity.`nextFollowUpDate`),
   CONCAT('migration:v4:activity:', activity.`id`), activity.`activityDate`, activity.`createdAt`
 FROM `portfolio_crm_activities` activity
-JOIN `portfolio_crm_leads` lead ON lead.`id` = activity.`leadId`
-LEFT JOIN `portfolio_crm_opportunities` opportunity ON opportunity.`legacyLeadId` = lead.`id`;
+JOIN `portfolio_crm_leads` legacyLead ON legacyLead.`id` = activity.`leadId`
+LEFT JOIN `portfolio_crm_opportunities` opportunity ON opportunity.`legacyLeadId` = legacyLead.`id`;

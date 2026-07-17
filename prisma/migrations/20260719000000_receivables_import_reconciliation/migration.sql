@@ -65,7 +65,7 @@ CREATE TABLE `portfolio_financial_receivable_import_rows` (
   CONSTRAINT `portfolio_financial_receivable_import_rows_campaignId_fkey` FOREIGN KEY (`campaignId`) REFERENCES `portfolio_campaigns`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_financial_receivable_import_rows_locationId_fkey` FOREIGN KEY (`locationId`) REFERENCES `portfolio_locations`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_financial_receivable_import_rows_resolvedByUserId_fkey` FOREIGN KEY (`resolvedByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 CREATE TABLE `portfolio_financial_receivable_payments` (
   `id` VARCHAR(191) NOT NULL,
@@ -99,7 +99,7 @@ CREATE TABLE `portfolio_financial_receivable_payments` (
   CONSTRAINT `portfolio_financial_receivable_payments_createdByUserId_fkey` FOREIGN KEY (`createdByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_financial_receivable_payments_cancelledByUserId_fkey` FOREIGN KEY (`cancelledByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_financial_receivable_payments_correctsPaymentId_fkey` FOREIGN KEY (`correctsPaymentId`) REFERENCES `portfolio_financial_receivable_payments`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 CREATE TABLE `portfolio_financial_client_aliases` (
   `id` VARCHAR(191) NOT NULL,
@@ -115,7 +115,7 @@ CREATE TABLE `portfolio_financial_client_aliases` (
   INDEX `portfolio_financial_client_aliases_clientId_idx` (`clientId`),
   CONSTRAINT `portfolio_financial_client_aliases_clientId_fkey` FOREIGN KEY (`clientId`) REFERENCES `portfolio_client_accounts`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `portfolio_financial_client_aliases_createdByUserId_fkey` FOREIGN KEY (`createdByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 CREATE TABLE `portfolio_financial_client_credits` (
   `id` VARCHAR(191) NOT NULL,
@@ -141,4 +141,4 @@ CREATE TABLE `portfolio_financial_client_credits` (
   CONSTRAINT `portfolio_financial_client_credits_receivableId_fkey` FOREIGN KEY (`receivableId`) REFERENCES `portfolio_financial_receivables`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_financial_client_credits_sourcePaymentId_fkey` FOREIGN KEY (`sourcePaymentId`) REFERENCES `portfolio_financial_receivable_payments`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `portfolio_financial_client_credits_createdByUserId_fkey` FOREIGN KEY (`createdByUserId`) REFERENCES `portfolio_users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;

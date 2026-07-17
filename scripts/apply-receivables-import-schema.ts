@@ -32,7 +32,9 @@ async function main() {
   await addIndex("portfolio_financial_receivables", "portfolio_financial_receivables_company_invoice_currency_idx", "", "`companyCode`, `normalizedInvoiceNumber`, `currency`");
   await addIndex("portfolio_financial_receivables", "portfolio_financial_receivables_client_dueDate_idx", "", "`clientId`, `dueDate`");
 
-  const sql = fs.readFileSync(migrationPath, "utf8");
+  const collation = await databaseCollation();
+  const sql = fs.readFileSync(migrationPath, "utf8")
+    .replace(/COLLATE\s+utf8mb4_[a-z0-9_]+/gi, `COLLATE ${collation}`);
   for (const table of newTables) {
     if (await tableExists(table)) continue;
     const statement = extractCreateTable(sql, table).replace(/^CREATE TABLE/i, "CREATE TABLE IF NOT EXISTS");
@@ -46,6 +48,17 @@ async function main() {
   const missing = [...Object.entries(after.columns).filter(([, exists]) => !exists).map(([name]) => name), ...Object.entries(after.tables).filter(([, exists]) => !exists).map(([name]) => name)];
   if (missing.length) throw new Error(`Schema a rămas incompletă: ${missing.join(", ")}`);
   console.log(JSON.stringify({ ok: true, after }, null, 2));
+}
+
+async function databaseCollation() {
+  const rows = await prisma.$queryRawUnsafe<Array<{ collationName: string }>>(
+    "SELECT DEFAULT_COLLATION_NAME collationName FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = DATABASE()"
+  );
+  const collation = rows[0]?.collationName;
+  if (!collation || !/^utf8mb4_[a-z0-9_]+$/i.test(collation)) {
+    throw new Error("Collation-ul bazei nu a putut fi validat.");
+  }
+  return collation;
 }
 
 async function schemaState() {

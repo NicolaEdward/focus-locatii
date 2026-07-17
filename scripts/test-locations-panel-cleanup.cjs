@@ -201,6 +201,11 @@ function salesExportsBelongToFinance() {
   assert(salesExportButton.includes("Data de final trebuie sa fie dupa data de inceput."), "sales export dialog should validate date order");
   assert(salesReport.includes("sortSalesRows"), "sales export should have deterministic business sorting");
   assert(salesReport.includes("salesRowTimingRank"), "sales export should group active/upcoming/past rows");
+  assert(!salesReport.includes("listAdminLocations"), "sales export must not depend on the lightweight inventory DTO that omits reservation details");
+  assert(salesReport.includes("prisma.location.findMany"), "sales export should load its report dataset directly");
+  assert(salesReport.includes('status: "BOOKED"'), "sales export should include confirmed rentals");
+  assert(salesReport.includes("periodStart: { lte: periodEnd }"), "sales export should include rentals that start before the selected range ends");
+  assert(salesReport.includes("periodEnd: { gte: periodStart }"), "sales export should include rentals that end after the selected range starts");
 }
 
 function activeRentalsCanBeCorrectedSafely() {

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { requirePermission } from "@/lib/auth";
-import { listAdminLocations } from "@/lib/locations";
+import { normalizeMediaType } from "@/lib/format";
 import { sortOperationalLocations } from "@/lib/location-order";
+import { prisma } from "@/lib/prisma";
 import { calculateProrata } from "@/lib/prorata";
 import { createStyledWorkbook, XLSX_STYLES, type StyledCell, type StyledSheet } from "@/lib/styled-xlsx";
-import type { LocationDTO, ReservationDTO } from "@/types/location";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -129,6 +130,43 @@ const salesReportReferenceRank = new Map<string, number>(
   salesReportReferenceOrder.map((code, index) => [code, index])
 );
 
+const salesReportLocationSelect = {
+  nr: true,
+  code: true,
+  city: true,
+  county: true,
+  address: true,
+  type: true,
+  size: true,
+  sqm: true,
+  illum: true,
+  rateCard: true,
+  rateCardValue: true,
+  reportingGroupName: true,
+  displayOrder: true,
+  locationGroupOrder: true,
+  faceOrder: true,
+  directionOrder: true,
+  category: { select: { name: true } }
+} satisfies Prisma.LocationSelect;
+
+const salesReportReservationSelect = {
+  status: true,
+  clientName: true,
+  campaignName: true,
+  amount: true,
+  monthlyRentTotal: true,
+  monthlyRentShare: true,
+  contractGroupId: true,
+  periodStart: true,
+  periodEnd: true
+} satisfies Prisma.ReservationSelect;
+
+type SalesReportLocation = Prisma.LocationGetPayload<{ select: typeof salesReportLocationSelect }> & {
+  reservations: SalesReportReservation[];
+};
+type SalesReportReservation = Prisma.ReservationGetPayload<{ select: typeof salesReportReservationSelect }>;
+
 export async function GET(request: NextRequest) {
   const { response } = await requirePermission(request, "reports.view");
   if (response) return response;
@@ -152,7 +190,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Perioada selectata nu este valida." }, { status: 400 });
   }
 
-  const locations = (await listAdminLocations()).sort(sortSalesLocations);
+  const locations = (await listSalesReportLocations(periodStart, periodEnd)).sort(sortSalesLocations);
   const rows = locations
     .map((location, index) => salesRow(location, index, periodStart, periodEnd))
     .sort(sortSalesRows)
@@ -257,7 +295,29 @@ export async function GET(request: NextRequest) {
   });
 }
 
-function salesRow(location: LocationDTO, index: number, periodStart: Date, periodEnd: Date) {
+async function listSalesReportLocations(periodStart: Date, periodEnd: Date): Promise<SalesReportLocation[]> {
+  const locations = await prisma.location.findMany({
+    select: {
+      ...salesReportLocationSelect,
+      reservations: {
+        where: {
+          status: "BOOKED",
+          periodStart: { lte: periodEnd },
+          periodEnd: { gte: periodStart }
+        },
+        select: salesReportReservationSelect,
+        orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
+      }
+    }
+  });
+
+  return locations.map((location) => ({
+    ...location,
+    type: normalizeMediaType(location.type, location.category.name, location.address, location.code)
+  }));
+}
+
+function salesRow(location: SalesReportLocation, index: number, periodStart: Date, periodEnd: Date) {
   const reservations = relevantReservations(location.reservations, periodStart, periodEnd);
   const sold = reservations.length > 0;
   const bodyStyle = index % 2 === 0 ? XLSX_STYLES.body : XLSX_STYLES.bodyAlt;
@@ -297,7 +357,7 @@ function salesRow(location: LocationDTO, index: number, periodStart: Date, perio
   };
 }
 
-function relevantReservations(reservations: ReservationDTO[], periodStart: Date, periodEnd: Date) {
+function relevantReservations(reservations: SalesReportReservation[], periodStart: Date, periodEnd: Date) {
   return reservations
     .filter((reservation) => reservation.status === "BOOKED")
     .filter((reservation) => overlaps(periodStart, periodEnd, new Date(reservation.periodStart), new Date(reservation.periodEnd)))
@@ -327,7 +387,7 @@ function blankCells(count: number, style: number = XLSX_STYLES.body): StyledCell
   return Array.from({ length: count }, () => ({ value: "", style }));
 }
 
-function clientCell(reservations: ReservationDTO[]) {
+function clientCell(reservations: SalesReportReservation[]) {
   return reservations
     .map((reservation) => {
       const period = `${formatDate(new Date(reservation.periodStart))} - ${formatDate(new Date(reservation.periodEnd))}`;
@@ -336,7 +396,7 @@ function clientCell(reservations: ReservationDTO[]) {
     .join("\n");
 }
 
-function reservationMonthlyAmount(reservation: ReservationDTO) {
+function reservationMonthlyAmount(reservation: SalesReportReservation) {
   return reservation.amount ?? reservation.monthlyRentShare ?? (reservation.contractGroupId ? 0 : reservation.monthlyRentTotal ?? 0);
 }
 
@@ -371,7 +431,7 @@ function summaryRowMerges(row: number) {
   ];
 }
 
-function sortSalesLocations(a: LocationDTO, b: LocationDTO) {
+function sortSalesLocations(a: SalesReportLocation, b: SalesReportLocation) {
   const aRank = salesReportReferenceRank.get(a.code);
   const bRank = salesReportReferenceRank.get(b.code);
   if (aRank != null || bRank != null) {

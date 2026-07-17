@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
-import { isKnownCrmStatus } from "@/lib/crm";
+import { isKnownCrmForecastCategory, isKnownCrmStatus } from "@/lib/crm";
 import { createCrmLead, listCrmLeads } from "@/lib/crm-service";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +29,8 @@ const qualificationSchema = z.object({
 const leadSchema = z.object({
   leadDate: z.string().trim().nullable().optional(),
   companyName: z.string().trim().min(2).max(191),
+  taxId: z.string().trim().min(2, "Completeaza CUI / CIF-ul firmei.").max(80),
+  industry: z.string().trim().min(2, "Alege domeniul de activitate.").max(120),
   opportunityName: z.string().trim().max(191).nullable().optional(),
   clientType: z.enum(["direct_client", "agency"]).nullable().optional(),
   clientId: z.string().trim().nullable().optional(),
@@ -41,7 +43,7 @@ const leadSchema = z.object({
   status: z.string().trim().refine(isKnownCrmStatus, "Etapa CRM nu este valida.").default("cold"),
   estimatedValue: z.coerce.number().nonnegative().nullable().optional(),
   currency: z.enum(["RON", "EUR"]).default("EUR"),
-  probability: z.coerce.number().int().min(0).max(100).nullable().optional(),
+  forecastCategory: z.string().trim().refine(isKnownCrmForecastCategory, "Categoria de estimare nu este valida.").optional(),
   expectedCloseDate: z.string().trim().nullable().optional(),
   nextFollowUpDate: z.string().trim().nullable().optional(),
   nextStep: z.string().trim().max(2000).nullable().optional(),
@@ -61,6 +63,7 @@ export async function GET(request: NextRequest) {
       due: (request.nextUrl.searchParams.get("due") || "all") as never,
       clientType: request.nextUrl.searchParams.get("clientType") || "",
       source: request.nextUrl.searchParams.get("source") || "",
+      industry: request.nextUrl.searchParams.get("industry") || "",
       page: Number(request.nextUrl.searchParams.get("page") || 1),
       limit: Number(request.nextUrl.searchParams.get("limit") || 30)
     }, session);

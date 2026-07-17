@@ -22,14 +22,16 @@ export async function POST(request: NextRequest, context: Context) {
   try {
     const input = schema.parse(await request.json().catch(() => ({})));
     const converted = await convertCrmLeadToClient({ leadId: id, clientId: input.clientId }, session);
-    await recordAudit({
-      actor: session,
-      action: "crm.lead_convert",
-      entityType: "crm_lead",
-      entityId: id,
-      metadata: { clientId: converted.client.id },
-      request
-    });
+    if (!converted.alreadyCompleted) {
+      await recordAudit({
+        actor: session,
+        action: "crm.opportunity_won",
+        entityType: "crm_lead",
+        entityId: id,
+        metadata: { clientId: converted.client.id },
+        request
+      });
+    }
     return NextResponse.json(converted, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Lead-ul nu a putut fi convertit.";

@@ -16,6 +16,7 @@ type NotificationRow = {
   createdAt: string;
   entityType: string | null;
   entityId: string | null;
+  metadata?: Record<string, unknown> | null;
   user?: { name: string; email: string } | null;
 };
 
@@ -44,7 +45,8 @@ export function NotificationBell() {
     };
   }, [loadRows]);
 
-  const activeRows = useMemo(() => rows.filter((row) => row.status !== "resolved").slice(0, 12), [rows]);
+  const activeCount = useMemo(() => rows.filter((row) => row.status !== "resolved").length, [rows]);
+  const activeRows = useMemo(() => rows.filter((row) => row.status !== "resolved").slice(0, 20), [rows]);
 
   async function action(id: string, actionName: string) {
     setBusy(`${id}-${actionName}`);
@@ -75,13 +77,16 @@ export function NotificationBell() {
       >
         <Bell size={18} />
         <span className="hidden sm:inline">Notificari</span>
-        {activeRows.length ? <span className="rounded-full bg-focus-yellow px-2 py-0.5 text-xs text-focus-navy">{activeRows.length}</span> : null}
+        {activeCount ? <span className="rounded-full bg-focus-yellow px-2 py-0.5 text-xs text-focus-navy">{activeCount > 99 ? "99+" : activeCount}</span> : null}
       </button>
       {open ? (
         <div className="absolute right-0 top-full z-30 mt-2 w-[min(92vw,420px)] rounded-lg border border-focus-line bg-focus-navy p-3 shadow-2xl">
           <div className="mb-2 flex items-center justify-between gap-3 border-b border-focus-line pb-2">
             <strong className="text-sm uppercase text-focus-yellow">Notificari</strong>
-            <button className="text-xs font-bold text-slate-300" type="button" onClick={() => setOpen(false)}>Inchide</button>
+            <div className="flex items-center gap-3">
+              <Link className="text-xs font-black text-white" href="/admin/crm" onClick={() => setOpen(false)}>Agenda zilnica</Link>
+              <button className="text-xs font-bold text-slate-300" type="button" onClick={() => setOpen(false)}>Inchide</button>
+            </div>
           </div>
           <div className="max-h-[min(24rem,calc(100vh-7rem))] overflow-auto">
             {activeRows.length ? activeRows.map((row) => (
@@ -91,7 +96,7 @@ export function NotificationBell() {
                     <p className="font-black text-white">{row.title}</p>
                     <p className="text-xs text-slate-300">{row.message}</p>
                     <p className="mt-1 text-xs text-slate-400">{row.recommendedAction || ""}{row.user?.name ? ` / Owner: ${row.user.name}` : ""}</p>
-                    <p className="mt-1 text-[11px] text-slate-500">{formatNotificationDate(row.createdAt)}</p>
+                    <p className="mt-1 text-[11px] text-slate-500">{row.dueDate ? `Termen: ${formatNotificationDate(row.dueDate)} / ` : ""}Creata: {formatNotificationDate(row.createdAt)}</p>
                   </div>
                   <span className={`rounded-full border px-2 py-1 text-[10px] font-black uppercase ${row.severity === "high" ? "border-red-300/50 bg-red-400/10 text-red-100" : "border-focus-yellow/60 bg-focus-yellow/10 text-focus-yellow"}`}>
                     {row.severity}
@@ -101,6 +106,11 @@ export function NotificationBell() {
                   {row.entityType === "crm_lead" && row.entityId ? (
                     <Link className="focus-button secondary" href={`/admin/crm?lead=${encodeURIComponent(row.entityId)}`} onClick={() => setOpen(false)}>
                       Deschide lead
+                    </Link>
+                  ) : null}
+                  {row.type.startsWith("receivable_") && typeof row.metadata?.clientId === "string" ? (
+                    <Link className="focus-button secondary" href={`/admin/clienti?clientId=${encodeURIComponent(row.metadata.clientId)}`} onClick={() => setOpen(false)}>
+                      Deschide client
                     </Link>
                   ) : null}
                   {row.type.startsWith("receivable_") ? <button className="focus-button secondary" type="button" disabled={busy === `${row.id}-called`} onClick={() => action(row.id, "called")}><PhoneCall size={14} /> Am sunat</button> : null}

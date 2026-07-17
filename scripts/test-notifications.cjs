@@ -13,6 +13,9 @@ const notifications = [];
 let nextNotificationId = 1;
 
 const prisma = {
+  financialReportUpload: {
+    findFirst: async () => ({ id: "active-upload" })
+  },
   financialReceivable: {
     findMany: async () => receivables
   },
@@ -81,6 +84,7 @@ const prisma = {
 
 const {
   createOperationalNotifications,
+  sendDailyNotificationEmails,
   resolveCrmNotificationsForLead,
   syncCrmNotifications,
   syncFinancialNotifications,
@@ -98,7 +102,7 @@ main().catch((error) => {
 async function main() {
   const now = new Date("2026-06-26T00:00:00.000Z");
   receivables = [
-    receivable("soon-1", "2026-07-03", "client-owner-1"),
+    receivable("soon-1", "2026-07-03", "client-owner-1", "direct-owner-1"),
     receivable("overdue-1", "2026-06-25", "client-owner-2")
   ];
   notifications.push({
@@ -113,6 +117,7 @@ async function main() {
   const created = await syncFinancialNotifications(now);
   assert.equal(created, 2, "due-soon and overdue receivable notifications are created");
   assert(openNotification("soon-1", "receivable_due_soon"), "due-soon receivable notification is created");
+  assert.equal(openNotification("soon-1", "receivable_due_soon").userId, "direct-owner-1", "snapshot owner takes precedence over a later client owner change");
   assert(openNotification("overdue-1", "receivable_overdue"), "overdue receivable notification is created");
   assert.equal(notificationById("stale-1").status, "archived", "stale receivable notification is cleaned");
 
@@ -139,10 +144,18 @@ async function main() {
     crmLead("crm-stalled", "Oportunitate blocata", "in_offer", "2026-07-10", "2026-06-25", {
       stageChangedAt: "2026-06-01"
     }),
+    crmLead("crm-close-soon", "Oportunitate aproape", "in_offer", "2026-07-10", "2026-06-25", {
+      forecastCategory: "commit",
+      expectedCloseDate: "2026-06-29"
+    }),
+    crmLead("crm-close-overdue", "Oportunitate restanta", "in_negotiation", "2026-07-10", "2026-06-25", {
+      forecastCategory: "best_case",
+      expectedCloseDate: "2026-06-25"
+    }),
     crmLead("crm-future", "Client viitor", "offer_sent", "2026-06-28", "2026-06-25")
   ];
   const crmCreated = await syncCrmNotifications(now);
-  assert.equal(crmCreated, 7, "CRM sync creates due, classification, no-answer and stalled-stage notifications");
+  assert.equal(crmCreated, 9, "CRM sync creates follow-up, classification, stalled and close-date notifications");
   assert(openNotification("crm-overdue", "crm_followup_overdue"), "overdue CRM notification is created");
   assert(openNotification("crm-today", "crm_followup_due_today"), "today CRM notification is created");
   assert(openNotification("crm-missing", "crm_next_step_missing"), "missing-next-step CRM notification is created");
@@ -150,7 +163,11 @@ async function main() {
   assert(openNotification("crm-classify", "crm_classification_due"), "stale Cold prospect receives a classification reminder");
   assert(openNotification("crm-no-answer", "crm_no_response_attention"), "repeated no-answer attempts create one attention reminder");
   assert(openNotification("crm-stalled", "crm_stage_stalled"), "a stalled commercial stage creates one attention reminder");
+  assert(openNotification("crm-close-soon", "crm_close_due_soon"), "a committed opportunity near close date creates a reminder");
+  assert(openNotification("crm-close-overdue", "crm_close_overdue"), "a best-case opportunity past close date creates an overdue reminder");
   assert.equal(await syncCrmNotifications(now), 0, "CRM notifications remain idempotent");
+  const digest = await sendDailyNotificationEmails(now);
+  assert.equal(digest.enabled, false, "email digest remains safely disabled without provider configuration");
 
   crmLeads = [
     crmLead("crm-overdue", "Client restant", "qualified", "2026-06-30", "2026-06-26"),
@@ -214,9 +231,11 @@ async function main() {
   }, null, 2));
 }
 
-function receivable(id, dueDate, ownerId) {
+function receivable(id, dueDate, ownerId, directOwnerId = null) {
   return {
     id,
+    uploadId: "active-upload",
+    accountOwnerUserId: directOwnerId,
     dueDate: new Date(`${dueDate}T00:00:00.000Z`),
     clientName: `Client ${id}`,
     currency: "RON",
@@ -237,6 +256,10 @@ function crmLead(id, companyName, status, nextFollowUpDate, updatedAt, extra = {
     stageChangedAt: new Date(`${extra.stageChangedAt || updatedAt}T00:00:00.000Z`),
     lastActivityAt: new Date(`${updatedAt}T00:00:00.000Z`),
     noResponseCount: extra.noResponseCount || 0,
+    forecastCategory: extra.forecastCategory || "pipeline",
+    expectedCloseDate: extra.expectedCloseDate ? new Date(`${extra.expectedCloseDate}T00:00:00.000Z`) : null,
+    estimatedValue: extra.estimatedValue || 1000,
+    currency: "EUR",
     updatedAt: new Date(`${updatedAt}T00:00:00.000Z`)
   };
 }

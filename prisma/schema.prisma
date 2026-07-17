@@ -716,6 +716,8 @@ model CrmLead {
   id                String   @id @default(cuid())
   leadDate          DateTime?
   companyName       String
+  taxId             String?  @db.VarChar(80)
+  industry          String?  @db.VarChar(120)
   opportunityName   String?
   clientType        String?
   contactName       String?
@@ -729,6 +731,7 @@ model CrmLead {
   estimatedValue    Float?
   currency          String?  @db.VarChar(3)
   probability       Int?
+  forecastCategory  String   @default("pipeline") @db.VarChar(32)
   expectedCloseDate DateTime?
   nextFollowUpDate  DateTime?
   nextStep          String?  @db.Text
@@ -757,6 +760,9 @@ model CrmLead {
   @@index([assignedToUserId])
   @@index([createdByUserId])
   @@index([status])
+  @@index([taxId])
+  @@index([industry])
+  @@index([forecastCategory, expectedCloseDate])
   @@index([nextFollowUpDate])
   @@index([stageChangedAt])
   @@index([lastContactAt])

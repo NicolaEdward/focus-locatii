@@ -5,9 +5,9 @@ import {
   canAccessCrmLead,
   CRM_ACTIVE_DB_STATUSES,
   CRM_STATUS_OPTIONS,
-  crmDefaultProbability,
   crmDbStatusesFor,
   crmDueWhere,
+  crmForecastCategoryForStatus,
   crmLeadAttention,
   crmLeadClassificationAttention,
   crmLeadScope,
@@ -16,14 +16,19 @@ import {
   crmStageAgeDays,
   crmStageIsStalled,
   crmStatusAtLeast,
+  isActiveCrmStatus,
   monthlyCrmOutcomes,
+  nextCrmForecastCategory,
   normalizeCrmQualificationData,
+  normalizeCrmForecastCategory,
   normalizeCrmStatus,
   summarizeCrmLeads,
+  validateCrmForecast,
   validateCrmState,
   type CrmQualificationData
 } from "@/lib/crm";
 import { prisma } from "@/lib/prisma";
+import { canonicalTaxId, normalizeTaxId, taxIdSearchValues } from "@/lib/tax-id";
 
 export type CrmListInput = {
   query?: string;
@@ -32,6 +37,7 @@ export type CrmListInput = {
   due?: "all" | "attention" | "overdue" | "today" | "upcoming" | "missing";
   clientType?: string;
   source?: string;
+  industry?: string;
   page?: number;
   limit?: number;
 };
@@ -50,10 +56,12 @@ export async function listCrmLeads(input: CrmListInput, actor: AuthSession) {
       ...(input.assignee && actor.role !== "SALES_AGENT" ? [{ assignedToUserId: input.assignee }] : []),
       ...(input.clientType ? [{ clientType: input.clientType }] : []),
       ...(input.source ? [{ source: { contains: input.source } }] : []),
+      ...(input.industry ? [{ industry: input.industry }] : []),
       ...(query
         ? [{
             OR: [
               { companyName: { contains: query } },
+              { taxId: { contains: query } },
               { opportunityName: { contains: query } },
               { contactName: { contains: query } },
               { email: { contains: query } },
@@ -86,7 +94,8 @@ export async function listCrmLeads(input: CrmListInput, actor: AuthSession) {
         nextFollowUpDate: true,
         estimatedValue: true,
         currency: true,
-        probability: true,
+        forecastCategory: true,
+        expectedCloseDate: true,
         updatedAt: true,
         stageChangedAt: true,
         firstContactedAt: true,
@@ -133,6 +142,7 @@ export async function getCrmLead(id: string, actor: AuthSession) {
         select: {
           id: true,
           companyName: true,
+          taxId: true,
           status: true,
           accountOwnerUserId: true,
           generalEmail: true,
@@ -148,7 +158,8 @@ export async function getCrmLead(id: string, actor: AuthSession) {
     }
   });
   if (!lead) return null;
-  const campaigns = lead.clientId
+  const [campaigns, companyHistory] = await Promise.all([
+    lead.clientId
     ? await prisma.campaign.findMany({
         where: { clientId: lead.clientId, archivedAt: null },
         select: {
@@ -163,13 +174,21 @@ export async function getCrmLead(id: string, actor: AuthSession) {
         orderBy: { updatedAt: "desc" },
         take: 12
       })
-    : [];
-  return serializeCrmLeadDetail(lead, campaigns);
+    : [],
+    listCrmCompanyHistory({
+      leadId: lead.id,
+      clientId: lead.clientId,
+      taxId: lead.taxId
+    }, actor)
+  ]);
+  return serializeCrmLeadDetail(lead, campaigns, companyHistory);
 }
 
 export async function createCrmLead(input: {
   leadDate?: Date | null;
   companyName: string;
+  taxId: string;
+  industry: string;
   opportunityName?: string | null;
   clientType?: string | null;
   clientId?: string | null;
@@ -182,7 +201,7 @@ export async function createCrmLead(input: {
   status: string;
   estimatedValue?: number | null;
   currency?: string | null;
-  probability?: number | null;
+  forecastCategory?: string | null;
   expectedCloseDate?: Date | null;
   nextFollowUpDate?: Date | null;
   nextStep?: string | null;
@@ -192,12 +211,26 @@ export async function createCrmLead(input: {
 }, actor: AuthSession) {
   crmLeadScope(actor);
   const assignedToUserId = await resolveCrmAssignee(actor, input.assignedToUserId);
+  const taxId = normalizeTaxId(input.taxId);
+  if (!taxId) throw new Error("Completeaza CUI / CIF-ul firmei.");
+  await assertCrmCompanyOwnership({
+    taxId,
+    companyName: input.companyName,
+    opportunityName: input.opportunityName,
+    clientId: input.clientId,
+    assignedToUserId
+  }, actor);
   const status = validateCrmState({
     status: input.status,
     nextFollowUpDate: input.nextFollowUpDate,
     clientId: input.clientId
   });
-  const probability = input.probability ?? crmDefaultProbability(status);
+  const forecastCategory = validateCrmForecast({
+    status,
+    forecastCategory: input.forecastCategory ?? crmForecastCategoryForStatus(status),
+    estimatedValue: input.estimatedValue,
+    expectedCloseDate: input.expectedCloseDate
+  });
   const now = new Date();
   const firstContactedAt = crmStatusAtLeast(status, "contacted") ? now : null;
   const qualifiedAt = crmStatusAtLeast(status, "qualified") ? now : null;
@@ -205,6 +238,8 @@ export async function createCrmLead(input: {
   return prisma.crmLead.create({
     data: {
       companyName: input.companyName,
+      taxId,
+      industry: input.industry.trim(),
       opportunityName: input.opportunityName,
       leadDate: input.leadDate || new Date(),
       clientType: input.clientType,
@@ -218,7 +253,7 @@ export async function createCrmLead(input: {
       status,
       estimatedValue: input.estimatedValue,
       currency: input.currency || "EUR",
-      probability,
+      forecastCategory,
       expectedCloseDate: input.expectedCloseDate,
       nextFollowUpDate: input.nextFollowUpDate,
       nextStep,
@@ -265,6 +300,8 @@ export async function createCrmLead(input: {
 
 export async function updateCrmLead(id: string, patch: {
   companyName?: string;
+  taxId?: string;
+  industry?: string;
   opportunityName?: string | null;
   leadDate?: Date | null;
   clientType?: string | null;
@@ -277,7 +314,7 @@ export async function updateCrmLead(id: string, patch: {
   status?: string;
   estimatedValue?: number | null;
   currency?: string | null;
-  probability?: number | null;
+  forecastCategory?: string | null;
   expectedCloseDate?: Date | null;
   nextFollowUpDate?: Date | null;
   nextStep?: string | null;
@@ -294,11 +331,34 @@ export async function updateCrmLead(id: string, patch: {
   const assignedToUserId = patch.assignedToUserId === undefined
     ? existing.assignedToUserId
     : await resolveCrmAssignee(actor, patch.assignedToUserId);
+  const nextTaxId = patch.taxId === undefined ? existing.taxId : normalizeTaxId(patch.taxId);
+  if (patch.taxId !== undefined && !nextTaxId) throw new Error("CUI / CIF-ul nu este valid.");
+  if (nextTaxId && (patch.taxId !== undefined || patch.clientId !== undefined || patch.assignedToUserId !== undefined)) {
+    await assertCrmCompanyOwnership({
+      taxId: nextTaxId,
+      companyName: patch.companyName ?? existing.companyName,
+      opportunityName: patch.opportunityName === undefined ? existing.opportunityName : patch.opportunityName,
+      clientId: patch.clientId === undefined ? existing.clientId : patch.clientId,
+      assignedToUserId,
+      excludeLeadId: id
+    }, actor);
+  }
   const nextStatus = normalizeCrmStatus(patch.status ?? existing.status);
+  if (patch.status !== undefined && nextStatus === "won" && normalizeCrmStatus(existing.status) !== "won") {
+    throw new Error("Foloseste actiunea Inchide oportunitatea pentru a confirma castigarea si clientul.");
+  }
   const nextClientId = patch.clientId === undefined ? existing.clientId : patch.clientId;
   const nextFollowUpDate = patch.nextFollowUpDate === undefined ? existing.nextFollowUpDate : patch.nextFollowUpDate;
   const nextLostReason = patch.lostReason === undefined ? existing.lostReason : patch.lostReason;
   const nextLostReasonCode = patch.lostReasonCode === undefined ? existing.lostReasonCode : patch.lostReasonCode;
+  const nextEstimatedValue = patch.estimatedValue === undefined ? existing.estimatedValue : patch.estimatedValue;
+  const nextExpectedCloseDate = patch.expectedCloseDate === undefined ? existing.expectedCloseDate : patch.expectedCloseDate;
+  const nextForecastCategory = nextCrmForecastCategory({
+    currentCategory: existing.forecastCategory,
+    currentStatus: existing.status,
+    nextStatus,
+    requestedCategory: patch.forecastCategory
+  });
   const nextNextStep = isTerminalStatus(nextStatus)
     ? null
     : patch.nextStep === undefined
@@ -311,16 +371,14 @@ export async function updateCrmLead(id: string, patch: {
     lostReasonCode: nextLostReasonCode,
     clientId: nextClientId
   });
+  validateCrmForecast({
+    status: nextStatus,
+    forecastCategory: nextForecastCategory,
+    estimatedValue: nextEstimatedValue,
+    expectedCloseDate: nextExpectedCloseDate
+  });
   const statusChanged = nextStatus !== normalizeCrmStatus(existing.status);
   const ownerChanged = assignedToUserId !== existing.assignedToUserId;
-  const shouldApplyStageProbability = statusChanged
-    && patch.probability === undefined
-    && (existing.probability == null || existing.probability === crmDefaultProbability(existing.status));
-  const nextProbability = patch.probability !== undefined
-    ? patch.probability
-    : shouldApplyStageProbability
-      ? crmDefaultProbability(nextStatus)
-      : existing.probability;
   const now = new Date();
   const firstContactedAt = existing.firstContactedAt
     || (crmStatusAtLeast(nextStatus, "contacted") ? now : null);
@@ -332,6 +390,8 @@ export async function updateCrmLead(id: string, patch: {
     where: { id },
     data: {
       ...(patch.companyName !== undefined ? { companyName: patch.companyName } : {}),
+      ...(patch.taxId !== undefined ? { taxId: nextTaxId } : {}),
+      ...(patch.industry !== undefined ? { industry: patch.industry.trim() } : {}),
       ...(patch.opportunityName !== undefined ? { opportunityName: patch.opportunityName } : {}),
       ...(patch.leadDate !== undefined ? { leadDate: patch.leadDate } : {}),
       ...(patch.clientType !== undefined ? { clientType: patch.clientType } : {}),
@@ -344,7 +404,7 @@ export async function updateCrmLead(id: string, patch: {
       ...(patch.status !== undefined ? { status: nextStatus } : {}),
       ...(patch.estimatedValue !== undefined ? { estimatedValue: patch.estimatedValue } : {}),
       ...(patch.currency !== undefined ? { currency: patch.currency } : {}),
-      ...(patch.probability !== undefined || shouldApplyStageProbability ? { probability: nextProbability } : {}),
+      ...(patch.forecastCategory !== undefined || statusChanged ? { forecastCategory: nextForecastCategory } : {}),
       ...(patch.expectedCloseDate !== undefined ? { expectedCloseDate: patch.expectedCloseDate } : {}),
       ...(patch.nextFollowUpDate !== undefined ? { nextFollowUpDate: patch.nextFollowUpDate } : {}),
       ...(patch.nextStep !== undefined || isTerminalStatus(nextStatus) ? { nextStep: nextNextStep } : {}),
@@ -408,6 +468,14 @@ export async function addCrmActivity(leadId: string, input: {
   const nextFollowUpDate = input.nextFollowUpDate === undefined ? lead.nextFollowUpDate : input.nextFollowUpDate;
   const currentStatus = normalizeCrmStatus(lead.status);
   const nextStatus = input.status ? normalizeCrmStatus(input.status) : currentStatus;
+  if (nextStatus === "won" && currentStatus !== "won") {
+    throw new Error("Foloseste actiunea Inchide oportunitatea pentru a confirma castigarea si clientul.");
+  }
+  const nextForecastCategory = nextCrmForecastCategory({
+    currentCategory: lead.forecastCategory,
+    currentStatus,
+    nextStatus
+  });
   validateCrmState({
     status: nextStatus,
     nextFollowUpDate,
@@ -415,8 +483,12 @@ export async function addCrmActivity(leadId: string, input: {
     lostReasonCode: lead.lostReasonCode,
     clientId: lead.clientId
   });
-  const shouldApplyStageProbability = nextStatus !== currentStatus
-    && (lead.probability == null || lead.probability === crmDefaultProbability(currentStatus));
+  validateCrmForecast({
+    status: nextStatus,
+    forecastCategory: nextForecastCategory,
+    estimatedValue: lead.estimatedValue,
+    expectedCloseDate: lead.expectedCloseDate
+  });
   const activityDate = input.activityDate || new Date();
   const isNoResponse = input.actionType === "call_no_answer";
   const isContactAttempt = crmContactActionTypes.has(input.actionType) || isNoResponse;
@@ -449,7 +521,7 @@ export async function addCrmActivity(leadId: string, input: {
         nextStep: input.nextStep === undefined ? lead.nextStep : input.nextStep,
         ...(nextStatus !== currentStatus ? { status: nextStatus } : {}),
         ...(nextStatus !== currentStatus ? { stageChangedAt: activityDate } : {}),
-        ...(shouldApplyStageProbability ? { probability: crmDefaultProbability(nextStatus) } : {}),
+        ...(nextStatus !== currentStatus ? { forecastCategory: nextForecastCategory } : {}),
         ...(firstContactedAt && !lead.firstContactedAt ? { firstContactedAt } : {}),
         ...(qualifiedAt && !lead.qualifiedAt ? { qualifiedAt } : {}),
         ...(isContactAttempt ? { lastContactAt: activityDate } : {}),
@@ -466,23 +538,27 @@ export async function addCrmActivity(leadId: string, input: {
   });
 }
 
-export async function findCrmDuplicates(query: string, actor: AuthSession) {
+export async function findCrmDuplicates(query: string, actor: AuthSession, taxIdInput?: string | null) {
   crmLeadScope(actor);
   const value = query.trim();
-  if (value.length < 2) return { clients: [], leads: [] };
+  const normalizedTaxId = normalizeTaxId(taxIdInput);
+  const taxIdValues = taxIdSearchValues(normalizedTaxId);
+  if (value.length < 2 && !normalizedTaxId) return { clients: [], leads: [] };
   const normalized = normalizeClientName(value);
   const [clients, leads] = await Promise.all([
     prisma.clientAccount.findMany({
       where: {
         status: { notIn: ["merged", "archived"] },
         OR: [
-          { companyName: { contains: value } },
-          ...(normalized ? [{ normalizedName: { contains: normalized } }] : [])
+          ...(value.length >= 2 ? [{ companyName: { contains: value } }] : []),
+          ...(normalized ? [{ normalizedName: { contains: normalized } }] : []),
+          ...(taxIdValues.length ? [{ taxId: { in: taxIdValues } }] : [])
         ]
       },
       select: {
         id: true,
         companyName: true,
+        taxId: true,
         status: true,
         clientType: true,
         accountOwner: { select: { id: true, name: true } }
@@ -493,13 +569,23 @@ export async function findCrmDuplicates(query: string, actor: AuthSession) {
     prisma.crmLead.findMany({
       where: {
         status: { in: CRM_ACTIVE_DB_STATUSES },
-        OR: [{ companyName: { contains: value } }, { email: { contains: value } }, { phone: { contains: value } }]
+        OR: [
+          ...(value.length >= 2 ? [
+            { companyName: { contains: value } },
+            { email: { contains: value } },
+            { phone: { contains: value } }
+          ] : []),
+          ...(taxIdValues.length ? [{ taxId: { in: taxIdValues } }] : [])
+        ]
       },
       select: {
         id: true,
         companyName: true,
+        taxId: true,
         opportunityName: true,
         status: true,
+        lastContactAt: true,
+        lastActivityAt: true,
         assignedTo: { select: { id: true, name: true } }
       },
       orderBy: { updatedAt: "desc" },
@@ -507,8 +593,104 @@ export async function findCrmDuplicates(query: string, actor: AuthSession) {
     })
   ]);
   return {
-    clients,
-    leads: leads.map((lead) => ({ ...lead, status: normalizeCrmStatus(lead.status), canOpen: canAccessCrmLead(actor, { assignedToUserId: lead.assignedTo?.id || null }) }))
+    clients: clients.map((client) => ({
+      ...client,
+      exactTaxIdMatch: Boolean(normalizedTaxId && canonicalTaxId(client.taxId) === canonicalTaxId(normalizedTaxId))
+    })),
+    leads: leads.map((lead) => ({
+      ...lead,
+      status: normalizeCrmStatus(lead.status),
+      exactTaxIdMatch: Boolean(normalizedTaxId && canonicalTaxId(lead.taxId) === canonicalTaxId(normalizedTaxId)),
+      canOpen: canAccessCrmLead(actor, { assignedToUserId: lead.assignedTo?.id || null }),
+      lastContactAt: lead.lastContactAt?.toISOString() || null,
+      lastActivityAt: lead.lastActivityAt?.toISOString() || null
+    }))
+  };
+}
+
+export async function listCrmDailyAgenda(input: { assignee?: string | null }, actor: AuthSession) {
+  crmLeadScope(actor);
+  const ownerId = resolveAgendaOwner(actor, input.assignee);
+  const now = new Date();
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const tomorrow = addDays(todayStart, 1);
+  const nextWeek = addDays(todayStart, 8);
+  const activeFinancialUpload = await prisma.financialReportUpload.findFirst({
+    where: { activeVersion: true, status: "confirmed" },
+    select: { id: true, reportDate: true, uploadedAt: true },
+    orderBy: { uploadedAt: "desc" }
+  });
+  const leadOwnerWhere = ownerId ? { assignedToUserId: ownerId } : {};
+  const receivableOwnerWhere: Prisma.FinancialReceivableWhereInput = ownerId
+    ? { OR: [{ accountOwnerUserId: ownerId }, { client: { accountOwnerUserId: ownerId } }] }
+    : {};
+
+  const [calls, receivables, opportunities] = await Promise.all([
+    prisma.crmLead.findMany({
+      where: {
+        ...leadOwnerWhere,
+        status: { in: CRM_ACTIVE_DB_STATUSES },
+        nextFollowUpDate: { lt: tomorrow }
+      },
+      select: crmLeadSummarySelect,
+      orderBy: [{ nextFollowUpDate: "asc" }, { updatedAt: "desc" }],
+      take: 30
+    }),
+    prisma.financialReceivable.findMany({
+      where: {
+        ...receivableOwnerWhere,
+        uploadId: activeFinancialUpload?.id || "__no_active_financial_report__",
+        includedInReport: true,
+        needsReview: false,
+        status: { notIn: ["collected", "included", "excluded", "archived"] },
+        remainingAmount: { gt: 0 },
+        dueDate: { gte: addDays(todayStart, -180), lt: nextWeek }
+      },
+      select: {
+        id: true,
+        clientId: true,
+        clientName: true,
+        companyName: true,
+        invoiceNumber: true,
+        dueDate: true,
+        remainingAmount: true,
+        currency: true,
+        client: { select: { id: true, companyName: true, accountOwner: { select: { id: true, name: true } } } }
+      },
+      orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
+      take: 30
+    }),
+    prisma.crmLead.findMany({
+      where: {
+        ...leadOwnerWhere,
+        status: { in: CRM_ACTIVE_DB_STATUSES },
+        forecastCategory: { in: ["best_case", "commit"] },
+        expectedCloseDate: { lt: nextWeek }
+      },
+      select: crmLeadSummarySelect,
+      orderBy: [{ expectedCloseDate: "asc" }, { updatedAt: "desc" }],
+      take: 30
+    })
+  ]);
+
+  return {
+    ownerId,
+    generatedAt: now.toISOString(),
+    financialReport: activeFinancialUpload
+      ? {
+          available: true,
+          reportDate: activeFinancialUpload.reportDate?.toISOString() || null,
+          uploadedAt: activeFinancialUpload.uploadedAt.toISOString()
+        }
+      : { available: false, reportDate: null, uploadedAt: null },
+    counts: { calls: calls.length, receivables: receivables.length, opportunities: opportunities.length },
+    calls: calls.map(serializeCrmLeadSummary),
+    receivables: receivables.map((row) => ({
+      ...row,
+      dueDate: row.dueDate?.toISOString() || null,
+      remainingAmount: row.remainingAmount == null ? null : Number(row.remainingAmount)
+    })),
+    opportunities: opportunities.map(serializeCrmLeadSummary)
   };
 }
 
@@ -518,22 +700,46 @@ export async function convertCrmLeadToClient(input: {
 }, actor: AuthSession) {
   const lead = await prisma.crmLead.findUnique({ where: { id: input.leadId } });
   if (!lead || !canAccessCrmLead(actor, lead)) throw new Error("Lead-ul nu este accesibil.");
+  if (normalizeCrmStatus(lead.status) === "won" && lead.clientId) {
+    const client = await prisma.clientAccount.findFirst({
+      where: { id: lead.clientId, status: { notIn: ["merged", "archived"] } }
+    });
+    if (client) return { client, lead, alreadyCompleted: true };
+  }
+  if (!isActiveCrmStatus(lead.status)) {
+    throw new Error("Doar oportunitatile active pot fi inchise ca fiind castigate.");
+  }
 
   const converted = await prisma.$transaction(async (tx) => {
-    let client = input.clientId
-      ? await tx.clientAccount.findFirst({ where: { id: input.clientId, status: { notIn: ["merged", "archived"] } } })
+    const requestedClientId = input.clientId || lead.clientId;
+    let client = requestedClientId
+      ? await tx.clientAccount.findFirst({ where: { id: requestedClientId, status: { notIn: ["merged", "archived"] } } })
       : await tx.clientAccount.findFirst({
-          where: { normalizedName: normalizeClientName(lead.companyName), status: { notIn: ["merged", "archived"] } },
+          where: {
+            status: { notIn: ["merged", "archived"] },
+            OR: [
+              ...(lead.taxId ? [{ taxId: { in: taxIdSearchValues(lead.taxId) } }] : []),
+              { normalizedName: normalizeClientName(lead.companyName) }
+            ]
+          },
           orderBy: { updatedAt: "desc" }
         });
+    if (requestedClientId && !client) throw new Error("Clientul selectat nu exista sau este arhivat.");
+    if (client && lead.taxId && client.taxId && canonicalTaxId(client.taxId) !== canonicalTaxId(lead.taxId)) {
+      throw new Error("CUI-ul oportunitatii nu corespunde clientului selectat.");
+    }
     if (client?.accountOwnerUserId && actor.role === "SALES_AGENT" && client.accountOwnerUserId !== actor.id) {
       throw new Error("Clientul exista la alt owner. COO trebuie sa confirme legatura sau reasignarea.");
+    }
+    if (client && lead.taxId && !client.taxId) {
+      client = await tx.clientAccount.update({ where: { id: client.id }, data: { taxId: lead.taxId } });
     }
     if (!client) {
       client = await tx.clientAccount.create({
         data: {
           companyName: lead.companyName,
           normalizedName: normalizeClientName(lead.companyName),
+          taxId: lead.taxId,
           clientType: lead.clientType || "direct_client",
           generalEmail: lead.email,
           generalPhone: lead.phone,
@@ -542,18 +748,37 @@ export async function convertCrmLeadToClient(input: {
           status: "active"
         }
       });
-      if (lead.contactName) {
+    }
+    if (lead.contactName) {
+      const existingContact = await tx.clientContact.findFirst({
+        where: {
+          clientId: client.id,
+          OR: [
+            ...(lead.email ? [{ email: lead.email }] : []),
+            ...(lead.phone ? [{ phone: lead.phone }] : []),
+            { name: lead.contactName }
+          ]
+        },
+        select: { id: true }
+      });
+      if (!existingContact) {
+        const hasPrimaryContact = await tx.clientContact.findFirst({
+          where: { clientId: client.id, isPrimary: true },
+          select: { id: true }
+        });
         await tx.clientContact.create({
           data: {
             clientId: client.id,
             name: lead.contactName,
             email: lead.email,
             phone: lead.phone,
-            isPrimary: true
+            isPrimary: !hasPrimaryContact
           }
         });
       }
     }
+    await tx.crmContact.updateMany({ where: { leadId: lead.id }, data: { clientId: client.id } });
+    const completedAt = new Date();
     const updatedLead = await tx.crmLead.update({
       where: { id: lead.id },
       data: {
@@ -561,22 +786,22 @@ export async function convertCrmLeadToClient(input: {
         status: "won",
         nextFollowUpDate: null,
         nextStep: null,
-        probability: 100,
-        stageChangedAt: new Date(),
-        lastActivityAt: new Date(),
+        forecastCategory: "closed",
+        stageChangedAt: completedAt,
+        lastActivityAt: completedAt,
         activities: {
           create: {
             userId: actor.id,
             type: "conversion",
             actionType: "status_change",
             statusAtTime: "won",
-            details: `Lead convertit in client: ${client.companyName}.`,
-            note: "Conversie CRM confirmata."
+            details: `Oportunitate castigata. Client asociat: ${client.companyName}.`,
+            note: "Inchidere comerciala confirmata."
           }
         }
       }
     });
-    return { client, lead: updatedLead };
+    return { client, lead: updatedLead, alreadyCompleted: false };
   });
 
   return converted;
@@ -670,6 +895,8 @@ const crmLeadSummarySelect = {
   id: true,
   leadDate: true,
   companyName: true,
+  taxId: true,
+  industry: true,
   opportunityName: true,
   clientType: true,
   contactName: true,
@@ -681,7 +908,7 @@ const crmLeadSummarySelect = {
   assignedToUserId: true,
   estimatedValue: true,
   currency: true,
-  probability: true,
+  forecastCategory: true,
   expectedCloseDate: true,
   nextFollowUpDate: true,
   nextStep: true,
@@ -719,6 +946,7 @@ function serializeCrmLeadSummary(row: Prisma.CrmLeadGetPayload<{ select: typeof 
   return {
     ...row,
     status: normalizeCrmStatus(row.status),
+    forecastCategory: normalizeCrmForecastCategory(row.forecastCategory),
     leadDate: row.leadDate?.toISOString() || null,
     expectedCloseDate: row.expectedCloseDate?.toISOString() || null,
     nextFollowUpDate: row.nextFollowUpDate?.toISOString() || null,
@@ -748,12 +976,15 @@ function serializeCrmLeadSummary(row: Prisma.CrmLeadGetPayload<{ select: typeof 
 
 function serializeCrmLeadDetail(
   lead: Awaited<ReturnType<typeof prisma.crmLead.findFirst>> & Record<string, any>,
-  campaigns: Array<Record<string, any>>
+  campaigns: Array<Record<string, any>>,
+  companyHistory: Array<Record<string, any>>
 ) {
   const qualification = crmQualificationScore(lead.qualificationData);
   return {
     ...lead,
     status: normalizeCrmStatus(lead.status),
+    probability: undefined,
+    forecastCategory: normalizeCrmForecastCategory(lead.forecastCategory),
     leadDate: lead.leadDate?.toISOString() || null,
     expectedCloseDate: lead.expectedCloseDate?.toISOString() || null,
     nextFollowUpDate: lead.nextFollowUpDate?.toISOString() || null,
@@ -785,8 +1016,128 @@ function serializeCrmLeadDetail(
       startDate: campaign.startDate?.toISOString() || null,
       endDate: campaign.endDate?.toISOString() || null,
       totalContractValue: campaign.totalContractValue == null ? null : Number(campaign.totalContractValue)
-    }))
+    })),
+    companyHistory
   };
+}
+
+async function listCrmCompanyHistory(
+  input: { leadId: string; clientId?: string | null; taxId?: string | null },
+  actor: AuthSession
+) {
+  const taxIdValues = taxIdSearchValues(input.taxId);
+  if (!input.clientId && !taxIdValues.length) return [];
+  const rows = await prisma.crmLead.findMany({
+    where: {
+      OR: [
+        ...(input.clientId ? [{ clientId: input.clientId }] : []),
+        ...(taxIdValues.length ? [{ taxId: { in: taxIdValues } }] : [])
+      ]
+    },
+    select: {
+      id: true,
+      companyName: true,
+      opportunityName: true,
+      status: true,
+      assignedToUserId: true,
+      createdAt: true,
+      lastContactAt: true,
+      lastActivityAt: true,
+      assignedTo: { select: { id: true, name: true } },
+      activities: {
+        orderBy: [{ activityDate: "desc" }, { createdAt: "desc" }],
+        take: 1,
+        select: {
+          id: true,
+          actionType: true,
+          activityDate: true,
+          user: { select: { id: true, name: true } }
+        }
+      }
+    },
+    orderBy: [{ lastActivityAt: "desc" }, { createdAt: "desc" }],
+    take: 20
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    isCurrent: row.id === input.leadId,
+    companyName: row.companyName,
+    opportunityName: row.opportunityName,
+    status: normalizeCrmStatus(row.status),
+    assignedTo: row.assignedTo,
+    createdAt: row.createdAt.toISOString(),
+    lastContactAt: row.lastContactAt?.toISOString() || null,
+    lastActivityAt: row.lastActivityAt?.toISOString() || null,
+    latestActivity: row.activities[0]
+      ? {
+          ...row.activities[0],
+          activityDate: row.activities[0].activityDate.toISOString()
+        }
+      : null,
+    canOpen: canAccessCrmLead(actor, row)
+  }));
+}
+
+async function assertCrmCompanyOwnership(input: {
+  taxId: string;
+  companyName: string;
+  opportunityName?: string | null;
+  clientId?: string | null;
+  assignedToUserId: string | null;
+  excludeLeadId?: string;
+}, actor: AuthSession) {
+  const taxIdValues = taxIdSearchValues(input.taxId);
+  const [client, selectedClient, activeLeads] = await Promise.all([
+    prisma.clientAccount.findFirst({
+      where: { taxId: { in: taxIdValues }, status: { notIn: ["merged", "archived"] } },
+      select: { id: true, companyName: true, accountOwnerUserId: true }
+    }),
+    input.clientId
+      ? prisma.clientAccount.findFirst({
+          where: { id: input.clientId, status: { notIn: ["merged", "archived"] } },
+          select: { id: true, companyName: true, taxId: true }
+        })
+      : Promise.resolve(null),
+    prisma.crmLead.findMany({
+      where: {
+        id: input.excludeLeadId ? { not: input.excludeLeadId } : undefined,
+        taxId: { in: taxIdValues },
+        status: { in: CRM_ACTIVE_DB_STATUSES }
+      },
+      select: { id: true, companyName: true, opportunityName: true, assignedToUserId: true, assignedTo: { select: { name: true } } },
+      take: 10
+    })
+  ]);
+
+  if (input.clientId && !selectedClient) throw new Error("Clientul selectat nu exista sau este arhivat.");
+  if (selectedClient?.taxId && canonicalTaxId(selectedClient.taxId) !== canonicalTaxId(input.taxId)) {
+    throw new Error(`CUI-ul introdus nu corespunde clientului ${selectedClient.companyName}.`);
+  }
+  if (client && input.clientId !== client.id) {
+    throw new Error(`CUI-ul este deja inregistrat la clientul ${client.companyName}. Selecteaza clientul existent.`);
+  }
+  const otherOwner = activeLeads.find((lead) => lead.assignedToUserId && lead.assignedToUserId !== input.assignedToUserId);
+  if (otherOwner && actor.role === "SALES_AGENT") {
+    throw new Error(`Firma este deja lucrata de ${otherOwner.assignedTo?.name || "alt vanzator"}. Verifica istoricul inainte de a continua.`);
+  }
+  const duplicateOpportunity = activeLeads.find((lead) =>
+    lead.assignedToUserId === input.assignedToUserId
+    && normalizeClientName(lead.companyName) === normalizeClientName(input.companyName)
+    && normalizeClientName(lead.opportunityName || "") === normalizeClientName(input.opportunityName || "")
+  );
+  if (duplicateOpportunity) {
+    throw new Error("Exista deja o oportunitate activa identica pentru aceasta firma.");
+  }
+}
+
+function resolveAgendaOwner(actor: AuthSession, requestedAssignee?: string | null) {
+  if (actor.role === "SALES_AGENT") return actor.id;
+  if (actor.role === "SALES_DIRECTOR") return requestedAssignee || actor.id;
+  return requestedAssignee || null;
+}
+
+function addDays(date: Date, days: number) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
 }
 
 async function resolveCrmAssignee(actor: AuthSession, requestedId?: string | null) {

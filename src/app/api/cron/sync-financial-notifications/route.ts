@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { syncCrmNotifications, syncFinancialNotifications } from "@/lib/notifications";
+import { sendDailyNotificationEmails, syncCrmNotifications, syncFinancialNotifications } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,5 +17,6 @@ export async function GET(request: NextRequest) {
     syncFinancialNotifications(),
     syncCrmNotifications()
   ]);
-  return NextResponse.json({ ok: true, financialCreated, crmCreated });
+  const emailDigest = await sendDailyNotificationEmails();
+  return NextResponse.json({ ok: true, financialCreated, crmCreated, emailDigest });
 }

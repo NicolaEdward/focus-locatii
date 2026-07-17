@@ -20,6 +20,16 @@ export type CrmDueFilter = "all" | "attention" | "overdue" | "today" | "upcoming
 export type CrmClassificationAttention = "cold" | "contacted" | null;
 export type CrmOpportunityPriority = "urgent" | "high" | "normal";
 
+export const CRM_FORECAST_CATEGORY_OPTIONS = [
+  { value: "pipeline", label: "Pipeline", description: "Oportunitate deschisa, fara angajament pentru luna estimata." },
+  { value: "best_case", label: "Posibil", description: "Poate fi castigata in luna estimata, la valoarea integrala." },
+  { value: "commit", label: "Angajament", description: "Vanzatorul estimeaza responsabil ca o va inchide in luna aleasa." },
+  { value: "closed", label: "Castigat", description: "Oportunitate castigata si legata de un client." },
+  { value: "omitted", label: "Exclus", description: "Nu intra in estimarea comerciala curenta." }
+] as const;
+
+export type CrmForecastCategory = (typeof CRM_FORECAST_CATEGORY_OPTIONS)[number]["value"];
+
 export const CRM_SOURCE_OPTIONS = [
   "Prospectare directa",
   "Recomandare",
@@ -29,6 +39,26 @@ export const CRM_SOURCE_OPTIONS = [
   "Eveniment",
   "Campanie reactivata",
   "Alta sursa"
+] as const;
+
+export const CRM_INDUSTRY_OPTIONS = [
+  "Retail",
+  "FMCG",
+  "Betting & gaming",
+  "Auto",
+  "Bancar & financiar",
+  "Asigurari",
+  "Imobiliare",
+  "Telecom",
+  "Tehnologie",
+  "Sanatate & pharma",
+  "HoReCa & turism",
+  "Entertainment & evenimente",
+  "Educatie",
+  "Servicii B2B",
+  "Productie & industrie",
+  "Institutii publice & ONG",
+  "Altele"
 ] as const;
 
 export const CRM_LOST_REASON_OPTIONS = [
@@ -143,6 +173,70 @@ export function crmStatusDescription(value?: string | null) {
 export function crmDefaultProbability(value?: string | null) {
   const status = normalizeCrmStatus(value);
   return CRM_STATUS_OPTIONS.find((option) => option.value === status)?.defaultProbability ?? 0;
+}
+
+export function normalizeCrmForecastCategory(value?: string | null): CrmForecastCategory {
+  const normalized = String(value || "pipeline").trim().toLowerCase();
+  return CRM_FORECAST_CATEGORY_OPTIONS.some((option) => option.value === normalized)
+    ? normalized as CrmForecastCategory
+    : "pipeline";
+}
+
+export function isKnownCrmForecastCategory(value?: string | null) {
+  return CRM_FORECAST_CATEGORY_OPTIONS.some((option) => option.value === String(value || "").trim().toLowerCase());
+}
+
+export function crmForecastCategoryLabel(value?: string | null) {
+  const category = normalizeCrmForecastCategory(value);
+  return CRM_FORECAST_CATEGORY_OPTIONS.find((option) => option.value === category)?.label || "Pipeline";
+}
+
+export function crmForecastCategoryDescription(value?: string | null) {
+  const category = normalizeCrmForecastCategory(value);
+  return CRM_FORECAST_CATEGORY_OPTIONS.find((option) => option.value === category)?.description || "";
+}
+
+export function crmForecastCategoryForStatus(status?: string | null): CrmForecastCategory {
+  const normalized = normalizeCrmStatus(status);
+  if (normalized === "won") return "closed";
+  if (["lost", "inactive", "on_hold"].includes(normalized)) return "omitted";
+  return "pipeline";
+}
+
+export function nextCrmForecastCategory(input: {
+  currentCategory?: string | null;
+  currentStatus?: string | null;
+  nextStatus?: string | null;
+  requestedCategory?: string | null;
+}) {
+  const nextStatus = normalizeCrmStatus(input.nextStatus);
+  if (["won", "lost", "inactive", "on_hold"].includes(nextStatus)) return crmForecastCategoryForStatus(nextStatus);
+  if (input.requestedCategory != null) return normalizeCrmForecastCategory(input.requestedCategory);
+  const currentCategory = normalizeCrmForecastCategory(input.currentCategory);
+  return normalizeCrmStatus(input.currentStatus) === "on_hold" && currentCategory === "omitted"
+    ? "pipeline"
+    : currentCategory;
+}
+
+export function validateCrmForecast(input: {
+  status: string;
+  forecastCategory?: string | null;
+  estimatedValue?: number | null;
+  expectedCloseDate?: Date | null;
+}) {
+  const status = normalizeCrmStatus(input.status);
+  const category = normalizeCrmForecastCategory(input.forecastCategory);
+  const forcedCategory = crmForecastCategoryForStatus(status);
+  if (!isActiveCrmStatus(status)) return forcedCategory;
+  if (["best_case", "commit"].includes(category)) {
+    if (!input.estimatedValue || input.estimatedValue <= 0) {
+      throw new Error("Completeaza valoarea integrala inainte de a include oportunitatea in estimare.");
+    }
+    if (!input.expectedCloseDate) {
+      throw new Error("Alege luna estimata de inchidere pentru Posibil sau Angajament.");
+    }
+  }
+  return category;
 }
 
 export function normalizeCrmQualificationData(value: unknown): CrmQualificationData {
@@ -331,17 +425,14 @@ export function crmLeadClassificationAttention(input: {
   return null;
 }
 
-export function weightedCrmValue(value?: number | null, probability?: number | null) {
-  return roundMoney((value || 0) * Math.max(0, Math.min(100, probability ?? 0)) / 100);
-}
-
 export function summarizeCrmLeads(
   rows: Array<{
     status: string;
     nextFollowUpDate: Date | null;
     estimatedValue: number | null;
     currency: string | null;
-    probability: number | null;
+    forecastCategory?: string | null;
+    expectedCloseDate?: Date | null;
     updatedAt: Date;
     stageChangedAt?: Date | null;
     firstContactedAt?: Date | null;
@@ -355,9 +446,18 @@ export function summarizeCrmLeads(
   const todayStart = startOfUtcDay(now);
   const tomorrow = addDays(todayStart, 1);
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   const active = rows.filter((row) => isActiveCrmStatus(row.status));
   const pipelineByCurrency = moneyByCurrency(active, (row) => row.estimatedValue || 0);
-  const weightedByCurrency = moneyByCurrency(active, (row) => weightedCrmValue(row.estimatedValue, row.probability));
+  const closingThisMonth = active.filter((row) => row.expectedCloseDate && row.expectedCloseDate >= monthStart && row.expectedCloseDate < monthEnd);
+  const bestCaseByCurrency = moneyByCurrency(
+    closingThisMonth.filter((row) => normalizeCrmForecastCategory(row.forecastCategory) === "best_case"),
+    (row) => row.estimatedValue || 0
+  );
+  const commitByCurrency = moneyByCurrency(
+    closingThisMonth.filter((row) => normalizeCrmForecastCategory(row.forecastCategory) === "commit"),
+    (row) => row.estimatedValue || 0
+  );
   return {
     total: rows.length,
     active: active.length,
@@ -375,7 +475,8 @@ export function summarizeCrmLeads(
     wonThisMonth: rows.filter((row) => normalizeCrmStatus(row.status) === "won" && row.updatedAt >= monthStart).length,
     lostThisMonth: rows.filter((row) => normalizeCrmStatus(row.status) === "lost" && row.updatedAt >= monthStart).length,
     pipelineByCurrency,
-    weightedByCurrency
+    bestCaseByCurrency,
+    commitByCurrency
   };
 }
 

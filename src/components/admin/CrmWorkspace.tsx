@@ -11,6 +11,7 @@ import {
   Check,
   CircleDollarSign,
   Clock3,
+  Download,
   Mail,
   MessageSquareText,
   Phone,
@@ -22,13 +23,17 @@ import {
   X
 } from "lucide-react";
 import {
+  CRM_FORECAST_CATEGORY_OPTIONS,
+  CRM_INDUSTRY_OPTIONS,
   CRM_LOST_REASON_OPTIONS,
   CRM_QUALIFICATION_ITEMS,
   CRM_SOURCE_OPTIONS,
   CRM_STATUS_OPTIONS,
-  crmDefaultProbability,
+  crmForecastCategoryDescription,
+  crmForecastCategoryLabel,
   crmStatusDescription,
   isActiveCrmStatus,
+  type CrmForecastCategory,
   type CrmQualificationData,
   type CrmStatus
 } from "@/lib/crm";
@@ -49,12 +54,15 @@ type Summary = {
   wonThisMonth: number;
   lostThisMonth: number;
   pipelineByCurrency: Record<string, number>;
-  weightedByCurrency: Record<string, number>;
+  bestCaseByCurrency: Record<string, number>;
+  commitByCurrency: Record<string, number>;
 };
 type LeadSummary = {
   id: string;
   leadDate: string | null;
   companyName: string;
+  taxId: string | null;
+  industry: string | null;
   opportunityName: string | null;
   clientType: string | null;
   contactName: string | null;
@@ -66,7 +74,7 @@ type LeadSummary = {
   assignedToUserId: string | null;
   estimatedValue: number | null;
   currency: string | null;
-  probability: number | null;
+  forecastCategory: CrmForecastCategory;
   expectedCloseDate: string | null;
   nextFollowUpDate: string | null;
   nextStep: string | null;
@@ -133,10 +141,40 @@ type LeadDetail = LeadSummary & {
     totalContractValue: number | null;
     currency: string | null;
   }>;
+  companyHistory: Array<{
+    id: string;
+    isCurrent: boolean;
+    companyName: string;
+    opportunityName: string | null;
+    status: string;
+    assignedTo: { id: string; name: string } | null;
+    createdAt: string;
+    lastContactAt: string | null;
+    lastActivityAt: string | null;
+    latestActivity: { id: string; actionType: string | null; activityDate: string; user: { id: string; name: string } | null } | null;
+    canOpen: boolean;
+  }>;
 };
 type DuplicateResults = {
-  clients: Array<{ id: string; companyName: string; status: string; clientType: string; accountOwner: { id: string; name: string } | null }>;
-  leads: Array<{ id: string; companyName: string; opportunityName: string | null; status: string; assignedTo: { id: string; name: string } | null; canOpen: boolean }>;
+  clients: Array<{ id: string; companyName: string; taxId: string | null; status: string; clientType: string; accountOwner: { id: string; name: string } | null; exactTaxIdMatch: boolean }>;
+  leads: Array<{ id: string; companyName: string; taxId: string | null; opportunityName: string | null; status: string; lastContactAt: string | null; lastActivityAt: string | null; assignedTo: { id: string; name: string } | null; canOpen: boolean; exactTaxIdMatch: boolean }>;
+};
+type DailyAgenda = {
+  financialReport: { available: boolean; reportDate: string | null; uploadedAt: string | null };
+  counts: { calls: number; receivables: number; opportunities: number };
+  calls: LeadSummary[];
+  receivables: Array<{
+    id: string;
+    clientId: string | null;
+    clientName: string | null;
+    companyName: string;
+    invoiceNumber: string | null;
+    dueDate: string | null;
+    remainingAmount: number | null;
+    currency: string | null;
+    client: { id: string; companyName: string; accountOwner: { id: string; name: string } | null } | null;
+  }>;
+  opportunities: LeadSummary[];
 };
 type ViewMode = "today" | "pipeline" | "all";
 type QuickActionKey = "contacted" | "no_answer" | "email_sent" | "qualified" | "brief_received" | "offer_sent" | "follow_up_7";
@@ -156,7 +194,8 @@ const emptySummary: Summary = {
   wonThisMonth: 0,
   lostThisMonth: 0,
   pipelineByCurrency: {},
-  weightedByCurrency: {}
+  bestCaseByCurrency: {},
+  commitByCurrency: {}
 };
 
 const actionTypes = [
@@ -178,21 +217,26 @@ const actionTypes = [
 
 export function CrmWorkspace({
   currentUserId,
+  currentUserRole,
   canViewTeam,
   initialLeadId
 }: {
   currentUserId: string;
+  currentUserRole: string;
   canViewTeam: boolean;
   initialLeadId: string | null;
 }) {
   const [view, setView] = useState<ViewMode>("today");
   const [leads, setLeads] = useState<LeadSummary[]>([]);
   const [summary, setSummary] = useState<Summary>(emptySummary);
+  const [agenda, setAgenda] = useState<DailyAgenda>({ financialReport: { available: false, reportDate: null, uploadedAt: null }, counts: { calls: 0, receivables: 0, opportunities: 0 }, calls: [], receivables: [], opportunities: [] });
+  const [agendaLoading, setAgendaLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0, limit: 30 });
   const [assignees, setAssignees] = useState<Assignee[]>([]);
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [industryFilter, setIndustryFilter] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("");
   const [attentionFilter, setAttentionFilter] = useState("all");
   const [selectedLead, setSelectedLead] = useState<LeadDetail | null>(null);
@@ -221,6 +265,7 @@ export function CrmWorkspace({
       });
       if (query) params.set("q", query);
       if (statusFilter) params.set("status", statusFilter);
+      if (industryFilter) params.set("industry", industryFilter);
       if (assigneeFilter && canViewTeam) params.set("assignee", assigneeFilter);
       const response = await fetch(`/api/admin/crm/leads?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json();
@@ -233,11 +278,32 @@ export function CrmWorkspace({
     } finally {
       setLoading(false);
     }
-  }, [assigneeFilter, canViewTeam, due, page, query, statusFilter, view]);
+  }, [assigneeFilter, canViewTeam, due, industryFilter, page, query, statusFilter, view]);
+
+  const loadAgenda = useCallback(async () => {
+    if (view !== "today") return;
+    setAgendaLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (assigneeFilter && canViewTeam) params.set("assignee", assigneeFilter);
+      const response = await fetch(`/api/admin/crm/agenda?${params.toString()}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Agenda nu a putut fi incarcata.");
+      setAgenda(payload);
+    } catch (agendaError) {
+      setError(agendaError instanceof Error ? agendaError.message : "Agenda nu a putut fi incarcata.");
+    } finally {
+      setAgendaLoading(false);
+    }
+  }, [assigneeFilter, canViewTeam, view]);
 
   useEffect(() => {
     void loadLeads();
   }, [loadLeads]);
+
+  useEffect(() => {
+    void loadAgenda();
+  }, [loadAgenda]);
 
   useEffect(() => {
     if (!canViewTeam) {
@@ -284,7 +350,7 @@ export function CrmWorkspace({
       if (!response.ok) throw new Error(payload.error || "Oportunitatea nu a putut fi creata.");
       setShowCreate(false);
       setMessage("Oportunitatea a fost creata si are urmatorul pas programat.");
-      await loadLeads();
+      await Promise.all([loadLeads(), loadAgenda()]);
       await openLead(payload.lead.id);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Oportunitatea nu a putut fi creata.");
@@ -306,9 +372,11 @@ export function CrmWorkspace({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Oportunitatea nu a putut fi actualizata.");
       setMessage("Oportunitatea a fost actualizata.");
-      await Promise.all([loadLeads(), openLead(id)]);
+      await Promise.all([loadLeads(), loadAgenda(), openLead(id)]);
+      return true;
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : "Oportunitatea nu a putut fi actualizata.");
+      return false;
     } finally {
       setBusy(null);
     }
@@ -326,7 +394,7 @@ export function CrmWorkspace({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Activitatea nu a putut fi salvata.");
       setMessage("Activitatea si urmatorul follow-up au fost salvate.");
-      await Promise.all([loadLeads(), openLead(id)]);
+      await Promise.all([loadLeads(), loadAgenda(), openLead(id)]);
     } catch (activityError) {
       setError(activityError instanceof Error ? activityError.message : "Activitatea nu a putut fi salvata.");
     } finally {
@@ -347,7 +415,7 @@ export function CrmWorkspace({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Actiunea rapida nu a putut fi salvata.");
       setMessage("Activitatea a fost salvata, iar follow-up-ul a fost programat.");
-      await loadLeads();
+      await Promise.all([loadLeads(), loadAgenda()]);
     } catch (activityError) {
       setError(activityError instanceof Error ? activityError.message : "Actiunea rapida nu a putut fi salvata.");
     } finally {
@@ -391,7 +459,6 @@ export function CrmWorkspace({
   }
 
   async function convertLead(id: string, clientId?: string | null) {
-    if (!window.confirm("Confirmi conversia lead-ului in client? Nu se creeaza rezervare sau HOLD.")) return;
     setBusy(`convert-${id}`);
     setError(null);
     try {
@@ -402,10 +469,14 @@ export function CrmWorkspace({
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Conversia nu a reusit.");
-      setMessage(`Lead convertit in client: ${payload.client.companyName}.`);
-      await Promise.all([loadLeads(), openLead(id)]);
+      setMessage(payload.alreadyCompleted
+        ? `Oportunitatea era deja castigata si legata de ${payload.client.companyName}.`
+        : `Oportunitate castigata. Client asociat: ${payload.client.companyName}.`);
+      await Promise.all([loadLeads(), loadAgenda(), openLead(id)]);
+      return true;
     } catch (convertError) {
       setError(convertError instanceof Error ? convertError.message : "Conversia nu a reusit.");
+      return false;
     } finally {
       setBusy(null);
     }
@@ -449,9 +520,12 @@ export function CrmWorkspace({
               Prioritati zilnice, pipeline, contacte si istoric comercial pentru fiecare agent.
             </p>
           </div>
-          <button className="focus-button" type="button" onClick={() => setShowCreate(true)}>
-            <Plus size={18} /> Oportunitate noua
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {["COO", "SUPER_ADMIN"].includes(currentUserRole) ? <a className="focus-button secondary" href="/api/admin/crm/export.xlsx"><Download size={18} /> Export CRM</a> : null}
+            <button className="focus-button" type="button" onClick={() => setShowCreate(true)}>
+              <Plus size={18} /> Oportunitate noua
+            </button>
+          </div>
         </section>
 
         {message ? <Feedback tone="green" text={message} onClose={() => setMessage(null)} /> : null}
@@ -461,11 +535,7 @@ export function CrmWorkspace({
           <Metric label="Oportunitati active" value={summary.active} icon={<BriefcaseBusiness size={18} />} />
           <Metric label="Restante" value={summary.overdue} icon={<AlertTriangle size={18} />} tone={summary.overdue ? "red" : "green"} />
           <Metric label="Pentru azi" value={summary.dueToday} icon={<CalendarClock size={18} />} tone="yellow" />
-          <Metric label="Fara urmator pas" value={summary.missingNextStep} icon={<Clock3 size={18} />} tone={summary.missingNextStep ? "red" : "green"} />
-          <Metric label="Etape blocate" value={summary.stalled} icon={<AlertTriangle size={18} />} tone={summary.stalled ? "yellow" : "green"} />
-          <Metric label="De calificat" value={summary.needsQualification} icon={<Target size={18} />} tone={summary.needsQualification ? "yellow" : "green"} />
-          <Metric label="Castigate luna" value={summary.wonThisMonth} icon={<Check size={18} />} tone="green" />
-          <Metric label="Forecast ponderat" value={formatCurrencyValues(summary.weightedByCurrency)} icon={<Target size={18} />} />
+          <Metric label="Angajament luna" value={formatCurrencyValues(summary.commitByCurrency)} icon={<Check size={18} />} tone="green" />
         </section>
 
         <section className="flex flex-wrap items-center gap-2 border-b border-focus-line pb-4" aria-label="Vederi CRM">
@@ -480,6 +550,11 @@ export function CrmWorkspace({
           status={statusFilter}
           onStatus={(value) => {
             setStatusFilter(value);
+            setPagination((current) => ({ ...current, page: 1 }));
+          }}
+          industry={industryFilter}
+          onIndustry={(value) => {
+            setIndustryFilter(value);
             setPagination((current) => ({ ...current, page: 1 }));
           }}
           attention={attentionFilter}
@@ -499,7 +574,7 @@ export function CrmWorkspace({
 
         {loading ? <LoadingState /> : null}
         {!loading && view === "today" ? (
-          <TodayView groups={todayGroups} busy={busy} onOpen={openLead} onQuick={addQuickActivity} />
+          <TodayView agenda={agenda} agendaLoading={agendaLoading} groups={todayGroups} busy={busy} onOpen={openLead} onQuick={addQuickActivity} />
         ) : null}
         {!loading && view === "pipeline" ? (
           <PipelineView leads={leads} total={pagination.total} busy={busy} onOpen={openLead} onStatus={updateLead} />
@@ -525,6 +600,7 @@ export function CrmWorkspace({
       {showCreate ? (
         <CreateLeadDialog
           currentUserId={currentUserId}
+          currentUserRole={currentUserRole}
           canViewTeam={canViewTeam}
           assignees={assignees}
           busy={busy === "create"}
@@ -561,6 +637,8 @@ function CrmFilters({
   onQuery,
   status,
   onStatus,
+  industry,
+  onIndustry,
   attention,
   onAttention,
   assignee,
@@ -573,6 +651,8 @@ function CrmFilters({
   onQuery: (value: string) => void;
   status: string;
   onStatus: (value: string) => void;
+  industry: string;
+  onIndustry: (value: string) => void;
   attention: string;
   onAttention: (value: string) => void;
   assignee: string;
@@ -581,12 +661,7 @@ function CrmFilters({
   canViewTeam: boolean;
   hideAttention: boolean;
 }) {
-  const columnClass = canViewTeam && !hideAttention
-    ? "xl:grid-cols-4"
-    : canViewTeam || !hideAttention
-      ? "xl:grid-cols-3"
-      : "xl:grid-cols-2";
-  return <section className={`grid min-w-0 gap-3 border-b border-focus-line pb-4 md:grid-cols-2 ${columnClass}`}>
+  return <section className="grid min-w-0 gap-3 border-b border-focus-line pb-4 md:grid-cols-2 xl:grid-cols-5">
     <label className="relative min-w-0 md:col-span-2 xl:col-span-1">
       <span className="sr-only">Cauta</span>
       <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -595,6 +670,10 @@ function CrmFilters({
     <select className="focus-input" value={status} onChange={(event) => onStatus(event.target.value)} aria-label="Status CRM">
       <option value="">Toate etapele</option>
       {CRM_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+    </select>
+    <select className="focus-input" value={industry} onChange={(event) => onIndustry(event.target.value)} aria-label="Domeniu de activitate">
+      <option value="">Toate domeniile</option>
+      {CRM_INDUSTRY_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
     </select>
     {!hideAttention ? (
       <select className="focus-input" value={attention} onChange={(event) => onAttention(event.target.value)} aria-label="Urmatorul pas">
@@ -615,25 +694,77 @@ function CrmFilters({
 }
 
 function TodayView({
+  agenda,
+  agendaLoading,
   groups,
   busy,
   onOpen,
   onQuick
 }: {
+  agenda: DailyAgenda;
+  agendaLoading: boolean;
   groups: Record<"overdue" | "today" | "missing" | "noResponse" | "classification" | "stalled" | "dormant", LeadSummary[]>;
   busy: string | null;
   onOpen: (id: string) => void;
   onQuick: (id: string, input: Record<string, unknown>) => void;
 }) {
   return <div className="grid gap-6">
-    <LeadSection title="Restante" description="Follow-up-uri care trebuiau deja facute." rows={groups.overdue} tone="red" busy={busy} onOpen={onOpen} onQuick={onQuick} />
-    <LeadSection title="Astazi" description="Discutii si actiuni programate pentru azi." rows={groups.today} tone="yellow" busy={busy} onOpen={onOpen} onQuick={onQuick} />
-    <LeadSection title="Fara urmator pas" description="Lead-uri active care trebuie planificate." rows={groups.missing} tone="red" busy={busy} onOpen={onOpen} onQuick={onQuick} />
-    <LeadSection title="Fara raspuns" description="Cel putin trei tentative consecutive; schimba canalul sau decide urmatorul pas." rows={groups.noResponse} tone="red" busy={busy} onOpen={onOpen} onQuick={onQuick} />
-    <LeadSection title="De clasificat" description="Prospecti Cold sau Contactati care asteapta o decizie comerciala." rows={groups.classification} tone="yellow" busy={busy} onOpen={onOpen} onQuick={onQuick} />
-    <LeadSection title="Etape blocate" description="Oportunitati ramase prea mult in aceeasi etapa comerciala." rows={groups.stalled} tone="yellow" busy={busy} onOpen={onOpen} onQuick={onQuick} />
-    {groups.dormant.length ? <LeadSection title="Fara activitate recenta" description="Lead-uri active neactualizate de peste 14 zile." rows={groups.dormant} tone="neutral" busy={busy} onOpen={onOpen} onQuick={onQuick} /> : null}
-    {!groups.overdue.length && !groups.today.length && !groups.missing.length && !groups.noResponse.length && !groups.classification.length && !groups.stalled.length && !groups.dormant.length ? (
+    <section className="border-y border-focus-line py-5">
+      <div className="mb-4">
+        <p className="text-xs font-black uppercase text-focus-yellow">Agenda zilnica</p>
+        <h2 className="text-xl font-black text-white">Ce necesita actiune acum</h2>
+        <p className="mt-1 text-sm text-slate-400">Apeluri, incasari si oportunitati comerciale apropiate de termen.</p>
+      </div>
+      {agendaLoading ? <p className="py-8 text-center text-sm font-bold text-slate-400">Se incarca agenda...</p> : (
+        <div className="grid min-w-0 gap-5">
+          {!agenda.financialReport.available ? <div className="flex items-start gap-3 rounded-md border border-amber-300/35 bg-amber-400/10 px-4 py-3 text-sm text-amber-50">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p><strong>Datele de incasari nu sunt disponibile.</strong> Nu exista un raport financiar activ si confirmat; aplicatia nu afiseaza versiuni arhivate ca date curente.</p>
+          </div> : null}
+          <div className="grid min-w-0 gap-5 xl:grid-cols-3">
+          <AgendaColumn title="De sunat" count={agenda.counts.calls} icon={<Phone size={17} />} empty="Nu ai apeluri restante pentru azi.">
+            {agenda.calls.map((lead) => <article className="border-b border-focus-line py-3 last:border-b-0" key={lead.id}>
+              <button className="w-full text-left" type="button" onClick={() => onOpen(lead.id)}>
+                <strong className="block text-white">{lead.companyName}</strong>
+                <small className="block text-slate-400">{lead.nextStep || "Follow-up comercial"} / {lead.nextFollowUpDate ? date(lead.nextFollowUpDate) : "restant"}</small>
+              </button>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button className="focus-button secondary" type="button" disabled={busy === `activity-${lead.id}`} onClick={() => onQuick(lead.id, quickActionPayload("contacted", lead))}>Contactat</button>
+                <button className="focus-button secondary" type="button" disabled={busy === `activity-${lead.id}`} onClick={() => onQuick(lead.id, quickActionPayload("no_answer", lead))}>Nu raspunde</button>
+              </div>
+            </article>)}
+          </AgendaColumn>
+          <AgendaColumn title="Incasari de urmarit" count={agenda.counts.receivables} icon={<CircleDollarSign size={17} />} empty={agenda.financialReport.available ? "Nu sunt incasari scadente in urmatoarele 7 zile." : "Activeaza si confirma raportul financiar curent pentru a vedea incasarile."}>
+            {agenda.receivables.map((row) => <article className="border-b border-focus-line py-3 last:border-b-0" key={row.id}>
+              <strong className="block text-white">{row.clientName || row.client?.companyName || row.companyName}</strong>
+              <small className="block text-slate-400">{row.invoiceNumber || "Factura"} / {row.dueDate ? date(row.dueDate) : "fara termen"}</small>
+              <p className="mt-1 text-sm font-black text-focus-yellow">{row.remainingAmount == null ? "-" : money(row.remainingAmount)} {row.currency || ""}</p>
+              {row.clientId ? <a className="mt-2 inline-flex text-xs font-black text-white underline" href={`/admin/clienti?clientId=${encodeURIComponent(row.clientId)}`}>Deschide client</a> : null}
+            </article>)}
+          </AgendaColumn>
+          <AgendaColumn title="Oportunitati de decis" count={agenda.counts.opportunities} icon={<Target size={17} />} empty="Nu sunt oportunitati apropiate de termen.">
+            {agenda.opportunities.map((lead) => <button className="block w-full border-b border-focus-line py-3 text-left last:border-b-0" type="button" key={lead.id} onClick={() => onOpen(lead.id)}>
+              <strong className="block text-white">{lead.companyName}</strong>
+              <small className="block text-slate-400">{crmForecastCategoryLabel(lead.forecastCategory)} / inchidere {lead.expectedCloseDate ? date(lead.expectedCloseDate) : "nesetata"}</small>
+              <p className="mt-1 text-sm font-black text-focus-yellow">{lead.estimatedValue == null ? "Valoare nesetata" : `${money(lead.estimatedValue)} ${lead.currency || "EUR"}`}</p>
+            </button>)}
+          </AgendaColumn>
+          </div>
+        </div>
+      )}
+    </section>
+
+    {(groups.missing.length || groups.noResponse.length || groups.classification.length || groups.stalled.length || groups.dormant.length) ? <details className="border-y border-focus-line py-4">
+      <summary className="cursor-pointer text-sm font-black uppercase text-focus-yellow">Semnale CRM suplimentare ({groups.missing.length + groups.noResponse.length + groups.classification.length + groups.stalled.length + groups.dormant.length})</summary>
+      <div className="mt-5 grid gap-6">
+        <LeadSection title="Fara urmator pas" description="Lead-uri active care trebuie planificate." rows={groups.missing} tone="red" busy={busy} onOpen={onOpen} onQuick={onQuick} />
+        <LeadSection title="Fara raspuns" description="Cel putin trei tentative consecutive; schimba canalul sau decide urmatorul pas." rows={groups.noResponse} tone="red" busy={busy} onOpen={onOpen} onQuick={onQuick} />
+        <LeadSection title="De clasificat" description="Prospecti Cold sau Contactati care asteapta o decizie comerciala." rows={groups.classification} tone="yellow" busy={busy} onOpen={onOpen} onQuick={onQuick} />
+        <LeadSection title="Etape blocate" description="Oportunitati ramase prea mult in aceeasi etapa comerciala." rows={groups.stalled} tone="yellow" busy={busy} onOpen={onOpen} onQuick={onQuick} />
+        {groups.dormant.length ? <LeadSection title="Fara activitate recenta" description="Lead-uri active neactualizate de peste 14 zile." rows={groups.dormant} tone="neutral" busy={busy} onOpen={onOpen} onQuick={onQuick} /> : null}
+      </div>
+    </details> : null}
+    {!agendaLoading && !agenda.counts.calls && !agenda.counts.receivables && !agenda.counts.opportunities && !groups.missing.length && !groups.noResponse.length && !groups.classification.length && !groups.stalled.length && !groups.dormant.length ? (
       <section className="border-y border-focus-line py-10 text-center">
         <Check className="mx-auto h-10 w-10 text-emerald-300" />
         <h2 className="mt-3 text-xl font-black text-white">Agenda CRM este la zi</h2>
@@ -641,6 +772,16 @@ function TodayView({
       </section>
     ) : null}
   </div>;
+}
+
+function AgendaColumn({ title, count, icon, empty, children }: { title: string; count: number; icon: React.ReactNode; empty: string; children: React.ReactNode }) {
+  return <section className="min-w-0 border-t border-focus-line pt-3 xl:border-l xl:border-t-0 xl:pl-5 first:xl:border-l-0 first:xl:pl-0">
+    <div className="flex items-center justify-between gap-3">
+      <h3 className="flex items-center gap-2 text-sm font-black uppercase text-white">{icon}{title}</h3>
+      <span className="rounded-full border border-focus-line px-2 py-1 text-xs font-black text-focus-yellow">{count}</span>
+    </div>
+    <div className="mt-2 max-h-[30rem] overflow-y-auto pr-1">{count ? children : <p className="py-6 text-sm text-slate-400">{empty}</p>}</div>
+  </section>;
 }
 
 function LeadSection({
@@ -693,7 +834,7 @@ function LeadCard({
       <div className="min-w-0">
         <p className="truncate text-lg font-black text-white">{lead.companyName}</p>
         <p className="truncate text-sm font-bold text-slate-200">{lead.opportunityName || "Oportunitate generala"}</p>
-        <p className="truncate text-xs text-slate-400">{lead.contactName || "Fara contact"}{lead.assignedTo?.name ? ` / ${lead.assignedTo.name}` : ""}</p>
+        <p className="truncate text-xs text-slate-400">{lead.industry || "Domeniu nesetat"} / {lead.contactName || "Fara contact"}{lead.assignedTo?.name ? ` / ${lead.assignedTo.name}` : ""}</p>
       </div>
       <div className="flex flex-wrap justify-end gap-2"><PriorityBadge priority={lead.priority} /><StatusBadge status={lead.status} /></div>
     </div>
@@ -796,7 +937,7 @@ function LeadList({ leads, busy, onOpen }: { leads: LeadSummary[]; busy: string 
           </tr>
         </thead>
         <tbody>{leads.map((lead) => <tr className="border-t border-focus-line" key={lead.id}>
-          <td className="px-3 py-3"><strong className="text-white">{lead.companyName}</strong><small className="block font-bold text-slate-300">{lead.opportunityName || "Oportunitate generala"}</small><small className="block text-slate-400">{lead.contactName || lead.email || lead.phone || "Fara contact"}</small></td>
+          <td className="px-3 py-3"><strong className="text-white">{lead.companyName}</strong><small className="block font-bold text-slate-300">{lead.opportunityName || "Oportunitate generala"}</small><small className="block text-slate-400">{lead.industry || "Domeniu nesetat"} / {lead.contactName || lead.email || lead.phone || "Fara contact"}</small></td>
           <td className="px-3 py-3"><StatusBadge status={lead.status} /></td>
           <td className="px-3 py-3">{lead.assignedTo?.name || "Nealocat"}</td>
           <td className="px-3 py-3"><span className={lead.attention === "overdue" || lead.attention === "missing" ? "font-black text-red-100" : ""}>{lead.nextFollowUpDate ? date(lead.nextFollowUpDate) : "Nesetat"}</span></td>
@@ -811,6 +952,7 @@ function LeadList({ leads, busy, onOpen }: { leads: LeadSummary[]; busy: string 
 
 function CreateLeadDialog({
   currentUserId,
+  currentUserRole,
   canViewTeam,
   assignees,
   busy,
@@ -819,6 +961,7 @@ function CreateLeadDialog({
   onOpenExisting
 }: {
   currentUserId: string;
+  currentUserRole: string;
   canViewTeam: boolean;
   assignees: Assignee[];
   busy: boolean;
@@ -828,6 +971,8 @@ function CreateLeadDialog({
 }) {
   const [form, setForm] = useState({
     companyName: "",
+    taxId: "",
+    industry: "",
     opportunityName: "",
     clientType: "direct_client",
     clientId: "",
@@ -840,7 +985,7 @@ function CreateLeadDialog({
     status: "cold",
     estimatedValue: "",
     currency: "EUR",
-    probability: String(crmDefaultProbability("cold")),
+    forecastCategory: "pipeline" as CrmForecastCategory,
     expectedCloseDate: "",
     nextFollowUpDate: tomorrowInput(),
     nextStep: "Contact initial",
@@ -856,13 +1001,15 @@ function CreateLeadDialog({
 
   useEffect(() => {
     const query = form.companyName.trim();
-    if (query.length < 2) {
+    const taxId = form.taxId.trim();
+    if (query.length < 2 && taxId.length < 2) {
       setDuplicates({ clients: [], leads: [] });
       return;
     }
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      fetch(`/api/admin/crm/duplicates?q=${encodeURIComponent(query)}`, { signal: controller.signal, cache: "no-store" })
+      const params = new URLSearchParams({ q: query, taxId });
+      fetch(`/api/admin/crm/duplicates?${params.toString()}`, { signal: controller.signal, cache: "no-store" })
         .then((response) => response.ok ? response.json() : null)
         .then((payload) => {
           if (payload) setDuplicates({ clients: payload.clients || [], leads: payload.leads || [] });
@@ -873,22 +1020,23 @@ function CreateLeadDialog({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [form.companyName]);
+  }, [form.companyName, form.taxId]);
 
+  const forecastReady = !["best_case", "commit"].includes(form.forecastCategory)
+    || (Number(form.estimatedValue.replace(",", ".")) > 0 && Boolean(form.expectedCloseDate));
+  const ownershipConflict = currentUserRole === "SALES_AGENT"
+    && duplicates.leads.some((lead) => lead.exactTaxIdMatch && !lead.canOpen);
   const valid = form.companyName.trim().length >= 2
+    && form.taxId.trim().length >= 2
+    && form.industry.trim().length >= 2
     && form.nextFollowUpDate
     && form.nextStep.trim().length >= 2
-    && form.assignedToUserId;
+    && form.assignedToUserId
+    && forecastReady
+    && !ownershipConflict;
 
   function changeInitialStatus(status: CrmStatus) {
-    const currentSuggestedProbability = crmDefaultProbability(form.status);
-    setForm({
-      ...form,
-      status,
-      probability: !form.probability || Number(form.probability) === currentSuggestedProbability
-        ? String(crmDefaultProbability(status))
-        : form.probability
-    });
+    setForm({ ...form, status });
   }
 
   return <ModalShell title="Oportunitate CRM noua" onClose={onClose}>
@@ -896,6 +1044,8 @@ function CreateLeadDialog({
       <p className="text-sm text-slate-300">Completeaza compania si urmatoarea actiune. Restul poate fi adaugat cand discutia avanseaza.</p>
       <div className="grid gap-3 md:grid-cols-2">
         <Field label="Companie"><input className="focus-input" value={form.companyName} onChange={(event) => setForm({ ...form, companyName: event.target.value, clientId: "" })} autoFocus /></Field>
+        <Field label="CUI / CIF"><input className="focus-input" value={form.taxId} onChange={(event) => setForm({ ...form, taxId: event.target.value.toUpperCase(), clientId: "" })} placeholder="Ex: RO12345678" /></Field>
+        <Field label="Domeniu de activitate"><select className="focus-input" value={form.industry} onChange={(event) => setForm({ ...form, industry: event.target.value })}><option value="">Alege domeniul</option>{CRM_INDUSTRY_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}</select></Field>
         <Field label="Oportunitate / campanie"><input className="focus-input" value={form.opportunityName} onChange={(event) => setForm({ ...form, opportunityName: event.target.value })} placeholder="Ex: Lansare toamna 2026" /></Field>
         <Field label="Contact"><input className="focus-input" value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })} /></Field>
         <Field label="Telefon"><input className="focus-input" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></Field>
@@ -914,11 +1064,13 @@ function CreateLeadDialog({
           <Field label="Etapa initiala"><select className="focus-input" value={form.status} onChange={(event) => changeInitialStatus(event.target.value as CrmStatus)}>{CRM_STATUS_OPTIONS.filter((option) => isActiveCrmStatus(option.value)).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
           <Field label="Valoare estimata"><input className="focus-input" inputMode="decimal" value={form.estimatedValue} onChange={(event) => setForm({ ...form, estimatedValue: event.target.value })} /></Field>
           <Field label="Moneda"><select className="focus-input" value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option>EUR</option><option>RON</option></select></Field>
-          <Field label="Probabilitate"><input className="focus-input" type="number" min="0" max="100" value={form.probability} onChange={(event) => setForm({ ...form, probability: event.target.value })} /></Field>
+          <Field label="Estimare comerciala"><select className="focus-input" value={form.forecastCategory} onChange={(event) => setForm({ ...form, forecastCategory: event.target.value as CrmForecastCategory })}>{CRM_FORECAST_CATEGORY_OPTIONS.filter((option) => ["pipeline", "best_case", "commit", "omitted"].includes(option.value)).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
           <Field label="Data estimata inchidere"><input className="focus-input" type="date" value={form.expectedCloseDate} onChange={(event) => setForm({ ...form, expectedCloseDate: event.target.value })} /></Field>
           <Field label="Interes OOH"><input className="focus-input" value={form.locationsInterested} onChange={(event) => setForm({ ...form, locationsInterested: event.target.value })} placeholder="Orase, formate, coduri" /></Field>
         </div>
         <p className="mt-3 text-xs text-slate-400">{crmStatusDescription(form.status)}</p>
+        <p className="mt-1 text-xs text-slate-400">{crmForecastCategoryDescription(form.forecastCategory)}</p>
+        {!forecastReady ? <p className="mt-2 text-xs font-bold text-red-100">Pentru Posibil sau Angajament completeaza valoarea integrala si data estimata de inchidere.</p> : null}
         <Field label="Note"><textarea className="focus-input mt-3 min-h-20" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></Field>
       </details>
 
@@ -926,9 +1078,10 @@ function CreateLeadDialog({
         <section className="rounded-md border border-focus-yellow/40 bg-focus-yellow/5 p-3">
           <h3 className="text-xs font-black uppercase text-focus-yellow">Posibile inregistrari existente</h3>
           <div className="mt-2 grid gap-2">
-            {duplicates.clients.map((client) => <button className="flex items-center justify-between gap-3 rounded-md border border-focus-line px-3 py-2 text-left text-sm" type="button" key={client.id} onClick={() => setForm({ ...form, clientId: client.id, companyName: client.companyName })}><span><strong className="text-white">{client.companyName}</strong><small className="block text-slate-400">Client existent / {client.accountOwner?.name || "fara owner"}</small></span><span className="text-focus-yellow">Leaga</span></button>)}
-            {duplicates.leads.map((lead) => <button className="flex items-center justify-between gap-3 rounded-md border border-focus-line px-3 py-2 text-left text-sm" type="button" key={lead.id} disabled={!lead.canOpen} onClick={() => lead.canOpen && onOpenExisting(lead.id)}><span><strong className="text-white">{lead.companyName}</strong><small className="block text-slate-400">{lead.opportunityName || "Oportunitate activa"} / {lead.assignedTo?.name || "neacordat"}</small></span><span className="text-focus-yellow">{lead.canOpen ? "Deschide" : "Exista la alt agent"}</span></button>)}
+            {duplicates.clients.map((client) => <button className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-left text-sm ${client.exactTaxIdMatch ? "border-focus-yellow bg-focus-yellow/10" : "border-focus-line"}`} type="button" key={client.id} onClick={() => setForm({ ...form, clientId: client.id, companyName: client.companyName, taxId: client.taxId || form.taxId })}><span><strong className="text-white">{client.companyName}</strong><small className="block text-slate-400">CUI {client.taxId || "nesetat"} / {client.accountOwner?.name || "fara owner"}</small></span><span className="text-focus-yellow">Leaga</span></button>)}
+            {duplicates.leads.map((lead) => <button className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-left text-sm ${lead.exactTaxIdMatch ? "border-red-300/60 bg-red-400/10" : "border-focus-line"}`} type="button" key={lead.id} disabled={!lead.canOpen} onClick={() => lead.canOpen && onOpenExisting(lead.id)}><span><strong className="text-white">{lead.companyName}</strong><small className="block text-slate-400">{lead.opportunityName || "Oportunitate activa"} / {lead.assignedTo?.name || "neacordat"}</small><small className="block text-slate-500">{lead.lastContactAt ? `Ultimul contact ${dateTime(lead.lastContactAt)}` : "Fara contact inregistrat"}</small></span><span className="text-focus-yellow">{lead.canOpen ? "Deschide" : "Exista la alt agent"}</span></button>)}
           </div>
+          {currentUserRole === "SALES_AGENT" && duplicates.leads.some((lead) => lead.exactTaxIdMatch && !lead.canOpen) ? <p className="mt-3 text-xs font-bold text-red-100">CUI-ul este lucrat de alt vanzator. Crearea va fi oprita pentru a evita contactarea paralela.</p> : null}
         </section>
       ) : null}
 
@@ -940,7 +1093,7 @@ function CreateLeadDialog({
           opportunityName: form.opportunityName || null,
           nextStep: form.nextStep || "Contact initial",
           estimatedValue: form.estimatedValue ? Number(form.estimatedValue.replace(",", ".")) : null,
-          probability: form.probability ? Number(form.probability) : null,
+          forecastCategory: form.forecastCategory,
           expectedCloseDate: form.expectedCloseDate || null
         })}>{busy ? "Se salveaza..." : "Creeaza oportunitate"}</button>
       </div>
@@ -966,21 +1119,23 @@ function LeadDrawer({
   canViewTeam: boolean;
   busy: string | null;
   onClose: () => void;
-  onUpdate: (id: string, patch: Record<string, unknown>) => void;
+  onUpdate: (id: string, patch: Record<string, unknown>) => Promise<boolean>;
   onActivity: (id: string, input: Record<string, unknown>) => void;
   onContact: (id: string, input: Record<string, unknown>) => void;
   onRemoveContact: (leadId: string, contactId: string) => void;
-  onConvert: (id: string, clientId?: string | null) => void;
+  onConvert: (id: string, clientId?: string | null) => Promise<boolean>;
   onOpenLead: (id: string) => void;
 }) {
   const [draft, setDraft] = useState({
+    taxId: lead.taxId || "",
+    industry: lead.industry || "",
     opportunityName: lead.opportunityName || "",
     status: lead.status,
     source: lead.source || "Prospectare directa",
     assignedToUserId: lead.assignedToUserId || "",
     estimatedValue: lead.estimatedValue == null ? "" : String(lead.estimatedValue),
     currency: lead.currency || "EUR",
-    probability: lead.probability == null ? "" : String(lead.probability),
+    forecastCategory: lead.forecastCategory,
     expectedCloseDate: lead.expectedCloseDate?.slice(0, 10) || "",
     nextFollowUpDate: lead.nextFollowUpDate?.slice(0, 10) || "",
     nextStep: lead.nextStep || "",
@@ -999,16 +1154,19 @@ function LeadDrawer({
   });
   const [contact, setContact] = useState({ name: "", role: "", phone: "", email: "", isPrimary: lead.contacts.length === 0 });
   const [duplicates, setDuplicates] = useState<DuplicateResults>({ clients: [], leads: [] });
+  const [showCloseOpportunity, setShowCloseOpportunity] = useState(false);
 
   useEffect(() => {
     setDraft({
+      taxId: lead.taxId || "",
+      industry: lead.industry || "",
       opportunityName: lead.opportunityName || "",
       status: lead.status,
       source: lead.source || "Prospectare directa",
       assignedToUserId: lead.assignedToUserId || "",
       estimatedValue: lead.estimatedValue == null ? "" : String(lead.estimatedValue),
       currency: lead.currency || "EUR",
-      probability: lead.probability == null ? "" : String(lead.probability),
+      forecastCategory: lead.forecastCategory,
       expectedCloseDate: lead.expectedCloseDate?.slice(0, 10) || "",
       nextFollowUpDate: lead.nextFollowUpDate?.slice(0, 10) || "",
       nextStep: lead.nextStep || "",
@@ -1034,40 +1192,43 @@ function LeadDrawer({
       setDuplicates({ clients: [], leads: [] });
       return;
     }
-    fetch(`/api/admin/crm/duplicates?q=${encodeURIComponent(lead.companyName)}`, { cache: "no-store" })
+    const params = new URLSearchParams({ q: lead.companyName, taxId: lead.taxId || "" });
+    fetch(`/api/admin/crm/duplicates?${params.toString()}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => payload && setDuplicates({ clients: payload.clients || [], leads: payload.leads || [] }))
       .catch(() => undefined);
-  }, [lead.clientId, lead.companyName]);
+  }, [lead.clientId, lead.companyName, lead.taxId]);
 
-  const lostDetailsMissing = draft.status === "lost"
-    && (!draft.lostReasonCode || draft.lostReason.trim().length < 2);
-  const saveDisabled = lostDetailsMissing || (
+  const forecastReady = !["best_case", "commit"].includes(draft.forecastCategory)
+    || (Number(draft.estimatedValue.replace(",", ".")) > 0 && Boolean(draft.expectedCloseDate));
+  const saveDisabled = draft.industry.trim().length < 2 || !forecastReady || (
     isActiveCrmStatus(draft.status)
     && (!draft.nextFollowUpDate || draft.nextStep.trim().length < 2)
   );
 
   function changeDraftStatus(status: CrmStatus) {
-    const currentSuggestedProbability = crmDefaultProbability(draft.status);
     setDraft({
       ...draft,
       status,
-      probability: !draft.probability || Number(draft.probability) === currentSuggestedProbability
-        ? String(crmDefaultProbability(status))
-        : draft.probability
+      forecastCategory: ["on_hold", "inactive"].includes(status)
+        ? "omitted"
+        : draft.status === "on_hold" && draft.forecastCategory === "omitted"
+          ? "pipeline"
+          : draft.forecastCategory
     });
   }
 
   const draftQualificationCompleted = qualificationCompleted(draft.qualificationData);
 
-  return <div className="fixed inset-0 z-[70] flex justify-end bg-black/65" role="dialog" aria-modal="true" aria-label={`Oportunitate ${lead.companyName}`}>
+  return <>
+    <div className="fixed inset-0 z-[70] flex justify-end bg-black/65" role="dialog" aria-modal="true" aria-label={`Oportunitate ${lead.companyName}`}>
     <div className="h-full w-full max-w-[860px] overflow-y-auto border-l border-focus-line bg-focus-navy shadow-2xl">
       <div className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-focus-line bg-focus-navy/98 px-5 py-4">
         <div>
           <p className="text-xs font-black uppercase text-focus-yellow">Dosar oportunitate</p>
           <h2 className="text-2xl font-black text-white">{lead.companyName}</h2>
           <p className="mt-1 text-sm font-bold text-slate-200">{lead.opportunityName || "Oportunitate generala"}</p>
-          <p className="mt-1 text-xs text-slate-400">{lead.assignedTo?.name || "Nealocat"} / actualizat {dateTime(lead.updatedAt)}</p>
+          <p className="mt-1 text-xs text-slate-400">{lead.industry || "Domeniu nesetat"} / CUI {lead.taxId || "nesetat"} / {lead.assignedTo?.name || "Nealocat"} / actualizat {dateTime(lead.updatedAt)}</p>
         </div>
         <button className="focus-button secondary" type="button" onClick={onClose} aria-label="Inchide"><X size={18} /></button>
       </div>
@@ -1078,7 +1239,7 @@ function LeadDrawer({
           <MiniMetric label="Vechime etapa" value={`${lead.stageAgeDays} zile`} tone={lead.stageStalled ? "red" : "neutral"} />
           <MiniMetric label="Calificare" value={`${lead.qualification.completed}/${lead.qualification.total}`} />
           <MiniMetric label="Valoare" value={lead.estimatedValue ? `${money(lead.estimatedValue)} ${lead.currency || "EUR"}` : "-"} />
-          <MiniMetric label="Probabilitate" value={lead.probability == null ? "-" : `${lead.probability}%`} />
+          <MiniMetric label="Estimare" value={crmForecastCategoryLabel(lead.forecastCategory)} />
           <MiniMetric label="Follow-up" value={lead.nextFollowUpDate ? date(lead.nextFollowUpDate) : "Nesetat"} tone={lead.attention === "overdue" || lead.attention === "missing" ? "red" : "neutral"} />
         </section>
 
@@ -1094,27 +1255,29 @@ function LeadDrawer({
               <h3 className="text-sm font-black uppercase text-focus-yellow">Situatie comerciala</h3>
               <p className="mt-1 text-xs text-slate-400">Actualizeaza etapa, valoarea si urmatorul pas.</p>
             </div>
-            {!lead.clientId ? <button className="focus-button" type="button" disabled={busy === `convert-${lead.id}`} onClick={() => onConvert(lead.id)}><UserPlus size={17} /> Converteste in client</button> : <span className="text-xs font-black text-emerald-200">Client asociat: {lead.client?.companyName}</span>}
+            <div className="flex flex-wrap items-center gap-2">
+              {lead.clientId ? <span className="text-xs font-black text-emerald-200">Client asociat: {lead.client?.companyName}</span> : null}
+              {isActiveCrmStatus(lead.status) ? <button className="focus-button" type="button" disabled={busy === `convert-${lead.id}`} onClick={() => setShowCloseOpportunity(true)}><Check size={17} /> Inchide oportunitatea</button> : null}
+            </div>
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <Field label="CUI / CIF"><input className="focus-input" value={draft.taxId} onChange={(event) => setDraft({ ...draft, taxId: event.target.value.toUpperCase() })} /></Field>
+            <Field label="Domeniu de activitate"><select className="focus-input" value={draft.industry} onChange={(event) => setDraft({ ...draft, industry: event.target.value })}><option value="">Nesetat</option>{CRM_INDUSTRY_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}</select></Field>
             <Field label="Oportunitate / campanie"><input className="focus-input" value={draft.opportunityName} onChange={(event) => setDraft({ ...draft, opportunityName: event.target.value })} /></Field>
-            <Field label="Etapa"><select className="focus-input" value={draft.status} onChange={(event) => changeDraftStatus(event.target.value as CrmStatus)}>{CRM_STATUS_OPTIONS.filter((option) => option.value !== "won" || lead.clientId).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
+            <Field label="Etapa"><select className="focus-input" disabled={!isActiveCrmStatus(lead.status)} value={draft.status} onChange={(event) => changeDraftStatus(event.target.value as CrmStatus)}>{CRM_STATUS_OPTIONS.filter((option) => isActiveCrmStatus(option.value) || option.value === "inactive" || option.value === lead.status).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
             <Field label="Sursa"><select className="focus-input" value={draft.source} onChange={(event) => setDraft({ ...draft, source: event.target.value })}>{CRM_SOURCE_OPTIONS.map((source) => <option key={source}>{source}</option>)}</select></Field>
             {canViewTeam ? <Field label="Agent"><select className="focus-input" value={draft.assignedToUserId} onChange={(event) => setDraft({ ...draft, assignedToUserId: event.target.value })}>{assignees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></Field> : null}
             <Field label="Valoare"><input className="focus-input" inputMode="decimal" value={draft.estimatedValue} onChange={(event) => setDraft({ ...draft, estimatedValue: event.target.value })} /></Field>
             <Field label="Moneda"><select className="focus-input" value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value })}><option>EUR</option><option>RON</option></select></Field>
-            <Field label="Probabilitate"><input className="focus-input" type="number" min="0" max="100" value={draft.probability} onChange={(event) => setDraft({ ...draft, probability: event.target.value })} /></Field>
+            <Field label="Estimare comerciala"><select className="focus-input" disabled={!isActiveCrmStatus(lead.status)} value={draft.forecastCategory} onChange={(event) => setDraft({ ...draft, forecastCategory: event.target.value as CrmForecastCategory })}>{CRM_FORECAST_CATEGORY_OPTIONS.filter((option) => isActiveCrmStatus(lead.status) ? option.value !== "closed" : option.value === lead.forecastCategory).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
             <Field label="Data estimata inchidere"><input className="focus-input" type="date" value={draft.expectedCloseDate} onChange={(event) => setDraft({ ...draft, expectedCloseDate: event.target.value })} /></Field>
             <Field label="Urmatorul follow-up"><input className="focus-input" type="date" value={draft.nextFollowUpDate} onChange={(event) => setDraft({ ...draft, nextFollowUpDate: event.target.value })} /></Field>
             <Field label="Urmatorul pas"><input className="focus-input" value={draft.nextStep} onChange={(event) => setDraft({ ...draft, nextStep: event.target.value })} /></Field>
             <Field label="Interes OOH"><input className="focus-input" value={draft.locationsInterested} onChange={(event) => setDraft({ ...draft, locationsInterested: event.target.value })} /></Field>
           </div>
           <p className="mt-3 text-xs text-slate-400">{crmStatusDescription(draft.status)}</p>
-          {draft.status === "lost" ? <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <Field label="Categorie pierdere"><select className="focus-input" value={draft.lostReasonCode} onChange={(event) => setDraft({ ...draft, lostReasonCode: event.target.value })}><option value="">Alege motivul</option>{CRM_LOST_REASON_OPTIONS.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}</select></Field>
-            <Field label="Detalii pierdere"><textarea className="focus-input min-h-20" value={draft.lostReason} onChange={(event) => setDraft({ ...draft, lostReason: event.target.value })} /></Field>
-            {lostDetailsMissing ? <p className="text-xs font-bold text-red-100 md:col-span-2">Alege categoria si noteaza pe scurt de ce s-a pierdut oportunitatea.</p> : null}
-          </div> : null}
+          <p className="mt-1 text-xs text-slate-400">{crmForecastCategoryDescription(draft.forecastCategory)}</p>
+          {!forecastReady ? <p className="mt-2 text-xs font-bold text-red-100">Pentru Posibil sau Angajament completeaza valoarea integrala si data estimata de inchidere.</p> : null}
 
           <details className="mt-4 border-y border-focus-line py-3" open={lead.qualification.completed < 4}>
             <summary className="cursor-pointer text-sm font-black text-focus-yellow">Calificare OOH: {draftQualificationCompleted}/{CRM_QUALIFICATION_ITEMS.length}</summary>
@@ -1135,13 +1298,15 @@ function LeadDrawer({
           <Field label="Note interne"><textarea className="focus-input mt-3 min-h-24" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></Field>
           <div className="mt-4 flex justify-end">
             <button className="focus-button" type="button" disabled={saveDisabled || busy === `update-${lead.id}`} onClick={() => onUpdate(lead.id, {
+              taxId: draft.taxId || undefined,
+              industry: draft.industry || undefined,
               opportunityName: draft.opportunityName || null,
               status: draft.status,
               source: draft.source,
               assignedToUserId: draft.assignedToUserId,
               estimatedValue: draft.estimatedValue ? Number(draft.estimatedValue.replace(",", ".")) : null,
               currency: draft.currency,
-              probability: draft.probability ? Number(draft.probability) : null,
+              forecastCategory: draft.forecastCategory,
               expectedCloseDate: draft.expectedCloseDate || null,
               nextFollowUpDate: draft.nextFollowUpDate || null,
               nextStep: draft.nextStep || null,
@@ -1153,15 +1318,6 @@ function LeadDrawer({
             })}>{busy === `update-${lead.id}` ? "Se salveaza..." : "Salveaza oportunitate"}</button>
           </div>
         </section>
-
-        {!lead.clientId && duplicates.clients.length ? (
-          <section>
-            <h3 className="text-sm font-black uppercase text-focus-yellow">Clienti existenti similari</h3>
-            <div className="mt-3 grid gap-2">
-              {duplicates.clients.map((client) => <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-focus-line px-3 py-3" key={client.id}><span><strong className="text-white">{client.companyName}</strong><small className="block text-slate-400">Owner: {client.accountOwner?.name || "nesetat"}</small></span><button className="focus-button secondary" type="button" onClick={() => onConvert(lead.id, client.id)}>Leaga si castiga</button></div>)}
-            </div>
-          </section>
-        ) : null}
 
         {isActiveCrmStatus(lead.status) ? <section className="border-y border-focus-line py-5">
           <h3 className="text-sm font-black uppercase text-focus-yellow">Actiuni rapide</h3>
@@ -1209,6 +1365,23 @@ function LeadDrawer({
           </div>
         </section>
 
+        {lead.companyHistory.length ? <section>
+          <h3 className="text-sm font-black uppercase text-focus-yellow">Istoric companie</h3>
+          <p className="mt-1 text-xs text-slate-400">Cine a lucrat firma si cand a fost ultimul contact. Notele altor agenti raman private.</p>
+          <div className="mt-3 grid gap-2">
+            {lead.companyHistory.map((row) => <button className="flex w-full flex-wrap items-center justify-between gap-3 border-b border-focus-line py-3 text-left disabled:cursor-default" type="button" disabled={!row.canOpen || row.isCurrent} key={row.id} onClick={() => row.canOpen && !row.isCurrent && onOpenLead(row.id)}>
+              <span className="min-w-0">
+                <strong className="block truncate text-white">{row.opportunityName || "Oportunitate generala"}{row.isCurrent ? " / curenta" : ""}</strong>
+                <small className="block text-slate-400">{statusLabel(row.status)} / {row.assignedTo?.name || "neacordat"}</small>
+              </span>
+              <span className="text-right text-xs text-slate-400">
+                {row.lastContactAt ? `Contact ${dateTime(row.lastContactAt)}` : row.lastActivityAt ? `Activitate ${dateTime(row.lastActivityAt)}` : `Creata ${dateTime(row.createdAt)}`}
+                {row.latestActivity?.user?.name ? <small className="block">de {row.latestActivity.user.name}</small> : null}
+              </span>
+            </button>)}
+          </div>
+        </section> : null}
+
         <section>
           <h3 className="text-sm font-black uppercase text-focus-yellow">Istoric activitate</h3>
           <div className="mt-3 grid gap-3">
@@ -1242,7 +1415,99 @@ function LeadDrawer({
         ) : null}
       </div>
     </div>
-  </div>;
+  </div>
+  {showCloseOpportunity ? <CloseOpportunityModal
+    lead={lead}
+    clients={duplicates.clients}
+    busy={busy}
+    onClose={() => setShowCloseOpportunity(false)}
+    onWon={async (clientId) => {
+      const succeeded = await onConvert(lead.id, clientId);
+      if (succeeded) setShowCloseOpportunity(false);
+    }}
+    onLost={async (lostReasonCode, lostReason) => {
+      const succeeded = await onUpdate(lead.id, {
+        status: "lost",
+        forecastCategory: "omitted",
+        nextFollowUpDate: null,
+        nextStep: null,
+        lostReasonCode,
+        lostReason
+      });
+      if (succeeded) setShowCloseOpportunity(false);
+    }}
+  /> : null}
+  </>;
+}
+
+function CloseOpportunityModal({
+  lead,
+  clients,
+  busy,
+  onClose,
+  onWon,
+  onLost
+}: {
+  lead: LeadDetail;
+  clients: DuplicateResults["clients"];
+  busy: string | null;
+  onClose: () => void;
+  onWon: (clientId?: string | null) => Promise<void>;
+  onLost: (reasonCode: string, reason: string) => Promise<void>;
+}) {
+  const [outcome, setOutcome] = useState<"won" | "lost">("won");
+  const [selectedClientId, setSelectedClientId] = useState(lead.clientId || clients[0]?.id || "");
+  const [lostReasonCode, setLostReasonCode] = useState("");
+  const [lostReason, setLostReason] = useState("");
+  const pending = busy === `convert-${lead.id}` || busy === `update-${lead.id}`;
+  const lossReady = Boolean(lostReasonCode) && lostReason.trim().length >= 2;
+  const selectedClient = clients.find((client) => client.id === selectedClientId);
+
+  return <ModalShell title="Inchide oportunitatea" onClose={onClose}>
+    <div className="grid gap-5">
+      <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Rezultatul oportunitatii">
+        <button className={`rounded-md border p-4 text-left ${outcome === "won" ? "border-emerald-400 bg-emerald-400/10" : "border-focus-line"}`} type="button" onClick={() => setOutcome("won")}>
+          <span className="flex items-center gap-2 font-black text-white"><Check size={18} /> Castigata</span>
+          <small className="mt-1 block text-slate-300">Leaga firma de un client existent sau creeaza clientul.</small>
+        </button>
+        <button className={`rounded-md border p-4 text-left ${outcome === "lost" ? "border-red-300 bg-red-300/10" : "border-focus-line"}`} type="button" onClick={() => setOutcome("lost")}>
+          <span className="flex items-center gap-2 font-black text-white"><X size={18} /> Pierduta</span>
+          <small className="mt-1 block text-slate-300">Pastreaza motivul pentru analiza comerciala.</small>
+        </button>
+      </div>
+
+      {outcome === "won" ? <section className="grid gap-3">
+        <div className="rounded-md border border-focus-line bg-focus-ink/55 p-4">
+          <p className="text-xs font-black uppercase text-focus-yellow">Firma</p>
+          <p className="mt-2 font-black text-white">{lead.companyName}</p>
+          <p className="mt-1 text-xs text-slate-400">Nu se creeaza rezervare, HOLD, campanie sau document financiar.</p>
+        </div>
+        {lead.clientId ? <p className="rounded-md border border-emerald-400/40 bg-emerald-400/10 p-3 text-sm font-bold text-emerald-100">Client existent asociat: {lead.client?.companyName}</p> : null}
+        {!lead.clientId && clients.length ? <div className="grid gap-2">
+          <p className="text-xs font-black uppercase text-slate-400">Clienti existenti similari</p>
+          {clients.map((client) => <label className="flex cursor-pointer items-center gap-3 rounded-md border border-focus-line px-3 py-3" key={client.id}>
+            <input type="radio" name="crm-client" checked={selectedClientId === client.id} onChange={() => setSelectedClientId(client.id)} />
+            <span><strong className="text-white">{client.companyName}</strong><small className="block text-slate-400">Owner: {client.accountOwner?.name || "nesetat"}</small></span>
+          </label>)}
+          <label className="flex cursor-pointer items-center gap-3 rounded-md border border-focus-line px-3 py-3">
+            <input type="radio" name="crm-client" checked={!selectedClientId} onChange={() => setSelectedClientId("")} />
+            <span><strong className="text-white">Niciunul dintre acestia</strong><small className="block text-slate-400">Creeaza client nou numai daca firma este diferita.</small></span>
+          </label>
+        </div> : null}
+        <div className="flex flex-wrap justify-end gap-2 border-t border-focus-line pt-4">
+          <button className="focus-button secondary" type="button" disabled={pending} onClick={onClose}>Renunta</button>
+          <button className="focus-button" type="button" disabled={pending} onClick={() => void onWon(selectedClientId || null)}><UserPlus size={17} /> {pending ? "Se salveaza..." : lead.clientId || selectedClient ? "Leaga si marcheaza castigata" : "Creeaza client si marcheaza castigata"}</button>
+        </div>
+      </section> : <section className="grid gap-3">
+        <Field label="Categorie pierdere"><select className="focus-input" value={lostReasonCode} onChange={(event) => setLostReasonCode(event.target.value)}><option value="">Alege motivul</option>{CRM_LOST_REASON_OPTIONS.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}</select></Field>
+        <Field label="De ce s-a pierdut"><textarea className="focus-input min-h-24" value={lostReason} onChange={(event) => setLostReason(event.target.value)} placeholder="Context scurt si util pentru urmatoarea discutie." /></Field>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-focus-line pt-4">
+          <button className="focus-button secondary" type="button" disabled={pending} onClick={onClose}>Renunta</button>
+          <button className="focus-button" type="button" disabled={!lossReady || pending} onClick={() => void onLost(lostReasonCode, lostReason.trim())}>{pending ? "Se salveaza..." : "Marcheaza pierduta"}</button>
+        </div>
+      </section>}
+    </div>
+  </ModalShell>;
 }
 
 function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {

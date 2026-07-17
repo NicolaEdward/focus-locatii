@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
-import { isKnownCrmStatus } from "@/lib/crm";
+import { isKnownCrmForecastCategory, isKnownCrmStatus } from "@/lib/crm";
 import { getCrmLead, updateCrmLead } from "@/lib/crm-service";
 import { resolveCrmNotificationsForLead } from "@/lib/notifications";
 
@@ -34,6 +34,8 @@ const qualificationSchema = z.object({
 const patchSchema = z.object({
   leadDate: z.string().trim().nullable().optional(),
   companyName: z.string().trim().min(2).max(191).optional(),
+  taxId: z.string().trim().min(2).max(80).optional(),
+  industry: z.string().trim().min(2).max(120).optional(),
   opportunityName: z.string().trim().max(191).nullable().optional(),
   clientType: z.enum(["direct_client", "agency"]).nullable().optional(),
   clientId: z.string().trim().nullable().optional(),
@@ -45,7 +47,7 @@ const patchSchema = z.object({
   status: z.string().trim().refine(isKnownCrmStatus, "Etapa CRM nu este valida.").optional(),
   estimatedValue: z.coerce.number().nonnegative().nullable().optional(),
   currency: z.enum(["RON", "EUR"]).nullable().optional(),
-  probability: z.coerce.number().int().min(0).max(100).nullable().optional(),
+  forecastCategory: z.string().trim().refine(isKnownCrmForecastCategory, "Categoria de estimare nu este valida.").optional(),
   expectedCloseDate: z.string().trim().nullable().optional(),
   nextFollowUpDate: z.string().trim().nullable().optional(),
   nextStep: z.string().trim().max(2000).nullable().optional(),

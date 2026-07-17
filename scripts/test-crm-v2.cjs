@@ -1,17 +1,27 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const XLSX = require("xlsx");
 const { loadTsModule } = require("./load-ts-module.cjs");
 
 const crm = loadTsModule(path.join(process.cwd(), "src", "lib", "crm.ts"));
+const taxId = loadTsModule(path.join(process.cwd(), "src", "lib", "tax-id.ts"));
 
-main();
+main().catch((error) => {
+  console.error(error?.stack || error?.message || String(error));
+  process.exitCode = 1;
+});
 
-function main() {
+async function main() {
   const now = new Date("2026-07-16T12:00:00.000Z");
   const seller = actor("seller-1", "SALES_AGENT");
   const director = actor("director-1", "SALES_DIRECTOR");
   const coo = actor("coo-1", "COO");
+
+  assert.equal(taxId.normalizeTaxId(" ro 12.345.678 "), "RO12345678");
+  assert.equal(taxId.canonicalTaxId("RO12345678"), "12345678");
+  assert.equal(taxId.taxIdsMatch("RO 12345678", "12345678"), true);
+  assert.equal(taxId.isUsableTaxId("RO1"), false);
 
   assert.equal(crm.normalizeCrmStatus("NEW"), "cold");
   assert.equal(crm.normalizeCrmStatus("CONTACTED"), "contacted");
@@ -20,9 +30,22 @@ function main() {
   assert.equal(crm.isKnownCrmStatus("new"), true);
   assert.equal(crm.isKnownCrmStatus("contacted"), true);
   assert.equal(crm.isKnownCrmStatus("not-a-real-stage"), false);
-  assert.equal(crm.crmDefaultProbability("cold"), 10);
-  assert.equal(crm.crmDefaultProbability("contacted"), 20);
-  assert.equal(crm.crmDefaultProbability("qualified"), 35);
+  assert.equal(crm.crmForecastCategoryForStatus("cold"), "pipeline");
+  assert.equal(crm.crmForecastCategoryForStatus("on_hold"), "omitted");
+  assert.equal(crm.crmForecastCategoryForStatus("won"), "closed");
+  assert.equal(crm.nextCrmForecastCategory({ currentCategory: "commit", currentStatus: "in_negotiation", nextStatus: "offer_sent" }), "commit");
+  assert.equal(crm.nextCrmForecastCategory({ currentCategory: "omitted", currentStatus: "on_hold", nextStatus: "contacted" }), "pipeline");
+  assert.equal(crm.nextCrmForecastCategory({ currentCategory: "pipeline", nextStatus: "won", requestedCategory: "commit" }), "closed");
+  assert.throws(
+    () => crm.validateCrmForecast({ status: "offer_sent", forecastCategory: "commit", estimatedValue: 1000, expectedCloseDate: null }),
+    /luna estimata/
+  );
+  assert.equal(crm.validateCrmForecast({
+    status: "offer_sent",
+    forecastCategory: "commit",
+    estimatedValue: 1000,
+    expectedCloseDate: new Date("2026-07-30T00:00:00.000Z")
+  }), "commit");
   const qualification = crm.crmQualificationScore({
     needConfirmed: true,
     periodKnown: true,
@@ -101,11 +124,11 @@ function main() {
   }, now), null);
 
   const summary = crm.summarizeCrmLeads([
-    row("qualified", "2026-07-15", 100, "EUR", 50, "2026-07-15"),
-    row("in_offer", "2026-07-16", 200, "RON", 25, "2026-07-16"),
-    row("cold", null, 300, "EUR", null, "2026-07-16"),
-    row("won", null, 500, "EUR", 100, "2026-07-10"),
-    row("lost", null, 100, "RON", 0, "2026-07-11")
+    row("qualified", "2026-07-15", 100, "EUR", "pipeline", "2026-08-15", "2026-07-15"),
+    row("in_offer", "2026-07-16", 200, "RON", "best_case", "2026-07-28", "2026-07-16"),
+    row("in_negotiation", null, 300, "EUR", "commit", "2026-07-30", "2026-07-16"),
+    row("won", null, 500, "EUR", "closed", "2026-07-10", "2026-07-10"),
+    row("lost", null, 100, "RON", "omitted", "2026-07-11", "2026-07-11")
   ], now);
   assert.equal(summary.active, 3);
   assert.equal(summary.overdue, 1);
@@ -115,8 +138,8 @@ function main() {
   assert.equal(summary.lostThisMonth, 1);
   assert.equal(summary.pipelineByCurrency.EUR, 400);
   assert.equal(summary.pipelineByCurrency.RON, 200);
-  assert.equal(summary.weightedByCurrency.EUR, 50);
-  assert.equal(summary.weightedByCurrency.RON, 50);
+  assert.equal(summary.bestCaseByCurrency.RON, 200);
+  assert.equal(summary.commitByCurrency.EUR, 300);
   const outcomes = crm.monthlyCrmOutcomes([
     { leadId: "lead-1", statusAtTime: "lost", activityDate: "2026-07-03T10:00:00.000Z" },
     { leadId: "lead-1", statusAtTime: "won", activityDate: "2026-07-08T10:00:00.000Z" },
@@ -127,13 +150,14 @@ function main() {
   assert.equal(outcomes.lostThisMonth, 1);
 
   sourceArchitectureChecks();
+  await testCrmExport();
 
   console.log(JSON.stringify({
     ok: true,
     checked: [
       "canonical CRM statuses and legacy mappings",
       "OOH Cold and Contactat stages remain distinct",
-      "stage probability suggestions preserve deterministic forecast defaults",
+      "full-value forecast categories replace misleading weighted amounts",
       "stale Cold and Contactat leads are identified for classification",
       "qualification score is deterministic and optional at creation",
       "stage aging and opportunity priority are calculated automatically",
@@ -146,14 +170,101 @@ function main() {
       "paginated summary/detail API architecture",
       "all-client duplicate visibility without cross-owner lead access",
       "COO dashboard metrics and CRM notifications",
+      "COO-only CRM export with leads, contacts and seller observations",
       "no selector, reservation or Media Plan integration"
     ]
   }, null, 2));
 }
 
+async function testCrmExport() {
+  let role = "COO";
+  const lead = {
+    id: "lead-export-1",
+    leadDate: new Date("2026-07-01T00:00:00.000Z"),
+    companyName: "Client test",
+    taxId: "RO12345678",
+    industry: "Retail",
+    opportunityName: "Campanie test",
+    clientType: "direct_client",
+    contactName: "Contact Principal",
+    phone: "0700000000",
+    email: "contact@example.test",
+    source: "Recomandare",
+    status: "qualified",
+    estimatedValue: 1000,
+    currency: "EUR",
+    forecastCategory: "pipeline",
+    expectedCloseDate: new Date("2026-08-01T00:00:00.000Z"),
+    nextFollowUpDate: new Date("2026-07-20T00:00:00.000Z"),
+    nextStep: "Apel",
+    locationsInterested: "Bucuresti",
+    notes: "Observatie vanzator",
+    lostReason: null,
+    lostReasonCode: null,
+    lastContactAt: new Date("2026-07-16T10:00:00.000Z"),
+    lastActivityAt: new Date("2026-07-16T10:00:00.000Z"),
+    createdAt: new Date("2026-07-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-07-16T10:00:00.000Z"),
+    assignedTo: { name: "Agent Test", email: "agent@example.test" },
+    client: null,
+    contacts: [{
+      id: "contact-export-1",
+      name: "Contact Principal",
+      role: "Marketing",
+      phone: "0700000000",
+      email: "contact@example.test",
+      isPrimary: true,
+      notes: "Decident",
+      createdAt: new Date("2026-07-01T00:00:00.000Z")
+    }],
+    activities: [{
+      activityDate: new Date("2026-07-16T10:00:00.000Z"),
+      actionType: "call_connected",
+      type: "call",
+      statusAtTime: "qualified",
+      details: "Discutie",
+      note: "Revine vineri",
+      nextStep: "Oferta",
+      nextFollowUpDate: new Date("2026-07-20T00:00:00.000Z"),
+      user: { name: "Agent Test", email: "agent@example.test" }
+    }]
+  };
+  const route = loadTsModule(path.join(process.cwd(), "src", "app", "api", "admin", "crm", "export.xlsx", "route.ts"), {
+    "@/lib/auth": {
+      requireAnyPermission: async () => ({
+        session: { id: "actor-1", role, email: "coo@example.test" },
+        response: null
+      })
+    },
+    "@/lib/audit": { recordAudit: async () => null },
+    "@/lib/crm": {
+      crmForecastCategoryLabel: (value) => value,
+      crmStatusLabel: (value) => value
+    },
+    "@/lib/prisma": { prisma: { crmLead: { findMany: async () => [lead] } } }
+  });
+
+  const request = { headers: new Headers() };
+  const response = await route.GET(request);
+  assert.equal(response.status, 200, "COO can download the CRM workbook");
+  const workbook = XLSX.read(Buffer.from(await response.arrayBuffer()), { type: "buffer" });
+  assert.deepEqual(workbook.SheetNames, ["Lead-uri", "Persoane contact", "Istoric observatii"]);
+  const leadRows = XLSX.utils.sheet_to_json(workbook.Sheets["Lead-uri"]);
+  const contactRows = XLSX.utils.sheet_to_json(workbook.Sheets["Persoane contact"]);
+  const activityRows = XLSX.utils.sheet_to_json(workbook.Sheets["Istoric observatii"]);
+  assert.equal(leadRows[0]["Domeniu activitate"], "Retail");
+  assert.equal(leadRows[0]["Observatii vanzator"], "Observatie vanzator");
+  assert.equal(contactRows[0]["Persoana contact"], "Contact Principal");
+  assert.equal(activityRows[0].Observatii, "Revine vineri");
+
+  role = "SALES_DIRECTOR";
+  assert.equal((await route.GET(request)).status, 403, "team CRM access does not grant the full COO export");
+}
+
 function sourceArchitectureChecks() {
   const service = read("src/lib/crm-service.ts");
   const workspace = read("src/components/admin/CrmWorkspace.tsx");
+  const cooCommandCenter = read("src/components/admin/CooCommandCenter.tsx");
   const adminHeader = read("src/components/admin/AdminHeader.tsx");
   const notificationBell = read("src/components/admin/NotificationBell.tsx");
   const crmPage = read("src/app/admin/crm/page.tsx");
@@ -165,8 +276,12 @@ function sourceArchitectureChecks() {
   const activityRoute = read("src/app/api/admin/crm/leads/[id]/activities/route.ts");
   const contactsRoute = read("src/app/api/admin/crm/leads/[id]/contacts/route.ts");
   const assigneesRoute = read("src/app/api/admin/crm/assignees/route.ts");
+  const agendaRoute = read("src/app/api/admin/crm/agenda/route.ts");
+  const duplicatesRoute = read("src/app/api/admin/crm/duplicates/route.ts");
+  const exportRoute = read("src/app/api/admin/crm/export.xlsx/route.ts");
   const schema = read("prisma/schema.prisma");
   const migration = read("prisma/migrations/20260716000000_crm_opportunity_productivity_v3/migration.sql");
+  const forecastMigration = read("prisma/migrations/20260717000000_crm_forecast_categories/migration.sql");
 
   assert(service.includes("skip: (page - 1) * limit"), "CRM list must be paginated");
   assert(service.includes("take: limit"), "CRM list must have a bounded page size");
@@ -174,6 +289,12 @@ function sourceArchitectureChecks() {
   assert(service.includes("take: 50"), "CRM detail activity history must stay bounded");
   assert(service.includes('role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] }'), "CRM assignees must be active sales agents or the sales director");
   assert(service.includes("prisma.clientAccount.findMany"), "duplicate search must show registered clients");
+  assert(service.includes("taxIdSearchValues"), "duplicate search must compare normalized CUI values");
+  assert(service.includes("assertCrmCompanyOwnership"), "lead writes must enforce company ownership rules server-side");
+  assert(service.includes("Firma este deja lucrata"), "sales agents must be warned and blocked from cross-owner company overlap");
+  assert(service.includes("listCrmDailyAgenda"), "CRM service must expose a bounded daily agenda");
+  assert(service.includes('where: { activeVersion: true, status: "confirmed" }'), "CRM receivables must use only the active confirmed financial upload");
+  assert(service.includes("take: 30"), "daily agenda sections must stay bounded");
   assert(!/clientAccount\.findMany\([\s\S]*accountOwnerUserId:\s*actor\.id/.test(service), "client duplicate lookup must not hide registered clients from sellers");
   assert(!service.includes("prisma.reservation"), "CRM conversion must not create or change reservations");
   assert(!service.includes("prisma.mediaPlan"), "CRM must not depend on Media Plan");
@@ -187,6 +308,22 @@ function sourceArchitectureChecks() {
   assert(workspace.includes("Calificare OOH"), "CRM detail must offer a compact OOH qualification checklist");
   assert(workspace.includes("Detalii comerciale optionale"), "new opportunity form must keep secondary fields progressive");
   assert(workspace.includes("Oportunitate / campanie"), "CRM must separate company from the commercial opportunity");
+  assert(workspace.includes("CUI / CIF"), "new CRM opportunities must request the company CUI");
+  assert(workspace.includes("Domeniu de activitate"), "new CRM opportunities must request the business industry");
+  assert(workspace.includes("CRM_INDUSTRY_OPTIONS"), "CRM must use one controlled industry vocabulary");
+  assert(workspace.includes("/api/admin/crm/export.xlsx"), "COO must have an explicit full CRM export action");
+  assert(workspace.includes("Incasari de urmarit"), "daily agenda must combine calls with receivables");
+  assert(workspace.includes("Datele de incasari nu sunt disponibile"), "CRM must not present missing financial source data as zero receivables");
+  assert(workspace.includes("Oportunitati de decis"), "daily agenda must show forecast decisions due soon");
+  assert(workspace.includes("Istoric companie"), "lead detail must show safe company-wide contact history");
+  assert(workspace.includes("Inchide oportunitatea"), "CRM must close won/lost opportunities through an explicit flow");
+  assert(workspace.includes("Creeaza client si marcheaza castigata"), "client creation must happen only as part of a won close flow");
+  assert(!workspace.includes("Converteste in client"), "standalone client conversion must not remain visible");
+  assert(!workspace.includes("Forecast ponderat"), "seller CRM must not show misleading weighted forecast");
+  assert(!workspace.includes('label="Probabilitate"'), "seller CRM must not ask for manual probability");
+  assert(!cooCommandCenter.includes("Forecast ponderat"), "COO dashboard must use full-value forecast categories");
+  assert(!cooCommandCenter.includes(">Disciplina<"), "COO dashboard must not show a vacuous discipline score");
+  assert(cooCommandCenter.includes("Angajament luna"), "COO dashboard must show the seller commitment for the month");
   assert(workspace.includes("Brief primit"), "CRM must offer a one-click brief-received workflow");
   assert(workspace.includes("Oferta trimisa"), "CRM must offer a one-click offer-sent workflow");
   assert(workspace.includes('status: "contacted"'), "quick contact action must classify a Cold prospect as Contactat");
@@ -203,6 +340,8 @@ function sourceArchitectureChecks() {
   assert(notifications.includes("syncCrmNotifications"), "CRM follow-up notifications must be synchronized");
   assert(notifications.includes("crm_followup_due_tomorrow"), "CRM must notify sellers before tomorrow's follow-up");
   assert(notifications.includes("crm_classification_due"), "CRM must remind sellers to classify stale prospects");
+  assert(notifications.includes("crm_close_due_soon"), "CRM must notify sellers about opportunities near their close date");
+  assert(notifications.includes("sendDailyNotificationEmails"), "CRM must provide an optional daily email digest");
   assert(notifications.includes('{ OR: [{ type: { notIn: crmNotificationTypes } }, { userId: session.id }] }'), "Sales Director must receive own CRM notifications without losing broader non-CRM oversight");
   assert(cron.includes("syncCrmNotifications()"), "protected cron must run CRM notification synchronization");
   assert(roleBlock(rbac, "SALES_DIRECTOR").includes('"leads.view"'), "Sales Director must have CRM read access");
@@ -212,6 +351,27 @@ function sourceArchitectureChecks() {
   assert(contactsRoute.includes("const optionalEmail = z.preprocess"), "CRM contacts must accept an omitted email");
   assert(activityRoute.includes("status: z.string().trim().refine(isKnownCrmStatus"), "quick actions must validate CRM stage changes");
   assert(assigneesRoute.includes('["leads.view"]'), "only global CRM roles may list all CRM assignees");
+  assert(agendaRoute.includes('["leads.view", "leads.view.own"]'), "daily agenda must require CRM permission");
+  assert(duplicatesRoute.includes('searchParams.get("taxId")'), "duplicate lookup must accept CUI as a strict identifier");
+  assert(listRoute.includes('searchParams.get("industry")'), "CRM list API must support industry filtering");
+  assert(listRoute.includes('industry: z.string().trim().min(2'), "new CRM leads must require an industry");
+  assert(exportRoute.includes('["COO", "SUPER_ADMIN"]'), "full CRM export must be restricted to COO and super admin");
+  assert(exportRoute.includes('"Lead-uri"'), "CRM export must contain a lead sheet");
+  assert(exportRoute.includes('"Persoane contact"'), "CRM export must contain a contact sheet");
+  assert(exportRoute.includes('"Istoric observatii"'), "CRM export must contain an activity and notes sheet");
+  assert(exportRoute.includes('"Observatii vanzator"'), "CRM export must contain seller observations");
+  assert(schema.includes("forecastCategory"), "CRM schema must store an explicit forecast category");
+  assert(schema.includes("taxId             String?"), "CRM schema must store normalized company CUI additively");
+  assert(schema.includes("industry          String?"), "CRM schema must store business industry additively");
+  assert(forecastMigration.includes("`forecastCategory`"), "CRM migration must add forecast category additively");
+  assert(forecastMigration.includes("`taxId`"), "CRM migration must add CUI additively");
+  assert(forecastMigration.includes("`industry`"), "CRM migration must add industry additively");
+  assert(!forecastMigration.includes("DROP TABLE"), "forecast migration must not drop tables");
+  assert(!forecastMigration.includes("DROP COLUMN"), "forecast migration must not drop columns");
+  assert(service.includes("alreadyCompleted: true"), "won close must be idempotent");
+  assert(service.includes("crmContact.updateMany"), "CRM contacts must link to the client after a win");
+  assert(service.includes("Foloseste actiunea Inchide oportunitatea"), "direct won updates must be blocked outside the controlled close flow");
+  assert(service.includes("Doar oportunitatile active pot fi inchise"), "lost or inactive opportunities must not be converted to won directly");
   for (const field of ["opportunityName", "qualificationData", "nextStep", "stageChangedAt", "lastActivityAt", "noResponseCount"]) {
     assert(schema.includes(field), `CRM schema must include additive ${field}`);
     assert(migration.includes("`" + field + "`"), `CRM migration must add ${field}`);
@@ -220,13 +380,14 @@ function sourceArchitectureChecks() {
   assert(!migration.includes("DROP COLUMN"), "CRM migration must not drop columns");
 }
 
-function row(status, nextFollowUpDate, estimatedValue, currency, probability, updatedAt) {
+function row(status, nextFollowUpDate, estimatedValue, currency, forecastCategory, expectedCloseDate, updatedAt) {
   return {
     status,
     nextFollowUpDate: nextFollowUpDate ? new Date(`${nextFollowUpDate}T00:00:00.000Z`) : null,
     estimatedValue,
     currency,
-    probability,
+    forecastCategory,
+    expectedCloseDate: expectedCloseDate ? new Date(`${expectedCloseDate}T00:00:00.000Z`) : null,
     updatedAt: new Date(`${updatedAt}T00:00:00.000Z`)
   };
 }

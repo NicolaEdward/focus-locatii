@@ -19,6 +19,7 @@ export default async function CrmPage({
     <AdminHeader session={session} />
     <CrmWorkspace
       currentUserId={session.id}
+      currentUserRole={session.role}
       canViewTeam={hasGlobalDataAccess(session.role)}
       initialLeadId={params.lead || null}
     />

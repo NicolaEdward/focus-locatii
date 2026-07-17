@@ -30,7 +30,8 @@ export async function getCrmTeamDashboardData(now = new Date()) {
         nextFollowUpDate: true,
         estimatedValue: true,
         currency: true,
-        probability: true,
+        forecastCategory: true,
+        expectedCloseDate: true,
         stageChangedAt: true,
         firstContactedAt: true,
         qualifiedAt: true,
@@ -94,12 +95,10 @@ export async function getCrmTeamDashboardData(now = new Date()) {
         ? Math.round(active.reduce((sum, lead) => sum + crmStageAgeDays(lead.stageChangedAt, now), 0) / active.length)
         : 0,
       pipelineByCurrency: ownSummary.pipelineByCurrency,
-      weightedByCurrency: ownSummary.weightedByCurrency,
+      bestCaseByCurrency: ownSummary.bestCaseByCurrency,
+      commitByCurrency: ownSummary.commitByCurrency,
       activities7Days: activityCount(activities7, seller.id),
       activities30Days: activityCount(activities30, seller.id),
-      followUpCompliance: active.length
-        ? Math.round((active.filter((lead) => lead.nextFollowUpDate).length / active.length) * 100)
-        : 100,
       qualificationRate: contacted ? Math.round((qualified / contacted) * 100) : null,
       contacted,
       qualified,

@@ -3,11 +3,13 @@ import * as XLSX from "xlsx";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import {
-  crmEffectiveProbability,
-  crmForecastCategoryForStatus,
-  crmForecastCategoryLabel,
-  crmStatusLabel
-} from "@/lib/crm";
+  crmCurrentOpportunityValue,
+  crmForecastForStage,
+  crmForecastLabel,
+  crmNextActionLabel,
+  crmOpportunityStageLabel,
+  crmProspectStatusLabel
+} from "@/lib/crm-domain";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -21,147 +23,160 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Exportul complet CRM este disponibil doar pentru COO." }, { status: 403 });
   }
 
-  const leads = await prisma.crmLead.findMany({
-    select: {
-      id: true,
-      leadDate: true,
-      companyName: true,
-      taxId: true,
-      industry: true,
-      opportunityName: true,
-      clientType: true,
-      contactName: true,
-      phone: true,
-      email: true,
-      source: true,
-      status: true,
-      estimatedValue: true,
-      currency: true,
-      probability: true,
-      forecastCategory: true,
-      expectedCloseDate: true,
-      nextFollowUpDate: true,
-      nextStep: true,
-      locationsInterested: true,
-      notes: true,
-      lostReason: true,
-      lostReasonCode: true,
-      lastContactAt: true,
-      lastActivityAt: true,
-      createdAt: true,
-      updatedAt: true,
-      assignedTo: { select: { name: true, email: true } },
-      client: { select: { id: true, companyName: true, taxId: true } },
-      contacts: {
-        select: {
-          id: true,
-          name: true,
-          role: true,
-          phone: true,
-          email: true,
-          isPrimary: true,
-          notes: true,
-          createdAt: true
-        },
-        orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }]
+  const [companies, prospects, opportunities, events] = await Promise.all([
+    prisma.crmCompany.findMany({
+      select: {
+        id: true, name: true, taxId: true, industry: true, website: true, status: true, createdAt: true, updatedAt: true,
+        owner: { select: { name: true, email: true } },
+        contacts: { select: { name: true, role: true, phone: true, email: true, preferredChannel: true, isDecisionMaker: true, isPrimary: true, createdAt: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] }
       },
-      activities: {
-        select: {
-          activityDate: true,
-          actionType: true,
-          type: true,
-          statusAtTime: true,
-          details: true,
-          note: true,
-          nextStep: true,
-          nextFollowUpDate: true,
-          user: { select: { name: true, email: true } }
-        },
-        orderBy: [{ activityDate: "desc" }, { createdAt: "desc" }]
-      }
-    },
-    orderBy: [{ companyName: "asc" }, { updatedAt: "desc" }]
-  });
+      orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+      take: 20_000
+    }),
+    prisma.crmProspect.findMany({
+      select: {
+        id: true, companyId: true, source: true, status: true, priority: true, contactState: true, qualificationSummary: true,
+        qualifiedAt: true, disqualifiedAt: true, returnAt: true, closedReason: true, createdAt: true, updatedAt: true,
+        company: { select: { name: true, taxId: true, industry: true } }, owner: { select: { name: true, email: true } },
+        nextActions: { where: { status: "open" }, select: { type: true, description: true, dueAt: true }, orderBy: { dueAt: "asc" }, take: 1 }
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      take: 25_000
+    }),
+    prisma.crmOpportunity.findMany({
+      select: {
+        id: true, companyId: true, sourceProspectId: true, name: true, needSummary: true, stage: true, desiredPeriodStart: true, desiredPeriodEnd: true,
+        geography: true, formats: true, budgetStatus: true, budgetMin: true, budgetMax: true, currency: true, quotedValue: true, revisedValue: true,
+        agreedValue: true, decisionDate: true, quotedAt: true, negotiationAt: true, contractingAt: true, wonAt: true, lostAt: true,
+        lostReasonCode: true, lostReason: true, competitor: true, createdAt: true, updatedAt: true,
+        company: { select: { name: true, taxId: true, industry: true } }, owner: { select: { name: true, email: true } },
+        nextActions: { where: { status: "open" }, select: { type: true, description: true, dueAt: true }, orderBy: { dueAt: "asc" }, take: 1 }
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+      take: 20_000
+    }),
+    prisma.crmEvent.findMany({
+      select: {
+        companyId: true, prospectId: true, opportunityId: true, type: true, source: true, summary: true, result: true,
+        previousValues: true, nextValues: true, occurredAt: true, actor: { select: { name: true, email: true } }, company: { select: { name: true, taxId: true } }
+      },
+      orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+      take: 100_000
+    })
+  ]);
 
   const workbook = XLSX.utils.book_new();
-  const leadSheet = XLSX.utils.json_to_sheet(leads.map((lead) => ({
-    "Data lead": dateValue(lead.leadDate),
-    Companie: lead.companyName,
-    "CUI / CIF": lead.taxId || lead.client?.taxId || "",
-    "Domeniu activitate": lead.industry || "Neclasificat",
-    "Oportunitate / campanie": lead.opportunityName || "",
-    "Tip client": lead.clientType || "",
-    "Persoana contact principala": lead.contactName || "",
-    Telefon: lead.phone || "",
-    Email: lead.email || "",
-    Sursa: lead.source || "",
-    Etapa: crmStatusLabel(lead.status),
-    Vanzator: lead.assignedTo?.name || "Nealocat",
-    "Email vanzator": lead.assignedTo?.email || "",
-    "Valoare oportunitate": lead.estimatedValue ?? "",
-    Moneda: lead.currency || "",
-    "Sanse de castig (%)": crmEffectiveProbability(lead.probability, lead.status),
-    "Nivel forecast": crmForecastCategoryLabel(crmForecastCategoryForStatus(lead.status, lead.probability)),
-    "Data estimata inchidere": dateValue(lead.expectedCloseDate),
-    "Urmator follow-up": dateValue(lead.nextFollowUpDate),
-    "Urmatorul pas": lead.nextStep || "",
-    "Interes OOH": lead.locationsInterested || "",
-    "Observatii vanzator": lead.notes || "",
-    "Motiv pierdere": lead.lostReason || "",
-    "Categorie pierdere": lead.lostReasonCode || "",
-    "Client inregistrat": lead.client?.companyName || "",
-    "Ultimul contact": dateTimeValue(lead.lastContactAt),
-    "Ultima activitate": dateTimeValue(lead.lastActivityAt),
-    "Creat la": dateTimeValue(lead.createdAt),
-    "Actualizat la": dateTimeValue(lead.updatedAt)
-  })));
-
-  const contactRows = leads.flatMap((lead) => lead.contacts.map((contact) => ({
-    Companie: lead.companyName,
-    "CUI / CIF": lead.taxId || lead.client?.taxId || "",
-    "Domeniu activitate": lead.industry || "Neclasificat",
-    "Oportunitate / campanie": lead.opportunityName || "",
-    Vanzator: lead.assignedTo?.name || "Nealocat",
-    "Persoana contact": contact.name,
-    Rol: contact.role || "",
+  const companyRows = companies.map((company) => ({
+    "ID firmă CRM": company.id,
+    Firmă: company.name,
+    CUI: company.taxId || "",
+    Domeniu: company.industry || "",
+    Website: company.website || "",
+    Responsabil: company.owner?.name || "Nealocat",
+    "Email responsabil": company.owner?.email || "",
+    Status: company.status,
+    "Creat la": dateTimeValue(company.createdAt),
+    "Actualizat la": dateTimeValue(company.updatedAt)
+  }));
+  const prospectRows = prospects.map((prospect) => {
+    const next = prospect.nextActions[0];
+    return {
+      "ID prospect": prospect.id,
+      Firmă: prospect.company.name,
+      CUI: prospect.company.taxId || "",
+      Domeniu: prospect.company.industry || "",
+      Responsabil: prospect.owner?.name || "Nealocat",
+      Sursă: prospect.source || "",
+      Status: crmProspectStatusLabel(prospect.status),
+      Prioritate: prospect.priority,
+      "Stare contact": prospect.contactState,
+      "Următoarea acțiune": next ? crmNextActionLabel(next.type, next.description) : "",
+      "Termen acțiune": dateTimeValue(next?.dueAt || null),
+      "Rezumat calificare": prospect.qualificationSummary ? JSON.stringify(prospect.qualificationSummary) : "",
+      "Calificat la": dateTimeValue(prospect.qualifiedAt),
+      "Revenire la": dateTimeValue(prospect.returnAt),
+      "Motiv închidere": prospect.closedReason || "",
+      "Creat la": dateTimeValue(prospect.createdAt),
+      "Actualizat la": dateTimeValue(prospect.updatedAt)
+    };
+  });
+  const opportunityRows = opportunities.map((opportunity) => {
+    const next = opportunity.nextActions[0];
+    const forecast = crmForecastForStage(opportunity.stage);
+    return {
+      "ID oportunitate": opportunity.id,
+      "ID prospect sursă": opportunity.sourceProspectId || "",
+      Firmă: opportunity.company.name,
+      CUI: opportunity.company.taxId || "",
+      Domeniu: opportunity.company.industry || "",
+      Oportunitate: opportunity.name,
+      "Nevoie comercială": opportunity.needSummary || "",
+      Responsabil: opportunity.owner?.name || "Nealocat",
+      Etapă: crmOpportunityStageLabel(opportunity.stage),
+      "Nivel forecast": crmForecastLabel(forecast),
+      "Valoare oportunitate": crmCurrentOpportunityValue(opportunity) ?? "",
+      Monedă: opportunity.currency || "",
+      "Valoare ofertată": numberValue(opportunity.quotedValue),
+      "Valoare revizuită": numberValue(opportunity.revisedValue),
+      "Valoare finală agreată": numberValue(opportunity.agreedValue),
+      "Data estimată decizie": dateValue(opportunity.decisionDate),
+      "Perioadă dorită început": dateValue(opportunity.desiredPeriodStart),
+      "Perioadă dorită final": dateValue(opportunity.desiredPeriodEnd),
+      Geografie: opportunity.geography || "",
+      Formate: opportunity.formats || "",
+      "Status buget": opportunity.budgetStatus || "",
+      "Buget minim": numberValue(opportunity.budgetMin),
+      "Buget maxim": numberValue(opportunity.budgetMax),
+      "Următoarea acțiune": next ? crmNextActionLabel(next.type, next.description) : "",
+      "Termen acțiune": dateTimeValue(next?.dueAt || null),
+      "Motiv pierdere": opportunity.lostReason || "",
+      "Categorie pierdere": opportunity.lostReasonCode || "",
+      Concurent: opportunity.competitor || "",
+      "Câștigat la": dateTimeValue(opportunity.wonAt),
+      "Pierdut la": dateTimeValue(opportunity.lostAt),
+      "Creat la": dateTimeValue(opportunity.createdAt),
+      "Actualizat la": dateTimeValue(opportunity.updatedAt)
+    };
+  });
+  const contactRows = companies.flatMap((company) => company.contacts.map((contact) => ({
+    Firmă: company.name,
+    CUI: company.taxId || "",
+    "Persoană contact": contact.name,
+    Funcție: contact.role || "",
     Telefon: contact.phone || "",
     Email: contact.email || "",
+    "Canal preferat": contact.preferredChannel || "",
+    Decident: contact.isDecisionMaker ? "Da" : "Nu",
     Principal: contact.isPrimary ? "Da" : "Nu",
-    "Observatii contact": contact.notes || "",
-    "Adaugat la": dateTimeValue(contact.createdAt)
+    "Adăugat la": dateTimeValue(contact.createdAt)
   })));
-  const contactSheet = XLSX.utils.json_to_sheet(contactRows.length ? contactRows : [{ Mesaj: "Nu exista persoane de contact in CRM." }]);
+  const eventRows = events.map((event) => ({
+    Firmă: event.company.name,
+    CUI: event.company.taxId || "",
+    "ID prospect": event.prospectId || "",
+    "ID oportunitate": event.opportunityId || "",
+    "Data activitate": dateTimeValue(event.occurredAt),
+    Tip: event.type,
+    Sursă: event.source,
+    Rezumat: event.summary,
+    Rezultat: event.result || "",
+    "Valori vechi": event.previousValues ? JSON.stringify(event.previousValues) : "",
+    "Valori noi": event.nextValues ? JSON.stringify(event.nextValues) : "",
+    Autor: event.actor?.name || event.actor?.email || "Sistem"
+  }));
 
-  const activityRows = leads.flatMap((lead) => lead.activities.map((activity) => ({
-    Companie: lead.companyName,
-    "CUI / CIF": lead.taxId || lead.client?.taxId || "",
-    "Domeniu activitate": lead.industry || "Neclasificat",
-    "Oportunitate / campanie": lead.opportunityName || "",
-    Vanzator: lead.assignedTo?.name || "Nealocat",
-    "Data activitate": dateTimeValue(activity.activityDate),
-    Actiune: activity.actionType || activity.type,
-    "Etapa la momentul respectiv": activity.statusAtTime ? crmStatusLabel(activity.statusAtTime) : "",
-    Detalii: activity.details || "",
-    Observatii: activity.note || "",
-    "Urmatorul pas": activity.nextStep || "",
-    "Urmator follow-up": dateValue(activity.nextFollowUpDate),
-    "Inregistrat de": activity.user?.name || activity.user?.email || ""
-  })));
-  const activitySheet = XLSX.utils.json_to_sheet(activityRows.length ? activityRows : [{ Mesaj: "Nu exista activitati CRM." }]);
-
-  leadSheet["!cols"] = columnWidths([14, 28, 16, 24, 28, 14, 24, 16, 28, 20, 18, 22, 28, 18, 10, 18, 18, 18, 30, 28, 36, 28, 20, 24, 20, 20, 20, 20]);
-  contactSheet["!cols"] = columnWidths([28, 16, 24, 28, 22, 24, 20, 16, 28, 10, 36, 20]);
-  activitySheet["!cols"] = columnWidths([28, 16, 24, 28, 22, 20, 20, 20, 36, 36, 30, 16, 24]);
-  XLSX.utils.book_append_sheet(workbook, leadSheet, "Lead-uri");
-  XLSX.utils.book_append_sheet(workbook, contactSheet, "Persoane contact");
-  XLSX.utils.book_append_sheet(workbook, activitySheet, "Istoric observatii");
+  appendSheet(workbook, "Firme", companyRows, [26, 16, 22, 26, 22, 28, 16, 18, 18]);
+  appendSheet(workbook, "Prospectări", prospectRows, [22, 28, 16, 22, 22, 20, 20, 16, 20, 28, 20, 40, 18, 18, 30, 18, 18]);
+  appendSheet(workbook, "Oportunități", opportunityRows, [22, 22, 28, 16, 22, 30, 42, 22, 22, 18, 20, 10, 20, 20, 20, 18, 18, 18, 24, 24, 18, 16, 16, 30, 20, 32, 22, 22, 18, 18, 18, 18]);
+  appendSheet(workbook, "Persoane contact", contactRows, [28, 16, 24, 20, 16, 28, 16, 12, 12, 18]);
+  appendSheet(workbook, "Istoric audit", eventRows, [28, 16, 22, 22, 20, 24, 18, 45, 45, 45, 45, 24]);
 
   const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
   await recordAudit({
     actor: session,
-    action: "crm.export",
-    entityType: "crm_lead",
-    metadata: { leadCount: leads.length, contactCount: contactRows.length, activityCount: activityRows.length },
+    action: "crm.v4.export",
+    entityType: "crm_domain",
+    metadata: { companyCount: companies.length, prospectCount: prospects.length, opportunityCount: opportunities.length, contactCount: contactRows.length, eventCount: events.length },
     request
   });
 
@@ -174,14 +189,22 @@ export async function GET(request: NextRequest) {
   });
 }
 
+function appendSheet(workbook: XLSX.WorkBook, name: string, rows: Record<string, unknown>[], widths: number[]) {
+  const sheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{ Mesaj: "Nu există înregistrări." }]);
+  sheet["!cols"] = widths.map((wch) => ({ wch }));
+  XLSX.utils.book_append_sheet(workbook, sheet, name.slice(0, 31));
+}
+
+function numberValue(value: unknown) {
+  if (value == null || value === "") return "";
+  const parsed = Number(String(value));
+  return Number.isFinite(parsed) ? parsed : "";
+}
+
 function dateValue(value: Date | null) {
   return value ? value.toISOString().slice(0, 10) : "";
 }
 
 function dateTimeValue(value: Date | null) {
   return value ? value.toISOString().replace("T", " ").slice(0, 16) : "";
-}
-
-function columnWidths(widths: number[]) {
-  return widths.map((wch) => ({ wch }));
 }

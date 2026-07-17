@@ -503,12 +503,12 @@ function CrmTeamPanel({ data }: { data: CooData["crmTeam"] }) {
         <Metric label="Fara urmator pas" value={data.summary.missingNextStep} tone={data.summary.missingNextStep ? "yellow" : "green"} />
         <Metric label="Etape blocate" value={data.summary.stalled} tone={data.summary.stalled ? "yellow" : "green"} />
       </div>
-      <p className="mt-4 text-xs font-bold text-slate-400">Valorile comerciale sunt sume integrale. Procentul reprezinta increderea in castig, nu reduce valoarea oportunitatii.</p>
+      <p className="mt-4 text-xs font-bold text-slate-400">Valorile comerciale sunt integrale și sunt separate pe monedă. Nivelul de forecast este derivat exclusiv din etapa oportunității.</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Metric label="Activitati 7 zile" value={data.activities7Days} />
         <CrmMoneyMetric label="Pipeline total" values={data.summary.pipelineByCurrency} />
-        <CrmMoneyMetric label="Sanse >=50% luna" values={data.summary.likelyByCurrency} />
-        <CrmMoneyMetric label="Sanse >=80% luna" values={data.summary.commitByCurrency} />
+        <CrmMoneyMetric label="Posibil" values={data.summary.likelyByCurrency} />
+        <CrmMoneyMetric label="Angajament" values={data.summary.commitByCurrency} />
         <Metric label="Castigate luna" value={data.summary.wonThisMonth} tone="green" />
       </div>
     </Panel>
@@ -523,7 +523,7 @@ function CrmTeamPanel({ data }: { data: CooData["crmTeam"] }) {
               <th className="px-3 py-2">Follow-up</th>
               <th className="px-3 py-2">Activitati 7 zile</th>
               <th className="px-3 py-2">Atentie</th>
-              <th className="px-3 py-2">Sanse &gt;=80%</th>
+              <th className="px-3 py-2">Angajament</th>
               <th className="px-3 py-2">Conversie</th>
             </tr>
           </thead>

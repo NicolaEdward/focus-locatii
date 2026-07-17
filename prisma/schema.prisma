@@ -335,6 +335,17 @@ model User {
   createdCampaigns Campaign[] @relation("CampaignCreator")
   createdRentalPriceSegments RentalPriceSegment[]
   createdRentalChangeLogs RentalChangeLog[]
+  ownedCrmCompanies CrmCompany[] @relation("CrmCompanyOwner")
+  createdCrmCompanies CrmCompany[] @relation("CrmCompanyCreator")
+  createdCrmCompanyContacts CrmCompanyContact[] @relation("CrmCompanyContactCreator")
+  ownedCrmProspects CrmProspect[] @relation("CrmProspectOwner")
+  createdCrmProspects CrmProspect[] @relation("CrmProspectCreator")
+  ownedCrmOpportunities CrmOpportunity[] @relation("CrmOpportunityOwner")
+  createdCrmOpportunities CrmOpportunity[] @relation("CrmOpportunityCreator")
+  ownedCrmNextActions CrmNextAction[] @relation("CrmNextActionOwner")
+  createdCrmNextActions CrmNextAction[] @relation("CrmNextActionCreator")
+  completedCrmNextActions CrmNextAction[] @relation("CrmNextActionCompleter")
+  crmDomainEvents CrmEvent[] @relation("CrmEventActor")
   createdSuppliers Supplier[] @relation("SupplierCreator")
   assignedOperationTasks OperationTask[] @relation("OperationTaskAssignee")
   createdOperationTasks OperationTask[] @relation("OperationTaskCreator")
@@ -815,6 +826,214 @@ model CrmActivity {
   @@index([type])
   @@index([activityDate])
   @@map("portfolio_crm_activities")
+}
+
+model CrmCompany {
+  id                      String   @id @default(cuid())
+  name                    String
+  normalizedName          String   @db.VarChar(191)
+  taxId                   String?  @db.VarChar(80)
+  normalizedTaxId         String?  @unique @db.VarChar(80)
+  industry                String?  @db.VarChar(120)
+  website                 String?  @db.VarChar(191)
+  normalizedWebsiteDomain String?  @db.VarChar(191)
+  ownerId                 String?
+  createdByUserId         String?
+  status                  String   @default("prospect") @db.VarChar(40)
+  version                 Int      @default(0)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  owner User? @relation("CrmCompanyOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdBy User? @relation("CrmCompanyCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  contacts CrmCompanyContact[]
+  prospects CrmProspect[]
+  opportunities CrmOpportunity[]
+  nextActions CrmNextAction[]
+  events CrmEvent[]
+
+  @@index([normalizedName])
+  @@index([normalizedWebsiteDomain])
+  @@index([ownerId, status])
+  @@index([createdAt])
+  @@map("portfolio_crm_companies")
+}
+
+model CrmCompanyContact {
+  id               String   @id @default(cuid())
+  companyId        String
+  name             String
+  role             String?  @db.VarChar(191)
+  email            String?  @db.VarChar(191)
+  normalizedEmail  String?  @db.VarChar(191)
+  phone            String?  @db.VarChar(80)
+  normalizedPhone  String?  @db.VarChar(80)
+  preferredChannel String?  @db.VarChar(40)
+  isDecisionMaker  Boolean  @default(false)
+  isPrimary        Boolean  @default(false)
+  createdByUserId  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  company CrmCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("CrmCompanyContactCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, isPrimary])
+  @@index([normalizedEmail])
+  @@index([normalizedPhone])
+  @@index([createdByUserId])
+  @@map("portfolio_crm_company_contacts")
+}
+
+model CrmProspect {
+  id                   String    @id @default(cuid())
+  companyId            String
+  ownerId              String?
+  createdByUserId      String?
+  legacyLeadId         String?   @unique
+  source               String?   @db.VarChar(191)
+  status               String    @default("prospecting") @db.VarChar(40)
+  priority             String    @default("normal") @db.VarChar(20)
+  contactState         String    @default("uncontacted") @db.VarChar(40)
+  qualificationSummary Json?
+  initialSnapshot      Json
+  qualifiedAt          DateTime?
+  disqualifiedAt       DateTime?
+  returnAt             DateTime?
+  closedReason         String?   @db.Text
+  version              Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  company CrmCompany @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  owner User? @relation("CrmProspectOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdBy User? @relation("CrmProspectCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  opportunities CrmOpportunity[]
+  nextActions CrmNextAction[]
+  events CrmEvent[]
+
+  @@index([companyId, status])
+  @@index([ownerId, status])
+  @@index([status, createdAt])
+  @@index([returnAt])
+  @@map("portfolio_crm_prospects")
+}
+
+model CrmOpportunity {
+  id                   String    @id @default(cuid())
+  companyId            String
+  sourceProspectId     String?
+  ownerId              String?
+  createdByUserId      String?
+  legacyLeadId         String?   @unique
+  name                 String
+  needSummary          String?   @db.Text
+  stage                String    @default("opportunity") @db.VarChar(40)
+  desiredPeriodStart   DateTime?
+  desiredPeriodEnd     DateTime?
+  geography            String?   @db.Text
+  formats              String?   @db.Text
+  budgetStatus         String?   @db.VarChar(40)
+  budgetMin            Decimal?  @db.Decimal(14, 2)
+  budgetMax            Decimal?  @db.Decimal(14, 2)
+  currency             String?   @db.VarChar(3)
+  quotedValue          Decimal?  @db.Decimal(14, 2)
+  revisedValue         Decimal?  @db.Decimal(14, 2)
+  agreedValue          Decimal?  @db.Decimal(14, 2)
+  decisionDate         DateTime?
+  quotedAt             DateTime?
+  negotiationAt        DateTime?
+  contractingAt        DateTime?
+  wonAt                DateTime?
+  lostAt               DateTime?
+  onHoldAt             DateTime?
+  previousStage        String?   @db.VarChar(40)
+  lostReasonCode       String?   @db.VarChar(80)
+  lostReason           String?   @db.Text
+  competitor           String?   @db.VarChar(191)
+  initialSnapshot      Json
+  version              Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  company CrmCompany @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  sourceProspect CrmProspect? @relation(fields: [sourceProspectId], references: [id], onDelete: SetNull)
+  owner User? @relation("CrmOpportunityOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdBy User? @relation("CrmOpportunityCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  nextActions CrmNextAction[]
+  events CrmEvent[]
+
+  @@index([companyId, stage])
+  @@index([sourceProspectId])
+  @@index([ownerId, stage])
+  @@index([stage, decisionDate])
+  @@index([wonAt])
+  @@index([lostAt])
+  @@index([updatedAt])
+  @@map("portfolio_crm_opportunities")
+}
+
+model CrmNextAction {
+  id                String    @id @default(cuid())
+  companyId         String
+  prospectId        String?
+  opportunityId     String?
+  ownerId           String?
+  createdByUserId   String?
+  completedByUserId String?
+  type              String    @db.VarChar(80)
+  description       String?   @db.Text
+  dueAt             DateTime
+  priority          String    @default("normal") @db.VarChar(20)
+  status            String    @default("open") @db.VarChar(20)
+  result            String?   @db.Text
+  completedAt       DateTime?
+  version           Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  company CrmCompany @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  prospect CrmProspect? @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  opportunity CrmOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  owner User? @relation("CrmNextActionOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdBy User? @relation("CrmNextActionCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  completedBy User? @relation("CrmNextActionCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([ownerId, status, dueAt])
+  @@index([prospectId, status])
+  @@index([opportunityId, status])
+  @@index([companyId, status])
+  @@map("portfolio_crm_next_actions")
+}
+
+model CrmEvent {
+  id             String   @id @default(cuid())
+  companyId      String
+  prospectId     String?
+  opportunityId  String?
+  actorUserId    String?
+  type           String   @db.VarChar(80)
+  source         String   @default("CRM") @db.VarChar(60)
+  summary        String   @db.Text
+  result         String?  @db.Text
+  previousValues Json?
+  nextValues     Json?
+  metadata       Json?
+  idempotencyKey String?  @unique @db.VarChar(191)
+  occurredAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  company CrmCompany @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  prospect CrmProspect? @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  opportunity CrmOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  actor User? @relation("CrmEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, occurredAt])
+  @@index([prospectId, occurredAt])
+  @@index([opportunityId, occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@index([type, occurredAt])
+  @@map("portfolio_crm_events")
 }
 
 model BillingItem {

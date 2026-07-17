@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { addCrmContact } from "@/lib/crm-service";
+import { crmLegacyWriteDisabledResponse } from "@/lib/crm-legacy";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -23,23 +24,5 @@ const schema = z.object({
 export async function POST(request: NextRequest, context: Context) {
   const { session, response } = await requireAnyPermission(request, ["leads.manage", "leads.manage.own"]);
   if (response || !session) return response;
-  const { id } = await context.params;
-  try {
-    const input = schema.parse(await request.json());
-    const contact = await addCrmContact(id, input, session);
-    await recordAudit({
-      actor: session,
-      action: "crm.contact_create",
-      entityType: "crm_lead",
-      entityId: id,
-      metadata: { contactId: contact.id },
-      request
-    });
-    return NextResponse.json({ contact }, { status: 201, headers: { "Cache-Control": "no-store" } });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Contactul nu a putut fi adaugat." },
-      { status: 400, headers: { "Cache-Control": "no-store" } }
-    );
-  }
+  return crmLegacyWriteDisabledResponse();
 }

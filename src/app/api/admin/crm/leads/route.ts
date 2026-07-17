@@ -4,6 +4,7 @@ import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { isKnownCrmStatus } from "@/lib/crm";
 import { createCrmLead, listCrmLeads } from "@/lib/crm-service";
+import { crmLegacyWriteDisabledResponse } from "@/lib/crm-legacy";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -79,29 +80,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const { session, response } = await requireAnyPermission(request, ["leads.manage", "leads.manage.own"]);
   if (response || !session) return response;
-  try {
-    const input = leadSchema.parse(await request.json());
-    const lead = await createCrmLead({
-      ...input,
-      leadDate: parseDate(input.leadDate),
-      expectedCloseDate: parseDate(input.expectedCloseDate),
-      nextFollowUpDate: parseDate(input.nextFollowUpDate)
-    }, session);
-    await recordAudit({
-      actor: session,
-      action: "crm.lead_create",
-      entityType: "crm_lead",
-      entityId: lead.id,
-      metadata: { assignedToUserId: lead.assignedToUserId, status: lead.status },
-      request
-    });
-    return NextResponse.json({ lead }, { status: 201, headers: noStoreHeaders });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Lead-ul nu a putut fi creat." },
-      { status: 400, headers: noStoreHeaders }
-    );
-  }
+  return crmLegacyWriteDisabledResponse();
 }
 
 function parseDate(value?: string | null) {

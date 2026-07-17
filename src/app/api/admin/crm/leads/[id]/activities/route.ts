@@ -5,6 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { isKnownCrmStatus } from "@/lib/crm";
 import { addCrmActivity, listCrmActivities } from "@/lib/crm-service";
 import { resolveCrmNotificationsForLead } from "@/lib/notifications";
+import { crmLegacyWriteDisabledResponse } from "@/lib/crm-legacy";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -61,28 +62,7 @@ export async function GET(request: NextRequest, context: Context) {
 export async function POST(request: NextRequest, context: Context) {
   const { session, response } = await requireAnyPermission(request, ["leads.manage", "leads.manage.own"]);
   if (response || !session) return response;
-  const { id } = await context.params;
-  try {
-    const input = activitySchema.parse(await request.json());
-    const activity = await addCrmActivity(id, {
-      ...input,
-      activityDate: parseDate(input.activityDate),
-      nextFollowUpDate: parseDate(input.nextFollowUpDate)
-    }, session);
-    await recordAudit({
-      actor: session,
-      action: "crm.activity_create",
-      entityType: "crm_lead",
-      entityId: id,
-      metadata: { actionType: input.actionType, nextFollowUpDate: input.nextFollowUpDate, status: input.status },
-      request
-    });
-    await resolveCrmNotificationsForLead(id, session.id).catch(() => undefined);
-    return NextResponse.json({ activity }, { status: 201, headers: noStoreHeaders });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Activitatea CRM nu a putut fi salvata.";
-    return NextResponse.json({ error: message }, { status: message.includes("doar pe lead-urile tale") ? 403 : 400, headers: noStoreHeaders });
-  }
+  return crmLegacyWriteDisabledResponse();
 }
 
 function parseDate(value?: string | null) {

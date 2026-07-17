@@ -103,9 +103,9 @@ export function NotificationBell() {
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {row.entityType === "crm_lead" && row.entityId ? (
-                    <Link className="focus-button secondary" href={`/admin/crm?lead=${encodeURIComponent(row.entityId)}`} onClick={() => setOpen(false)}>
-                      Deschide lead
+                  {["crm_prospect", "crm_opportunity"].includes(row.entityType || "") && row.entityId ? (
+                    <Link className="focus-button secondary" href={`/admin/crm?view=today&kind=${row.entityType === "crm_opportunity" ? "opportunity" : "prospect"}&record=${encodeURIComponent(row.entityId)}`} onClick={() => setOpen(false)}>
+                      Deschide în CRM
                     </Link>
                   ) : null}
                   {row.type.startsWith("receivable_") && typeof row.metadata?.clientId === "string" ? (

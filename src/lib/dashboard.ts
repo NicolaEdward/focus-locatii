@@ -9,6 +9,7 @@ import { getFinancialDashboardData } from "@/lib/financial-dashboard";
 import { sortOperationalLocations } from "@/lib/location-order";
 import { calculateLocationProfit } from "@/lib/profit";
 import { getCrmTeamDashboardData } from "@/lib/crm-dashboard";
+import { crmCurrentOpportunityValue, crmNextActionLabel } from "@/lib/crm-domain";
 import { effectiveInstallationDate, hasMissingInstallationSchedule } from "@/lib/installation-date";
 import { effectiveNeutralizationDate, hasMissingNeutralizationSchedule } from "@/lib/neutralization-date";
 import { HOLD_DURATION_DAYS } from "@/lib/reservation-lifecycle";
@@ -169,6 +170,61 @@ type CrmLeadRow = {
   assignedTo: { name: string; email: string } | null;
 };
 
+async function listDashboardCrmRows(session: AuthSession): Promise<CrmLeadRow[]> {
+  const ownerWhere = session.role === "SALES_AGENT" ? { ownerId: session.id } : {};
+  const [prospects, opportunities] = await Promise.all([
+    prisma.crmProspect.findMany({
+      where: ownerWhere,
+      select: {
+        id: true, source: true, ownerId: true, createdByUserId: true, status: true, createdAt: true, updatedAt: true,
+        company: { select: { name: true, contacts: { where: { isPrimary: true }, select: { name: true, phone: true, email: true }, take: 1 } } },
+        owner: { select: { name: true, email: true } },
+        nextActions: { where: { status: "open" }, select: { type: true, description: true, dueAt: true }, orderBy: { dueAt: "asc" }, take: 1 }
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 150
+    }),
+    prisma.crmOpportunity.findMany({
+      where: ownerWhere,
+      select: {
+        id: true, name: true, needSummary: true, geography: true, formats: true, ownerId: true, createdByUserId: true, stage: true,
+        currency: true, quotedValue: true, revisedValue: true, agreedValue: true, decisionDate: true, lostReason: true, createdAt: true, updatedAt: true,
+        company: { select: { name: true, contacts: { where: { isPrimary: true }, select: { name: true, phone: true, email: true }, take: 1 } } },
+        owner: { select: { name: true, email: true } },
+        nextActions: { where: { status: "open" }, select: { type: true, description: true, dueAt: true }, orderBy: { dueAt: "asc" }, take: 1 }
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 150
+    })
+  ]);
+  const prospectRows: CrmLeadRow[] = prospects.map((row) => {
+    const contact = row.company.contacts[0];
+    const action = row.nextActions[0];
+    return {
+      id: row.id, leadDate: row.createdAt, companyName: row.company.name, opportunityName: null, clientType: null,
+      contactName: contact?.name || null, phone: contact?.phone || null, email: contact?.email || null, source: row.source,
+      assignedToUserId: row.ownerId, createdByUserId: row.createdByUserId, status: row.status, estimatedValue: null, currency: null,
+      probability: null, expectedCloseDate: null, nextFollowUpDate: action?.dueAt || null,
+      nextStep: action ? crmNextActionLabel(action.type, action.description) : null, locationsInterested: null, notes: null, lostReason: null,
+      lastActivityAt: row.updatedAt, createdAt: row.createdAt, updatedAt: row.updatedAt, assignedTo: row.owner
+    };
+  });
+  const opportunityRows: CrmLeadRow[] = opportunities.map((row) => {
+    const contact = row.company.contacts[0];
+    const action = row.nextActions[0];
+    return {
+      id: row.id, leadDate: row.createdAt, companyName: row.company.name, opportunityName: row.name, clientType: null,
+      contactName: contact?.name || null, phone: contact?.phone || null, email: contact?.email || null, source: null,
+      assignedToUserId: row.ownerId, createdByUserId: row.createdByUserId, status: row.stage,
+      estimatedValue: crmCurrentOpportunityValue(row), currency: row.currency, probability: null, expectedCloseDate: row.decisionDate,
+      nextFollowUpDate: action?.dueAt || null, nextStep: action ? crmNextActionLabel(action.type, action.description) : null,
+      locationsInterested: [row.geography, row.formats].filter(Boolean).join(" / ") || null, notes: row.needSummary, lostReason: row.lostReason,
+      lastActivityAt: row.updatedAt, createdAt: row.createdAt, updatedAt: row.updatedAt, assignedTo: row.owner
+    };
+  });
+  return [...prospectRows, ...opportunityRows].sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime()).slice(0, 300);
+}
+
 export type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
 
 export async function getDashboardData(session: AuthSession) {
@@ -315,15 +371,7 @@ export async function getDashboardData(session: AuthSession) {
       : Promise.resolve([]),
     financeOnly || !canReadCrm
       ? Promise.resolve([]) as Promise<CrmLeadRow[]>
-      : prisma.crmLead.findMany({
-          where:
-            session.role === "SALES_AGENT"
-              ? { assignedToUserId: session.id }
-              : {},
-          include: { assignedTo: { select: { name: true, email: true } } },
-          orderBy: [{ updatedAt: "desc" }],
-          take: 300
-        }) as Promise<CrmLeadRow[]>,
+      : listDashboardCrmRows(session),
     financePromise,
     crmTeamPromise
   ]);

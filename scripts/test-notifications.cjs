@@ -3,7 +3,9 @@ const path = require("node:path");
 const { loadTsModule } = require("./load-ts-module.cjs");
 
 let receivables = [];
-let crmLeads = [];
+let crmActions = [];
+let crmProspectsWithoutAction = [];
+let crmOpportunitiesWithoutAction = [];
 const users = [
   { id: "director-1", role: "SALES_DIRECTOR", active: true },
   { id: "coo-1", role: "COO", active: true },
@@ -27,8 +29,14 @@ const prisma = {
       return true;
     })
   },
-  crmLead: {
-    findMany: async () => crmLeads
+  crmNextAction: {
+    findMany: async () => crmActions
+  },
+  crmProspect: {
+    findMany: async () => crmProspectsWithoutAction
+  },
+  crmOpportunity: {
+    findMany: async () => crmOpportunitiesWithoutAction
   },
   appNotification: {
     findMany: async ({ where }) => notifications
@@ -84,6 +92,7 @@ const prisma = {
 
 const {
   createOperationalNotifications,
+  resolveCrmNotificationsForRecord,
   sendDailyNotificationEmails,
   resolveCrmNotificationsForLead,
   syncCrmNotifications,
@@ -131,53 +140,38 @@ async function main() {
   assert(!openNotification("soon-1", "receivable_due_soon"), "due-soon transition archives stale due-soon notification");
   assert(openNotification("soon-1", "receivable_overdue"), "due-soon transition leaves current overdue notification");
 
-  crmLeads = [
-    crmLead("crm-overdue", "Client restant", "qualified", "2026-06-25", "2026-06-25"),
-    crmLead("crm-today", "Client azi", "in_offer", "2026-06-26", "2026-06-25"),
-    crmLead("crm-missing", "Client fara pas", "new", null, "2026-06-25"),
-    crmLead("crm-tomorrow", "Client maine", "offer_sent", "2026-06-27", "2026-06-25"),
-    crmLead("crm-classify", "Prospect vechi", "cold", "2026-07-10", "2026-06-10"),
-    crmLead("crm-no-answer", "Client fara raspuns", "qualified", "2026-07-10", "2026-06-25", {
-      noResponseCount: 3,
-      stageChangedAt: "2026-06-25"
-    }),
-    crmLead("crm-stalled", "Oportunitate blocata", "in_offer", "2026-07-10", "2026-06-25", {
-      stageChangedAt: "2026-06-01"
-    }),
-    crmLead("crm-close-soon", "Oportunitate aproape", "in_offer", "2026-07-10", "2026-06-25", {
-      forecastCategory: "commit",
-      expectedCloseDate: "2026-06-29"
-    }),
-    crmLead("crm-close-overdue", "Oportunitate restanta", "in_negotiation", "2026-07-10", "2026-06-25", {
-      forecastCategory: "best_case",
-      expectedCloseDate: "2026-06-25"
-    }),
-    crmLead("crm-future", "Client viitor", "offer_sent", "2026-06-28", "2026-06-25")
+  crmActions = [
+    crmAction("crm-overdue", "Client restant", "2026-06-25", { prospect: crmProspectRef("crm-overdue", "qualified", "2026-06-25") }),
+    crmAction("crm-today", "Client azi", "2026-06-26", { opportunity: crmOpportunityRef("crm-today", "quoted", "2026-06-25") }),
+    crmAction("crm-tomorrow", "Client maine", "2026-06-27", { opportunity: crmOpportunityRef("crm-tomorrow", "quoted", "2026-06-25") }),
+    crmAction("crm-stalled", "Oportunitate blocata", "2026-07-10", { opportunity: crmOpportunityRef("crm-stalled", "quoted", "2026-06-01") }),
+    crmAction("crm-close-soon", "Oportunitate aproape", "2026-07-10", { opportunity: crmOpportunityRef("crm-close-soon", "negotiation", "2026-06-25", "2026-06-29") }),
+    crmAction("crm-close-overdue", "Oportunitate restanta", "2026-07-10", { opportunity: crmOpportunityRef("crm-close-overdue", "contracting", "2026-06-25", "2026-06-25") }),
+    crmAction("crm-future", "Client viitor", "2026-06-28", { opportunity: crmOpportunityRef("crm-future", "quoted", "2026-06-25") })
   ];
+  crmProspectsWithoutAction = [missingProspect("crm-missing-prospect", "Prospect fara pas")];
+  crmOpportunitiesWithoutAction = [missingOpportunity("crm-missing-opportunity", "Oportunitate fara pas")];
   const crmCreated = await syncCrmNotifications(now);
-  assert.equal(crmCreated, 9, "CRM sync creates follow-up, classification, stalled and close-date notifications");
+  assert.equal(crmCreated, 8, "CRM sync creates follow-up, missing-action, stalled and close-date notifications");
   assert(openNotification("crm-overdue", "crm_followup_overdue"), "overdue CRM notification is created");
   assert(openNotification("crm-today", "crm_followup_due_today"), "today CRM notification is created");
-  assert(openNotification("crm-missing", "crm_next_step_missing"), "missing-next-step CRM notification is created");
+  assert(openNotification("crm-missing-prospect", "crm_next_step_missing"), "missing prospect action notification is created");
+  assert(openNotification("crm-missing-opportunity", "crm_next_step_missing"), "missing opportunity action notification is created");
   assert(openNotification("crm-tomorrow", "crm_followup_due_tomorrow"), "tomorrow CRM notification is created");
-  assert(openNotification("crm-classify", "crm_classification_due"), "stale Cold prospect receives a classification reminder");
-  assert(openNotification("crm-no-answer", "crm_no_response_attention"), "repeated no-answer attempts create one attention reminder");
   assert(openNotification("crm-stalled", "crm_stage_stalled"), "a stalled commercial stage creates one attention reminder");
   assert(openNotification("crm-close-soon", "crm_close_due_soon"), "a committed opportunity near close date creates a reminder");
   assert(openNotification("crm-close-overdue", "crm_close_overdue"), "a best-case opportunity past close date creates an overdue reminder");
   assert.equal(await syncCrmNotifications(now), 0, "CRM notifications remain idempotent");
+  assert.equal(await resolveCrmNotificationsForRecord("crm_opportunity", "crm-today", "seller-1", now).then((result) => result.count), 1, "saved CRM work resolves the related notification");
+  assert(!openNotification("crm-today", "crm_followup_due_today"), "resolved CRM work is removed from active notifications immediately");
   const digest = await sendDailyNotificationEmails(now);
   assert.equal(digest.enabled, false, "email digest remains safely disabled without provider configuration");
 
-  crmLeads = [
-    crmLead("crm-overdue", "Client restant", "qualified", "2026-06-30", "2026-06-26"),
-    crmLead("crm-today", "Client azi", "in_offer", "2026-06-26", "2026-06-26"),
-    crmLead("crm-missing", "Client fara pas", "new", null, "2026-06-26")
-  ];
+  crmActions = [crmAction("crm-overdue", "Client restant", "2026-06-30", { prospect: crmProspectRef("crm-overdue", "qualified", "2026-06-26") })];
+  crmProspectsWithoutAction = [];
+  crmOpportunitiesWithoutAction = [];
   await syncCrmNotifications(now);
   assert(!openNotification("crm-overdue", "crm_followup_overdue"), "resolved CRM timing archives stale overdue notification");
-  assert.equal(await resolveCrmNotificationsForLead("crm-today", "seller-1", now).then((result) => result.count), 1, "saved CRM work resolves the related notification");
-  assert(!openNotification("crm-today", "crm_followup_due_today"), "resolved CRM work is removed from active notifications immediately");
 
   const operationalCreated = await createOperationalNotifications({
     recipientUserIds: ["seller-1"],
@@ -221,8 +215,8 @@ async function main() {
       "due-soon transitions to overdue without stale duplicate",
       "duplicate notification not repeatedly created",
       "CRM due and missing-next-step notifications are idempotent",
-      "CRM tomorrow and stale-classification reminders are generated without duplicate noise",
-      "CRM no-answer and stalled-stage reminders are generated without duplicate noise",
+      "CRM tomorrow and missing-action reminders are generated without duplicate noise",
+      "CRM stalled-stage and decision-date reminders are generated without duplicate noise",
       "saving CRM work resolves its active reminder immediately",
       "stale CRM notifications are archived",
       "operational completion notification is scoped and idempotent",
@@ -244,24 +238,43 @@ function receivable(id, dueDate, ownerId, directOwnerId = null) {
   };
 }
 
-function crmLead(id, companyName, status, nextFollowUpDate, updatedAt, extra = {}) {
+function crmAction(id, companyName, dueDate, related) {
   return {
     id,
-    companyName,
-    opportunityName: null,
-    status,
-    assignedToUserId: "seller-1",
-    nextFollowUpDate: nextFollowUpDate ? new Date(`${nextFollowUpDate}T00:00:00.000Z`) : null,
-    nextStep: "Revenire comerciala",
-    stageChangedAt: new Date(`${extra.stageChangedAt || updatedAt}T00:00:00.000Z`),
-    lastActivityAt: new Date(`${updatedAt}T00:00:00.000Z`),
-    noResponseCount: extra.noResponseCount || 0,
-    forecastCategory: extra.forecastCategory || "pipeline",
-    expectedCloseDate: extra.expectedCloseDate ? new Date(`${extra.expectedCloseDate}T00:00:00.000Z`) : null,
-    estimatedValue: extra.estimatedValue || 1000,
-    currency: "EUR",
-    updatedAt: new Date(`${updatedAt}T00:00:00.000Z`)
+    ownerId: "seller-1",
+    type: "initial_call",
+    description: null,
+    dueAt: new Date(`${dueDate}T00:00:00.000Z`),
+    company: { name: companyName },
+    prospect: related.prospect || null,
+    opportunity: related.opportunity || null
   };
+}
+
+function crmProspectRef(id, status, updatedAt) {
+  return { id, status, updatedAt: new Date(`${updatedAt}T00:00:00.000Z`) };
+}
+
+function crmOpportunityRef(id, stage, updatedAt, decisionDate = null) {
+  return {
+    id,
+    name: `Oportunitate ${id}`,
+    stage,
+    decisionDate: decisionDate ? new Date(`${decisionDate}T00:00:00.000Z`) : null,
+    updatedAt: new Date(`${updatedAt}T00:00:00.000Z`),
+    quotedValue: 4000,
+    revisedValue: null,
+    agreedValue: null,
+    currency: "EUR"
+  };
+}
+
+function missingProspect(id, name) {
+  return { id, ownerId: "seller-1", status: "prospecting", updatedAt: new Date("2026-06-25T00:00:00.000Z"), company: { name } };
+}
+
+function missingOpportunity(id, name) {
+  return { id, ownerId: "seller-1", name, stage: "opportunity", updatedAt: new Date("2026-06-25T00:00:00.000Z"), company: { name } };
 }
 
 function openNotification(entityId, type) {

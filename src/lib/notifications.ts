@@ -2,16 +2,12 @@ import type { AuthSession } from "@/lib/auth";
 import type { Prisma } from "@prisma/client";
 import { recordAudit } from "@/lib/audit";
 import {
-  CRM_ACTIVE_DB_STATUSES,
-  crmEffectiveProbability,
-  crmForecastCategoryForStatus,
-  crmLeadClassificationAttention,
-  crmStageAgeDays,
-  crmStageIsStalled,
-  crmStatusLabel,
-  normalizeCrmStatus,
-  startOfUtcDay
-} from "@/lib/crm";
+  crmCurrentOpportunityValue,
+  crmForecastForStage,
+  crmNextActionLabel,
+  crmOpportunityStageLabel,
+  crmProspectStatusLabel
+} from "@/lib/crm-domain";
 import { moneyNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -125,126 +121,94 @@ export async function listNotificationsForUser(session: AuthSession) {
 }
 
 export async function syncCrmNotifications(now = new Date()) {
-  const today = startOfUtcDay(now);
+  const today = startOfDay(now);
   const tomorrow = addDays(today, 1);
   const dayAfterTomorrow = addDays(today, 2);
   const nextWeek = addDays(today, 8);
-  const leads = await prisma.crmLead.findMany({
-    where: {
-      status: { in: CRM_ACTIVE_DB_STATUSES },
-      assignedToUserId: { not: null }
-    },
-    select: {
-      id: true,
-      companyName: true,
-      opportunityName: true,
-      status: true,
-      assignedToUserId: true,
-      nextFollowUpDate: true,
-      nextStep: true,
-      estimatedValue: true,
-      currency: true,
-      probability: true,
-      forecastCategory: true,
-      expectedCloseDate: true,
-      stageChangedAt: true,
-      noResponseCount: true,
-      updatedAt: true
-    },
-    take: 2000
-  });
+  const [actions, prospectsWithoutAction, opportunitiesWithoutAction] = await Promise.all([
+    prisma.crmNextAction.findMany({
+      where: { status: "open", ownerId: { not: null } },
+      select: {
+        id: true, ownerId: true, type: true, description: true, dueAt: true, company: { select: { name: true } },
+        prospect: { select: { id: true, status: true, updatedAt: true } },
+        opportunity: { select: { id: true, name: true, stage: true, decisionDate: true, updatedAt: true, quotedValue: true, revisedValue: true, agreedValue: true, currency: true } }
+      },
+      orderBy: { dueAt: "asc" },
+      take: 5000
+    }),
+    prisma.crmProspect.findMany({
+      where: { OR: [{ status: "prospecting" }, { status: "qualified", opportunities: { none: { stage: { in: ["opportunity", "quoted", "negotiation", "contracting", "on_hold"] } } } }], ownerId: { not: null }, nextActions: { none: { status: "open" } } },
+      select: { id: true, ownerId: true, status: true, updatedAt: true, company: { select: { name: true } } },
+      take: 2000
+    }),
+    prisma.crmOpportunity.findMany({
+      where: { stage: { in: ["opportunity", "quoted", "negotiation", "contracting"] }, ownerId: { not: null }, nextActions: { none: { status: "open" } } },
+      select: { id: true, ownerId: true, name: true, stage: true, updatedAt: true, company: { select: { name: true } } },
+      take: 2000
+    })
+  ]);
 
   const desiredKeys = new Set<string>();
   let created = 0;
-  for (const lead of leads) {
-    if (!lead.assignedToUserId) continue;
-    const classificationAttention = crmLeadClassificationAttention(lead, now);
-    const stageStalled = crmStageIsStalled(lead, now);
-    const attentionType = !lead.nextFollowUpDate
-      ? "crm_next_step_missing"
-      : lead.nextFollowUpDate < today
-        ? "crm_followup_overdue"
-        : lead.nextFollowUpDate < tomorrow
-          ? "crm_followup_due_today"
-          : lead.nextFollowUpDate < dayAfterTomorrow
-            ? "crm_followup_due_tomorrow"
-            : lead.noResponseCount >= 3
-              ? "crm_no_response_attention"
-              : classificationAttention
-                ? "crm_classification_due"
-                : stageStalled
-                  ? "crm_stage_stalled"
-                  : null;
-    const reminderTypes = attentionType ? [attentionType] : [];
-    if (
-      lead.expectedCloseDate
-      && lead.expectedCloseDate < nextWeek
-      && ["best_case", "commit"].includes(crmForecastCategoryForStatus(lead.status, lead.probability))
-    ) {
-      reminderTypes.push(lead.expectedCloseDate < today ? "crm_close_overdue" : "crm_close_due_soon");
+  for (const action of actions) {
+    if (!action.ownerId) continue;
+    const entityType = action.opportunity ? "crm_opportunity" : "crm_prospect";
+    const entityId = action.opportunity?.id || action.prospect?.id;
+    if (!entityId) continue;
+    const reminderTypes: string[] = [];
+    if (action.dueAt < today) reminderTypes.push("crm_followup_overdue");
+    else if (action.dueAt < tomorrow) reminderTypes.push("crm_followup_due_today");
+    else if (action.dueAt < dayAfterTomorrow) reminderTypes.push("crm_followup_due_tomorrow");
+    const stageUpdatedAt = action.opportunity?.updatedAt || action.prospect?.updatedAt;
+    const stageAgeDays = stageUpdatedAt ? Math.max(0, Math.floor((now.getTime() - stageUpdatedAt.getTime()) / 86_400_000)) : 0;
+    if (stageAgeDays >= 14) reminderTypes.push("crm_stage_stalled");
+    if (action.opportunity?.decisionDate && action.opportunity.decisionDate < nextWeek && ["possible", "commit"].includes(crmForecastForStage(action.opportunity.stage))) {
+      reminderTypes.push(action.opportunity.decisionDate < today ? "crm_close_overdue" : "crm_close_due_soon");
     }
-
-    for (const type of reminderTypes) {
-      desiredKeys.add(notificationKey(lead.assignedToUserId, type, "crm_lead", lead.id));
-      const classificationTitle = classificationAttention === "cold"
-        ? "Prospect Cold de clasificat"
-        : "Lead Contactat de calificat";
+    for (const type of [...new Set(reminderTypes)]) {
+      desiredKeys.add(notificationKey(action.ownerId, type, entityType, entityId));
       const isCloseReminder = type === "crm_close_due_soon" || type === "crm_close_overdue";
       created += await ensureNotification({
-        userId: lead.assignedToUserId,
+        userId: action.ownerId,
         type,
-        title: type === "crm_followup_overdue"
-          ? "Follow-up CRM restant"
-          : type === "crm_followup_due_today"
-            ? "Follow-up CRM pentru azi"
-            : type === "crm_followup_due_tomorrow"
-              ? "Follow-up CRM pentru maine"
-              : type === "crm_no_response_attention"
-                ? "Client greu de contactat"
-                : type === "crm_classification_due"
-                  ? classificationTitle
-                  : type === "crm_stage_stalled"
-                    ? "Oportunitate blocata in etapa"
-                    : type === "crm_close_overdue"
-                      ? "Decizie comerciala restanta"
-                      : type === "crm_close_due_soon"
-                        ? "Oportunitate aproape de termen"
-                        : "Lead fara urmator pas",
-        message: `${lead.companyName}${lead.opportunityName ? ` / ${lead.opportunityName}` : ""} este in etapa ${crmStatusLabel(lead.status)}.`,
-        entityType: "crm_lead",
-        entityId: lead.id,
+        title: type === "crm_followup_overdue" ? "Follow-up CRM restant" : type === "crm_followup_due_today" ? "Follow-up CRM pentru azi" : type === "crm_followup_due_tomorrow" ? "Follow-up CRM pentru maine" : type === "crm_stage_stalled" ? "Element CRM blocat in etapa" : type === "crm_close_overdue" ? "Decizie comerciala restanta" : "Oportunitate aproape de termen",
+        message: `${action.company.name}${action.opportunity?.name ? ` / ${action.opportunity.name}` : ""}: ${action.opportunity ? crmOpportunityStageLabel(action.opportunity.stage) : crmProspectStatusLabel(action.prospect?.status || "prospecting")}.`,
+        entityType,
+        entityId,
         severity: ["crm_followup_overdue", "crm_close_overdue"].includes(type) ? "high" : "medium",
-        dueDate: isCloseReminder
-          ? lead.expectedCloseDate
-          : ["crm_classification_due", "crm_stage_stalled", "crm_no_response_attention"].includes(type)
-            ? today
-            : lead.nextFollowUpDate,
-        recommendedAction: type === "crm_no_response_attention"
-          ? "Schimba canalul de contact sau decide daca oportunitatea ramane activa."
-          : type === "crm_classification_due"
-            ? classificationAttention === "cold"
-              ? "Contacteaza prospectul sau inchide-l daca nu mai este relevant."
-              : "Confirma nevoia, perioada si bugetul, apoi actualizeaza etapa."
-            : type === "crm_stage_stalled"
-              ? `Oportunitatea este in aceeasi etapa de ${crmStageAgeDays(lead.stageChangedAt, now)} zile. Stabileste decizia urmatoare.`
-              : isCloseReminder
-                ? "Confirma urmatorul pas si actualizeaza estimarea comerciala."
-                : "Deschide lead-ul si inregistreaza urmatoarea activitate.",
+        dueDate: isCloseReminder ? action.opportunity?.decisionDate || action.dueAt : action.dueAt,
+        recommendedAction: type === "crm_stage_stalled" ? `Elementul este neschimbat de ${stageAgeDays} zile. Stabileste urmatorul rezultat.` : isCloseReminder ? "Confirma decizia comerciala si actualizeaza oportunitatea." : `Executa: ${crmNextActionLabel(action.type, action.description)}.`,
         metadata: {
-          companyName: lead.companyName,
-          crmStatus: normalizeCrmStatus(lead.status),
-          classificationAttention,
-          stageAgeDays: crmStageAgeDays(lead.stageChangedAt, now),
-          noResponseCount: lead.noResponseCount,
-          nextStep: lead.nextStep,
-          estimatedValue: lead.estimatedValue,
-          currency: lead.currency,
-          probability: crmEffectiveProbability(lead.probability, lead.status),
-          forecastCategory: crmForecastCategoryForStatus(lead.status, lead.probability),
-          expectedCloseDate: lead.expectedCloseDate?.toISOString() || null
+          companyName: action.company.name,
+          kind: action.opportunity ? "opportunity" : "prospect",
+          stage: action.opportunity?.stage || action.prospect?.status,
+          stageAgeDays,
+          actionType: action.type,
+          value: action.opportunity ? crmCurrentOpportunityValue(action.opportunity) : null,
+          currency: action.opportunity?.currency || null,
+          forecast: action.opportunity ? crmForecastForStage(action.opportunity.stage) : null,
+          decisionDate: action.opportunity?.decisionDate?.toISOString() || null
         }
       });
     }
+  }
+
+  for (const row of [...prospectsWithoutAction.map((item) => ({ ...item, kind: "prospect" as const })), ...opportunitiesWithoutAction.map((item) => ({ ...item, kind: "opportunity" as const }))]) {
+    if (!row.ownerId) continue;
+    const entityType = row.kind === "opportunity" ? "crm_opportunity" : "crm_prospect";
+    desiredKeys.add(notificationKey(row.ownerId, "crm_next_step_missing", entityType, row.id));
+    created += await ensureNotification({
+      userId: row.ownerId,
+      type: "crm_next_step_missing",
+      title: "Element CRM fara urmator pas",
+      message: `${row.company.name}${"name" in row ? ` / ${row.name}` : ""} nu are o actiune deschisa.`,
+      entityType,
+      entityId: row.id,
+      severity: "medium",
+      dueDate: today,
+      recommendedAction: "Stabileste actiunea si termenul urmator.",
+      metadata: { companyName: row.company.name, kind: row.kind, stage: row.kind === "opportunity" ? row.stage : row.status }
+    });
   }
 
   await archiveStaleCrmNotifications(desiredKeys, now);
@@ -332,6 +296,27 @@ export async function resolveCrmNotificationsForLead(leadId: string, resolvedByU
     where: {
       entityType: "crm_lead",
       entityId: leadId,
+      type: { in: crmNotificationTypes },
+      status: { in: ["open", "in_progress"] }
+    },
+    data: {
+      status: "resolved",
+      resolvedByUserId,
+      resolvedAt: now
+    }
+  });
+}
+
+export async function resolveCrmNotificationsForRecord(
+  entityType: "crm_prospect" | "crm_opportunity",
+  entityId: string,
+  resolvedByUserId: string,
+  now = new Date()
+) {
+  return prisma.appNotification.updateMany({
+    where: {
+      entityType,
+      entityId,
       type: { in: crmNotificationTypes },
       status: { in: ["open", "in_progress"] }
     },
@@ -523,8 +508,9 @@ function dailyDigestHtml(name: string, rows: Array<{
 }>) {
   const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL || "https://locatii.focusmedia.ro").replace(/\/$/, "");
   const items = rows.slice(0, 30).map((row) => {
-    const href = row.entityType === "crm_lead" && row.entityId
-      ? `${baseUrl}/admin/crm?lead=${encodeURIComponent(row.entityId)}`
+    const crmKind = row.entityType === "crm_opportunity" ? "opportunity" : row.entityType === "crm_prospect" ? "prospect" : null;
+    const href = crmKind && row.entityId
+      ? `${baseUrl}/admin/crm?view=today&kind=${crmKind}&record=${encodeURIComponent(row.entityId)}`
       : `${baseUrl}/admin/crm`;
     return `<li style="margin:0 0 16px"><strong>${escapeHtml(row.title)}</strong><br>${escapeHtml(row.message)}${row.dueDate ? `<br>Termen: ${escapeHtml(row.dueDate.toLocaleDateString("ro-RO"))}` : ""}${row.recommendedAction ? `<br>${escapeHtml(row.recommendedAction)}` : ""}<br><a href="${href}">Deschide in aplicatie</a></li>`;
   }).join("");

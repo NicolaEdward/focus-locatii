@@ -5,6 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { isKnownCrmStatus } from "@/lib/crm";
 import { getCrmLead, updateCrmLead } from "@/lib/crm-service";
 import { resolveCrmNotificationsForLead } from "@/lib/notifications";
+import { crmLegacyWriteDisabledResponse } from "@/lib/crm-legacy";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -78,36 +79,7 @@ export async function GET(request: NextRequest, context: Context) {
 export async function PATCH(request: NextRequest, context: Context) {
   const { session, response } = await requireAnyPermission(request, ["leads.manage", "leads.manage.own"]);
   if (response || !session) return response;
-  const { id } = await context.params;
-  try {
-    const input = patchSchema.parse(await request.json());
-    const { leadDate, expectedCloseDate, nextFollowUpDate, ...patch } = input;
-    const lead = await updateCrmLead(id, {
-      ...patch,
-      ...(leadDate !== undefined ? { leadDate: parseDate(leadDate) } : {}),
-      ...(expectedCloseDate !== undefined ? { expectedCloseDate: parseDate(expectedCloseDate) } : {}),
-      ...(nextFollowUpDate !== undefined ? { nextFollowUpDate: parseDate(nextFollowUpDate) } : {})
-    }, session);
-    await recordAudit({
-      actor: session,
-      action: "crm.lead_update",
-      entityType: "crm_lead",
-      entityId: id,
-      metadata: {
-        fields: Object.keys(input),
-        status: input.status,
-        assignedToUserId: input.assignedToUserId
-      },
-      request
-    });
-    if (input.status !== undefined || input.nextFollowUpDate !== undefined) {
-      await resolveCrmNotificationsForLead(id, session.id).catch(() => undefined);
-    }
-    return NextResponse.json({ lead }, { headers: noStoreHeaders });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Lead-ul nu a putut fi actualizat.";
-    return NextResponse.json({ error: message }, { status: message.includes("doar lead-urile tale") ? 403 : 400, headers: noStoreHeaders });
-  }
+  return crmLegacyWriteDisabledResponse();
 }
 
 function parseDate(value?: string | null) {

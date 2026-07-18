@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import * as XLSX from "xlsx";
+import { excelSerialToUtcDate, parseSecureSpreadsheet } from "@/lib/secure-spreadsheet";
 
 export type FinancialCompanySnapshotInput = {
   companyName: string;
@@ -130,15 +130,25 @@ const auxiliaryMarkers = [
   "penalitati"
 ];
 
-export function parseFinancialWorkbook(input: {
+export async function parseFinancialWorkbook(input: {
   buffer: Buffer;
   fileName: string;
+  mimeType?: string | null;
+  signal?: AbortSignal;
   now?: Date;
   soonDays?: number;
-}): FinancialParsedWorkbook {
+}): Promise<FinancialParsedWorkbook> {
   const now = startOfUtcDay(input.now || new Date());
   const soonDays = input.soonDays ?? 7;
-  const workbook = XLSX.read(input.buffer, { type: "buffer", cellDates: true });
+  const workbook = await parseSecureSpreadsheet({
+    buffer: input.buffer,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    purpose: "financial",
+    allowedExtensions: ["xlsx", "xlsm", "xls"],
+    raw: true,
+    signal: input.signal
+  });
   const fileHash = crypto.createHash("sha256").update(input.buffer).digest("hex");
   const payables: FinancialPayableInput[] = [];
   const receivables: FinancialReceivableInput[] = [];
@@ -146,10 +156,9 @@ export function parseFinancialWorkbook(input: {
   let ignoredRows = 0;
   let reportDate = parseDateFromText(input.fileName);
 
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) continue;
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, blankrows: false, raw: true });
+  for (const sheet of workbook.sheets) {
+    const sheetName = sheet.name;
+    const rows = sheet.rows;
     const title = rows.slice(0, 3).flat().map(cleanText).filter(Boolean).join(" ");
     reportDate ||= parseDateFromText(title);
     const company = detectCompany(sheetName, title);
@@ -626,8 +635,7 @@ function parseDate(value: unknown) {
   if (!hasValue(value)) return null;
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : startOfUtcDay(value);
   if (typeof value === "number" && Number.isFinite(value)) {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    return parsed ? new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d)) : null;
+    return excelSerialToUtcDate(value);
   }
   const text = cleanText(value);
   const romanian = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);

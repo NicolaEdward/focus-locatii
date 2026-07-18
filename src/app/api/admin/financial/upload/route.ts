@@ -5,6 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { normalizeInvoiceNumber } from "@/lib/clients";
 import { parseFinancialWorkbook } from "@/lib/financial-import";
 import { prisma } from "@/lib/prisma";
+import { SpreadsheetSecurityError } from "@/lib/secure-spreadsheet";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,11 +29,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Fisierul trebuie sa fie Excel." }, { status: 400, headers: noStoreHeaders });
     }
     if (file.size > 20 * 1024 * 1024) {
-      return NextResponse.json({ error: "Fisierul este prea mare pentru import." }, { status: 400, headers: noStoreHeaders });
+      return NextResponse.json({ error: "Fisierul este prea mare pentru import." }, { status: 413, headers: noStoreHeaders });
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const parsed = parseFinancialWorkbook({ buffer, fileName: file.name });
+    const parsed = await parseFinancialWorkbook({ buffer, fileName: file.name, mimeType: file.type, signal: request.signal });
     const duplicate = await prisma.financialReportUpload.findFirst({
       where: {
         fileHash: parsed.fileHash,
@@ -151,7 +152,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Raportul financiar nu a putut fi procesat." },
-      { status: 400, headers: noStoreHeaders }
+      { status: error instanceof SpreadsheetSecurityError ? error.status : 400, headers: noStoreHeaders }
     );
   }
 }

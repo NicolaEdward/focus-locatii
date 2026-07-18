@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
-import * as XLSX from "xlsx";
 import { normalizeClientName } from "@/lib/clients";
 import { normalizeReceivableInvoiceNumber, receivableRowHash } from "@/lib/receivables-domain";
+import { excelSerialToUtcDate, parseSecureSpreadsheet } from "@/lib/secure-spreadsheet";
 
 export type ReceivablesCompanyCode = "FOCUS_MEDIA" | "EXCELLENCE_MEDIA" | "FOCUS_BG";
 export type ReceivablesCurrency = "RON" | "EUR";
@@ -75,23 +75,32 @@ const COMPANY_NAMES: Record<ReceivablesCompanyCode, string> = {
   FOCUS_BG: "Focus BG / Focus Media LLC EOOD"
 };
 
-export function parseReceivablesWorkbook(input: {
+export async function parseReceivablesWorkbook(input: {
   buffer: Buffer;
   fileName: string;
+  mimeType?: string | null;
+  signal?: AbortSignal;
   selectedCompanyCode?: ReceivablesCompanyCode | null;
   now?: Date;
-}): ReceivablesParsedWorkbook {
-  const workbook = XLSX.read(input.buffer, { type: "buffer", cellDates: true, cellFormula: false });
+}): Promise<ReceivablesParsedWorkbook> {
+  const workbook = await parseSecureSpreadsheet({
+    buffer: input.buffer,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    purpose: "receivables",
+    allowedExtensions: ["xlsx", "xls"],
+    raw: true,
+    signal: input.signal
+  });
   const fileHash = crypto.createHash("sha256").update(input.buffer).digest("hex");
   const rows: ReceivablesImportRow[] = [];
   const issues: ReceivablesImportIssue[] = [];
   const declaredTotals: ReceivablesParsedWorkbook["declaredTotals"] = [];
   let reportDate = parseDateFromText(input.fileName);
 
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) continue;
-    const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, blankrows: false, raw: true });
+  for (const sheet of workbook.sheets) {
+    const sheetName = sheet.name;
+    const grid = sheet.rows;
     const title = grid.slice(0, 5).flat().map(cleanText).filter(Boolean).join(" ");
     reportDate ||= parseDateFromText(title);
     const detected = detectReceivablesCompany(`${sheetName} ${title}`);
@@ -382,8 +391,7 @@ function parseExcelDate(value: unknown) {
   if (!hasValue(value)) return null;
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : startOfUtcDay(value);
   if (typeof value === "number" && Number.isFinite(value)) {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    return parsed ? validUtcDate(parsed.y, parsed.m, parsed.d) : null;
+    return excelSerialToUtcDate(value);
   }
   const text = cleanText(value);
   const romanian = text.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})$/);

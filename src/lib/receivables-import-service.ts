@@ -20,13 +20,17 @@ const ACTIVE_PAYMENT_STATUS = "active";
 export async function stageReceivablesImport(input: {
   buffer: Buffer;
   fileName: string;
+  mimeType?: string | null;
+  signal?: AbortSignal;
   selectedCompanyCode?: ReceivablesCompanyCode | null;
   reportDate?: Date | null;
   actor: AuthSession;
 }) {
-  const parsed = parseReceivablesWorkbook({
+  const parsed = await parseReceivablesWorkbook({
     buffer: input.buffer,
     fileName: input.fileName,
+    mimeType: input.mimeType,
+    signal: input.signal,
     selectedCompanyCode: input.selectedCompanyCode
   });
   if (!parsed.rows.length) throw new Error("Raportul nu conține rânduri valide în secțiunea «LISTA ÎNCASĂRI».");

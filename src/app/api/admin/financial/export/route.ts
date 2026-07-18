@@ -4,6 +4,7 @@ import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { moneyNumber } from "@/lib/money";
+import { sanitizeSpreadsheetRows } from "@/lib/spreadsheet-export";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
   ]);
 
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(payables.map((row) => ({
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(sanitizeSpreadsheetRows(payables.map((row) => ({
     Firma: row.companyName,
     Furnizor: row.supplierName,
     "Descriere document": row.documentDescription,
@@ -39,8 +40,8 @@ export async function GET(request: NextRequest) {
     Status: row.status,
     "Needs review": row.needsReview ? "Da" : "Nu",
     Observatii: row.reviewNote
-  }))), "Plati");
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(receivables.map((row) => ({
+  })))), "Plati");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(sanitizeSpreadsheetRows(receivables.map((row) => ({
     Firma: row.companyName,
     Factura: row.invoiceNumber,
     Locatie: row.location,
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
     Status: row.status,
     "Needs review": row.needsReview ? "Da" : "Nu",
     Observatii: row.reviewNote
-  }))), "Incasari");
+  })))), "Incasari");
 
   const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
   await recordAudit({

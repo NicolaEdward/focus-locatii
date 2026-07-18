@@ -13,6 +13,7 @@ import {
 } from "../src/lib/receivables-domain";
 import { parseReceivablesWorkbook } from "../src/lib/receivables-import-parser";
 
+async function main() {
 const workbook = XLSX.utils.book_new();
 appendSheet(workbook, "Focus Media", [
   ["FOCUS MEDIA OUTDOOR S.R.L."],
@@ -41,7 +42,7 @@ appendSheet(workbook, "Focus BG EOOD", [
 ]);
 
 const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
-const parsed = parseReceivablesWorkbook({ buffer, fileName: "Raport Incasari 16.07.2026.xlsx" });
+const parsed = await parseReceivablesWorkbook({ buffer, fileName: "Raport Incasari 16.07.2026.xlsx" });
 assert.equal(parsed.rows.length, 5, "only LISTA INCASARI rows must be parsed");
 assert.deepEqual(new Set(parsed.rows.map((row) => row.companyCode)), new Set(["FOCUS_MEDIA", "EXCELLENCE_MEDIA", "FOCUS_BG"]));
 assert.equal(parsed.rows.some((row) => row.clientNameRaw === "Furnizor ignorat"), false, "LISTA PLATI must never be imported");
@@ -59,7 +60,7 @@ assert.equal(fmbg52?.reportRemainingAmount, "-61.45");
 assert.equal(parsed.summaries.find((summary) => summary.companyCode === "FOCUS_BG")?.creditAmount, "61.45");
 assert.ok(parsed.issues.some((issue) => issue.type === "declared_total_mismatch" && issue.severity === "critical"), "FMBG-56 omission from declared total must be detected");
 
-const bgOnly = parseReceivablesWorkbook({ buffer, fileName: "Raport.xlsx", selectedCompanyCode: "FOCUS_BG" });
+const bgOnly = await parseReceivablesWorkbook({ buffer, fileName: "Raport.xlsx", selectedCompanyCode: "FOCUS_BG" });
 assert.equal(bgOnly.rows.length, 3, "manual company selection must ignore other company sheets");
 assert.equal(bgOnly.issues.some((issue) => issue.type === "company_conflict"), false);
 
@@ -161,18 +162,24 @@ assert.doesNotMatch(migration, /\b(DROP\s+(?:TABLE|COLUMN|INDEX)|TRUNCATE\s+TABL
 
 const optionalRealFixture = "C:\\Users\\edwar\\Desktop\\Raport Incasari _ Plati_ 23.06.2026.xlsx";
 if (fs.existsSync(optionalRealFixture)) {
-  const real = parseReceivablesWorkbook({ buffer: fs.readFileSync(optionalRealFixture), fileName: path.basename(optionalRealFixture) });
+  const real = await parseReceivablesWorkbook({ buffer: fs.readFileSync(optionalRealFixture), fileName: path.basename(optionalRealFixture) });
   assert.equal(real.rows.length, 72);
   assert.deepEqual(new Set(real.rows.map((row) => row.companyCode)), new Set(["FOCUS_MEDIA", "EXCELLENCE_MEDIA", "FOCUS_BG"]));
   assert.equal(real.rows.filter((row) => row.rowState === "credit").length, 1);
 }
 
 console.log("Receivables import v2 tests passed: parser, Bulgaria anomalies, decimal reconciliation, aliases, RBAC, transaction and privacy.");
+}
+
+void main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
 
 function appendSheet(book: XLSX.WorkBook, name: string, rows: unknown[][]) {
   XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), name);
 }
 
 function read(relativePath: string) {
-  return fs.readFileSync(path.join(root, relativePath), "utf8");
+  return fs.readFileSync(path.join(path.resolve(process.cwd()), relativePath), "utf8");
 }

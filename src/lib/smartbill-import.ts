@@ -1,10 +1,10 @@
 import crypto from "crypto";
-import * as XLSX from "xlsx";
 import type { Prisma } from "@prisma/client";
 import { normalizeClientName, normalizeInvoiceNumber } from "@/lib/clients";
 import { companyCodeForEntity, companyEntityOrThrow, type CompanyEntity } from "@/lib/company-entities";
 import { financialStatus } from "@/lib/financial-review";
 import { roundMoney } from "@/lib/money";
+import { excelSerialToUtcDate, parseSecureSpreadsheet } from "@/lib/secure-spreadsheet";
 
 export type SmartBillReportType = "customer_invoices" | "supplier_documents";
 export type SmartBillPreviewAction =
@@ -246,23 +246,36 @@ const supplierColumns = {
   status: ["status", "stare"]
 };
 
-export function parseSmartBillCustomerInvoices(input: Buffer | Uint8Array | ArrayBuffer) {
-  return parseSmartBillWorkbook(input, "customer_invoices");
+export function parseSmartBillCustomerInvoices(input: Buffer | Uint8Array | ArrayBuffer, file?: { fileName?: string; mimeType?: string | null; signal?: AbortSignal }) {
+  return parseSmartBillWorkbook(input, "customer_invoices", file);
 }
 
-export function parseSmartBillSupplierDocuments(input: Buffer | Uint8Array | ArrayBuffer) {
-  return parseSmartBillWorkbook(input, "supplier_documents");
+export function parseSmartBillSupplierDocuments(input: Buffer | Uint8Array | ArrayBuffer, file?: { fileName?: string; mimeType?: string | null; signal?: AbortSignal }) {
+  return parseSmartBillWorkbook(input, "supplier_documents", file);
 }
 
-export function parseSmartBillWorkbook(input: Buffer | Uint8Array | ArrayBuffer, reportType: SmartBillReportType): SmartBillParsedReport {
+export async function parseSmartBillWorkbook(
+  input: Buffer | Uint8Array | ArrayBuffer,
+  reportType: SmartBillReportType,
+  file?: { fileName?: string; mimeType?: string | null; signal?: AbortSignal }
+): Promise<SmartBillParsedReport> {
   const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input as ArrayBuffer);
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
+  const workbook = await parseSecureSpreadsheet({
+    buffer,
+    fileName: file?.fileName || "smartbill.xlsx",
+    mimeType: file?.mimeType,
+    purpose: "smartbill",
+    allowedExtensions: ["xlsx", "xlsm", "xls"],
+    raw: false,
+    blankRows: true,
+    signal: file?.signal
+  });
+  const sheet = workbook.sheets[0];
+  const sheetName = sheet?.name;
   if (!sheetName || !sheet) {
     throw new Error("Fisierul SmartBill nu contine foi Excel.");
   }
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: false });
+  const rows = sheet.rows;
   const aliases = reportType === "customer_invoices" ? customerColumns : supplierColumns;
   const headerIndex = findHeaderRow(rows, aliases);
   if (headerIndex < 0) {
@@ -284,7 +297,7 @@ export function parseSmartBillWorkbook(input: Buffer | Uint8Array | ArrayBuffer,
   return {
     reportType,
     fileHash: smartBillFileHash(buffer),
-    sheets: workbook.SheetNames,
+    sheets: workbook.sheets.map((item) => item.name),
     headerRow: headerIndex + 1,
     detectedColumns: header.filter(Boolean),
     rows: parsedRows,
@@ -318,8 +331,8 @@ export function resolveSmartBillCompanyContext(value?: string | null): SmartBill
 export function normalizeSmartBillDate(value: unknown): Date | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return startOfUtcDay(value);
   if (typeof value === "number" && Number.isFinite(value)) {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    if (parsed) return new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+    const parsed = excelSerialToUtcDate(value);
+    if (parsed) return parsed;
   }
   const text = cleanCell(value);
   if (!text) return null;

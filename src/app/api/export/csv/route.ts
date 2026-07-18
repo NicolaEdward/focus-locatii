@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { listAdminLocations } from "@/lib/locations";
+import { escapeSpreadsheetFormula } from "@/lib/spreadsheet-export";
 
 function csvCell(value: unknown) {
-  const text = String(value ?? "");
+  const text = String(escapeSpreadsheetFormula(value) ?? "");
   return `"${text.replace(/"/g, '""')}"`;
 }
 

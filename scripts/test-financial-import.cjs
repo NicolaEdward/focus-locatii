@@ -9,7 +9,8 @@ const defaultWorkbook = "C:/Users/edwar/Desktop/Raport Incasari _ Plati_ 23.06.2
 const workbookPath = process.argv[2] || defaultWorkbook;
 
 assert(fs.existsSync(workbookPath), `Workbook not found: ${workbookPath}`);
-const parsed = parseFinancialWorkbook({
+void (async () => {
+const parsed = await parseFinancialWorkbook({
   buffer: fs.readFileSync(workbookPath),
   fileName: path.basename(workbookPath),
   now: new Date(Date.UTC(2026, 5, 23))
@@ -37,3 +38,7 @@ console.log(JSON.stringify({
     issueCount: company.issueCount
   }))
 }, null, 2));
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

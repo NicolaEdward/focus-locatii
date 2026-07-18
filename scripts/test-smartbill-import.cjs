@@ -126,6 +126,7 @@ function supplierWorkbook() {
   ]);
 }
 
+void (async () => {
 assert.equal(smartbill.normalizeFiscalCode("RO15116098"), "15116098");
 assert.equal(smartbill.normalizeFiscalCode("ro 15116098"), "15116098");
 assert.equal(smartbill.normalizeFiscalCode("15116098"), "15116098");
@@ -137,7 +138,7 @@ assert.equal(smartbill.mapSmartBillCustomerInvoiceStatus("anulata", { totalAmoun
 assert.equal(smartbill.mapSmartBillSupplierDocumentStatus("platita", { totalAmount: 100 }).status, "paid");
 assert.equal(smartbill.mapSmartBillSupplierDocumentStatus("status strain", { totalAmount: 100 }).status, "needs_review");
 
-const customerParsed = smartbill.parseSmartBillCustomerInvoices(customerWorkbook());
+const customerParsed = await smartbill.parseSmartBillCustomerInvoices(customerWorkbook());
 assert.equal(customerParsed.rows.length, 2);
 assert.deepEqual(customerParsed.detectedColumns.slice(0, 5), ["Nr. crt.", "Client", "CIF", "Adresa", "Factura"]);
 assert.equal(customerParsed.rows[0].clientName, "BEST ADVERTISING & CONSULT SRL");
@@ -147,7 +148,7 @@ assert.equal(customerParsed.rows[0].issueDate.toISOString().slice(0, 10), "2026-
 assert.equal(customerParsed.rows[0].totalAmount, 47283.07);
 assert.equal(customerParsed.rows[1].status, "collected");
 
-const negativeCustomerParsed = smartbill.parseSmartBillCustomerInvoices(negativeCustomerWorkbook());
+const negativeCustomerParsed = await smartbill.parseSmartBillCustomerInvoices(negativeCustomerWorkbook());
 assert.equal(negativeCustomerParsed.rows[0].issues.some((issue) => issue.includes("negativa")), false);
 assert.equal(smartbill.classifySmartBillAdjustment(negativeCustomerParsed.rows[0]), "STORNO");
 const negativePreview = smartbill.buildSmartBillPreview({
@@ -160,14 +161,14 @@ const negativePreview = smartbill.buildSmartBillPreview({
 assert.equal(negativePreview.summary.invalidCount, 0);
 assert.equal(negativePreview.summary.adjustmentNeedsReviewCount, 1);
 
-const supplierParsed = smartbill.parseSmartBillSupplierDocuments(supplierWorkbook());
+const supplierParsed = await smartbill.parseSmartBillSupplierDocuments(supplierWorkbook());
 assert.equal(supplierParsed.rows.length, 2);
 assert.deepEqual(supplierParsed.detectedColumns.slice(0, 4), ["Document", "Denumire furnizor", "CIF", "Data doc"]);
 assert.equal(supplierParsed.rows[0].supplierName, "ASOCIATIA DE PROPRIETARI TURN T3");
 assert.equal(supplierParsed.rows[0].normalizedFiscalCode, "28993486");
 assert.equal(supplierParsed.rows[0].documentNumber, "T3.564");
 assert.equal(supplierParsed.rows[1].status, "paid");
-const negativeSupplierParsed = smartbill.parseSmartBillSupplierDocuments(negativeSupplierWorkbook());
+const negativeSupplierParsed = await smartbill.parseSmartBillSupplierDocuments(negativeSupplierWorkbook());
 assert.equal(negativeSupplierParsed.rows[0].issues.some((issue) => issue.includes("negativa")), false);
 assert.equal(smartbill.classifySmartBillAdjustment(negativeSupplierParsed.rows[0]), "STORNO");
 const negativeSupplierPreview = smartbill.buildSmartBillPreview({
@@ -305,7 +306,7 @@ const duplicateAdjustmentPreview = smartbill.buildSmartBillPreview({
 });
 assert.equal(duplicateAdjustmentPreview.rows[0].proposedAction, "DUPLICATE");
 
-const sameReportAdjustmentParsed = smartbill.parseSmartBillCustomerInvoices(sameReportAdjustmentWorkbook());
+const sameReportAdjustmentParsed = await smartbill.parseSmartBillCustomerInvoices(sameReportAdjustmentWorkbook());
 const sameReportAdjustmentPreview = smartbill.buildSmartBillPreview({
   parsed: sameReportAdjustmentParsed,
   fileName: "Facturi_same_report_negative.xls",
@@ -398,8 +399,8 @@ assert.equal(supplierPreview.summary.duplicateCount, 0);
 const realCustomerFile = path.join(process.env.USERPROFILE || "", "Downloads", "Facturi_29_06_2026.xls");
 const realSupplierFile = path.join(process.env.USERPROFILE || "", "Downloads", "Raport_document_furnizori_29_06_2026 (1) (1).xls");
 if (fs.existsSync(realCustomerFile)) {
-  const realCustomerParsed = smartbill.parseSmartBillCustomerInvoices(fs.readFileSync(realCustomerFile));
-  const wrongTypeCustomerParsed = smartbill.parseSmartBillSupplierDocuments(fs.readFileSync(realCustomerFile));
+  const realCustomerParsed = await smartbill.parseSmartBillCustomerInvoices(fs.readFileSync(realCustomerFile), { fileName: realCustomerFile });
+  const wrongTypeCustomerParsed = await smartbill.parseSmartBillSupplierDocuments(fs.readFileSync(realCustomerFile), { fileName: realCustomerFile });
   const realCustomerPreview = smartbill.buildSmartBillPreview({
     parsed: realCustomerParsed,
     fileName: "Facturi_29_06_2026.xls",
@@ -421,7 +422,7 @@ if (fs.existsSync(realCustomerFile)) {
 }
 
 if (fs.existsSync(realSupplierFile)) {
-  const realSupplierParsed = smartbill.parseSmartBillSupplierDocuments(fs.readFileSync(realSupplierFile));
+  const realSupplierParsed = await smartbill.parseSmartBillSupplierDocuments(fs.readFileSync(realSupplierFile), { fileName: realSupplierFile });
   const realSupplierPreview = smartbill.buildSmartBillPreview({
     parsed: realSupplierParsed,
     fileName: "Raport_document_furnizori_29_06_2026.xls",
@@ -507,3 +508,7 @@ const publicApiSource = fs.readFileSync(path.join(repoRoot, "src/app/api/locatio
 assert.equal(publicApiSource.includes("smartbill"), false, "SmartBill import must not be exposed by public locations API.");
 
 console.log("SmartBill import tests passed.");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

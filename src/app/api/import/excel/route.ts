@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { importExcel } from "@/lib/import-excel";
 import { recordAudit } from "@/lib/audit";
+import { SpreadsheetSecurityError } from "@/lib/secure-spreadsheet";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,14 @@ export async function POST(request: NextRequest) {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const summary = await importExcel(buffer, file.name, session?.email);
-  if (session) await recordAudit({ actor: session, action: "locations.import_excel", entityType: "import", entityId: summary.batchId, metadata: { fileName: file.name, totalRows: summary.totalRows }, request });
-  return NextResponse.json({ summary });
+  try {
+    const summary = await importExcel(buffer, file.name, session?.email, file.type, request.signal);
+    if (session) await recordAudit({ actor: session, action: "locations.import_excel", entityType: "import", entityId: summary.batchId, metadata: { fileName: file.name, totalRows: summary.totalRows }, request });
+    return NextResponse.json({ summary });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Fișierul nu a putut fi importat." },
+      { status: error instanceof SpreadsheetSecurityError ? error.status : 400 }
+    );
+  }
 }

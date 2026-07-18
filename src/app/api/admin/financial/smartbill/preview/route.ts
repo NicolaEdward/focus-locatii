@@ -13,6 +13,7 @@ import {
   type SmartBillReportType
 } from "@/lib/smartbill-import";
 import { prisma } from "@/lib/prisma";
+import { SpreadsheetSecurityError } from "@/lib/secure-spreadsheet";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,31 +42,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Fisierul SmartBill trebuie sa fie Excel." }, { status: 400, headers: noStoreHeaders });
     }
     if (file.size > 20 * 1024 * 1024) {
-      return NextResponse.json({ error: "Fisierul SmartBill este prea mare pentru import." }, { status: 400, headers: noStoreHeaders });
+      return NextResponse.json({ error: "Fisierul SmartBill este prea mare pentru import." }, { status: 413, headers: noStoreHeaders });
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const parsed = parseSmartBillReportWithDetection(buffer, reportType);
+    const parsed = await parseSmartBillReportWithDetection(buffer, reportType, { fileName: file.name, mimeType: file.type, signal: request.signal });
     const context = await loadSmartBillPreviewContext(parsed.reportType, companyContext);
     const preview = buildSmartBillPreview({ parsed, fileName: file.name, companyContext, context });
     return NextResponse.json({ preview }, { headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Raportul SmartBill nu a putut fi previzualizat." },
-      { status: 400, headers: noStoreHeaders }
+      { status: error instanceof SpreadsheetSecurityError ? error.status : 400, headers: noStoreHeaders }
     );
   }
 }
 
-function parseSmartBillReportWithDetection(buffer: Buffer, requestedType: SmartBillReportType): SmartBillParsedReport {
-  const requested = parseSmartBillReport(buffer, requestedType);
+async function parseSmartBillReportWithDetection(
+  buffer: Buffer,
+  requestedType: SmartBillReportType,
+  file: { fileName: string; mimeType: string; signal: AbortSignal }
+): Promise<SmartBillParsedReport> {
+  const requested = await parseSmartBillReport(buffer, requestedType, file);
   const requestedValidRows = countValidSmartBillRows(requested);
   if (requested.rows.length && requestedValidRows > 0) return requested;
 
   const alternateType: SmartBillReportType = requestedType === "customer_invoices" ? "supplier_documents" : "customer_invoices";
   let alternate: SmartBillParsedReport | null = null;
   try {
-    alternate = parseSmartBillReport(buffer, alternateType);
+    alternate = await parseSmartBillReport(buffer, alternateType, file);
   } catch {
     return requested;
   }
@@ -84,10 +89,10 @@ function parseSmartBillReportWithDetection(buffer: Buffer, requestedType: SmartB
   return requested;
 }
 
-function parseSmartBillReport(buffer: Buffer, reportType: SmartBillReportType) {
+function parseSmartBillReport(buffer: Buffer, reportType: SmartBillReportType, file: { fileName: string; mimeType: string; signal: AbortSignal }) {
   return reportType === "customer_invoices"
-    ? parseSmartBillCustomerInvoices(buffer)
-    : parseSmartBillSupplierDocuments(buffer);
+    ? parseSmartBillCustomerInvoices(buffer, file)
+    : parseSmartBillSupplierDocuments(buffer, file);
 }
 
 function countValidSmartBillRows(report: SmartBillParsedReport) {

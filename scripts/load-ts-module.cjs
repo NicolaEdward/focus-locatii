@@ -31,6 +31,7 @@ function loadTsModule(filePath, stubs = {}) {
     }
     return require(request);
   }
+  localRequire.resolve = require.resolve;
 
   const sandbox = {
     exports: module.exports,
@@ -48,6 +49,10 @@ function loadTsModule(filePath, stubs = {}) {
     Math,
     Buffer,
     URL,
+    AbortController,
+    AbortSignal,
+    setTimeout,
+    clearTimeout,
     process
   };
 

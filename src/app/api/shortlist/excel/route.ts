@@ -4,6 +4,7 @@ import { formatAvailability } from "@/lib/availability";
 import { mapsHref } from "@/lib/gps";
 import { monthlyRate, oneTimeRate } from "@/lib/format";
 import { listPublicLocations } from "@/lib/locations";
+import { escapeSpreadsheetFormula } from "@/lib/spreadsheet-export";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest) {
       ])
     ];
 
-    const sheet = XLSX.utils.aoa_to_sheet(rows);
+    const sheet = XLSX.utils.aoa_to_sheet(rows.map((row) => row.map((value) => escapeSpreadsheetFormula(value))));
     sheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 12 } }];
     sheet["!cols"] = defaultColumns();
     sheet["!autofilter"] = { ref: `A2:M${rows.length}` };

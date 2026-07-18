@@ -11,6 +11,7 @@ import {
   crmProspectStatusLabel
 } from "@/lib/crm-domain";
 import { prisma } from "@/lib/prisma";
+import { sanitizeSpreadsheetRows } from "@/lib/spreadsheet-export";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -190,6 +191,7 @@ export async function GET(request: NextRequest) {
 }
 
 function appendSheet(workbook: XLSX.WorkBook, name: string, rows: Record<string, unknown>[], widths: number[]) {
+  rows = sanitizeSpreadsheetRows(rows);
   const sheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{ Mesaj: "Nu există înregistrări." }]);
   sheet["!cols"] = widths.map((wch) => ({ wch }));
   XLSX.utils.book_append_sheet(workbook, sheet, name.slice(0, 31));

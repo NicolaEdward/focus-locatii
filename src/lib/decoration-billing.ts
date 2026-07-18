@@ -1,4 +1,5 @@
 import type { OperationStatus } from "@/lib/operation-status";
+import { escapeSpreadsheetFormula } from "@/lib/spreadsheet-export";
 
 export type DecorationBillingReservationLike = {
   id: string;
@@ -203,6 +204,6 @@ function taskTypeLabel(value: string) {
 }
 
 function csvCell(value: unknown) {
-  const text = String(value ?? "");
+  const text = String(escapeSpreadsheetFormula(value) ?? "");
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }

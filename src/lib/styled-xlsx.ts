@@ -1,5 +1,6 @@
 import { deflateRawSync } from "zlib";
 import CRC32 from "crc-32";
+import { escapeSpreadsheetFormula } from "@/lib/spreadsheet-export";
 
 type CellValue = string | number | boolean | null | undefined;
 
@@ -136,8 +137,20 @@ function cellXml(ref: string, cell: StyledCell) {
 }
 
 function normalizeCell(rawCell: StyledCell | CellValue): StyledCell {
-  if (rawCell && typeof rawCell === "object" && "value" in rawCell) return rawCell;
-  return { value: rawCell };
+  if (rawCell && typeof rawCell === "object" && "value" in rawCell) {
+    return { ...rawCell, value: escapeSpreadsheetFormula(rawCell.value) as CellValue, hyperlink: safeExternalUrl(rawCell.hyperlink) };
+  }
+  return { value: escapeSpreadsheetFormula(rawCell) as CellValue };
+}
+
+function safeExternalUrl(value?: string) {
+  if (!value || value.length > 2048) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function colsXml(columns: Array<{ width: number }>) {

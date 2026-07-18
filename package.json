@@ -66,6 +66,7 @@
     "test:financial-import": "node scripts/test-financial-import.cjs",
     "test:receivables-import": "tsx scripts/test-receivables-import-v2.ts",
     "test:smartbill-import": "node scripts/test-smartbill-import.cjs",
+    "test:spreadsheet-security": "tsx scripts/test-secure-spreadsheet-imports.ts",
     "test:finance-consistency": "node scripts/test-finance-consistency.cjs",
     "test:billing": "node scripts/test-billing.cjs",
     "test:montaj-billing": "node scripts/test-montaj-billing.cjs",
@@ -90,6 +91,7 @@
     "release:verify-isolation": "tsx scripts/release/verify-preview-isolation.ts",
     "test:release-governance": "node scripts/test-release-governance.cjs",
     "smoke:roles": "node scripts/release/smoke-role-routes.cjs",
+    "smoke:spreadsheet-imports": "tsx scripts/release/smoke-secure-spreadsheet-routes.ts",
     "smoke:capture": "node scripts/release/capture-role-pages.cjs"
   },
   "dependencies": {
@@ -105,7 +107,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "slugify": "^1.6.6",
-    "xlsx": "^0.18.5",
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz",
     "zod": "^3.24.1"
   },
   "devDependencies": {

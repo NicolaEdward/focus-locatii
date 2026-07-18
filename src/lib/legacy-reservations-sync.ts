@@ -1,5 +1,9 @@
 import mysql from "mysql2/promise";
 import { prisma } from "@/lib/prisma";
+import {
+  assertCanonicalReservationAvailabilityForWrite,
+  lockReservationLocationsForWrite
+} from "@/lib/reservations";
 
 type LegacyReservationRow = {
   id: number;
@@ -27,6 +31,7 @@ export type LegacyReservationSyncSummary = {
   message?: string;
 };
 
+// Import-only sync boundary. Runtime reservation writes must use the reservation domain service.
 export async function syncLegacyReservations(): Promise<LegacyReservationSyncSummary> {
   if (process.env.ENABLE_LEGACY_RESERVATION_SYNC !== "true") {
     return {
@@ -92,63 +97,67 @@ export async function syncLegacyReservations(): Promise<LegacyReservationSyncSum
       const clientName = clean(rawRow.client) || "Client existent";
       const bookedAt = parseLegacyDate(rawRow.created_on);
 
-      const conflict = await prisma.reservation.findFirst({
-        where: {
-          locationId: rawRow.portfolio_id,
-          OR: [{ externalId: null }, { externalId: { not: externalId } }],
-          status: { in: ["HOLD", "RESERVED", "BOOKED"] },
-          periodStart: { lte: periodEnd },
-          periodEnd: { gte: periodStart }
-        },
-        select: { id: true }
-      });
-      if (conflict) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          const existingMirror = await tx.reservation.findUnique({
+            where: { externalId },
+            select: { id: true, locationId: true }
+          });
+          await lockReservationLocationsForWrite(tx, [rawRow.portfolio_id!, existingMirror?.locationId || ""]);
+          await assertCanonicalReservationAvailabilityForWrite(
+            tx,
+            rawRow.portfolio_id!,
+            periodStart,
+            periodEnd,
+            "BOOKED",
+            existingMirror?.id
+          );
+
+          await tx.reservation.upsert({
+            where: { externalId },
+            update: {
+              locationId: rawRow.portfolio_id!,
+              status: "BOOKED",
+              clientName,
+              contractCompany: clientName,
+              campaignName: clean(rawRow.campaign),
+              salesperson: clean(rawRow.created_by),
+              amount,
+              monthlyRentTotal: amount,
+              monthlyRentShare: amount,
+              periodStart,
+              periodEnd,
+              neutralizationDate: periodEnd,
+              externalSource: "legacy-rezervari",
+              holdExpiresAt: null,
+              ...(bookedAt ? { bookedAt } : {})
+            },
+            create: {
+              locationId: rawRow.portfolio_id!,
+              status: "BOOKED",
+              clientName,
+              contractCompany: clientName,
+              campaignName: clean(rawRow.campaign),
+              salesperson: clean(rawRow.created_by),
+              amount,
+              monthlyRentTotal: amount,
+              monthlyRentShare: amount,
+              periodStart,
+              periodEnd,
+              neutralizationDate: periodEnd,
+              externalSource: "legacy-rezervari",
+              externalId,
+              bookedAt,
+              holdExpiresAt: null
+            }
+          });
+        });
+      } catch (error) {
+        if (!isAvailabilityConflict(error)) throw error;
         skipped += 1;
         conflicts += 1;
         continue;
       }
-
-      // Import-only sync boundary: this mirrors rows from the legacy rezervari table
-      // when ENABLE_LEGACY_RESERVATION_SYNC=true. User-facing reservation lifecycle
-      // writes must stay in src/lib/reservations.ts where conflict locking is enforced.
-      await prisma.reservation.upsert({
-        where: { externalId },
-        update: {
-          locationId: rawRow.portfolio_id,
-          status: "BOOKED",
-          clientName,
-          contractCompany: clientName,
-          campaignName: clean(rawRow.campaign),
-          salesperson: clean(rawRow.created_by),
-          amount,
-          monthlyRentTotal: amount,
-          monthlyRentShare: amount,
-          periodStart,
-          periodEnd,
-          neutralizationDate: periodEnd,
-          externalSource: "legacy-rezervari",
-          holdExpiresAt: null,
-          ...(bookedAt ? { bookedAt } : {})
-        },
-        create: {
-          locationId: rawRow.portfolio_id,
-          status: "BOOKED",
-          clientName,
-          contractCompany: clientName,
-          campaignName: clean(rawRow.campaign),
-          salesperson: clean(rawRow.created_by),
-          amount,
-          monthlyRentTotal: amount,
-          monthlyRentShare: amount,
-          periodStart,
-          periodEnd,
-          neutralizationDate: periodEnd,
-          externalSource: "legacy-rezervari",
-          externalId,
-          bookedAt,
-          holdExpiresAt: null
-        }
-      });
 
       if (existingExternalIds.has(externalId)) updated += 1;
       else created += 1;
@@ -182,6 +191,11 @@ export async function syncLegacyReservations(): Promise<LegacyReservationSyncSum
   } finally {
     await connection.end();
   }
+}
+
+function isAvailabilityConflict(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return /deja o rezervare|este blocata|este in mentenanta|este inactiva|este arhivata/i.test(message);
 }
 
 function mysqlOptions(): mysql.ConnectionOptions {

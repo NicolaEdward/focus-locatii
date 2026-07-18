@@ -19,6 +19,10 @@ const adminLocationInclude = {
   },
   reservations: {
     orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
+  },
+  availabilityOverrides: {
+    where: { clearedAt: null },
+    orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
   }
 };
 
@@ -41,6 +45,10 @@ function adminLocationListInclude(now: Date) {
         holdExpiresAt: true,
         createdAt: true
       },
+      orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
+    },
+    availabilityOverrides: {
+      where: { clearedAt: null },
       orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
     }
   };
@@ -73,6 +81,18 @@ function publicLocationInclude(now: Date) {
         createdAt: true
       },
       orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
+    },
+    availabilityOverrides: {
+      where: { clearedAt: null },
+      select: {
+        id: true,
+        type: true,
+        reason: true,
+        periodStart: true,
+        periodEnd: true,
+        clearedAt: true
+      },
+      orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
     }
   };
 }
@@ -97,6 +117,14 @@ type PublicLocationWithRelations = Prisma.LocationGetPayload<{
     periodEnd: Date;
     holdExpiresAt: Date | null;
     createdAt: Date;
+  }>;
+  availabilityOverrides?: Array<{
+    id: string;
+    type: "COMMERCIAL_BLOCK" | "MAINTENANCE" | "INTERNAL_HOLD";
+    reason: string;
+    periodStart: Date;
+    periodEnd: Date | null;
+    clearedAt: Date | null;
   }>;
 };
 
@@ -130,15 +158,22 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
   );
   const availability = publicAvailability({
     status: normalizedStatus,
+    lifecycleStatus: location.lifecycleStatus,
     availabilityText: location.availabilityText,
     availableFrom: location.availableFrom,
     availableUntil: location.availableUntil,
     bookedFrom: location.bookedFrom,
     bookedUntil: location.bookedUntil,
+    blockedReason: location.blockedReason,
+    blockedFrom: location.blockedFrom,
+    blockedUntil: location.blockedUntil,
+    availabilityOverrides: location.availabilityOverrides || [],
     reservations: availabilityReservations.map((reservation) => ({
       status: reservation.status,
       periodStart: reservation.periodStart,
-      periodEnd: reservation.periodEnd
+      periodEnd: reservation.periodEnd,
+      holdExpiresAt: reservation.holdExpiresAt,
+      createdAt: reservation.createdAt
     }))
   });
 
@@ -199,6 +234,16 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
     blockedFrom: exposePrivateFields ? toIso(location.blockedFrom) : null,
     blockedUntil: exposePrivateFields ? toIso(location.blockedUntil) : null,
     blockedNotes: exposePrivateFields ? location.blockedNotes : null,
+    availabilityOverrides: exposePrivateFields
+      ? (location.availabilityOverrides || []).map((override) => ({
+          id: override.id,
+          type: override.type,
+          reason: override.reason,
+          periodStart: override.periodStart.toISOString(),
+          periodEnd: override.periodEnd?.toISOString() || null,
+          clearedAt: override.clearedAt?.toISOString() || null
+        }))
+      : undefined,
     coordinateSource: exposePrivateFields ? location.coordinateSource : null,
     gpsAuditStatus: location.gpsAuditStatus,
     benefits: arrayFromJson(location.benefits, defaultBenefits(location)),
@@ -307,6 +352,7 @@ const PUBLIC_PRIVATE_LOCATION_KEYS: Array<keyof LocationDTO> = [
   "blockedFrom",
   "blockedUntil",
   "blockedNotes",
+  "availabilityOverrides",
   "coordinateSource",
   "gpsAuditStatus",
   "internalNotes",
@@ -372,7 +418,7 @@ export async function getOrCreateCategory(name: string, sortOrder = 0) {
 export async function listPublicLocations() {
   const now = new Date();
   const locations = await prisma.location.findMany({
-    where: { showInPublic: true },
+    where: { showInPublic: true, lifecycleStatus: "ACTIVE" },
     include: publicLocationInclude(now),
     orderBy: [{ isFeatured: "desc" }, { category: { sortOrder: "asc" } }, { code: "asc" }]
   });
@@ -401,7 +447,7 @@ export async function listAdminLocations() {
 export async function getPublicLocation(id: string) {
   const now = new Date();
   const location = await prisma.location.findFirst({
-    where: { id, showInPublic: true },
+    where: { id, showInPublic: true, lifecycleStatus: "ACTIVE" },
     include: publicLocationInclude(now)
   });
 

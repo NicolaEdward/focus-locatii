@@ -1,11 +1,9 @@
-import { prisma } from "@/lib/prisma";
 import { hasGlobalDataAccess } from "@/lib/rbac";
 import type { AuthSession } from "@/lib/auth";
-import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
+import type { AvailabilityDecision } from "@/lib/availability";
+import { loadAvailabilityDecisions, type AvailabilityReservationRow } from "@/lib/availability-service";
 import {
   isManualAvailabilityStatus,
-  legacyManualBlockConflict,
-  listLocationAvailabilityOverrideConflicts,
   manualAvailabilityStatusLabel
 } from "@/lib/location-availability-overrides";
 import type {
@@ -40,139 +38,24 @@ export async function getLocationSelectionAvailability(input: {
   const periodEnd = parseDate(input.periodEnd);
 
   if (!locationIds.length) return {};
-
-  const locations = await prisma.location.findMany({
-    where: { id: { in: locationIds } },
-    select: {
-      id: true,
-      code: true,
-      status: true,
-      lifecycleStatus: true,
-      availabilityText: true,
-      blockedReason: true,
-      blockedFrom: true,
-      blockedUntil: true
-    }
+  const referenceDate = periodStart || periodEnd || startOfUtcDay(new Date());
+  const batch = await loadAvailabilityDecisions({
+    locationIds,
+    periodStart,
+    periodEnd,
+    referenceDate
   });
 
-  if (!periodStart || !periodEnd) {
-    const referenceDate = periodStart || periodEnd || startOfUtcDay(new Date());
-    const [futureReservations, overrideConflicts] = await Promise.all([
-      prisma.reservation.findMany({
-        where: {
-          locationId: { in: locationIds },
-          ...effectiveBlockingReservationWhere(new Date()),
-          periodEnd: { gte: referenceDate }
-        },
-        select: {
-          id: true,
-          locationId: true,
-          status: true,
-          periodStart: true,
-          periodEnd: true,
-          holdExpiresAt: true,
-          clientName: true,
-          campaignName: true,
-          salesperson: true,
-          ownerId: true,
-          sellerUserId: true,
-          client: { select: { companyName: true } },
-          campaign: { select: { campaignName: true } },
-          sellerUser: { select: { name: true } }
-        },
-        orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
-      }),
-      listLocationAvailabilityOverrideConflicts({
-        locationIds,
-        referenceDate,
-        session: input.session
-      })
-    ]);
-
-    const reservationConflictsByLocationId = groupByLocationId(
-      futureReservations.map((reservation) => serializeConflict(reservation, input.session))
-    );
-    const overrideConflictsByLocationId = groupByLocationId(overrideConflicts);
-
-    return Object.fromEntries(
-      locations.map((location) => {
-        const reservationConflicts = reservationConflictsByLocationId.get(location.id) || [];
-        const legacyBlock = legacyManualBlockConflict(location, { referenceDate });
-        const intervals = [
-          ...reservationConflicts,
-          ...(overrideConflictsByLocationId.get(location.id) || []),
-          ...(legacyBlock ? [legacyBlock] : [])
-        ].sort(compareConflicts);
-        return [location.id, location.lifecycleStatus === "ACTIVE"
-          ? buildNoPeriodAvailability(location, intervals, referenceDate)
-          : lifecycleUnavailable(location)];
-      })
-    );
-  }
-
-  if (periodStart > periodEnd) {
-    return Object.fromEntries(locations.map((location) => [location.id, unknownAvailability(location, "Perioada selectata nu este valida.")]));
-  }
-
-  const [conflicts, overrideConflicts] = await Promise.all([
-    prisma.reservation.findMany({
-      where: {
-        locationId: { in: locationIds },
-        ...effectiveBlockingReservationWhere(new Date()),
-        periodStart: { lte: periodEnd },
-        periodEnd: { gte: periodStart }
-      },
-      select: {
-        id: true,
-        locationId: true,
-        status: true,
-        periodStart: true,
-        periodEnd: true,
-        holdExpiresAt: true,
-        clientName: true,
-        campaignName: true,
-        salesperson: true,
-        ownerId: true,
-        sellerUserId: true,
-        client: { select: { companyName: true } },
-        campaign: { select: { campaignName: true } },
-        sellerUser: { select: { name: true } }
-      },
-      orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
-    }),
-    listLocationAvailabilityOverrideConflicts({
-      locationIds,
-      periodStart,
-      periodEnd,
-      session: input.session
-    })
-  ]);
-
-  const reservationConflictsByLocationId = groupByLocationId(
-    conflicts.map((conflict) => serializeConflict(conflict, input.session))
-  );
-  const overrideConflictsByLocationId = groupByLocationId(overrideConflicts);
-
-  return Object.fromEntries(
-    locations.map((location) => {
-      const reservationConflicts = reservationConflictsByLocationId.get(location.id) || [];
-      const legacyBlock = legacyManualBlockConflict(location, { periodStart, periodEnd });
-      const locationConflicts = [
-        ...reservationConflicts,
-        ...(overrideConflictsByLocationId.get(location.id) || []),
-        ...(legacyBlock ? [legacyBlock] : [])
-      ].sort(compareConflicts);
-      return [
-        location.id,
-        location.lifecycleStatus === "ACTIVE" ? buildAvailability({
-          location,
-          conflicts: locationConflicts,
-          periodStart,
-          periodEnd
-        }) : lifecycleUnavailable(location)
-      ];
-    })
-  );
+  return Object.fromEntries([...batch.locationsById.values()].map((location) => {
+    const decision = batch.decisionsByLocationId[location.id];
+    const conflicts = decisionConflicts(location.id, decision, batch.reservationsById, input.session);
+    if (!periodEnd) {
+      if (decision.lifecycleReason) return [location.id, lifecycleUnavailable(location)];
+      if (decision.status === "UNKNOWN") return [location.id, unknownAvailability(location, "Perioada selectata nu este valida.")];
+      return [location.id, buildNoPeriodAvailability(location, conflicts, referenceDate)];
+    }
+    return [location.id, buildAvailability({ location, conflicts, decision })];
+  }));
 }
 
 export function availabilitySummary(input: {
@@ -190,31 +73,38 @@ export function availabilitySummary(input: {
 function buildAvailability(input: {
   location: AvailabilityLocation;
   conflicts: LocationSelectionConflict[];
-  periodStart: Date;
-  periodEnd: Date;
+  decision: AvailabilityDecision;
 }): LocationSelectionAvailability {
+  if (input.decision.lifecycleReason) return lifecycleUnavailable(input.location);
+  if (input.decision.status === "UNKNOWN") {
+    return unknownAvailability(input.location, "Perioada selectata nu este valida.");
+  }
   const baseWarnings = locationWarnings(input.location);
-  if (input.conflicts.length) {
-    const blockingIntervals = input.conflicts.map(toBlockingInterval);
-    const coverage = selectedPeriodCoverage(blockingIntervals, input.periodStart, input.periodEnd);
-    if (!coverage.coversEntirePeriod && coverage.availableSegments.length) {
-      const explanation = partialExplanation(coverage);
-      const firstAvailable = coverage.availableSegments[0];
-      return {
-        locationId: input.location.id,
-        state: "PARTIAL",
-        label: "Disponibil partial",
-        tone: "yellow",
-        explanation,
-        warnings: [explanation, ...baseWarnings.filter((warning) => !isGenericAvailableNote(warning))],
-        conflicts: input.conflicts,
-        blockingIntervals,
-        availableFrom: firstAvailable.start.toISOString(),
-        availableUntil: firstAvailable.end.toISOString()
-      };
-    }
+  const blockingIntervals = input.conflicts.map(toBlockingInterval);
+  if (input.decision.status === "PARTIAL") {
+    const coverage: SelectedPeriodCoverage = {
+      mergedIntervals: blockingIntervals,
+      availableSegments: input.decision.availableWindows.map((window) => ({ start: window.from, end: window.to })),
+      coversEntirePeriod: false
+    };
+    const explanation = partialExplanation(coverage);
+    const firstAvailable = coverage.availableSegments[0];
+    return {
+      locationId: input.location.id,
+      state: "PARTIAL",
+      label: "Disponibil partial",
+      tone: "yellow",
+      explanation,
+      warnings: [explanation, ...baseWarnings.filter((warning) => !isGenericAvailableNote(warning))],
+      conflicts: input.conflicts,
+      blockingIntervals,
+      availableFrom: firstAvailable?.start.toISOString(),
+      availableUntil: firstAvailable?.end.toISOString()
+    };
+  }
 
-    const explanation = conflictExplanation(coverage.mergedIntervals.length ? coverage.mergedIntervals : blockingIntervals);
+  if (input.decision.status === "CONFLICT" || input.decision.status === "BLOCKED") {
+    const explanation = conflictExplanation(blockingIntervals);
     return {
       locationId: input.location.id,
       state: "CONFLICT",
@@ -348,23 +238,34 @@ function buildNoPeriodAvailability(
   };
 }
 
+function decisionConflicts(
+  locationId: string,
+  decision: AvailabilityDecision,
+  reservationsById: Map<string, AvailabilityReservationRow>,
+  session: AuthSession
+): LocationSelectionConflict[] {
+  return decision.conflictingIntervals.map((interval, index) => {
+    if (interval.source === "RESERVATION" && interval.sourceId) {
+      const reservation = reservationsById.get(interval.sourceId);
+      if (reservation) return serializeConflict(reservation, session);
+    }
+    return {
+      reservationId: interval.sourceId || `${interval.source.toLowerCase()}:${index}`,
+      locationId,
+      status: interval.status,
+      periodStart: interval.from.toISOString(),
+      periodEnd: interval.to.toISOString(),
+      holdExpiresAt: interval.holdExpiresAt?.toISOString() || null,
+      clientName: null,
+      campaignName: interval.reason,
+      sellerName: null,
+      openEnded: interval.openEnded
+    };
+  });
+}
+
 function serializeConflict(
-  reservation: {
-    id: string;
-    locationId: string;
-    status: string;
-    periodStart: Date;
-    periodEnd: Date;
-    holdExpiresAt: Date | null;
-    clientName: string;
-    campaignName: string | null;
-    salesperson: string | null;
-    ownerId: string | null;
-    sellerUserId: string | null;
-    client?: { companyName: string } | null;
-    campaign?: { campaignName: string } | null;
-    sellerUser?: { name: string } | null;
-  },
+  reservation: AvailabilityReservationRow,
   session: AuthSession
 ): LocationSelectionConflict {
   const canSeeDetails =
@@ -444,65 +345,6 @@ type SelectedPeriodCoverage = {
   coversEntirePeriod: boolean;
 };
 
-function selectedPeriodCoverage(
-  intervals: LocationSelectionBlockingInterval[],
-  periodStart: Date,
-  periodEnd: Date
-): SelectedPeriodCoverage {
-  const clamped = intervals
-    .map((interval) => ({
-      status: interval.status,
-      start: maxDate(new Date(interval.start), periodStart),
-      end: minDate(new Date(interval.end), periodEnd),
-      holdExpiresAt: interval.holdExpiresAt,
-      openEnded: interval.openEnded
-    }))
-    .filter((interval) => interval.start <= interval.end)
-    .sort((left, right) => left.start.getTime() - right.start.getTime() || left.end.getTime() - right.end.getTime());
-
-  const merged: Array<{ status: string; start: Date; end: Date; holdExpiresAt?: string | null; openEnded?: boolean }> = [];
-  for (const interval of clamped) {
-    const last = merged[merged.length - 1];
-    if (!last || interval.start > addDays(last.end, 1)) {
-      merged.push({ ...interval });
-      continue;
-    }
-    if (interval.end > last.end) last.end = interval.end;
-    last.holdExpiresAt = last.holdExpiresAt || interval.holdExpiresAt;
-    last.openEnded = Boolean(last.openEnded || interval.openEnded);
-  }
-
-  const availableSegments: Array<{ start: Date; end: Date }> = [];
-  let cursor = periodStart;
-  for (const interval of merged) {
-    if (cursor < interval.start) {
-      availableSegments.push({ start: cursor, end: addDays(interval.start, -1) });
-    }
-    const nextCursor = addDays(interval.end, 1);
-    if (nextCursor > cursor) cursor = nextCursor;
-  }
-  if (cursor <= periodEnd) {
-    availableSegments.push({ start: cursor, end: periodEnd });
-  }
-
-  const coversEntirePeriod =
-    merged.length === 1 &&
-    merged[0].start <= periodStart &&
-    merged[0].end >= periodEnd;
-
-  return {
-    mergedIntervals: merged.map((interval) => ({
-      status: interval.status,
-      start: interval.start.toISOString(),
-      end: interval.end.toISOString(),
-      holdExpiresAt: interval.holdExpiresAt,
-      openEnded: interval.openEnded
-    })),
-    availableSegments,
-    coversEntirePeriod
-  };
-}
-
 function reservationIntervalAction(status: string) {
   if (status === "HOLD" || status === "RESERVED") return "Rezervat";
   return "Ocupat";
@@ -546,18 +388,6 @@ function startOfUtcDay(date: Date) {
 
 function addDays(date: Date, days: number) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
-}
-
-function maxDate(left: Date, right: Date) {
-  return left > right ? left : right;
-}
-
-function minDate(left: Date, right: Date) {
-  return left < right ? left : right;
-}
-
-function compareConflicts(left: LocationSelectionConflict, right: LocationSelectionConflict) {
-  return new Date(left.periodStart).getTime() - new Date(right.periodStart).getTime() || new Date(left.periodEnd).getTime() - new Date(right.periodEnd).getTime();
 }
 
 function formatDate(value: string | Date) {

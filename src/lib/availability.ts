@@ -1,6 +1,8 @@
+import { effectiveHoldExpiresAt, isEffectiveBlockingReservation } from "@/lib/reservation-lifecycle-domain";
+
 export type PublicAvailabilityStatus = "AVAILABLE" | "BOOKED" | "RESERVED" | "UNKNOWN";
 
-type AvailabilityInput = {
+export type AvailabilityInput = {
   status?: string | null;
   availabilityText?: string | null;
   availableFrom?: Date | string | null;
@@ -12,6 +14,7 @@ type AvailabilityInput = {
   blockedUntil?: Date | string | null;
   lifecycleStatus?: string | null;
   availabilityOverrides?: Array<{
+    id?: string | null;
     type?: string | null;
     reason?: string | null;
     periodStart?: Date | string | null;
@@ -19,10 +22,69 @@ type AvailabilityInput = {
     clearedAt?: Date | string | null;
   }>;
   reservations?: Array<{
+    id?: string | null;
     status?: string | null;
     periodStart?: Date | string | null;
     periodEnd?: Date | string | null;
+    holdExpiresAt?: Date | string | null;
+    createdAt?: Date | string | null;
   }>;
+};
+
+export type AvailabilityDecisionStatus = "AVAILABLE" | "PARTIAL" | "CONFLICT" | "BLOCKED" | "UNKNOWN";
+
+export type AvailabilityReasonCode =
+  | "AVAILABLE_NO_BLOCKERS"
+  | "INVALID_PERIOD"
+  | "LOCATION_INACTIVE"
+  | "LOCATION_ARCHIVED"
+  | "LOCATION_MAINTENANCE"
+  | "RESERVATION_BOOKED"
+  | "RESERVATION_HOLD"
+  | "OVERRIDE_COMMERCIAL_BLOCK"
+  | "OVERRIDE_MAINTENANCE"
+  | "OVERRIDE_INTERNAL_HOLD"
+  | "LEGACY_MANUAL_BLOCK"
+  | "LEGACY_AVAILABILITY_WINDOW";
+
+export type AvailabilityReason = {
+  code: AvailabilityReasonCode;
+  sourceId?: string | null;
+};
+
+export type AvailabilityConflictInterval = {
+  source: "RESERVATION" | "OVERRIDE" | "LEGACY_BLOCK" | "LEGACY_AVAILABILITY";
+  sourceId: string | null;
+  status: string;
+  from: Date;
+  to: Date;
+  reason: string | null;
+  holdExpiresAt: Date | null;
+  openEnded: boolean;
+};
+
+export type AvailabilityDecision = {
+  status: AvailabilityDecisionStatus;
+  isBookable: boolean;
+  reasons: AvailabilityReason[];
+  conflictingIntervals: AvailabilityConflictInterval[];
+  availableWindows: AvailabilityWindow[];
+  activeOverride: AvailabilityConflictInterval | null;
+  lifecycleReason: AvailabilityReasonCode | null;
+  effectiveHoldExpiry: Date | null;
+  dateSemantics: "INCLUSIVE";
+  periodStart: Date | null;
+  periodEnd: Date | null;
+};
+
+const FAR_FUTURE_DATE = new Date("2099-12-31T00:00:00.000Z");
+
+type AvailabilityDecisionInput = AvailabilityInput & {
+  periodStart?: Date | string | null;
+  periodEnd?: Date | string | null;
+  referenceDate?: Date | string | null;
+  ignoreReservationId?: string | null;
+  now?: Date;
 };
 
 export type PublicAvailability = {
@@ -48,6 +110,133 @@ export type CalculatedAvailability = {
   windows: AvailabilityWindow[];
 };
 
+export function decideAvailability(input: AvailabilityDecisionInput): AvailabilityDecision {
+  const now = input.now || new Date();
+  const periodStart = toDate(input.periodStart || input.referenceDate) || startOfDay(now);
+  const periodEnd = toDate(input.periodEnd);
+  if (periodEnd && periodStart > periodEnd) {
+    return decision({
+      status: "UNKNOWN",
+      isBookable: false,
+      reasons: [{ code: "INVALID_PERIOD" }],
+      periodStart,
+      periodEnd
+    });
+  }
+
+  const lifecycleReason = lifecycleReasonCode(input.lifecycleStatus);
+  if (lifecycleReason) {
+    return decision({
+      status: "BLOCKED",
+      isBookable: false,
+      reasons: [{ code: lifecycleReason }],
+      lifecycleReason,
+      periodStart,
+      periodEnd
+    });
+  }
+
+  const rangeEnd = periodEnd || FAR_FUTURE_DATE;
+  const conflictingIntervals = canonicalBlockingIntervals(input, periodStart, rangeEnd, now)
+    .filter((interval) => interval.from <= rangeEnd && interval.to >= periodStart)
+    .sort(compareCanonicalIntervals);
+  const activeOverride = conflictingIntervals.find((interval) =>
+    interval.source === "OVERRIDE" &&
+    (periodEnd ? interval.from <= periodEnd && interval.to >= periodStart : interval.from <= periodStart && interval.to >= periodStart)
+  ) || null;
+  const effectiveHoldExpiry = conflictingIntervals
+    .map((interval) => interval.holdExpiresAt)
+    .filter((value): value is Date => Boolean(value))
+    .sort((a, b) => a.getTime() - b.getTime())[0] || null;
+  const reasons = uniqueReasons(conflictingIntervals.map(intervalReason));
+
+  if (!periodEnd) {
+    const current = conflictingIntervals.filter((interval) => interval.from <= periodStart && interval.to >= periodStart);
+    const blocking = current[0] || null;
+    const blocked = Boolean(blocking);
+    return decision({
+      status: blocked ? (blocking?.source === "RESERVATION" ? "CONFLICT" : "BLOCKED") : "AVAILABLE",
+      isBookable: !blocked,
+      reasons: reasons.length ? reasons : [{ code: "AVAILABLE_NO_BLOCKERS" }],
+      conflictingIntervals,
+      activeOverride,
+      effectiveHoldExpiry,
+      periodStart,
+      periodEnd: null,
+      availableWindows: blocked ? [] : [{ from: periodStart, to: rangeEnd, labelFrom: periodStart, labelTo: rangeEnd }]
+    });
+  }
+
+  const occupied = mergeCoverageIntervals(conflictingIntervals.map((interval) => ({
+    from: maxDate(interval.from, periodStart),
+    to: minDate(interval.to, periodEnd),
+    status: interval.status
+  })));
+  const available = availableWindows(periodStart, periodEnd, occupied);
+  if (!occupied.length) {
+    return decision({
+      status: "AVAILABLE",
+      isBookable: true,
+      reasons: [{ code: "AVAILABLE_NO_BLOCKERS" }],
+      conflictingIntervals,
+      activeOverride,
+      effectiveHoldExpiry,
+      periodStart,
+      periodEnd,
+      availableWindows: [{ from: periodStart, to: periodEnd, labelFrom: periodStart, labelTo: periodEnd }]
+    });
+  }
+
+  if (available.length) {
+    return decision({
+      status: "PARTIAL",
+      isBookable: false,
+      reasons,
+      conflictingIntervals,
+      activeOverride,
+      effectiveHoldExpiry,
+      periodStart,
+      periodEnd,
+      availableWindows: available
+    });
+  }
+
+  const fullyBlockedByManualRule = occupied.every((interval) => isManualBlockingStatus(interval.status));
+  return decision({
+    status: fullyBlockedByManualRule ? "BLOCKED" : "CONFLICT",
+    isBookable: false,
+    reasons,
+    conflictingIntervals,
+    activeOverride,
+    effectiveHoldExpiry,
+    periodStart,
+    periodEnd,
+    availableWindows: []
+  });
+}
+
+export function publicAvailabilityExplanation(decisionValue: AvailabilityDecision) {
+  if (decisionValue.lifecycleReason === "LOCATION_MAINTENANCE") return "Locatie temporar indisponibila";
+  if (decisionValue.lifecycleReason) return "Locatie indisponibila";
+  if (decisionValue.status === "BLOCKED") return "Temporar indisponibila";
+  if (decisionValue.status === "CONFLICT") return "Ocupata in perioada verificata";
+  if (decisionValue.status === "PARTIAL") return "Disponibilitate partiala";
+  if (decisionValue.status === "UNKNOWN") return "Disponibilitate de verificat";
+  return "Disponibila";
+}
+
+export function adminAvailabilityExplanation(decisionValue: AvailabilityDecision) {
+  if (decisionValue.lifecycleReason === "LOCATION_MAINTENANCE") return "Locatia este in mentenanta.";
+  if (decisionValue.lifecycleReason === "LOCATION_INACTIVE") return "Locatia este inactiva.";
+  if (decisionValue.lifecycleReason === "LOCATION_ARCHIVED") return "Locatia este arhivata.";
+  const first = decisionValue.conflictingIntervals[0];
+  if (!first) return decisionValue.status === "UNKNOWN" ? "Perioada nu este valida." : "Disponibila in perioada selectata.";
+  const action = first.source === "RESERVATION"
+    ? first.status === "BOOKED" ? "Ocupata" : "Rezervata"
+    : first.status === "MAINTENANCE" ? "In mentenanta" : "Blocata comercial";
+  return `${action}: ${formatDate(first.from)} - ${formatDate(first.to)}.`;
+}
+
 export function publicAvailability(input: AvailabilityInput, now = new Date()): PublicAvailability {
   const status = String(input.status || "UNKNOWN").toUpperCase();
   const availabilityText = cleanText(input.availabilityText);
@@ -56,7 +245,19 @@ export function publicAvailability(input: AvailabilityInput, now = new Date()): 
   const bookedFrom = toDate(input.bookedFrom);
   const bookedUntil = toDate(input.bookedUntil);
   const today = startOfDay(now);
-  const reservations = normalizeReservations(input.reservations);
+  const decisionValue = decideAvailability({ ...input, referenceDate: today, now });
+  if (decisionValue.lifecycleReason || decisionValue.status === "BLOCKED") {
+    return {
+      publicStatus: "UNKNOWN",
+      label: publicAvailabilityExplanation(decisionValue),
+      detail: null
+    };
+  }
+  const reservations = decisionValue.conflictingIntervals.map((interval) => ({
+    status: interval.status,
+    periodStart: interval.from,
+    periodEnd: interval.to
+  }));
   const activeReservation = reservations
     .filter((reservation) => reservation.periodStart <= today && reservation.periodEnd >= today)
     .sort((a, b) => statusPriority(a.status) - statusPriority(b.status))[0];
@@ -134,85 +335,41 @@ export function calculateAvailability(
   requestedStartDate?: Date | string | null,
   requestedEndDate?: Date | string | null
 ): CalculatedAvailability {
-  const status = String(input.status || "UNKNOWN").toUpperCase();
-  const lifecycleStatus = String(input.lifecycleStatus || "ACTIVE").toUpperCase();
-  const requestedStart = toDate(requestedStartDate) || startOfDay(new Date());
-  const requestedEnd = toDate(requestedEndDate) || requestedStart;
-  const from = requestedStart <= requestedEnd ? requestedStart : requestedEnd;
-  const to = requestedStart <= requestedEnd ? requestedEnd : requestedStart;
-  const normalizedReservations = normalizeReservations(input.reservations);
+  const from = toDate(requestedStartDate) || startOfDay(new Date());
+  const to = toDate(requestedEndDate) || from;
+  const decisionValue = decideAvailability({ ...input, periodStart: from, periodEnd: to });
 
-  if (lifecycleStatus === "INACTIVE" || lifecycleStatus === "ARCHIVED" || lifecycleStatus === "MAINTENANCE") {
+  if (decisionValue.lifecycleReason || decisionValue.status === "UNKNOWN") {
+    const label = decisionValue.lifecycleReason === "LOCATION_MAINTENANCE"
+      ? "In mentenanta"
+      : decisionValue.lifecycleReason ? "Locatie inactiva" : publicAvailabilityExplanation(decisionValue);
     return {
       status: "SUSPENDED",
       publicStatus: "UNKNOWN",
-      label: lifecycleStatus === "MAINTENANCE" ? "In mentenanta" : "Locatie inactiva",
+      label,
       detail: null,
       windows: []
     };
   }
 
-  if (status === "UNKNOWN") {
-    return {
-      status: "SUSPENDED",
-      publicStatus: "UNKNOWN",
-      label: "Suspendata / de verificat",
-      detail: null,
-      windows: []
-    };
-  }
-
-  const occupied = [
-    ...normalizedReservations.map((reservation) => ({
-      from: reservation.periodStart,
-      to: reservation.periodEnd,
-      status: reservation.status
-    })),
-    ...manualAvailabilityIntervals(input, from, to),
-    ...legacyOccupiedIntervals(input, from, to, status)
-  ]
-    .map((interval) => ({
-      ...interval,
-      from: maxDate(interval.from, from),
-      to: minDate(interval.to, to)
-    }))
-    .filter((interval) => interval.from <= interval.to)
-    .sort((a, b) => a.from.getTime() - b.from.getTime());
-
-  if ((status === "BOOKED" || status === "RESERVED") && !occupied.length && !toDate(input.bookedUntil)) {
+  if (decisionValue.status === "CONFLICT" || decisionValue.status === "BLOCKED") {
+    const first = decisionValue.conflictingIntervals[0];
     return {
       status: "UNAVAILABLE",
-      publicStatus: status === "RESERVED" ? "RESERVED" : "BOOKED",
-      label: status === "RESERVED" ? "Rezervata" : "Inchiriata",
-      detail: cleanText(input.availabilityText),
-      windows: []
-    };
-  }
-
-  const mergedOccupied = mergeIntervals(occupied);
-  const windows = availableWindows(from, to, mergedOccupied);
-  const constrainedWindows = constrainAvailabilityBounds(windows, input);
-
-  if (!constrainedWindows.length) {
-    const firstOccupied = mergedOccupied[0];
-    return {
-      status: "UNAVAILABLE",
-      publicStatus: firstOccupied?.status === "RESERVED" || firstOccupied?.status === "HOLD" ? "RESERVED" : "BOOKED",
+      publicStatus: first?.status === "RESERVED" || first?.status === "HOLD" ? "RESERVED" : "BOOKED",
       label: "Ocupata in perioada selectata",
-      detail: firstOccupied ? bookingWindowLabel(firstOccupied.status, firstOccupied.from, firstOccupied.to) : null,
+      detail: first ? bookingWindowLabel(first.status, first.from, first.to) : null,
       windows: []
     };
   }
 
-  const fullWindow = constrainedWindows.length === 1 && constrainedWindows[0].from <= from && constrainedWindows[0].to >= to;
-  const label = availabilityWindowLabel(constrainedWindows, from, to, mergedOccupied);
-
+  const label = availabilityWindowLabel(decisionValue.availableWindows, from, to);
   return {
-    status: fullWindow ? "AVAILABLE" : "PARTIAL",
+    status: decisionValue.status === "PARTIAL" ? "PARTIAL" : "AVAILABLE",
     publicStatus: "AVAILABLE",
     label,
-    detail: fullWindow ? null : "Disponibilitate partiala in perioada selectata",
-    windows: constrainedWindows
+    detail: decisionValue.status === "PARTIAL" ? "Disponibilitate partiala in perioada selectata" : null,
+    windows: decisionValue.availableWindows
   };
 }
 
@@ -221,7 +378,9 @@ export function formatAvailability(input: Pick<PublicAvailability, "label" | "de
 }
 
 function bookingWindowLabel(status: string, from: Date | null, until: Date | null) {
-  const label = status === "RESERVED" || status === "HOLD" ? "Rezervat" : "Inchiriat";
+  const label = isManualBlockingStatus(status)
+    ? "Indisponibil temporar"
+    : status === "RESERVED" || status === "HOLD" ? "Rezervat" : "Inchiriat";
   if (from && until) return `${label} intre ${formatDate(from)} si ${formatDate(until)}`;
   if (from) return `${label} din ${formatDate(from)}`;
   if (until) return `${label} pana la ${formatDate(until)}`;
@@ -249,67 +408,109 @@ function toDate(value?: Date | string | null) {
   return startOfDay(date);
 }
 
-function legacyOccupiedIntervals(input: AvailabilityInput, from: Date, to: Date, status: string) {
-  const bookedFrom = toDate(input.bookedFrom);
-  const bookedUntil = toDate(input.bookedUntil);
-  const availableFrom = toDate(input.availableFrom);
-  const intervals: Array<{ from: Date; to: Date; status: string }> = [];
-
-  if ((status === "BOOKED" || status === "RESERVED") && bookedFrom && bookedUntil) {
-    intervals.push({ from: bookedFrom, to: bookedUntil, status });
-  } else if ((status === "BOOKED" || status === "RESERVED") && bookedUntil) {
-    intervals.push({ from, to: bookedUntil, status });
-  } else if (status === "AVAILABLE_FROM" && availableFrom && availableFrom > from) {
-    intervals.push({ from, to: minDate(addDays(availableFrom, -1), to), status: "BOOKED" });
-  }
-
-  return intervals;
+function toInstant(value?: Date | string | null) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function manualAvailabilityIntervals(input: AvailabilityInput, from: Date, to: Date) {
-  const intervals: Array<{ from: Date; to: Date; status: string }> = [];
-  const blockedFrom = toDate(input.blockedFrom) || from;
-  const blockedUntil = toDate(input.blockedUntil) || to;
+function canonicalBlockingIntervals(
+  input: AvailabilityDecisionInput,
+  from: Date,
+  to: Date,
+  now: Date
+): AvailabilityConflictInterval[] {
+  const intervals: AvailabilityConflictInterval[] = [];
 
-  if (input.blockedReason && blockedFrom <= to && blockedUntil >= from) {
+  for (const reservation of input.reservations || []) {
+    if (input.ignoreReservationId && reservation.id === input.ignoreReservationId) continue;
+    const periodStart = toDate(reservation.periodStart);
+    const periodEnd = toDate(reservation.periodEnd);
+    if (!periodStart || !periodEnd || periodStart > periodEnd) continue;
+    const createdAt = toInstant(reservation.createdAt) || now;
+    const holdExpiresAt = toInstant(reservation.holdExpiresAt);
+    const status = String(reservation.status || "").toUpperCase();
+    if (!isEffectiveBlockingReservation({ status, holdExpiresAt, createdAt }, now)) continue;
     intervals.push({
-      from: blockedFrom,
-      to: blockedUntil,
-      status: "COMMERCIAL_BLOCK"
+      source: "RESERVATION",
+      sourceId: reservation.id || null,
+      status,
+      from: periodStart,
+      to: periodEnd,
+      reason: null,
+      holdExpiresAt: status === "HOLD" || status === "RESERVED"
+        ? effectiveHoldExpiresAt({ holdExpiresAt, createdAt })
+        : null,
+      openEnded: false
     });
   }
 
   for (const override of input.availabilityOverrides || []) {
-    if (toDate(override.clearedAt)) continue;
+    if (toInstant(override.clearedAt)) continue;
     const periodStart = toDate(override.periodStart);
     if (!periodStart) continue;
-    const periodEnd = toDate(override.periodEnd) || to;
-    if (periodStart <= to && periodEnd >= from) {
-      intervals.push({
-        from: periodStart,
-        to: periodEnd,
-        status: String(override.type || "COMMERCIAL_BLOCK").toUpperCase()
-      });
-    }
+    const periodEnd = toDate(override.periodEnd) || FAR_FUTURE_DATE;
+    intervals.push({
+      source: "OVERRIDE",
+      sourceId: override.id || null,
+      status: String(override.type || "COMMERCIAL_BLOCK").toUpperCase(),
+      from: periodStart,
+      to: periodEnd,
+      reason: cleanText(override.reason),
+      holdExpiresAt: null,
+      openEnded: !override.periodEnd
+    });
   }
 
-  return intervals;
-}
+  if (cleanText(input.blockedReason)) {
+    intervals.push({
+      source: "LEGACY_BLOCK",
+      sourceId: null,
+      status: "COMMERCIAL_BLOCK",
+      from: toDate(input.blockedFrom) || from,
+      to: toDate(input.blockedUntil) || FAR_FUTURE_DATE,
+      reason: cleanText(input.blockedReason),
+      holdExpiresAt: null,
+      openEnded: !input.blockedUntil
+    });
+  }
 
-function constrainAvailabilityBounds(windows: AvailabilityWindow[], input: AvailabilityInput) {
+  const legacyStatus = String(input.status || "").toUpperCase();
+  const bookedFrom = toDate(input.bookedFrom);
+  const bookedUntil = toDate(input.bookedUntil);
   const availableFrom = toDate(input.availableFrom);
   const availableUntil = toDate(input.availableUntil);
+  const hasStructuredReservation = intervals.some((interval) => interval.source === "RESERVATION");
+  if (!hasStructuredReservation && (legacyStatus === "BOOKED" || legacyStatus === "RESERVED") && bookedUntil) {
+    intervals.push(legacyAvailabilityInterval(
+      legacyStatus,
+      bookedFrom || from,
+      bookedUntil
+    ));
+  } else if (!hasStructuredReservation && legacyStatus === "AVAILABLE_FROM" && availableFrom && availableFrom > from) {
+    intervals.push(legacyAvailabilityInterval("BOOKED", from, addDays(availableFrom, -1)));
+  }
+  if (availableUntil && availableUntil < to) {
+    intervals.push(legacyAvailabilityInterval("BOOKED", addDays(availableUntil, 1), to));
+  }
 
-  return windows
-    .map((window) => ({
-      ...window,
-      from: availableFrom && window.from < availableFrom ? availableFrom : window.from,
-      to: availableUntil && window.to > availableUntil ? availableUntil : window.to
-    }))
-    .filter((window) => window.from <= window.to);
+  return intervals.filter((interval) => interval.from <= interval.to && interval.from <= to && interval.to >= from);
 }
 
-function mergeIntervals(intervals: Array<{ from: Date; to: Date; status: string }>) {
+function legacyAvailabilityInterval(status: string, from: Date, to: Date): AvailabilityConflictInterval {
+  return {
+    source: "LEGACY_AVAILABILITY",
+    sourceId: null,
+    status,
+    from,
+    to,
+    reason: null,
+    holdExpiresAt: null,
+    openEnded: false
+  };
+}
+
+function mergeCoverageIntervals(intervals: Array<{ from: Date; to: Date; status: string }>) {
   const merged: Array<{ from: Date; to: Date; status: string }> = [];
 
   for (const interval of intervals) {
@@ -360,25 +561,88 @@ function availableWindows(from: Date, to: Date, occupied: Array<{ from: Date; to
 function availabilityWindowLabel(
   windows: AvailabilityWindow[],
   from: Date,
-  to: Date,
-  occupied: Array<{ from: Date; to: Date; status: string }>
+  to: Date
 ) {
   if (!windows.length) return "Ocupata in perioada selectata";
   const fullWindow = windows.length === 1 && windows[0].from <= from && windows[0].to >= to;
   if (fullWindow) return "Disponibila";
 
   const labels = windows.map((window) => {
-    const previous = occupied.filter((interval) => interval.to < window.from).at(-1);
-    const next = occupied.find((interval) => interval.from > window.to);
-    const labelFrom = previous ? previous.to : window.labelFrom;
-    const labelTo = next ? next.from : window.labelTo;
-
-    if (window.from <= from) return `Disponibila pana la data de ${formatDate(labelTo)}`;
-    if (window.to >= to) return `Disponibila din data de ${formatDate(labelFrom)}`;
-    return `Disponibila din data de ${formatDate(labelFrom)} pana la data de ${formatDate(labelTo)}`;
+    if (window.from <= from) return `Disponibila pana la data de ${formatDate(window.to)}`;
+    if (window.to >= to) return `Disponibila din data de ${formatDate(window.from)}`;
+    return `Disponibila din data de ${formatDate(window.from)} pana la data de ${formatDate(window.to)}`;
   });
 
   return labels.join("; ");
+}
+
+function decision(input: {
+  status: AvailabilityDecisionStatus;
+  isBookable: boolean;
+  reasons: AvailabilityReason[];
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  conflictingIntervals?: AvailabilityConflictInterval[];
+  availableWindows?: AvailabilityWindow[];
+  activeOverride?: AvailabilityConflictInterval | null;
+  lifecycleReason?: AvailabilityReasonCode | null;
+  effectiveHoldExpiry?: Date | null;
+}): AvailabilityDecision {
+  return {
+    status: input.status,
+    isBookable: input.isBookable,
+    reasons: input.reasons,
+    conflictingIntervals: input.conflictingIntervals || [],
+    availableWindows: input.availableWindows || [],
+    activeOverride: input.activeOverride || null,
+    lifecycleReason: input.lifecycleReason || null,
+    effectiveHoldExpiry: input.effectiveHoldExpiry || null,
+    dateSemantics: "INCLUSIVE",
+    periodStart: input.periodStart,
+    periodEnd: input.periodEnd
+  };
+}
+
+function lifecycleReasonCode(value?: string | null): AvailabilityReasonCode | null {
+  const status = String(value || "ACTIVE").toUpperCase();
+  if (status === "INACTIVE") return "LOCATION_INACTIVE";
+  if (status === "ARCHIVED") return "LOCATION_ARCHIVED";
+  if (status === "MAINTENANCE") return "LOCATION_MAINTENANCE";
+  return null;
+}
+
+function intervalReason(interval: AvailabilityConflictInterval): AvailabilityReason {
+  if (interval.source === "RESERVATION") {
+    return {
+      code: interval.status === "BOOKED" ? "RESERVATION_BOOKED" : "RESERVATION_HOLD",
+      sourceId: interval.sourceId
+    };
+  }
+  if (interval.source === "LEGACY_BLOCK") return { code: "LEGACY_MANUAL_BLOCK" };
+  if (interval.source === "LEGACY_AVAILABILITY") return { code: "LEGACY_AVAILABILITY_WINDOW" };
+  if (interval.status === "MAINTENANCE") return { code: "OVERRIDE_MAINTENANCE", sourceId: interval.sourceId };
+  if (interval.status === "INTERNAL_HOLD") return { code: "OVERRIDE_INTERNAL_HOLD", sourceId: interval.sourceId };
+  return { code: "OVERRIDE_COMMERCIAL_BLOCK", sourceId: interval.sourceId };
+}
+
+function uniqueReasons(reasons: AvailabilityReason[]) {
+  const seen = new Set<string>();
+  return reasons.filter((reason) => {
+    const key = `${reason.code}:${reason.sourceId || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function compareCanonicalIntervals(a: AvailabilityConflictInterval, b: AvailabilityConflictInterval) {
+  const byStart = a.from.getTime() - b.from.getTime();
+  if (byStart) return byStart;
+  return statusPriority(a.status) - statusPriority(b.status);
+}
+
+function isManualBlockingStatus(status: string) {
+  return ["COMMERCIAL_BLOCK", "MAINTENANCE", "INTERNAL_HOLD"].includes(status);
 }
 
 function minDate(a: Date, b: Date) {
@@ -423,28 +687,6 @@ function parseDateFromText(value?: string | null) {
 function normalizeYear(value: number) {
   if (value < 100) return 2000 + value;
   return value;
-}
-
-function normalizeReservations(input: AvailabilityInput["reservations"]) {
-  return (input || [])
-    .map((reservation) => ({
-      status: String(reservation.status || "BOOKED").toUpperCase(),
-      periodStart: toDate(reservation.periodStart),
-      periodEnd: toDate(reservation.periodEnd)
-    }))
-    .filter((reservation): reservation is { status: string; periodStart: Date; periodEnd: Date } =>
-      Boolean(
-        reservation.periodStart &&
-          reservation.periodEnd &&
-          reservation.periodStart <= reservation.periodEnd &&
-          !["CANCELLED", "EXPIRED", "ARCHIVED"].includes(reservation.status)
-      )
-    )
-    .sort((a, b) => {
-      const byStart = a.periodStart.getTime() - b.periodStart.getTime();
-      if (byStart) return byStart;
-      return statusPriority(a.status) - statusPriority(b.status);
-    });
 }
 
 function statusPriority(status: string) {

@@ -56,6 +56,15 @@ export type LocationImage = {
   isMain: boolean;
 };
 
+export type LocationAvailabilityOverrideDTO = {
+  id: string;
+  type: "COMMERCIAL_BLOCK" | "MAINTENANCE" | "INTERNAL_HOLD";
+  reason: string;
+  periodStart: string;
+  periodEnd: string | null;
+  clearedAt: string | null;
+};
+
 export type ReservationDTO = {
   id: string;
   locationId: string;
@@ -222,6 +231,7 @@ export type LocationDTO = {
   blockedFrom: string | null;
   blockedUntil: string | null;
   blockedNotes: string | null;
+  availabilityOverrides?: LocationAvailabilityOverrideDTO[];
   coordinateSource: string | null;
   gpsAuditStatus: GpsAuditStatus;
   benefits: string[];

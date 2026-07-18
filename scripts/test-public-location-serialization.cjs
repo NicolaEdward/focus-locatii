@@ -26,6 +26,7 @@ assert.equal("monthlyCost" in visible, false, "Internal cost key must not be exp
 assert.equal("showPricePublic" in visible, false, "Internal price visibility flag must not be exposed publicly.");
 assert.equal("showInstallationCostPublic" in visible, false, "Internal installation visibility flag must not be exposed publicly.");
 assert.equal("lifecycleStatus" in visible, false, "Internal lifecycle status key must not be exposed publicly.");
+assert.equal("availabilityOverrides" in visible, false, "Manual availability override records must not be exposed publicly.");
 
 const hidden = serializeLocation(location({
   showPricePublic: false,
@@ -76,6 +77,20 @@ const cancelledAndArchived = serializeLocation(location({
   ]
 }));
 assert.equal(cancelledAndArchived.publicStatus, "AVAILABLE", "Cancelled/archived reservations must not block public availability.");
+
+const manuallyBlocked = serializeLocation(location({
+  availabilityOverrides: [{
+    id: "override-private",
+    type: "COMMERCIAL_BLOCK",
+    reason: "Motiv intern secret",
+    periodStart: new Date("2000-01-01T00:00:00.000Z"),
+    periodEnd: null,
+    clearedAt: null
+  }]
+}));
+assert.equal(manuallyBlocked.publicStatus, "UNKNOWN", "An active manual override must not be proposed as publicly available.");
+assert.equal("availabilityOverrides" in manuallyBlocked, false, "Public DTO must not expose manual override records.");
+assert.equal(JSON.stringify(manuallyBlocked).includes("Motiv intern secret"), false, "Public DTO must not expose manual override reasons.");
 
 const portfolioHero = fs.readFileSync(path.join(process.cwd(), "src", "components", "public", "PortfolioHero.tsx"), "utf8");
 const locationExplorer = fs.readFileSync(path.join(process.cwd(), "src", "components", "public", "LocationExplorer.tsx"), "utf8");

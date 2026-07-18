@@ -24,12 +24,24 @@ export async function listLocationAvailabilityOverrideConflicts(input: {
   session: AuthSession;
   db?: AvailabilityOverrideStore;
 }): Promise<LocationSelectionConflict[]> {
+  const rows = await listActiveLocationAvailabilityOverrides(input);
+  return rows.map((row) => availabilityOverrideConflict(row));
+}
+
+export async function listActiveLocationAvailabilityOverrides(input: {
+  locationIds: string[];
+  periodStart?: Date | null;
+  periodEnd?: Date | null;
+  referenceDate?: Date | null;
+  db?: AvailabilityOverrideStore;
+  requireStorage?: boolean;
+}): Promise<LocationAvailabilityOverride[]> {
   if (!input.locationIds.length) return [];
   const periodWhere = overridePeriodWhere(input.periodStart, input.periodEnd, input.referenceDate);
   const db = input.db || prisma;
 
   try {
-    const rows = await db.locationAvailabilityOverride.findMany({
+    return await db.locationAvailabilityOverride.findMany({
       where: {
         locationId: { in: input.locationIds },
         clearedAt: null,
@@ -37,10 +49,8 @@ export async function listLocationAvailabilityOverrideConflicts(input: {
       },
       orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
     });
-
-    return rows.map((row) => availabilityOverrideConflict(row));
   } catch (error) {
-    if (isMissingAvailabilityOverrideStorage(error)) return [];
+    if (!input.requireStorage && isMissingAvailabilityOverrideStorage(error)) return [];
     throw error;
   }
 }

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/rbac";
 import type { AuthSession } from "@/lib/auth";
 import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
+import { adminAvailabilityExplanation, decideAvailability } from "@/lib/availability";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -38,6 +39,10 @@ export async function GET(request: NextRequest, context: Context) {
           periodEnd: { gte: today }
         },
         orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
+      },
+      availabilityOverrides: {
+        where: { clearedAt: null },
+        orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
       }
     }
   });
@@ -68,6 +73,13 @@ export async function GET(request: NextRequest, context: Context) {
     });
 
   const canViewInternalDetails = hasPermission(session.role, "inventory.manage");
+  const availability = decideAvailability({
+    ...location,
+    referenceDate: today,
+    now,
+    reservations,
+    availabilityOverrides: location.availabilityOverrides
+  });
 
   return NextResponse.json({
     location: serializeLocation(location, { includeHiddenCommercials: false, includePrivateFields: false }),
@@ -110,6 +122,13 @@ export async function GET(request: NextRequest, context: Context) {
     },
     timeline: {
       generatedAt: new Date().toISOString(),
+      availability: {
+        status: availability.status,
+        isBookable: availability.isBookable,
+        reasons: availability.reasons.map((reason) => reason.code),
+        explanation: adminAvailabilityExplanation(availability),
+        dateSemantics: availability.dateSemantics
+      },
       periods,
       empty: periods.length === 0
     },

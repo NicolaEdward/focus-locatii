@@ -55,10 +55,11 @@ function periodDialogValidatesAndRequiresPreview() {
 
 function conflictPreviewIsReadOnlyAndExcludesCurrentReservation() {
   const route = read("src", "app", "api", "admin", "reservations", "conflict-preview", "route.ts");
-  assert(route.includes("id: { not: currentReservation.id }"), "preview must exclude the reservation being edited");
-  assert(route.includes("effectiveBlockingReservationWhere(new Date())"), "preview must use the canonical effective blocking rule");
-  assert(route.includes("periodStart: { lte: periodEnd }"), "preview should match inclusive reservation conflict logic");
-  assert(route.includes("periodEnd: { gte: periodStart }"), "preview should match inclusive reservation conflict logic");
+  const service = read("src", "lib", "availability-service.ts");
+  assert(route.includes("ignoreReservationId: currentReservation?.id || null"), "preview must exclude the reservation being edited");
+  assert(route.includes("loadAvailabilityDecisions"), "preview must use the canonical availability decision service");
+  assert(service.includes("periodStart: { lte: input.periodEnd }"), "preview should match inclusive reservation conflict logic");
+  assert(service.includes("periodEnd: { gte: input.periodStart || referenceDate }"), "preview should match inclusive reservation conflict logic");
   assert(!/prisma\.\w+\.(create|update|updateMany|delete|deleteMany|upsert)\(/.test(route), "preview route must not mutate data");
 }
 

@@ -10,6 +10,7 @@ if (!envFile || !command) {
 }
 
 const environment = { ...process.env };
+environment.ENV_FILE = envFile;
 const raw = readFileSync(resolve(process.cwd(), envFile), "utf8");
 
 for (const line of raw.split(/\r?\n/)) {

@@ -2,7 +2,8 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { effectiveBlockingReservationWhere, expireStaleHolds, reservationLifecycleData } from "@/lib/reservation-lifecycle";
+import { loadAvailabilityDecisions } from "@/lib/availability-service";
+import { expireStaleHolds, reservationLifecycleData } from "@/lib/reservation-lifecycle";
 import type { ReservationDTO } from "@/types/location";
 import type { AuthSession } from "@/lib/auth";
 import { assertReservationTransition } from "@/lib/reservation-workflow";
@@ -307,9 +308,9 @@ export async function createReservation(input: unknown, actor?: AuthSession | nu
   const lifecycleData = reservationLifecycleData(parsed.status);
 
   const reservations = await prisma.$transaction(async (tx) => {
-    await lockReservationLocations(tx, locationIds);
+    await lockReservationLocationsForWrite(tx, locationIds);
     for (const locationId of locationIds) {
-      await assertNoReservationConflict(tx, locationId, parsed.periodStart, parsed.periodEnd, parsed.status);
+      await assertCanonicalReservationAvailabilityForWrite(tx, locationId, parsed.periodStart, parsed.periodEnd, parsed.status);
     }
 
     const created = [];
@@ -396,8 +397,8 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
     }
 
     if (availabilityChanged) {
-      await lockReservationLocations(tx, [existing.locationId, next.locationId]);
-      await assertNoReservationConflict(tx, next.locationId, next.periodStart, next.periodEnd, next.status, id);
+      await lockReservationLocationsForWrite(tx, [existing.locationId, next.locationId]);
+      await assertCanonicalReservationAvailabilityForWrite(tx, next.locationId, next.periodStart, next.periodEnd, next.status, id);
     }
 
     const patchData = reservationPatchData(parsed, rentalContext, nextStatusForClient, existing);
@@ -467,7 +468,7 @@ export async function updateReservationGroupStatus(
       ? await tx.reservation.findMany({ where: { contractGroupId: existing.contractGroupId } })
       : [existing];
 
-    await lockReservationLocations(tx, reservations.map((reservation) => reservation.locationId));
+    await lockReservationLocationsForWrite(tx, reservations.map((reservation) => reservation.locationId));
 
     for (const reservation of reservations) {
       if (actor) {
@@ -476,7 +477,7 @@ export async function updateReservationGroupStatus(
       if (status === "BOOKED") {
         await assertExistingBookedLink(reservation.clientId, reservation.campaignId);
       }
-      await assertNoReservationConflict(
+      await assertCanonicalReservationAvailabilityForWrite(
         tx,
         reservation.locationId,
         reservation.periodStart,
@@ -545,7 +546,7 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
       reservation.locationId,
       parsed.locationId || reservation.locationId
     ]);
-    await lockReservationLocations(tx, locationIdsToLock);
+    await lockReservationLocationsForWrite(tx, locationIdsToLock);
 
     const prepared = [];
     for (const reservation of reservations) {
@@ -566,7 +567,7 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
         periodEnd: parsed.periodEnd || reservation.periodEnd,
         status: parsed.status || reservation.status
       };
-      await assertNoReservationConflict(tx, next.locationId, next.periodStart, next.periodEnd, next.status, reservation.id);
+      await assertCanonicalReservationAvailabilityForWrite(tx, next.locationId, next.periodStart, next.periodEnd, next.status, reservation.id);
 
       prepared.push({
         reservation,
@@ -662,9 +663,9 @@ export async function extendReservationHold(id: string, days: number, actor?: Au
   const updated = await prisma.$transaction(async (tx) => {
     const reservations = await loadReservationGroupForCommand(tx, id, actor);
     assertAllStatuses(reservations, ["HOLD", "RESERVED"], "Poti prelungi doar holduri active.");
-    await lockReservationLocations(tx, reservations.map((reservation) => reservation.locationId));
+    await lockReservationLocationsForWrite(tx, reservations.map((reservation) => reservation.locationId));
     for (const reservation of reservations) {
-      await assertNoReservationConflict(tx, reservation.locationId, reservation.periodStart, reservation.periodEnd, "RESERVED", reservation.id);
+      await assertCanonicalReservationAvailabilityForWrite(tx, reservation.locationId, reservation.periodStart, reservation.periodEnd, "RESERVED", reservation.id);
     }
     await tx.reservation.updateMany({
       where: { id: { in: reservations.map((reservation) => reservation.id) } },
@@ -940,7 +941,7 @@ async function resolveUpdateSeller(
   });
 }
 
-async function lockReservationLocations(tx: Prisma.TransactionClient, locationIds: string[]) {
+export async function lockReservationLocationsForWrite(tx: Prisma.TransactionClient, locationIds: string[]) {
   const uniqueIds = [...new Set(locationIds.filter(Boolean))].sort();
   if (!uniqueIds.length) return;
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
@@ -955,7 +956,7 @@ async function lockReservationLocations(tx: Prisma.TransactionClient, locationId
   }
 }
 
-async function assertNoReservationConflict(
+export async function assertCanonicalReservationAvailabilityForWrite(
   client: ReservationDbClient,
   locationId: string,
   periodStart: Date,
@@ -969,22 +970,41 @@ async function assertNoReservationConflict(
 
   if (!activeReservationStatuses.includes(status as never)) return;
 
-  const conflict = await client.reservation.findFirst({
-    where: {
-      locationId,
-      ...effectiveBlockingReservationWhere(new Date()),
-      ...(ignoreId ? { id: { not: ignoreId } } : {}),
-      periodStart: { lte: periodEnd },
-      periodEnd: { gte: periodStart }
-    },
-    include: { location: { select: { code: true } } }
+  const batch = await loadAvailabilityDecisions({
+    locationIds: [locationId],
+    periodStart,
+    periodEnd,
+    ignoreReservationId: ignoreId,
+    requireOverrideStorage: true,
+    db: client
   });
+  const location = batch.locationsById.get(locationId);
+  if (!location) throw new Error("Locatia selectata nu mai exista.");
+  const availability = batch.decisionsByLocationId[locationId];
+  if (availability?.isBookable) return;
 
-  if (conflict) {
+  if (availability?.lifecycleReason === "LOCATION_MAINTENANCE") {
+    throw new Error(`Locatia ${location.code} este in mentenanta si nu poate fi rezervata.`);
+  }
+  if (availability?.lifecycleReason === "LOCATION_INACTIVE") {
+    throw new Error(`Locatia ${location.code} este inactiva si nu poate fi rezervata.`);
+  }
+  if (availability?.lifecycleReason === "LOCATION_ARCHIVED") {
+    throw new Error(`Locatia ${location.code} este arhivata si nu poate fi rezervata.`);
+  }
+
+  const conflict = availability?.conflictingIntervals[0];
+  if (conflict?.source === "RESERVATION") {
     throw new Error(
-      `Locatia ${conflict.location.code} are deja o rezervare in perioada ${formatDate(conflict.periodStart)} - ${formatDate(conflict.periodEnd)}.`
+      `Locatia ${location.code} are deja o rezervare in perioada ${formatDate(conflict.from)} - ${formatDate(conflict.to)}.`
     );
   }
+  if (conflict) {
+    throw new Error(
+      `Locatia ${location.code} este blocata in perioada ${formatDate(conflict.from)} - ${formatDate(conflict.to)}.`
+    );
+  }
+  throw new Error(`Disponibilitatea locatiei ${location.code} nu a putut fi confirmata.`);
 }
 
 function normalizeReservationInput<T extends Record<string, unknown>>(input: T) {

@@ -11,6 +11,8 @@ const files = {
   availabilityApi: read("src", "app", "api", "admin", "location-selection", "availability", "route.ts"),
   service: read("src", "lib", "location-selection.ts"),
   availability: read("src", "lib", "location-selection-availability.ts"),
+  canonicalAvailability: read("src", "lib", "availability.ts"),
+  availabilityService: read("src", "lib", "availability-service.ts"),
   dto: read("src", "lib", "location-selection-dto.ts"),
   builder: read("src", "components", "admin", "location-selection", "AdminLocationSelectionPage.tsx"),
   filters: read("src", "components", "admin", "location-selection", "LocationSelectionFilters.tsx"),
@@ -36,24 +38,25 @@ for (const status of ["HOLD", "RESERVED", "BOOKED"]) {
 for (const status of ["CANCELLED", "EXPIRED", "LOST", "ARCHIVED"]) {
   assert(files.availability.includes(status), `availability must document ${status} as non-blocking`);
 }
-assert(files.availability.includes("periodStart: { lte: periodEnd }"), "availability must use inclusive overlap start check");
-assert(files.availability.includes("periodEnd: { gte: periodStart }"), "availability must use inclusive overlap end check");
+assert(files.availabilityService.includes("periodStart: { lte: input.periodEnd }"), "availability must use inclusive overlap start check");
+assert(files.availabilityService.includes("periodEnd: { gte: input.periodStart || referenceDate }"), "availability must use inclusive overlap end check");
 assert(files.availability.includes("buildNoPeriodAvailability"), "availability must provide useful no-period status");
-assert(files.service.includes('lifecycleStatus: { not: "ARCHIVED" }'), "archived inventory must not enter the sales selector");
+assert(files.service.includes('lifecycleStatus: "ACTIVE"'), "inactive, archived and maintenance inventory must not enter the sales selector");
 assert(files.availability.includes("lifecycleUnavailable"), "inactive or maintenance inventory must not be proposed for sale");
 assert(!files.availability.includes("Status inventar: ${location.status}"), "legacy UNKNOWN status must not act as a commercial availability warning");
 assert(files.availability.includes("referenceDate"), "start-date-only availability should use the selected start date as reference");
-assert(files.availability.includes("periodEnd: { gte: referenceDate }"), "start-date-only availability should look forward from the selected start date");
+assert(files.availabilityService.includes("periodEnd: { gte: referenceDate }"), "start-date-only availability should look forward from the selected start date");
 assert(files.availability.includes("Disponibil pana la"), "no-period future booking should show available-until label");
 assert(files.availability.includes("Disponibil din"), "current booking should show available-from label");
 assert(files.availability.includes("label: \"Indisponibil\""), "selected-period conflicts must be labelled unavailable");
 assert(files.availability.includes("reservationIntervalAction(first.status)"), "selected-period conflicts must explain occupied/reserved period through normalized reservation labels");
 assert(files.availability.includes("Disponibil in perioada selectata"), "selected-period available state must be unambiguous");
-assert(files.availability.includes("selectedPeriodCoverage"), "selected-period availability must calculate partial coverage");
+assert(files.canonicalAvailability.includes("decideAvailability"), "selected-period availability must come from the canonical decision engine");
+assert(!files.availability.includes("selectedPeriodCoverage"), "selector adapter must not recalculate canonical partial coverage");
 assert(files.availability.includes('state: "PARTIAL"'), "selected-period partial overlaps must be marked as partial, not full conflict");
 assert(files.availability.includes("Disponibil partial"), "selected-period partial availability must have a clear label");
-assert(files.availability.includes("availableFrom: firstAvailable.start.toISOString()"), "partial availability should expose the first available start date");
-assert(files.availability.includes("availableUntil: firstAvailable.end.toISOString()"), "partial availability should expose the first available end date");
+assert(files.availability.includes("availableFrom: firstAvailable?.start.toISOString()"), "partial availability should expose the first available start date");
+assert(files.availability.includes("availableUntil: firstAvailable?.end.toISOString()"), "partial availability should expose the first available end date");
 assert(files.availability.includes("isGenericAvailableNote"), "generic available notes must be suppressed when they contradict conflicts");
 assert(files.availability.includes("holdExpiresAt: reservation.holdExpiresAt?.toISOString() || null"), "availability should carry hold expiry metadata for admin-safe reservation labels");
 assert(files.availability.includes('if (status === "HOLD" || status === "RESERVED") return "Rezervat"'), "HOLD/RESERVED availability should be labelled as reserved");

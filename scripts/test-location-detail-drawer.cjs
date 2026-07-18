@@ -42,7 +42,8 @@ function timelineRouteIsReadOnlyAndUsesLocationId() {
 
 function timelineRouteFiltersAndSortsFuturePeriods() {
   const route = read("src", "app", "api", "admin", "locations", "[id]", "availability-timeline", "route.ts");
-  assert(route.includes('const activeTimelineStatuses = ["HOLD", "RESERVED", "BOOKED"] as const;'), "timeline should include only active commercial statuses");
+  assert(route.includes("effectiveBlockingReservationWhere(now)"), "timeline should include only effective commercial blockers");
+  assert(route.includes("decideAvailability({"), "timeline summary should use the canonical availability decision");
   assert(route.includes("periodEnd: { gte: today }"), "timeline should include active/future periods and skip old ended rows");
   assert(!route.includes('"CANCELLED"'), "timeline should not include cancelled rows");
   assert(!route.includes('"LOST"'), "timeline should not include lost rows");

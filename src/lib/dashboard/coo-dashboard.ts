@@ -5,7 +5,8 @@ import { effectiveNeutralizationDate } from "@/lib/neutralization-date";
 import { operationStatus } from "@/lib/operation-status";
 import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
-import { effectiveHoldExpiresAt, effectiveHoldWhere } from "@/lib/reservation-lifecycle";
+import { decideAvailability } from "@/lib/availability";
+import { effectiveBlockingReservationWhere, effectiveHoldExpiresAt, effectiveHoldWhere } from "@/lib/reservation-lifecycle";
 import { addUtcDays, daysFromToday, decimalString, startOfUtcDay } from "@/lib/dashboard/dashboard-utils";
 
 export type DashboardMoney = { currency: string; amount: string; count: number };
@@ -53,8 +54,6 @@ export async function getCooDashboardData(session: AuthSession, now = new Date()
     operationalReservations,
     holdRows,
     locations,
-    occupiedLocationRows,
-    activeOverrides,
     crmSummary
   ] = await Promise.all([
     prisma.financialReceivable.groupBy({
@@ -121,15 +120,20 @@ export async function getCooDashboardData(session: AuthSession, now = new Date()
     }),
     prisma.location.findMany({
       where: { lifecycleStatus: { not: "ARCHIVED" } },
-      select: { id: true, lifecycleStatus: true, blockedFrom: true, blockedUntil: true, mainPhotoUrl: true, images: { select: { alt: true }, take: 20 } }
-    }),
-    prisma.reservation.findMany({
-      where: { status: "BOOKED", periodStart: { lte: today }, periodEnd: { gte: today } },
-      select: { locationId: true }, distinct: ["locationId"]
-    }),
-    prisma.locationAvailabilityOverride.findMany({
-      where: { clearedAt: null, periodStart: { lte: today }, OR: [{ periodEnd: null }, { periodEnd: { gte: today } }] },
-      select: { locationId: true }, distinct: ["locationId"]
+      select: {
+        id: true, status: true, lifecycleStatus: true, availabilityText: true,
+        availableFrom: true, availableUntil: true, bookedFrom: true, bookedUntil: true,
+        blockedReason: true, blockedFrom: true, blockedUntil: true,
+        mainPhotoUrl: true, images: { select: { alt: true }, take: 20 },
+        reservations: {
+          where: { ...effectiveBlockingReservationWhere(now), periodStart: { lte: today }, periodEnd: { gte: today } },
+          select: { id: true, status: true, periodStart: true, periodEnd: true, holdExpiresAt: true, createdAt: true }
+        },
+        availabilityOverrides: {
+          where: { clearedAt: null, periodStart: { lte: today }, OR: [{ periodEnd: null }, { periodEnd: { gte: today } }] },
+          select: { id: true, type: true, reason: true, periodStart: true, periodEnd: true, clearedAt: true }
+        }
+      }
     }),
     Promise.all([
       prisma.crmNextAction.count({ where: { status: "open", dueAt: { lt: today } } }),
@@ -164,14 +168,20 @@ export async function getCooDashboardData(session: AuthSession, now = new Date()
     .filter((row) => row.status === "HOLD" || row.status === "RESERVED")
     .map((row) => ({ ...row, expiresAt: effectiveHoldExpiresAt(row) }));
   const expiringHolds = activeHolds.filter((row) => row.expiresAt <= addUtcDays(now, 3));
-  const occupiedIds = new Set(occupiedLocationRows.map((row) => row.locationId));
-  const heldIds = new Set(activeHolds
-    .filter((row) => row.periodStart <= today && row.periodEnd >= today)
-    .map((row) => row.location.id));
-  const overrideIds = new Set(activeOverrides.map((row) => row.locationId));
-  const blockedIds = new Set(locations.filter((row) => row.lifecycleStatus !== "ACTIVE" || overrideIds.has(row.id) || manualBlockActive(row, today)).map((row) => row.id));
-  const activeLocationIds = locations.filter((row) => row.lifecycleStatus === "ACTIVE").map((row) => row.id);
-  const availableCount = activeLocationIds.filter((id) => !occupiedIds.has(id) && !heldIds.has(id) && !blockedIds.has(id)).length;
+  const inventoryDecisions = locations.map((location) => ({
+    location,
+    decision: decideAvailability({ ...location, periodStart: today, periodEnd: today, now })
+  }));
+  const occupiedIds = new Set(inventoryDecisions
+    .filter(({ decision }) => decision.conflictingIntervals.some((interval) => interval.status === "BOOKED"))
+    .map(({ location }) => location.id));
+  const heldIds = new Set(inventoryDecisions
+    .filter(({ decision }) => decision.conflictingIntervals.some((interval) => interval.status === "HOLD" || interval.status === "RESERVED"))
+    .map(({ location }) => location.id));
+  const blockedIds = new Set(inventoryDecisions
+    .filter(({ decision }) => decision.status === "BLOCKED")
+    .map(({ location }) => location.id));
+  const availableCount = inventoryDecisions.filter(({ decision }) => decision.isBookable).length;
   const missingPhotoCount = locations.filter((row) => !row.mainPhotoUrl && !row.images.length).length;
   const missingSketchCount = locations.filter((row) => !row.images.some((image) => String(image.alt || "").toUpperCase().startsWith("PRODUCTION_SKETCH"))).length;
 
@@ -327,10 +337,6 @@ function agingDecision(rows: any[], id: string, label: string) {
   const count = rows.reduce((sum, row) => sum + row._count._all, 0);
   if (!count) return [];
   return [{ id: `aging-${id}`, tone: "red" as const, text: `${count} ${label}.`, href: "/admin/financiar/incasari?status=overdue", actionLabel: "Prioritizează încasarea" }];
-}
-
-function manualBlockActive(row: { blockedFrom: Date | null; blockedUntil: Date | null }, today: Date) {
-  return Boolean(row.blockedFrom && row.blockedFrom <= today && (!row.blockedUntil || row.blockedUntil >= today));
 }
 
 function attentionSort(left: CooAttentionItem, right: CooAttentionItem) {

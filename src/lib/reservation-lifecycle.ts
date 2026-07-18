@@ -1,33 +1,23 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { recordAudit, type AuditActor } from "@/lib/audit";
+import {
+  HOLD_DURATION_DAYS,
+  effectiveHoldExpiresAt,
+  holdExpirationFrom,
+  isEffectiveBlockingReservation,
+  isEffectiveHold
+} from "@/lib/reservation-lifecycle-domain";
 
-export const HOLD_DURATION_DAYS = 5;
+export {
+  HOLD_DURATION_DAYS,
+  effectiveHoldExpiresAt,
+  holdExpirationFrom,
+  isEffectiveBlockingReservation,
+  isEffectiveHold
+} from "@/lib/reservation-lifecycle-domain";
+
 const holdStatuses = ["HOLD", "RESERVED"] as const;
-
-export function holdExpirationFrom(value = new Date()) {
-  const expiresAt = new Date(value);
-  expiresAt.setUTCDate(expiresAt.getUTCDate() + HOLD_DURATION_DAYS);
-  return expiresAt;
-}
-
-export function effectiveHoldExpiresAt(input: { holdExpiresAt: Date | null; createdAt: Date }) {
-  return input.holdExpiresAt || holdExpirationFrom(input.createdAt);
-}
-
-export function isEffectiveHold(
-  input: { status: string; holdExpiresAt: Date | null; createdAt: Date },
-  now = new Date()
-) {
-  return holdStatuses.includes(input.status as (typeof holdStatuses)[number]) && effectiveHoldExpiresAt(input) > now;
-}
-
-export function isEffectiveBlockingReservation(
-  input: { status: string; holdExpiresAt: Date | null; createdAt: Date },
-  now = new Date()
-) {
-  return input.status === "BOOKED" || isEffectiveHold(input, now);
-}
 
 export function effectiveHoldWhere(now = new Date()): Prisma.ReservationWhereInput {
   const legacyCutoff = holdLegacyCutoff(now);

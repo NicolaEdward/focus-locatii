@@ -17,6 +17,9 @@ const {
   updateReservationGroup,
   updateReservationGroupStatus
 } = loadTsModule(path.join(process.cwd(), "src", "lib", "reservations.ts"));
+const { loadAvailabilityDecisions } = loadTsModule(path.join(process.cwd(), "src", "lib", "availability-service.ts"));
+const { getLocationSelectionAvailability } = loadTsModule(path.join(process.cwd(), "src", "lib", "location-selection-availability.ts"));
+const { publicAvailability } = loadTsModule(path.join(process.cwd(), "src", "lib", "availability.ts"));
 
 const suffix = `reservation-integrity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const created = {
@@ -106,6 +109,62 @@ async function main() {
   assert.equal(concurrent.filter((result) => result.status === "fulfilled").length, 1, "only one concurrent overlapping create succeeds");
   assert.equal(concurrent.filter((result) => result.status === "rejected").length, 1, "one concurrent overlapping create is rejected");
 
+  await prisma.location.update({ where: { id: ctx.locationN.id }, data: { lifecycleStatus: "MAINTENANCE" } });
+  await rejects(() => createHold(ctx.locationN.id, "2026-04-15", "2026-04-20", agentSession), "maintenance location is rejected by write guard");
+  await prisma.location.update({ where: { id: ctx.locationO.id }, data: { lifecycleStatus: "INACTIVE" } });
+  await rejects(() => createHold(ctx.locationO.id, "2026-04-15", "2026-04-20", agentSession), "inactive location is rejected by write guard");
+  await prisma.location.update({ where: { id: ctx.locationP.id }, data: { lifecycleStatus: "ARCHIVED" } });
+  await rejects(() => createHold(ctx.locationP.id, "2026-04-15", "2026-04-20", agentSession), "archived location is rejected by write guard");
+
+  await prisma.locationAvailabilityOverride.create({
+    data: {
+      locationId: ctx.locationQ.id,
+      type: "COMMERCIAL_BLOCK",
+      reason: "QA canonical block",
+      periodStart: date("2026-04-15"),
+      periodEnd: date("2026-04-20")
+    }
+  });
+  await rejects(() => createHold(ctx.locationQ.id, "2026-04-15", "2026-04-20", agentSession), "active override is rejected by write guard");
+  const canonicalOverride = await loadAvailabilityDecisions({
+    locationIds: [ctx.locationQ.id],
+    periodStart: date("2026-04-15"),
+    periodEnd: date("2026-04-20")
+  });
+  const selectorOverride = await getLocationSelectionAvailability({
+    locationIds: [ctx.locationQ.id],
+    periodStart: "2026-04-15",
+    periodEnd: "2026-04-20",
+    session: agentSession
+  });
+  const publicOverride = publicAvailability({
+    lifecycleStatus: "ACTIVE",
+    availabilityOverrides: [{
+      id: "public-override",
+      type: "COMMERCIAL_BLOCK",
+      reason: "Private reason",
+      periodStart: "2026-04-15",
+      periodEnd: "2026-04-20"
+    }]
+  }, date("2026-04-15"));
+  assert.equal(canonicalOverride.decisionsByLocationId[ctx.locationQ.id].status, "BLOCKED", "canonical decision blocks override");
+  assert.equal(selectorOverride[ctx.locationQ.id].state, "CONFLICT", "selector adapter blocks override");
+  assert.equal(publicOverride.publicStatus, "UNKNOWN", "public adapter does not propose override-blocked location");
+  assert.equal(JSON.stringify(publicOverride).includes("Private reason"), false, "public adapter does not expose override reason");
+
+  await prisma.location.update({
+    where: { id: ctx.locationR.id },
+    data: { blockedReason: "QA legacy block", blockedFrom: date("2026-04-15"), blockedUntil: date("2026-04-20") }
+  });
+  await rejects(() => createHold(ctx.locationR.id, "2026-04-15", "2026-04-20", agentSession), "legacy manual block remains write-compatible");
+
+  await directReservation(ctx.locationS.id, "2026-04-15", "2026-04-20", "RESERVED", ctx.otherAgent, {
+    holdExpiresAt: new Date("2026-01-01T00:00:00.000Z"),
+    createdAt: new Date("2025-12-01T00:00:00.000Z")
+  });
+  const afterExpiredHold = await createHold(ctx.locationS.id, "2026-04-15", "2026-04-20", agentSession);
+  assert.equal(afterExpiredHold.status, "RESERVED", "expired HOLD does not block write even before relying on stored status");
+
   const extendable = await createHold(ctx.locationE.id, "2026-05-01", "2026-05-10", agentSession);
   const extended = await extendReservationHold(extendable.id, 7, agentSession);
   assert.equal(extended[0].status, "RESERVED", "extend active hold succeeds");
@@ -171,6 +230,9 @@ async function main() {
       "update non-overlap succeeds",
       "BOOKED conversion rechecks conflicts",
       "concurrency overlapping create only one succeeds",
+      "lifecycle and manual blocks reject writes",
+      "public selector and write share override decision",
+      "expired HOLD does not block",
       "command-center hold lifecycle guards",
       "seller reassignment policy and integrity preservation",
       "atomic group update rollback"
@@ -209,7 +271,7 @@ async function setup() {
   created.campaigns.push(campaign.id);
 
   const locations = {};
-  for (const letter of "ABCDEFGHIJKLM") {
+  for (const letter of "ABCDEFGHIJKLMNOPQRS") {
     locations[`location${letter}`] = await location(category.id, letter);
   }
   return { category, agent, otherAgent, coo, superAdmin, client, campaign, ...locations };

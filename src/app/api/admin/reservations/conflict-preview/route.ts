@@ -3,8 +3,7 @@ import { z } from "zod";
 import { requireAnyPermission, type AuthSession } from "@/lib/auth";
 import { hasAnyPermission } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
-import { legacyManualBlockConflict, listLocationAvailabilityOverrideConflicts } from "@/lib/location-availability-overrides";
-import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
+import { loadAvailabilityDecisions } from "@/lib/availability-service";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -66,90 +65,52 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Alege cel putin o locatie pentru verificare." }, { status: 400, headers: noStoreHeaders });
     }
 
-    const [locations, conflicts, overrideConflicts] = await Promise.all([
-      prisma.location.findMany({
-        where: { id: { in: locationIds } },
-        select: {
-          id: true,
-          code: true,
-          status: true,
-          blockedReason: true,
-          blockedFrom: true,
-          blockedUntil: true,
-          availabilityText: true
-        }
-      }),
-      prisma.reservation.findMany({
-        where: {
-          locationId: { in: locationIds },
-          ...(currentReservation ? { id: { not: currentReservation.id } } : {}),
-          ...effectiveBlockingReservationWhere(new Date()),
-          periodStart: { lte: periodEnd },
-          periodEnd: { gte: periodStart }
-        },
-        select: {
-          id: true,
-          locationId: true,
-          status: true,
-          clientName: true,
-          campaignName: true,
-          periodStart: true,
-          periodEnd: true,
-          location: { select: { code: true } }
-        },
-        orderBy: [{ periodStart: "asc" }]
-      }),
-      listLocationAvailabilityOverrideConflicts({
-        locationIds,
-        periodStart,
-        periodEnd,
-        session
-      })
-    ]);
-
+    const batch = await loadAvailabilityDecisions({
+      locationIds,
+      periodStart,
+      periodEnd,
+      ignoreReservationId: currentReservation?.id || null
+    });
+    const locations = [...batch.locationsById.values()];
     const warnings = locations.flatMap((location) => locationWarnings(location));
-    const legacyBlockConflicts = locations.flatMap((location) => {
-      const conflict = legacyManualBlockConflict(location, { periodStart, periodEnd });
-      return conflict ? [conflict] : [];
+    const conflicts = locations.flatMap((location) => {
+      const decision = batch.decisionsByLocationId[location.id];
+      if (!decision) return [];
+      const rows = decision.conflictingIntervals.map((interval, index) => {
+        const reservation = interval.sourceId ? batch.reservationsById.get(interval.sourceId) : null;
+        const canViewReservationDetails = Boolean(reservation && (canViewAll || isOwnReservation(reservation, session)));
+        return {
+          reservationId: interval.sourceId || `${interval.source.toLowerCase()}:${location.id}:${index}`,
+          locationId: location.id,
+          locationCode: location.code,
+          clientName: canViewReservationDetails ? reservation?.clientName || null : null,
+          campaignName: canViewReservationDetails ? reservation?.campaignName || null : interval.source === "RESERVATION" ? null : interval.reason || null,
+          status: interval.status,
+          periodStart: interval.from.toISOString(),
+          periodEnd: interval.to.toISOString(),
+          holdExpiresAt: interval.holdExpiresAt?.toISOString() || null,
+          openEnded: interval.openEnded
+        };
+      });
+      if (rows.length || decision.isBookable) return rows;
+      return [{
+        reservationId: `lifecycle:${location.id}`,
+        locationId: location.id,
+        locationCode: location.code,
+        clientName: null,
+        campaignName: null,
+        status: location.lifecycleStatus,
+        periodStart: periodStart.toISOString(),
+        periodEnd: periodEnd.toISOString(),
+        holdExpiresAt: null,
+        openEnded: false
+      }];
     });
 
     return NextResponse.json({
       ok: true,
       checkedLocationIds: locationIds,
-      conflicts: [
-        ...conflicts.map((conflict) => ({
-          reservationId: conflict.id,
-          locationId: conflict.locationId,
-          locationCode: conflict.location?.code || null,
-          clientName: conflict.clientName || null,
-          campaignName: conflict.campaignName || null,
-          status: conflict.status,
-          periodStart: conflict.periodStart.toISOString(),
-          periodEnd: conflict.periodEnd.toISOString()
-        })),
-        ...overrideConflicts.map((conflict) => ({
-          reservationId: conflict.reservationId,
-          locationId: conflict.locationId,
-          locationCode: locations.find((location) => location.id === conflict.locationId)?.code || null,
-          clientName: null,
-          campaignName: conflict.campaignName,
-          status: conflict.status,
-          periodStart: conflict.periodStart,
-          periodEnd: conflict.periodEnd,
-          openEnded: conflict.openEnded
-        })),
-        ...legacyBlockConflicts.map((conflict) => ({
-          reservationId: conflict.reservationId,
-          locationId: conflict.locationId,
-          locationCode: locations.find((location) => location.id === conflict.locationId)?.code || null,
-          clientName: null,
-          campaignName: conflict.campaignName,
-          status: conflict.status,
-          periodStart: conflict.periodStart,
-          periodEnd: conflict.periodEnd,
-          openEnded: conflict.openEnded
-        }))
-      ],
+      conflicts,
       warnings
     }, { headers: noStoreHeaders });
   } catch (error) {
@@ -182,20 +143,10 @@ function locationWarnings(
     id: string;
     code: string;
     status: string;
-    blockedReason: string | null;
-    blockedFrom: Date | null;
-    blockedUntil: Date | null;
     availabilityText: string | null;
   }
 ) {
   const warnings = [];
-  if (location.status !== "AVAILABLE" && location.status !== "AVAILABLE_FROM") {
-    warnings.push({
-      locationId: location.id,
-      locationCode: location.code,
-      message: `Status inventar: ${location.status}. Verifica daca este corect pentru noua perioada.`
-    });
-  }
   if (location.availabilityText) {
     warnings.push({
       locationId: location.id,

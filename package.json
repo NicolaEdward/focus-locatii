@@ -36,6 +36,8 @@
     "db:count": "node scripts/count-portfolio.cjs",
     "typecheck": "tsc --noEmit",
     "test:availability": "node scripts/test-availability.cjs",
+    "audit:availability": "tsx scripts/audit-availability-data.ts",
+    "measure:availability": "node scripts/measure-availability-routes.cjs",
     "test:status-availability": "node scripts/test-status-availability-architecture.cjs",
     "test:prorata": "node scripts/test-prorata.cjs",
     "test:rbac": "tsx scripts/test-rbac.ts",

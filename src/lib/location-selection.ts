@@ -182,7 +182,7 @@ function selectionDescription(row: SelectionLocationRow) {
 function selectionWhere(filters: LocationSelectionFilters): Prisma.LocationWhereInput {
   const search = filters.search?.trim();
   return {
-    lifecycleStatus: { not: "ARCHIVED" },
+    lifecycleStatus: "ACTIVE",
     ...(search
       ? {
           OR: [

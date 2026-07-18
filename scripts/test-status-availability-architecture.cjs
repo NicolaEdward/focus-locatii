@@ -10,6 +10,8 @@ const migration = read("prisma", "migrations", "20260702000000_location_status_a
 const overrides = read("src", "lib", "location-availability-overrides.ts");
 const selectionAvailability = read("src", "lib", "location-selection-availability.ts");
 const availability = read("src", "lib", "availability.ts");
+const availabilityService = read("src", "lib", "availability-service.ts");
+const lifecycleDomain = read("src", "lib", "reservation-lifecycle-domain.ts");
 const blockRoute = read("src", "app", "api", "admin", "locations", "[id]", "block", "route.ts");
 const conflictPreview = read("src", "app", "api", "admin", "reservations", "conflict-preview", "route.ts");
 const editor = read("src", "components", "admin", "LocationEditor.tsx");
@@ -44,20 +46,21 @@ assert(overrides.includes("legacyManualBlockConflict"), "legacy block fields mus
 assert(overrides.includes("createManualAvailabilityOverride"), "manual block route should be able to create a real override");
 assert(overrides.includes("clearManualAvailabilityOverrides"), "manual unblock route should clear active overrides");
 
-assert(selectionAvailability.includes("listLocationAvailabilityOverrideConflicts"), "selector availability must read override conflicts");
-assert(selectionAvailability.includes("legacyManualBlockConflict"), "selector availability must include legacy block fields");
+assert(availabilityService.includes("listActiveLocationAvailabilityOverrides"), "canonical availability service must read override conflicts");
+assert(availability.includes("LEGACY_MANUAL_BLOCK"), "canonical availability must include legacy block fields");
 assert(selectionAvailability.includes("isManualAvailabilityStatus"), "selector labels should distinguish manual blocks from reservations");
 assert(selectionAvailability.includes("current.openEnded || isManualAvailabilityStatus(current.status)"), "open-ended manual blocks must not become fake available-from dates");
 assert(selectionAvailability.includes("Blocat din"), "open-ended manual blocks should show a block label, not an artificial availability date");
 assert(!selectionAvailability.includes("Locatie blocata: ${location.blockedReason}"), "manual block must not be a duplicate warning beside conflict state");
 assert(lifecycle.includes("effectiveBlockingReservationWhere"), "reservation lifecycle must expose one canonical effective blocking query");
 assert(lifecycle.includes("effectiveHoldWhere"), "reservation lifecycle must expose one canonical effective HOLD query");
-assert(lifecycle.includes("isEffectiveBlockingReservation"), "in-memory availability must share the canonical effective rule");
-assert(selectionAvailability.includes("effectiveBlockingReservationWhere"), "selector must use the canonical effective reservation rule");
+assert(lifecycleDomain.includes("isEffectiveBlockingReservation"), "in-memory availability must share the canonical effective rule");
+assert(availabilityService.includes("effectiveBlockingReservationWhere"), "selector must use the canonical effective reservation rule through the batch service");
 assert(!selectionAvailability.includes("function activeBlockingReservationWhere"), "selector must not keep a parallel HOLD expiry query");
-assert(conflictPreview.includes("effectiveBlockingReservationWhere"), "conflict preview must ignore expired HOLDs through the canonical rule");
+assert(conflictPreview.includes("loadAvailabilityDecisions"), "conflict preview must use the canonical decision service");
 assert(timeline.includes("effectiveBlockingReservationWhere"), "location timeline must ignore expired HOLDs through the canonical rule");
-assert(reservations.includes("...effectiveBlockingReservationWhere(new Date())"), "reservation writes must recheck canonical effective conflicts inside the transaction");
+assert(reservations.includes("loadAvailabilityDecisions"), "reservation writes must recheck canonical decisions inside the transaction");
+assert(reservations.includes("requireOverrideStorage: true"), "reservation writes must fail closed if override storage is unavailable");
 assert(locations.includes("effectiveBlockingReservationWhere"), "public and inventory availability must query only effective blockers");
 assert(locations.includes("isEffectiveBlockingReservation"), "location serialization must not depend on cleanup for correctness");
 assert(!locations.includes("await expireStaleHolds()"), "read-only location requests must not mutate HOLD status");
@@ -66,7 +69,8 @@ assert(cooDashboard.includes("effectiveHoldWhere(now)"), "COO HOLD counts must u
 assert(salesDashboard.includes("effectiveHoldWhere(now)"), "Sales HOLD lists must use exact effective expiry");
 assert(!salesDashboard.includes("addUtcDays(row.createdAt, 14)"), "Sales dashboard must not use the old 14-day HOLD fallback");
 
-assert(availability.includes("manualAvailabilityIntervals"), "shared availability calculator must treat manual blocks as occupied intervals");
+assert(availability.includes("canonicalBlockingIntervals"), "shared availability calculator must treat all blockers as canonical intervals");
+assert(availability.includes('dateSemantics: "INCLUSIVE"'), "canonical availability must declare inclusive date semantics");
 assert(availability.includes("lifecycleStatus"), "shared availability calculator must understand lifecycle status");
 assert(availability.includes("Locatie inactiva"), "inactive lifecycle status should suspend availability");
 
@@ -76,8 +80,7 @@ assert(blockRoute.includes("prisma.$transaction"), "block route should update le
 assert(blockRoute.includes("createManualAvailabilityOverride"), "block route must sync the new override model");
 assert(blockRoute.includes("clearManualAvailabilityOverrides"), "unblock route must clear override model entries");
 
-assert(conflictPreview.includes("listLocationAvailabilityOverrideConflicts"), "reservation conflict preview must include manual overrides");
-assert(conflictPreview.includes("legacyManualBlockConflict"), "reservation conflict preview must include legacy manual blocks");
+assert(conflictPreview.includes("loadAvailabilityDecisions"), "reservation conflict preview must include canonical overrides and legacy blocks");
 
 assert(editor.includes("Stare locatie"), "location editor must expose lifecycle status separately");
 assert(editor.includes("Status disponibilitate vechi"), "legacy status must be labelled as compatibility state");

@@ -1,36 +1,6 @@
-const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
-const ts = require("typescript");
-
-const sourcePath = path.join(process.cwd(), "src", "lib", "availability.ts");
-const source = fs.readFileSync(sourcePath, "utf8");
-const transpiled = ts.transpileModule(source, {
-  compilerOptions: {
-    module: ts.ModuleKind.CommonJS,
-    target: ts.ScriptTarget.ES2020,
-    esModuleInterop: true
-  }
-}).outputText;
-
-const sandbox = {
-  exports: {},
-  require,
-  console,
-  Intl,
-  Date,
-  Number,
-  String,
-  Boolean,
-  Array,
-  JSON,
-  RegExp,
-  Math
-};
-sandbox.module = { exports: sandbox.exports };
-vm.runInNewContext(transpiled, sandbox, { filename: sourcePath });
-
-const { calculateAvailability } = sandbox.module.exports;
+const { loadTsModule } = require("./load-ts-module.cjs");
+const { calculateAvailability, decideAvailability } = loadTsModule(path.join(process.cwd(), "src", "lib", "availability.ts"));
 
 const cases = [
   {
@@ -61,7 +31,7 @@ const cases = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "pana la data de 01.07.2026"
+    expectedLabelIncludes: "pana la data de 30.06.2026"
   },
   {
     name: "locatie libera doar la final",
@@ -72,7 +42,7 @@ const cases = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "din data de 30.06.2026"
+    expectedLabelIncludes: "din data de 01.07.2026"
   },
   {
     name: "locatie libera intre doua inchirieri",
@@ -86,15 +56,15 @@ const cases = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "din data de 10.06.2026 pana la data de 01.07.2026"
+    expectedLabelIncludes: "din data de 11.06.2026 pana la data de 30.06.2026"
   },
   {
-    name: "locatie suspendata",
+    name: "status legacy necunoscut nu suprascrie disponibilitatea derivata",
     input: { status: "UNKNOWN", reservations: [] },
     from: "2026-06-01",
     to: "2026-07-31",
-    expectedStatus: "SUSPENDED",
-    expectedLabelIncludes: "Suspendata"
+    expectedStatus: "AVAILABLE",
+    expectedLabelIncludes: "Disponibila"
   },
   {
     name: "lifecycle inactiv suspenda disponibilitatea",
@@ -193,7 +163,53 @@ for (const testCase of cases) {
   );
 }
 
-console.log(JSON.stringify({ ok: true, checked: cases.map((testCase) => testCase.name) }, null, 2));
+const now = new Date("2026-07-18T12:00:00.000Z");
+const canonicalCases = [
+  {
+    name: "BOOKED overlap respins",
+    input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-01", periodEnd: "2026-08-10", now, reservations: [{ id: "booked", status: "BOOKED", periodStart: "2026-08-01", periodEnd: "2026-08-10", createdAt: now }] },
+    expected: "CONFLICT"
+  },
+  {
+    name: "HOLD activ respins",
+    input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-01", periodEnd: "2026-08-10", now, reservations: [{ id: "hold", status: "RESERVED", periodStart: "2026-08-01", periodEnd: "2026-08-10", createdAt: now, holdExpiresAt: "2026-07-20T12:00:00.000Z" }] },
+    expected: "CONFLICT"
+  },
+  {
+    name: "HOLD expirat permis",
+    input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-01", periodEnd: "2026-08-10", now, reservations: [{ id: "expired-hold", status: "RESERVED", periodStart: "2026-08-01", periodEnd: "2026-08-10", createdAt: now, holdExpiresAt: "2026-07-18T11:59:59.000Z" }] },
+    expected: "AVAILABLE"
+  },
+  {
+    name: "override activ blocheaza",
+    input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-01", periodEnd: "2026-08-10", now, availabilityOverrides: [{ id: "override", type: "COMMERCIAL_BLOCK", reason: "Blocaj", periodStart: "2026-08-01", periodEnd: "2026-08-10" }] },
+    expected: "BLOCKED"
+  },
+  {
+    name: "editarea exclude recordul curent",
+    input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-01", periodEnd: "2026-08-10", now, ignoreReservationId: "same", reservations: [{ id: "same", status: "BOOKED", periodStart: "2026-08-01", periodEnd: "2026-08-10", createdAt: now }] },
+    expected: "AVAILABLE"
+  },
+  {
+    name: "aceeasi zi este suprapunere inclusiva",
+    input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-10", periodEnd: "2026-08-12", now, reservations: [{ id: "inclusive", status: "BOOKED", periodStart: "2026-08-01", periodEnd: "2026-08-10", createdAt: now }] },
+    expected: "PARTIAL"
+  },
+  {
+    name: "ziua urmatoare nu se suprapune",
+    input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-11", periodEnd: "2026-08-12", now, reservations: [{ id: "adjacent", status: "BOOKED", periodStart: "2026-08-01", periodEnd: "2026-08-10", createdAt: now }] },
+    expected: "AVAILABLE"
+  }
+];
+
+for (const testCase of canonicalCases) {
+  const result = decideAvailability(testCase.input);
+  assert(result.status === testCase.expected, `${testCase.name}: expected ${testCase.expected}, got ${result.status}`);
+  assert(result.dateSemantics === "INCLUSIVE", `${testCase.name}: date semantics must remain inclusive`);
+  assert(result.isBookable === (testCase.expected === "AVAILABLE"), `${testCase.name}: isBookable mismatch`);
+}
+
+console.log(JSON.stringify({ ok: true, checked: [...cases, ...canonicalCases].map((testCase) => testCase.name) }, null, 2));
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);

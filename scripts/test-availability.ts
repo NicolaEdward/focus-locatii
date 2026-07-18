@@ -38,7 +38,7 @@ const cases: Case[] = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "pana la data de 01.07.2026"
+    expectedLabelIncludes: "pana la data de 30.06.2026"
   },
   {
     name: "locatie libera doar la final",
@@ -49,7 +49,7 @@ const cases: Case[] = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "din data de 30.06.2026"
+    expectedLabelIncludes: "din data de 01.07.2026"
   },
   {
     name: "locatie libera intre doua inchirieri",
@@ -63,7 +63,7 @@ const cases: Case[] = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "din data de 10.06.2026 pana la data de 01.07.2026"
+    expectedLabelIncludes: "din data de 11.06.2026 pana la data de 30.06.2026"
   },
   {
     name: "locatie suspendata",

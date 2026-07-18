@@ -2,9 +2,6 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["xlsx"],
-  outputFileTracingIncludes: {
-    "/*": ["./node_modules/xlsx/**/*"]
-  },
   experimental: {
     serverActions: {
       bodySizeLimit: "8mb"

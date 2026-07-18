@@ -1,4 +1,5 @@
 import { Worker } from "node:worker_threads";
+import "xlsx";
 
 export const SPREADSHEET_LIMITS = {
   maxCompressedBytes: 20 * 1024 * 1024,

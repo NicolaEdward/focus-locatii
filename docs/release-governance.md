@@ -42,6 +42,8 @@ Schema synchronization uses `prisma db push` because the historic production dat
 
 ## Required release gate
 
+- [ ] Use `pnpm 10.28.0`, matching the committed lockfile generation
+- [ ] Keep the package build-script allow-list limited to Prisma, esbuild and sharp
 - [ ] Repository clean and branch scope reviewed
 - [ ] Production and Preview database fingerprints differ
 - [ ] Preview email provider absent

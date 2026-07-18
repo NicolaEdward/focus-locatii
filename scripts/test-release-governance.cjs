@@ -16,6 +16,8 @@ const vercelEnvSync = read("scripts/release/sync-vercel-preview-env.cjs");
 const snapshotCompare = read("scripts/release/compare-sensitive-snapshots.cjs");
 const workflow = read(".github/workflows/release-governance.yml");
 const docs = read("docs/release-governance.md");
+const packageJson = JSON.parse(read("package.json"));
+const pnpmWorkspace = read("pnpm-workspace.yaml");
 
 assert.match(envUtils, /ALLOW_SYNTHETIC_SEED/);
 assert.match(envUtils, /PREVIEW_DATASET_ID/);
@@ -78,5 +80,9 @@ assert.match(docs, /Production/);
 assert.match(docs, /Preview/);
 assert.match(docs, /rollback/i);
 assert.match(docs, /count/i);
+assert.equal(packageJson.packageManager, "pnpm@10.28.0");
+for (const dependency of ["@prisma/client", "@prisma/engines", "esbuild", "prisma", "sharp"]) {
+  assert.ok(pnpmWorkspace.includes(dependency), `Missing pnpm build-script allow-list entry: ${dependency}`);
+}
 
 console.log("Release governance checks passed.");

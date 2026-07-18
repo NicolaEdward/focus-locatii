@@ -11,5 +11,6 @@ coverage
 public/samples/*.png
 tsconfig.tsbuildinfo
 backups/
+artifacts/
 
 .vercel

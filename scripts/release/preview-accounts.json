@@ -1,0 +1,7 @@
+[
+  { "role": "COO", "email": "coo.preview@focusmedia.test", "name": "COO Preview" },
+  { "role": "SALES_DIRECTOR", "email": "director.preview@focusmedia.test", "name": "Director Sales Preview" },
+  { "role": "SALES_AGENT", "email": "agent.preview@focusmedia.test", "name": "Agent Sales Preview" },
+  { "role": "FINANCE_OPERATOR", "email": "finance.preview@focusmedia.test", "name": "Finance Preview" },
+  { "role": "FIELD_OPERATOR", "email": "field.preview@focusmedia.test", "name": "Field Preview" }
+]

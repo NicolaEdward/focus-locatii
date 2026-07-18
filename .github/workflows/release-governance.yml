@@ -1,0 +1,73 @@
+name: Release governance
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  isolated-preview-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: focus_preview_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      APP_ENV: ci
+      VERCEL_ENV: preview
+      ALLOW_SYNTHETIC_SEED: "true"
+      PREVIEW_DATASET_ID: focus-media-synthetic-v1
+      PREVIEW_TEST_PASSWORD: FocusPreview-CI-Only-2026!
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/focus_preview_ci
+      AUTH_SECRET: ci-auth-secret-that-is-not-used-in-production-2026
+      CRON_SECRET: ci-cron-secret-that-is-not-used-in-production-2026
+      NEXT_PUBLIC_BASE_URL: http://127.0.0.1:3000
+      BASE_URL: http://127.0.0.1:3000
+      SMOKE_BASE_URL: http://localhost:3000
+      CAPTURE_BASE_URL: http://localhost:3000
+      CAPTURE_OUT_DIR: artifacts/release-screenshots
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run preview:prepare
+      - run: pnpm run test:release-governance
+      - run: pnpm run typecheck
+      - run: pnpm run test:rbac
+      - run: pnpm run test:public-visibility
+      - run: pnpm run test:dashboard-command-centers
+      - run: pnpm run test:operations-rbac
+      - run: pnpm run test:finance-consistency
+      - run: pnpm run test:crm
+      - run: pnpm prisma validate
+      - run: pnpm run build
+      - name: Start production server
+        run: pnpm start > /tmp/focus-preview.log 2>&1 &
+      - name: Wait for server
+        run: node -e "const http=require('http');let n=0;const ping=()=>http.get('http://127.0.0.1:3000/admin/login',r=>process.exit(0)).on('error',()=>{if(++n>60)process.exit(1);setTimeout(ping,1000)});ping()"
+      - run: pnpm run smoke:roles
+      - run: pnpm run smoke:capture
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: role-smoke-screenshots
+          path: artifacts/release-screenshots
+          if-no-files-found: warn
+          retention-days: 14

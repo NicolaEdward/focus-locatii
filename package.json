@@ -2,6 +2,7 @@
   "name": "focus-locatii",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.9.0",
   "engines": {
     "node": ">=20"
   },
@@ -75,7 +76,19 @@
     "test:client-supplier": "tsx scripts/test-client-supplier-workflows.ts",
     "smoke": "node scripts/smoke-http.cjs",
     "smoke:visual": "node scripts/visual-smoke.cjs",
-    "smoke:live": "node scripts/live-smoke.cjs"
+    "smoke:live": "node scripts/live-smoke.cjs",
+    "preview:db:sync": "tsx scripts/release/sync-preview-schema.ts",
+    "preview:db:provision": "tsx scripts/release/provision-preview-database.ts",
+    "preview:env:sync": "node scripts/release/sync-vercel-preview-env.cjs",
+    "preview:seed": "tsx prisma/seed-preview.ts",
+    "preview:prepare": "pnpm run preview:db:sync && pnpm run preview:seed",
+    "preview:build": "node scripts/release/run-with-env.cjs .env.preview.local pnpm run build",
+    "release:snapshot": "tsx scripts/release/snapshot-sensitive-counts.ts",
+    "release:compare-snapshots": "node scripts/release/compare-sensitive-snapshots.cjs",
+    "release:verify-isolation": "tsx scripts/release/verify-preview-isolation.ts",
+    "test:release-governance": "node scripts/test-release-governance.cjs",
+    "smoke:roles": "node scripts/release/smoke-role-routes.cjs",
+    "smoke:capture": "node scripts/release/capture-role-pages.cjs"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",

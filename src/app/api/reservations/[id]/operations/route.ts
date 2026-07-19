@@ -16,6 +16,7 @@ import {
 import type { OperationTaskStatus } from "@/lib/operation-tasks";
 import { updateReservationProductionNotes, updateReservationProductionNotesWithClient } from "@/lib/reservations";
 import { recordAudit } from "@/lib/audit";
+import { emitStructuredLog, safeErrorCode } from "@/lib/observability";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -66,9 +67,21 @@ export async function PATCH(request: NextRequest, context: Context) {
         }
       } catch (error) {
         if (isOperationTaskBridgeUnavailable(error)) {
-          console.warn("OperationTask bridge unavailable; falling back to legacy operation status write.", { reservationId: id, kind, taskId });
+          emitStructuredLog("warn", "operation_task_bridge_unavailable", {
+            operation: "operation.status.update",
+            role: session.role,
+            entityType: "reservation",
+            entityId: id,
+            errorCode: safeErrorCode(error)
+          });
         } else {
-          console.error("OperationTask bridge write failed; not falling back after transactional write attempt.", { reservationId: id, kind, taskId, error });
+          emitStructuredLog("error", "operation_task_bridge_failed", {
+            operation: "operation.status.update",
+            role: session.role,
+            entityType: "reservation",
+            entityId: id,
+            errorCode: safeErrorCode(error)
+          });
           throw error;
         }
       }
@@ -145,9 +158,21 @@ export async function POST(request: NextRequest, context: Context) {
       }
     } catch (error) {
       if (isOperationTaskBridgeUnavailable(error)) {
-        console.warn("OperationTask bridge unavailable; falling back to legacy operation task creation.", { reservationId: id, kind, taskId });
+        emitStructuredLog("warn", "operation_task_bridge_unavailable", {
+          operation: "operation.task.create",
+          role: session.role,
+          entityType: "reservation",
+          entityId: id,
+          errorCode: safeErrorCode(error)
+        });
       } else {
-        console.error("OperationTask bridge task creation failed; not falling back after transactional write attempt.", { reservationId: id, kind, taskId, error });
+        emitStructuredLog("error", "operation_task_bridge_failed", {
+          operation: "operation.task.create",
+          role: session.role,
+          entityType: "reservation",
+          entityId: id,
+          errorCode: safeErrorCode(error)
+        });
         const message = error instanceof Error ? error.message : "Taskul operational nu a putut fi creat.";
         return NextResponse.json({ error: message }, { status: 400 });
       }

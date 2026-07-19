@@ -3,6 +3,7 @@ import { requireAnyPermission } from "@/lib/auth";
 import { stageReceivablesImport } from "@/lib/receivables-import-service";
 import type { ReceivablesCompanyCode } from "@/lib/receivables-import-parser";
 import { SpreadsheetSecurityError } from "@/lib/secure-spreadsheet";
+import { emitStructuredLog, requestCorrelationId, safeErrorCode } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -10,6 +11,8 @@ export const runtime = "nodejs";
 const companies = new Set<ReceivablesCompanyCode>(["FOCUS_MEDIA", "EXCELLENCE_MEDIA", "FOCUS_BG"]);
 
 export async function POST(request: NextRequest) {
+  const correlationId = requestCorrelationId(request);
+  const startedAt = performance.now();
   const { session, response } = await requireAnyPermission(request, ["finance.upload", "finance.manage"]);
   if (response || !session) return response;
   try {
@@ -32,8 +35,26 @@ export async function POST(request: NextRequest) {
       reportDate,
       actor: session
     });
+    emitStructuredLog("info", "spreadsheet_import_staged", {
+      correlationId,
+      operation: "receivables.stage",
+      entityType: "financial_report_upload",
+      entityId: result.upload.id,
+      role: session.role,
+      durationMs: Math.round(performance.now() - startedAt),
+      status: result.duplicate ? "duplicate" : "staged",
+      metrics: { fileBytes: file.size }
+    });
     return NextResponse.json(result, { status: result.duplicate ? 200 : 201 });
   } catch (error) {
+    emitStructuredLog("warn", "spreadsheet_import_failed", {
+      correlationId,
+      operation: "receivables.stage",
+      role: session.role,
+      durationMs: Math.round(performance.now() - startedAt),
+      status: error instanceof SpreadsheetSecurityError ? error.status : 400,
+      errorCode: safeErrorCode(error, "RECEIVABLES_STAGE_FAILED")
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Raportul nu a putut fi analizat." },
       { status: error instanceof SpreadsheetSecurityError ? error.status : 400 }

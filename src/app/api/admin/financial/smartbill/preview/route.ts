@@ -14,6 +14,7 @@ import {
 } from "@/lib/smartbill-import";
 import { prisma } from "@/lib/prisma";
 import { SpreadsheetSecurityError } from "@/lib/secure-spreadsheet";
+import { emitStructuredLog, observeRoute, setObservabilityRole } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,35 +28,41 @@ const reportTypeSchema = z.enum(["customer_invoices", "supplier_documents"]);
 const companyNameSchema = z.string().trim().min(1, "Alege firma pentru importul SmartBill.");
 
 export async function POST(request: NextRequest) {
-  const { session, response } = await requireAnyPermission(request, ["finance.upload", "finance.manage"]);
-  if (response || !session) return response;
+  return observeRoute(request, {
+    route: "/api/admin/financial/smartbill/preview",
+    operation: "spreadsheet.smartbill_preview"
+  }, async () => {
+    const { session, response } = await requireAnyPermission(request, ["finance.upload", "finance.manage"]);
+    if (response || !session) return response;
+    setObservabilityRole(session.role);
 
-  try {
-    const form = await request.formData();
-    const file = form.get("file");
-    const reportType = reportTypeSchema.parse(form.get("reportType"));
-    const companyContext = resolveSmartBillCompanyContext(companyNameSchema.parse(form.get("companyName")));
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Incarca raportul SmartBill Excel." }, { status: 400, headers: noStoreHeaders });
-    }
-    if (!/\.(xlsx|xlsm|xls)$/i.test(file.name)) {
-      return NextResponse.json({ error: "Fisierul SmartBill trebuie sa fie Excel." }, { status: 400, headers: noStoreHeaders });
-    }
-    if (file.size > 20 * 1024 * 1024) {
-      return NextResponse.json({ error: "Fisierul SmartBill este prea mare pentru import." }, { status: 413, headers: noStoreHeaders });
-    }
+    try {
+      const form = await request.formData();
+      const file = form.get("file");
+      const reportType = reportTypeSchema.parse(form.get("reportType"));
+      const companyContext = resolveSmartBillCompanyContext(companyNameSchema.parse(form.get("companyName")));
+      if (!(file instanceof File)) {
+        return NextResponse.json({ error: "Incarca raportul SmartBill Excel." }, { status: 400, headers: noStoreHeaders });
+      }
+      if (!/\.(xlsx|xlsm|xls)$/i.test(file.name)) {
+        return NextResponse.json({ error: "Fisierul SmartBill trebuie sa fie Excel." }, { status: 400, headers: noStoreHeaders });
+      }
+      if (file.size > 20 * 1024 * 1024) {
+        return NextResponse.json({ error: "Fisierul SmartBill este prea mare pentru import." }, { status: 413, headers: noStoreHeaders });
+      }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const parsed = await parseSmartBillReportWithDetection(buffer, reportType, { fileName: file.name, mimeType: file.type, signal: request.signal });
-    const context = await loadSmartBillPreviewContext(parsed.reportType, companyContext);
-    const preview = buildSmartBillPreview({ parsed, fileName: file.name, companyContext, context });
-    return NextResponse.json({ preview }, { headers: noStoreHeaders });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Raportul SmartBill nu a putut fi previzualizat." },
-      { status: error instanceof SpreadsheetSecurityError ? error.status : 400, headers: noStoreHeaders }
-    );
-  }
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const parsed = await parseSmartBillReportWithDetection(buffer, reportType, { fileName: file.name, mimeType: file.type, signal: request.signal });
+      const context = await loadSmartBillPreviewContext(parsed.reportType, companyContext);
+      const preview = buildSmartBillPreview({ parsed, fileName: file.name, companyContext, context });
+      return NextResponse.json({ preview }, { headers: noStoreHeaders });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Raportul SmartBill nu a putut fi previzualizat." },
+        { status: error instanceof SpreadsheetSecurityError ? error.status : 400, headers: noStoreHeaders }
+      );
+    }
+  });
 }
 
 async function parseSmartBillReportWithDetection(
@@ -76,13 +83,13 @@ async function parseSmartBillReportWithDetection(
   }
   const alternateValidRows = countValidSmartBillRows(alternate);
   if (alternate.rows.length && alternateValidRows > requestedValidRows) {
-    console.info("[smartbill-preview] report_type_auto_detected", {
-      requestedType,
-      detectedType: alternateType,
-      requestedRows: requested.rows.length,
-      requestedValidRows,
-      alternateRows: alternate.rows.length,
-      alternateValidRows
+    emitStructuredLog("info", "smartbill_report_type_auto_detected", {
+      operation: "smartbill.preview_detection",
+      status: "auto_detected",
+      metrics: {
+        rowCount: alternate.rows.length,
+        itemCount: alternateValidRows
+      }
     });
     return alternate;
   }

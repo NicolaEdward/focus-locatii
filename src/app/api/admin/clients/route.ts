@@ -9,6 +9,7 @@ import {
   normalizeClientName
 } from "@/lib/clients";
 import { prisma } from "@/lib/prisma";
+import { observeRoute, setObservabilityRole } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,10 +33,12 @@ const schema = z.object({
 });
 
 export async function GET(request: NextRequest) {
-  const { session, response } = await requireAnyPermission(request, ["clients.view", "clients.view.own"]);
-  if (response || !session) return response;
-  const query = request.nextUrl.searchParams.get("q")?.trim() || "";
-  const clients = await prisma.clientAccount.findMany({
+  return observeRoute(request, { route: "/api/admin/clients", operation: "clients.list" }, async () => {
+    const { session, response } = await requireAnyPermission(request, ["clients.view", "clients.view.own"]);
+    if (response || !session) return response;
+    setObservabilityRole(session.role);
+    const query = request.nextUrl.searchParams.get("q")?.trim() || "";
+    const clients = await prisma.clientAccount.findMany({
     where: {
       status: { notIn: ["merged", "archived"] },
       ...(query ? {
@@ -53,19 +56,20 @@ export async function GET(request: NextRequest) {
     orderBy: { companyName: "asc" },
     take: 5000
   });
-  const visibleClients = clients.map((client) => {
-    const isOwnClient = session.role !== "SALES_AGENT" || client.accountOwnerUserId === session.id;
-    if (isOwnClient) return client;
-    return {
-      ...client,
-      billingAddress: null,
-      generalEmail: null,
-      generalPhone: null,
-      notes: null,
-      contacts: []
-    };
+    const visibleClients = clients.map((client) => {
+      const isOwnClient = session.role !== "SALES_AGENT" || client.accountOwnerUserId === session.id;
+      if (isOwnClient) return client;
+      return {
+        ...client,
+        billingAddress: null,
+        generalEmail: null,
+        generalPhone: null,
+        notes: null,
+        contacts: []
+      };
+    });
+    return NextResponse.json({ clients: visibleClients }, { headers: noStoreHeaders });
   });
-  return NextResponse.json({ clients: visibleClients }, { headers: noStoreHeaders });
 }
 
 export async function POST(request: NextRequest) {

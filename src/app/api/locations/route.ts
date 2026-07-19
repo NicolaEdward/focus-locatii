@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listCachedPublicLocations } from "@/lib/locations";
+import { observeRoute, setObservabilityRole } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,19 +18,26 @@ const publicCacheHeaders = {
 };
 
 export async function GET(request: NextRequest) {
-  const scope = request.nextUrl.searchParams.get("scope");
+  return observeRoute(request, {
+    route: "/api/locations",
+    operation: "locations.list",
+    budgetKey: "public_locations_api"
+  }, async () => {
+    const scope = request.nextUrl.searchParams.get("scope");
 
-  if (scope === "admin") {
-    const [{ requirePermission }, { listAdminLocations }] = await Promise.all([
-      import("@/lib/auth"),
-      import("@/lib/locations")
-    ]);
-    const { response } = await requirePermission(request, "inventory.view");
-    if (response) return response;
-    return NextResponse.json({ locations: await listAdminLocations() }, { headers: noStoreHeaders });
-  }
+    if (scope === "admin") {
+      const [{ requirePermission }, { listAdminLocations }] = await Promise.all([
+        import("@/lib/auth"),
+        import("@/lib/locations")
+      ]);
+      const { session, response } = await requirePermission(request, "inventory.view");
+      if (response || !session) return response;
+      setObservabilityRole(session.role);
+      return NextResponse.json({ locations: await listAdminLocations() }, { headers: noStoreHeaders });
+    }
 
-  return NextResponse.json({ locations: await listCachedPublicLocations() }, { headers: publicCacheHeaders });
+    return NextResponse.json({ locations: await listCachedPublicLocations() }, { headers: publicCacheHeaders });
+  });
 }
 
 export async function POST(request: NextRequest) {

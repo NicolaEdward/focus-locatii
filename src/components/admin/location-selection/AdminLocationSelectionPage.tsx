@@ -11,7 +11,7 @@ import {
   buildMediaPlanSeedFromSelection,
   selectionQualityWarnings,
   toSelectionSnapshot
-} from "@/lib/location-selection";
+} from "@/lib/location-selection-client";
 import type { AuthSession } from "@/lib/auth";
 import type {
   LocationSelectionAvailability,

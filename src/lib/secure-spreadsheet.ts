@@ -1,5 +1,6 @@
 import { Worker } from "node:worker_threads";
 import "xlsx";
+import { emitStructuredLog } from "@/lib/observability";
 
 export const SPREADSHEET_LIMITS = {
   maxCompressedBytes: 20 * 1024 * 1024,
@@ -404,13 +405,16 @@ function normalizeSpreadsheetError(error: unknown) {
 }
 
 function logSpreadsheetResult(purpose: SpreadsheetPurpose, result: string, durationMs: number, compressedBytes: number, details: Partial<SafeSpreadsheetWorkbook["metadata"]> | ContainerInspection | null) {
-  console.info("spreadsheet_import", {
-    purpose,
-    result,
+  const accepted = result === "accepted";
+  emitStructuredLog(accepted ? "info" : "warn", accepted ? "spreadsheet_import_accepted" : "spreadsheet_import_failed", {
+    operation: purpose,
     durationMs,
-    compressedBytes,
-    rowCount: "rowCount" in (details || {}) ? (details as Partial<SafeSpreadsheetWorkbook["metadata"]>).rowCount : undefined,
-    cellCount: "cellCount" in (details || {}) ? (details as Partial<SafeSpreadsheetWorkbook["metadata"]>).cellCount : undefined,
-    container: details?.container
+    status: accepted ? "accepted" : "rejected",
+    errorCode: accepted ? undefined : result,
+    metrics: {
+      compressedBytes,
+      rowCount: "rowCount" in (details || {}) ? (details as Partial<SafeSpreadsheetWorkbook["metadata"]>).rowCount : undefined,
+      cellCount: "cellCount" in (details || {}) ? (details as Partial<SafeSpreadsheetWorkbook["metadata"]>).cellCount : undefined
+    }
   });
 }

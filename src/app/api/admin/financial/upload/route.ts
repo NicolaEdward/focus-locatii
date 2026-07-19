@@ -6,6 +6,7 @@ import { normalizeInvoiceNumber } from "@/lib/clients";
 import { parseFinancialWorkbook } from "@/lib/financial-import";
 import { prisma } from "@/lib/prisma";
 import { SpreadsheetSecurityError } from "@/lib/secure-spreadsheet";
+import { emitStructuredLog, requestCorrelationId, safeErrorCode } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,6 +17,8 @@ const noStoreHeaders = {
 };
 
 export async function POST(request: NextRequest) {
+  const correlationId = requestCorrelationId(request);
+  const startedAt = performance.now();
   const { session, response } = await requireAnyPermission(request, ["finance.upload", "finance.manage"]);
   if (response || !session) return response;
 
@@ -126,6 +129,21 @@ export async function POST(request: NextRequest) {
       request
     });
 
+    emitStructuredLog("info", "spreadsheet_import_staged", {
+      correlationId,
+      operation: "financial_legacy.stage",
+      entityType: "financial_report_upload",
+      entityId: upload.id,
+      role: session.role,
+      durationMs: Math.round(performance.now() - startedAt),
+      status: uploadStatus,
+      metrics: {
+        fileBytes: file.size,
+        rowCount: parsed.summary.receivableRows + parsed.summary.payableRows,
+        conflictCount: parsed.summary.criticalIssueCount + parsed.summary.needsReviewCount
+      }
+    });
+
     return NextResponse.json({
       upload: {
         id: upload.id,
@@ -149,6 +167,14 @@ export async function POST(request: NextRequest) {
       entityType: "financial_report_upload",
       metadata: { error: error instanceof Error ? error.message : String(error) },
       request
+    });
+    emitStructuredLog("warn", "spreadsheet_import_failed", {
+      correlationId,
+      operation: "financial_legacy.stage",
+      role: session.role,
+      durationMs: Math.round(performance.now() - startedAt),
+      status: error instanceof SpreadsheetSecurityError ? error.status : 400,
+      errorCode: safeErrorCode(error, "FINANCIAL_IMPORT_FAILED")
     });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Raportul financiar nu a putut fi procesat." },

@@ -7,6 +7,7 @@ import { expireStaleHolds, reservationLifecycleData } from "@/lib/reservation-li
 import type { ReservationDTO } from "@/types/location";
 import type { AuthSession } from "@/lib/auth";
 import { assertReservationTransition } from "@/lib/reservation-workflow";
+import { emitStructuredLog } from "@/lib/observability";
 import { resolveSellerForMutation } from "@/lib/seller-users";
 import { paymentTermDays } from "@/lib/billing";
 import { companyEntityOrThrow, normalizeCompanyEntity } from "@/lib/company-entities";
@@ -982,6 +983,14 @@ export async function assertCanonicalReservationAvailabilityForWrite(
   if (!location) throw new Error("Locatia selectata nu mai exista.");
   const availability = batch.decisionsByLocationId[locationId];
   if (availability?.isBookable) return;
+
+  emitStructuredLog("warn", "reservation_conflict", {
+    operation: "reservation.availability_recheck",
+    entityType: "location",
+    entityId: locationId,
+    errorCode: availability?.lifecycleReason || availability?.reasons[0]?.code || "RESERVATION_CONFLICT",
+    metrics: { conflictCount: availability?.conflictingIntervals.length || 0 }
+  });
 
   if (availability?.lifecycleReason === "LOCATION_MAINTENANCE") {
     throw new Error(`Locatia ${location.code} este in mentenanta si nu poate fi rezervata.`);

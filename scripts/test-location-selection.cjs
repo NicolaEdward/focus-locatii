@@ -10,6 +10,7 @@ const files = {
   api: read("src", "app", "api", "admin", "location-selection", "route.ts"),
   availabilityApi: read("src", "app", "api", "admin", "location-selection", "availability", "route.ts"),
   service: read("src", "lib", "location-selection.ts"),
+  clientService: read("src", "lib", "location-selection-client.ts"),
   availability: read("src", "lib", "location-selection-availability.ts"),
   canonicalAvailability: read("src", "lib", "availability.ts"),
   availabilityService: read("src", "lib", "availability-service.ts"),
@@ -83,7 +84,7 @@ for (const forbidden of [
 }
 
 assert(files.service.includes("buildMediaPlanSeedFromSelection"), "future Media Plan seed helper must exist");
-assert(files.service.includes('source: "ADMIN_LOCATION_SELECTOR"'), "seed helper must label source");
+assert(files.clientService.includes('source: "ADMIN_LOCATION_SELECTOR"'), "seed helper must label source");
 assert(!/prisma\.(mediaPlan|offer|reservation)\.(create|update|upsert)/.test(files.service), "selector service must not create media plans, offers or reservations");
 assert(!files.builder.includes("/api/reservations"), "selector UI must not call reservation write APIs");
 assert(files.builder.includes("localStorage"), "active selection should be client-side persisted");

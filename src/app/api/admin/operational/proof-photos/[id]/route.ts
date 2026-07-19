@@ -7,6 +7,7 @@ import {
   isOperationalProofActive
 } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
+import { emitStructuredLog, requestCorrelationId, safeErrorCode } from "@/lib/observability";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -71,6 +72,8 @@ export async function GET(request: NextRequest, context: Context) {
 }
 
 export async function DELETE(request: NextRequest, context: Context) {
+  const startedAt = performance.now();
+  const correlationId = requestCorrelationId(request);
   const { session, response } = await requireAnyPermission(request, ["dashboard.operations.view", "campaigns.operate"]);
   if (response || !session) return response;
   if (!["SUPER_ADMIN", "COO"].includes(session.role)) {
@@ -83,14 +86,27 @@ export async function DELETE(request: NextRequest, context: Context) {
     return NextResponse.json({ error: "Poza dovada nu exista." }, { status: 404, headers: noStoreHeaders });
   }
 
-  await prisma.clientDocument.update({
-    where: { id },
-    data: {
-      status: "deleted",
-      storageUrl: `deleted:${id}`,
-      notes: appendDeletionNote(existing.notes, "manual")
-    }
-  });
+  try {
+    await prisma.clientDocument.update({
+      where: { id },
+      data: {
+        status: "deleted",
+        storageUrl: `deleted:${id}`,
+        notes: appendDeletionNote(existing.notes, "manual")
+      }
+    });
+  } catch (error) {
+    emitStructuredLog("error", "proof_storage_delete_failed", {
+      correlationId,
+      operation: "operational.proof_delete",
+      entityType: "client_document",
+      entityId: id,
+      role: session.role,
+      durationMs: Math.round(performance.now() - startedAt),
+      errorCode: safeErrorCode(error, "PROOF_DELETE_FAILED")
+    });
+    throw error;
+  }
   await recordAudit({
     actor: session,
     action: "operation.proof_photo.delete",
@@ -98,6 +114,17 @@ export async function DELETE(request: NextRequest, context: Context) {
     entityId: id,
     metadata: { reservationId: existing.reservationId },
     request
+  });
+
+  emitStructuredLog("info", "proof_storage_delete_completed", {
+    correlationId,
+    operation: "operational.proof_delete",
+    entityType: "client_document",
+    entityId: id,
+    role: session.role,
+    durationMs: Math.round(performance.now() - startedAt),
+    status: 200,
+    metrics: { deletedCount: 1 }
   });
 
   return NextResponse.json({ ok: true }, { headers: noStoreHeaders });

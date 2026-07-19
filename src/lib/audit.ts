@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { currentCorrelationId, emitStructuredLog, safeErrorCode } from "@/lib/observability";
 
 export type AuditActor = {
   id: string;
@@ -15,20 +16,35 @@ export async function recordAudit(input: {
   request?: NextRequest;
 }) {
   try {
+    const correlationId = currentCorrelationId();
     await prisma.auditLog.create({
       data: {
         userId: input.actor?.id || null,
         action: input.action,
         entityType: input.entityType,
         entityId: input.entityId || null,
-        metadata: input.metadata ? JSON.parse(JSON.stringify(input.metadata)) : undefined,
+        metadata: input.metadata || correlationId
+          ? JSON.parse(JSON.stringify({ ...(input.metadata || {}), ...(correlationId ? { correlationId } : {}) }))
+          : undefined,
         ipAddress: requestIp(input.request),
         userAgent: input.request?.headers.get("user-agent")?.slice(0, 1000) || null
       }
     });
-  } catch {
-    // Audit must not break the business transaction; production monitoring should alert on DB failures.
+  } catch (error) {
+    reportAuditWriteFailure(input, error);
   }
+}
+
+export function reportAuditWriteFailure(
+  input: Pick<Parameters<typeof recordAudit>[0], "action" | "entityType" | "entityId">,
+  error: unknown
+) {
+  emitStructuredLog("error", "audit_write_failed", {
+    operation: input.action,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    errorCode: safeErrorCode(error, "AUDIT_WRITE_FAILED")
+  });
 }
 
 function requestIp(request?: NextRequest) {

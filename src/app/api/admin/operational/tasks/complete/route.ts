@@ -21,6 +21,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { updateReservationProductionNotesWithClient } from "@/lib/reservations";
 import { createOperationalNotifications } from "@/lib/notifications";
+import { emitStructuredLog, requestCorrelationId, safeErrorCode } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,6 +33,8 @@ const noStoreHeaders = {
 const allowedKinds = new Set(["decoration", "neutralization"]);
 
 export async function POST(request: NextRequest) {
+  const startedAt = performance.now();
+  const correlationId = requestCorrelationId(request);
   const { session, response } = await requireAnyPermission(request, [
     "dashboard.operations.view",
     "campaigns.operate",
@@ -176,9 +179,30 @@ export async function POST(request: NextRequest) {
         entityId: `${reservationId}:${kind}:${taskId || "base"}`,
         metadata: { reservationId, kind, taskId, proofPhotoCount: files.length }
       });
-    } catch {
-      console.error("Operational completion notification failed", { reservationId, kind });
+    } catch (error) {
+      emitStructuredLog("error", "notification_sync_failed", {
+        correlationId,
+        operation: "operational.completion_notification",
+        entityType: "reservation",
+        entityId: reservationId,
+        role: session.role,
+        errorCode: safeErrorCode(error, "OPERATIONAL_NOTIFICATION_FAILED")
+      });
     }
+
+    emitStructuredLog("info", "proof_storage_upload_completed", {
+      correlationId,
+      operation: "operational.proof_upload",
+      entityType: "reservation",
+      entityId: reservationId,
+      role: session.role,
+      durationMs: Math.round(performance.now() - startedAt),
+      status: 200,
+      metrics: {
+        fileCount: files.length,
+        fileBytes: files.reduce((sum, file) => sum + file.size, 0)
+      }
+    });
 
     return NextResponse.json(
       {
@@ -194,6 +218,13 @@ export async function POST(request: NextRequest) {
       { headers: noStoreHeaders }
     );
   } catch (error) {
+    emitStructuredLog("error", "proof_storage_upload_failed", {
+      correlationId,
+      operation: "operational.proof_upload",
+      durationMs: Math.round(performance.now() - startedAt),
+      status: 400,
+      errorCode: safeErrorCode(error, "PROOF_UPLOAD_FAILED")
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Lucrarea nu a putut fi finalizata." },
       { status: 400, headers: noStoreHeaders }

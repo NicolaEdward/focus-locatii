@@ -90,6 +90,8 @@
     "release:compare-snapshots": "node scripts/release/compare-sensitive-snapshots.cjs",
     "release:verify-isolation": "tsx scripts/release/verify-preview-isolation.ts",
     "test:release-governance": "node scripts/test-release-governance.cjs",
+    "test:observability": "tsx scripts/test-observability.ts",
+    "release:performance-budgets": "tsx scripts/release/check-observability-budgets.ts",
     "smoke:roles": "node scripts/release/smoke-role-routes.cjs",
     "smoke:spreadsheet-imports": "tsx scripts/release/smoke-secure-spreadsheet-routes.ts",
     "smoke:capture": "node scripts/release/capture-role-pages.cjs"

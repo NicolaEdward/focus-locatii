@@ -29,6 +29,7 @@ import {
   type SmartBillReportType,
   type SmartBillSupplierDocumentRow
 } from "@/lib/smartbill-import";
+import { emitStructuredLog, requestCorrelationId, safeErrorCode } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -101,6 +102,8 @@ type SmartBillConfirmSummary = {
 };
 
 export async function POST(request: NextRequest) {
+  const correlationId = requestCorrelationId(request);
+  const requestStartedAt = performance.now();
   const { session, response } = await requireAnyPermission(request, ["finance.confirm", "finance.manage"]);
   if (response || !session) return response;
 
@@ -138,18 +141,25 @@ export async function POST(request: NextRequest) {
     }
 
     const planStats = summarizeConfirmPlan(plan);
-    console.info("[smartbill-confirm] started", {
-      reportType: payload.reportType,
-      companyCode: companyContext.companyCode,
-      rowCount: payload.rows.length,
-      ...planStats
+    emitStructuredLog("info", "spreadsheet_import_confirm_started", {
+      correlationId,
+      operation: "smartbill.confirm",
+      role: session.role,
+      status: "started",
+      metrics: {
+        rowCount: payload.rows.length,
+        itemCount: importableRows,
+        conflictCount: planStats.manualSkipped
+      }
     });
     const transactionStartedAt = Date.now();
     const result = await prisma.$transaction(async (tx) => {
-      console.info("[smartbill-confirm] transaction_start", {
-        reportType: payload.reportType,
-        companyCode: companyContext.companyCode,
-        rowCount: payload.rows.length
+      emitStructuredLog("info", "spreadsheet_import_transaction_started", {
+        correlationId,
+        operation: "smartbill.confirm_transaction",
+        role: session.role,
+        status: "started",
+        metrics: { rowCount: payload.rows.length }
       });
       const existingActiveUpload = await tx.financialReportUpload.findFirst({
         where: { activeVersion: true, status: "confirmed" },
@@ -438,14 +448,21 @@ export async function POST(request: NextRequest) {
         throw new Error("Importul SmartBill nu a schimbat niciun rand financiar; raportul activ a ramas neschimbat.");
       }
 
-      console.info("[smartbill-confirm] transaction_end", {
-        uploadId: upload.id,
+      emitStructuredLog("info", "spreadsheet_import_transaction_end", {
+        correlationId,
+        operation: "smartbill.confirm_transaction",
+        entityType: "financial_report_upload",
+        entityId: upload.id,
+        role: session.role,
         durationMs: Date.now() - transactionStartedAt,
-        createdClients: summary.createdClients,
-        createdSuppliers: summary.createdSuppliers,
-        createdReceivables: summary.createdReceivables,
-        createdPayables: summary.createdPayables,
-        adjustments: summary.manualAdjustments + summary.updatedReceivables
+        status: "success",
+        metrics: {
+          clientCount: summary.createdClients,
+          supplierCount: summary.createdSuppliers,
+          receivableCount: summary.createdReceivables,
+          payableCount: summary.createdPayables,
+          adjustmentCount: summary.manualAdjustments + summary.updatedReceivables
+        }
       });
       return summary;
     }, {
@@ -463,10 +480,25 @@ export async function POST(request: NextRequest) {
       request
     });
 
+    emitStructuredLog("info", "spreadsheet_import_confirm_completed", {
+      correlationId,
+      operation: "smartbill.confirm",
+      entityType: "financial_report_upload",
+      entityId: result.uploadId,
+      role: session.role,
+      durationMs: Math.round(performance.now() - requestStartedAt),
+      status: "success",
+      metrics: { rowCount: result.scanned }
+    });
+
     return NextResponse.json({ ok: true, summary: result }, { headers: noStoreHeaders });
   } catch (error) {
-    console.error("[smartbill-confirm] failed", {
-      message: error instanceof Error ? error.message : String(error)
+    emitStructuredLog("error", "spreadsheet_import_confirm_failed", {
+      correlationId,
+      operation: "smartbill.confirm",
+      durationMs: Math.round(performance.now() - requestStartedAt),
+      status: 400,
+      errorCode: safeErrorCode(error, "SMARTBILL_CONFIRM_FAILED")
     });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Importul SmartBill nu a putut fi confirmat." },

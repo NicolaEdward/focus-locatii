@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { createReservation, listReservations } from "@/lib/reservations";
 import { recordAudit } from "@/lib/audit";
+import { observeRoute, setObservabilityRole } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,31 +27,34 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { session, response } = await requireAnyPermission(request, ["reservations.manage", "reservations.manage.own"]);
-  if (response || !session) return response;
+  return observeRoute(request, { route: "/api/reservations", operation: "reservation.create" }, async () => {
+    const { session, response } = await requireAnyPermission(request, ["reservations.manage", "reservations.manage.own"]);
+    if (response || !session) return response;
+    setObservabilityRole(session.role);
 
-  try {
-    const reservations = await createReservation(await request.json(), session);
-    await recordAudit({
-      actor: session,
-      action: "reservation.create",
-      entityType: "reservation",
-      entityId: reservations[0]?.id,
-      metadata: { groupId: reservations[0]?.contractGroupId, locationCount: reservations.length },
-      request
-    });
-    return NextResponse.json(
-      {
-        reservation: reservations[0],
-        reservations,
-        groupId: reservations[0]?.contractGroupId || null
-      },
-      { status: 201, headers: noStoreHeaders }
-    );
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Rezervarea nu a putut fi salvata." },
-      { status: 400, headers: noStoreHeaders }
-    );
-  }
+    try {
+      const reservations = await createReservation(await request.json(), session);
+      await recordAudit({
+        actor: session,
+        action: "reservation.create",
+        entityType: "reservation",
+        entityId: reservations[0]?.id,
+        metadata: { groupId: reservations[0]?.contractGroupId, locationCount: reservations.length },
+        request
+      });
+      return NextResponse.json(
+        {
+          reservation: reservations[0],
+          reservations,
+          groupId: reservations[0]?.contractGroupId || null
+        },
+        { status: 201, headers: noStoreHeaders }
+      );
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Rezervarea nu a putut fi salvata." },
+        { status: 400, headers: noStoreHeaders }
+      );
+    }
+  });
 }

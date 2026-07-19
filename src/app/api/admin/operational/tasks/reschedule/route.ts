@@ -7,6 +7,7 @@ import { canRescheduleOperationalReservation } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
 import { updateReservation, updateReservationProductionNotes } from "@/lib/reservations";
 import { createOperationalNotifications } from "@/lib/notifications";
+import { emitStructuredLog } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -157,7 +158,13 @@ export async function POST(request: NextRequest) {
         }
       });
     } catch {
-      console.error("Operational reschedule notification failed", { reservationId, kind });
+      emitStructuredLog("error", "notification_sync_failed", {
+        operation: "operation.reschedule.notify",
+        role: session.role,
+        entityType: "reservation",
+        entityId: reservationId,
+        errorCode: "NOTIFICATION_WRITE_FAILED"
+      });
     }
 
     return NextResponse.json(

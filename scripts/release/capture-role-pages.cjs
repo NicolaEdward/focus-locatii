@@ -29,6 +29,7 @@ const pages = [
   { name: "campaigns", route: "/admin/campanii", role: "COO", expected: "Campanii" },
   { name: "crm", route: "/admin/crm", role: "SALES_AGENT", expected: "CRM" },
   { name: "operational", route: "/admin/operational", role: "COO", expected: "Opera" },
+  { name: "ownership-integrity", route: "/admin/integritate-date", role: "COO", expected: "Integritate ownership" },
   { name: "public-locations", route: "/locatii", expected: "loca" }
 ];
 

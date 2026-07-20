@@ -242,7 +242,7 @@ export async function getDashboardData(session: AuthSession) {
   const financeOnly = session.role === "FINANCE_OPERATOR";
   const ownWhere =
     session.role === "SALES_AGENT"
-      ? { OR: [{ sellerUserId: session.id }, { ownerId: session.id }, { ownerId: null, salesperson: { in: [session.name, session.email] } }] }
+      ? { OR: [{ sellerUserId: session.id }, { ownerId: session.id }] }
       : {};
 
   const financePromise = session.role === "FINANCE_OPERATOR" ? getFinancialDashboardData() : Promise.resolve(null);
@@ -358,7 +358,7 @@ export async function getDashboardData(session: AuthSession) {
       : prisma.offerRequest.findMany({
           where:
             session.role === "SALES_AGENT"
-              ? { OR: [{ ownerId: session.id }, { ownerId: null }] }
+              ? { ownerId: session.id }
               : {},
           orderBy: { createdAt: "desc" },
           take: 300

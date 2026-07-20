@@ -4,6 +4,7 @@ import type { AuthSession } from "@/lib/auth";
 import { paymentTermDays } from "@/lib/billing";
 import { companyEntityOrDefault, companyEntityOrThrow } from "@/lib/company-entities";
 import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
+import { resolveRequiredSalesOwner } from "@/lib/seller-users";
 
 const optionalText = z.preprocess((value) => {
   if (value == null || value === "") return null;
@@ -62,12 +63,16 @@ export async function createCampaign(input: unknown, actor: AuthSession) {
   if (actor.role === "SALES_AGENT" && client.accountOwnerUserId && client.accountOwnerUserId !== actor.id) {
     throw new Error("Poti crea campanii doar pentru clientii tai.");
   }
+  const seller = await resolveRequiredSalesOwner(actor, parsed.sellerUserId);
+  const owner = parsed.accountOwnerUserId
+    ? await resolveRequiredSalesOwner(actor, parsed.accountOwnerUserId)
+    : seller;
   return prisma.campaign.create({
     data: {
       ...parsed,
       createdByUserId: actor.id,
-      accountOwnerUserId: parsed.accountOwnerUserId || client.accountOwnerUserId || actor.id,
-      sellerUserId: parsed.sellerUserId || actor.id
+      accountOwnerUserId: owner.id,
+      sellerUserId: seller.id
     }
   });
 }
@@ -88,6 +93,12 @@ export async function updateCampaign(id: string, input: unknown, actor: AuthSess
   }
   if (actor.role === "SALES_AGENT" && parsed.accountOwnerUserId && parsed.accountOwnerUserId !== actor.id) {
     throw new Error("Agentul poate seta ca owner doar propriul cont.");
+  }
+  if (parsed.sellerUserId !== undefined && parsed.sellerUserId !== existing.sellerUserId) {
+    await resolveRequiredSalesOwner(actor, parsed.sellerUserId);
+  }
+  if (parsed.accountOwnerUserId !== undefined && parsed.accountOwnerUserId !== existing.accountOwnerUserId) {
+    await resolveRequiredSalesOwner(actor, parsed.accountOwnerUserId);
   }
   if (parsed.clientId && parsed.clientId !== existing.clientId) {
     const client = await prisma.clientAccount.findUnique({ where: { id: parsed.clientId } });
@@ -143,8 +154,8 @@ function normalizeCampaignForCreate(input: z.infer<typeof campaignInputSchema>, 
     paymentTermDays: paymentDays,
     billingRule: input.billingRule || "manual_per_contract",
     billingFrequency: input.billingFrequency || "monthly",
-    sellerUserId: input.sellerUserId || actor.id,
-    accountOwnerUserId: input.accountOwnerUserId || input.sellerUserId || actor.id
+    sellerUserId: input.sellerUserId || (["SALES_AGENT", "SALES_DIRECTOR"].includes(actor.role) ? actor.id : null),
+    accountOwnerUserId: input.accountOwnerUserId || input.sellerUserId || (["SALES_AGENT", "SALES_DIRECTOR"].includes(actor.role) ? actor.id : null)
   };
 }
 

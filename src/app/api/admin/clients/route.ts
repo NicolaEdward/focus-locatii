@@ -10,6 +10,7 @@ import {
 } from "@/lib/clients";
 import { prisma } from "@/lib/prisma";
 import { observeRoute, setObservabilityRole } from "@/lib/observability";
+import { resolveRequiredSalesOwner } from "@/lib/seller-users";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -81,6 +82,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Nu poti crea client pentru alt owner." }, { status: 403, headers: noStoreHeaders });
     }
     const existingClient = await findExistingClientAccountByNormalizedName(input.companyName);
+    const owner = await resolveRequiredSalesOwner(session, input.accountOwnerUserId ?? existingClient?.accountOwnerUserId);
     if (hasClientOwnershipConflict(existingClient, session)) {
       return NextResponse.json(
         { error: "Clientul exista deja la alt owner. Cere reasignare sau merge de la COO/SUPER_ADMIN." },
@@ -91,15 +93,15 @@ export async function POST(request: NextRequest) {
       companyName: input.companyName,
       email: input.generalEmail,
       phone: input.generalPhone,
-      accountOwnerUserId: input.accountOwnerUserId || session.id
+      accountOwnerUserId: owner.id
     }, session);
     if (!client) throw new Error("Clientul nu a putut fi creat.");
     const canIntentionallyReassign = ["SUPER_ADMIN", "COO"].includes(session.role);
     const nextOwnerUserId = existingClient
       ? canIntentionallyReassign && input.accountOwnerUserId !== undefined
-        ? input.accountOwnerUserId
+        ? owner.id
         : client.accountOwnerUserId
-      : input.accountOwnerUserId || session.id;
+      : owner.id;
     const updated = await prisma.clientAccount.update({
       where: { id: client.id },
       data: {

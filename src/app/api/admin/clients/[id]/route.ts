@@ -4,6 +4,8 @@ import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { normalizeClientName } from "@/lib/clients";
 import { prisma } from "@/lib/prisma";
+import { assertClientCanBeArchived } from "@/lib/ownership-integrity";
+import { resolveRequiredSalesOwner } from "@/lib/seller-users";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -48,14 +50,14 @@ export async function PATCH(request: NextRequest, context: Context) {
     if (session.role === "SALES_AGENT" && input.accountOwnerUserId && input.accountOwnerUserId !== session.id) {
       return NextResponse.json({ error: "Nu poti schimba account owner-ul." }, { status: 403, headers: noStoreHeaders });
     }
-    if (input.accountOwnerUserId && input.accountOwnerUserId !== existing.accountOwnerUserId) {
-      const allowed = await prisma.user.findFirst({
-        where: { id: input.accountOwnerUserId, active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR", "COO", "SUPER_ADMIN"] } },
-        select: { id: true }
-      });
-      if (!allowed) {
-        return NextResponse.json({ error: "Account owner invalid." }, { status: 400, headers: noStoreHeaders });
+    if (input.status === "archived" && existing.status !== "archived") {
+      await assertClientCanBeArchived(id);
+    }
+    if (input.accountOwnerUserId !== undefined && input.accountOwnerUserId !== existing.accountOwnerUserId) {
+      if (!input.ownerChangeReason?.trim()) {
+        return NextResponse.json({ error: "Motivul schimbarii owner-ului este obligatoriu." }, { status: 400, headers: noStoreHeaders });
       }
+      await resolveRequiredSalesOwner(session, input.accountOwnerUserId);
     }
 
     const updated = await prisma.clientAccount.update({
@@ -86,6 +88,8 @@ export async function PATCH(request: NextRequest, context: Context) {
       entityId: id,
       metadata: {
         changedOwner: input.accountOwnerUserId !== undefined && input.accountOwnerUserId !== existing.accountOwnerUserId,
+        previousOwnerUserId: existing.accountOwnerUserId,
+        nextOwnerUserId: updated.accountOwnerUserId,
         ownerChangeReason: input.ownerChangeReason || null,
         companyName: updated.companyName
       },

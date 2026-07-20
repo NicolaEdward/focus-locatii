@@ -24,6 +24,26 @@ export async function listSellerUsers() {
   return users.map((user) => ({ ...user, role: String(user.role) }));
 }
 
+export async function resolveRequiredSalesOwner(actor: AuthSession, requestedUserId?: string | null) {
+  if (actor.role === "SALES_AGENT" && requestedUserId && requestedUserId !== actor.id) {
+    throw new Error("Nu poti asigna inregistrarea catre alt vanzator.");
+  }
+  const actorIsSeller = sellerRoles.includes(actor.role as never);
+  const targetUserId = requestedUserId || (actorIsSeller ? actor.id : null);
+  if (!targetUserId) {
+    throw new Error("Alege un agent sau director de vanzari responsabil.");
+  }
+  if (targetUserId !== actor.id && !canAssignSellerForAnotherUser(actor)) {
+    throw new Error("Nu poti crea sau realoca pe alt vanzator.");
+  }
+  const target = await prisma.user.findFirst({
+    where: { id: targetUserId, active: true, role: { in: [...sellerRoles] } },
+    select: { id: true, name: true, email: true, role: true }
+  });
+  if (!target) throw new Error("Responsabilul trebuie sa fie un utilizator comercial activ.");
+  return target;
+}
+
 export async function resolveSellerForMutation(input: {
   actor?: AuthSession | null;
   sellerUserId?: string | null;
@@ -55,22 +75,7 @@ export async function resolveSellerForMutation(input: {
     throw new Error("Nu poti crea sau realoca pe alt vanzator.");
   }
 
-  const targetUserId = requestedSellerId || actor.id;
-  const target = await prisma.user.findFirst({
-    where: {
-      id: targetUserId,
-      active: true,
-      role: { in: [...sellerRoles] }
-    },
-    select: { id: true, name: true, email: true, role: true }
-  });
-
-  if (!target) {
-    if (targetUserId === actor.id && canAssignSellerForAnotherUser(actor)) {
-      return { sellerUserId: actor.id, ownerId: actor.id, salesperson: actor.name };
-    }
-    throw new Error("Vanzatorul ales nu este valid sau nu are rol de vanzare.");
-  }
+  const target = await resolveRequiredSalesOwner(actor, requestedSellerId);
 
   return {
     sellerUserId: target.id,

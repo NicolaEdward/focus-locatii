@@ -17,6 +17,7 @@ import {
   ReceiptText,
   Settings,
   Shield,
+  ShieldCheck,
   Truck,
   UserRoundCheck,
   Users
@@ -83,13 +84,14 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           ) : null}
           {hasSettingsMenu ? (
             <AdminNavMenu
-              active={isActiveAnyAdminPath(pathname, ["/admin/utilizatori", "/admin/locatii/import", "/admin/locatii/gps"])}
+              active={isActiveAnyAdminPath(pathname, ["/admin/utilizatori", "/admin/integritate-date", "/admin/locatii/import", "/admin/locatii/gps"])}
               icon={<Settings size={18} />}
               label="Setari"
             >
               {canManageInventory ? <AdminMenuLink href="/admin/locatii/import" active={isActiveAdminPath(pathname, "/admin/locatii/import")} icon={<FileSpreadsheet size={17} />} label="Import / actualizare" /> : null}
               {canManageInventory ? <AdminMenuLink href="/admin/locatii/gps" active={isActiveAdminPath(pathname, "/admin/locatii/gps")} icon={<Map size={17} />} label="Audit GPS" /> : null}
               {canManageUsers ? <AdminMenuLink href="/admin/utilizatori" active={isActiveAdminPath(pathname, "/admin/utilizatori")} icon={<Users size={17} />} label="Utilizatori" /> : null}
+              {canManageUsers && ["COO", "SUPER_ADMIN"].includes(session.role) ? <AdminMenuLink href="/admin/integritate-date" active={isActiveAdminPath(pathname, "/admin/integritate-date")} icon={<ShieldCheck size={17} />} label="Integritate date" /> : null}
             </AdminNavMenu>
           ) : null}
           {!isFieldOperator ? <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Portal public</AdminNavLink> : null}

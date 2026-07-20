@@ -44,6 +44,8 @@
     "test:public-visibility": "node scripts/test-public-location-serialization.cjs",
     "test:document-access": "node scripts/test-document-access.cjs",
     "test:client-ownership": "node scripts/test-client-ownership.cjs",
+    "audit:ownership-integrity": "tsx scripts/audit-ownership-integrity.ts",
+    "test:ownership-integrity": "tsx scripts/test-ownership-integrity.ts",
     "test:reservation-integrity": "node scripts/test-reservation-integrity.cjs",
     "test:reservation-route-safety": "node scripts/test-reservation-route-safety.cjs",
     "test:reservation-lifecycle": "node scripts/test-reservation-lifecycle.cjs",

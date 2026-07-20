@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
 import { USER_ROLES, type UserRole } from "@/lib/rbac";
+import { assertUserCanBeDeactivated } from "@/lib/ownership-integrity";
 
 const roleSchema = z.enum(USER_ROLES);
 
@@ -65,6 +66,13 @@ export async function updateUser(id: string, input: unknown, actorId: string, ac
   }
   if (id === actorId && parsed.active === false) {
     throw new Error("Nu iti poti dezactiva propriul cont.");
+  }
+  const removesCommercialOwnershipRole =
+    ["SALES_AGENT", "SALES_DIRECTOR"].includes(existing.role) &&
+    parsed.role !== undefined &&
+    !["SALES_AGENT", "SALES_DIRECTOR"].includes(parsed.role);
+  if (existing.active && (parsed.active === false || removesCommercialOwnershipRole)) {
+    await assertUserCanBeDeactivated(id);
   }
 
   const securityChanged = parsed.password !== undefined || parsed.role !== undefined || parsed.active !== undefined;

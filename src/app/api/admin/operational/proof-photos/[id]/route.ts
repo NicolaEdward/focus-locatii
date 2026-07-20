@@ -7,8 +7,8 @@ import {
   isOperationalProofMimeType,
   isOperationalProofActive,
   parseOperationalProofNotes,
-  validateOperationalProofBuffer
 } from "@/lib/operational-proof";
+import { decodeAndValidateOperationalProofBuffer } from "@/lib/operational-proof-image-server";
 import { fieldCanAccessOperationalProof } from "@/lib/operational-assignment";
 import {
   OPERATIONAL_PROOF_STORAGE_PROVIDER,
@@ -117,7 +117,7 @@ export async function GET(request: NextRequest, context: Context) {
     if (!match) return NextResponse.json({ error: "Fisier invalid." }, { status: 400, headers: noStoreHeaders });
     const body = Buffer.from(match[2], "base64");
     try {
-      validateOperationalProofBuffer(body, document.fileType || match[1]);
+      await decodeAndValidateOperationalProofBuffer(body, document.fileType || match[1]);
     } catch {
       return NextResponse.json({ error: "Fisier invalid." }, { status: 400, headers: noStoreHeaders });
     }

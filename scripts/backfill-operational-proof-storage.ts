@@ -1,9 +1,7 @@
 import crypto from "node:crypto";
 import { prisma } from "../src/lib/prisma";
-import {
-  OPERATIONAL_PROOF_DOCUMENT_TYPE,
-  validateOperationalProofBuffer
-} from "../src/lib/operational-proof";
+import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "../src/lib/operational-proof";
+import { decodeAndValidateOperationalProofBuffer } from "../src/lib/operational-proof-image-server";
 import {
   deleteOperationalProofObject,
   operationalProofChecksum,
@@ -49,7 +47,7 @@ async function main() {
     try {
       if (!row.reservationId || !row.fileType || !row.storageUrl) throw new Error("missing_required_metadata");
       const bytes = decodeDataUrl(row.storageUrl, row.fileType);
-      validateOperationalProofBuffer(bytes, row.fileType);
+      await decodeAndValidateOperationalProofBuffer(bytes, row.fileType);
       const checksum = operationalProofChecksum(bytes);
       if (row.fileSize != null && row.fileSize !== bytes.byteLength) throw new Error("file_size_mismatch");
       if (!apply) {

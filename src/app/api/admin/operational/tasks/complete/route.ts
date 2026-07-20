@@ -15,11 +15,11 @@ import {
   operationalProofDownloadPath,
   operationalProofExpiryDate,
   operationalProofNotes,
-  readAndValidateOperationalProofFile,
   safeOperationalProofFileName,
   validateOperationalProofFile,
   validateOperationalProofUploadTotal
 } from "@/lib/operational-proof";
+import { readAndValidateOperationalProofFile } from "@/lib/operational-proof-image-server";
 import {
   deleteOperationalProofObject,
   uploadOperationalProofObject,

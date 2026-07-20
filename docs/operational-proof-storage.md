@@ -8,7 +8,7 @@ This storage path is only for `operational_proof_photo` documents. Permanent loc
 
 1. The authenticated completion API enforces reservation/task RBAC.
 2. The full multipart request is limited to 4 MiB, below the Vercel Function 4.5 MB request limit.
-3. JPG, PNG and WebP files are checked by declared MIME, magic bytes, structural dimensions and a 40 megapixel ceiling.
+3. JPG, PNG and WebP files are checked by declared MIME, magic bytes, structural dimensions, a full libvips pixel decode and a 40 megapixel ceiling.
 4. The server uploads the bytes to a private Vercel Blob store using an environment-scoped, UUID-based immutable key.
 5. `ClientDocument` stores only provider, key, SHA-256 checksum, ETag, size, MIME, timestamps, uploader, expiry and relational metadata. New writes keep `storageUrl` null.
 6. The authenticated proof endpoint rechecks task/reservation access and streams the private object with `no-store`. It never returns or redirects to a Blob URL.

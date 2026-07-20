@@ -55,14 +55,6 @@ export function validateOperationalProofUploadTotal(files: File[]) {
   }
 }
 
-export async function readAndValidateOperationalProofFile(file: File) {
-  validateOperationalProofFile(file);
-  const bytes = Buffer.from(await file.arrayBuffer());
-  if (bytes.byteLength !== file.size) throw new Error("Fisierul incarcat este incomplet.");
-  const decoded = validateOperationalProofBuffer(bytes, file.type);
-  return { bytes, ...decoded };
-}
-
 export function validateOperationalProofBuffer(bytes: Buffer, declaredMimeType: string) {
   const decoded = decodeOperationalProofImage(bytes);
   if (!decoded || decoded.mimeType !== declaredMimeType) {

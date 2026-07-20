@@ -7,16 +7,17 @@ import {
   validateOperationalProofBuffer,
   validateOperationalProofUploadTotal
 } from "../src/lib/operational-proof";
+import { decodeAndValidateOperationalProofBuffer } from "../src/lib/operational-proof-image-server";
 import {
   operationalProofChecksum,
   operationalProofObjectKey,
   operationalProofStorageConfigured
 } from "../src/lib/operational-proof-storage";
 
-function main() {
+async function main() {
   schemaIsBackwardCompatible();
   objectKeysAndChecksumsAreSafe();
-  imageValidationRejectsSpoofedContent();
+  await imageValidationRejectsSpoofedContent();
   uploadLimitsFitTheFunctionBoundary();
   routesUsePrivateDualReadAndDelete();
   backfillIsGuardedAndRetainsLegacyPayloads();
@@ -27,7 +28,7 @@ function main() {
       "additive nullable private-storage metadata",
       "non-guessable environment-scoped object keys",
       "SHA-256 checksums",
-      "MIME, magic-byte and image dimension validation",
+      "MIME, magic-byte, structural and full pixel decode validation",
       "4 MiB total upload boundary",
       "authenticated private-object read with Base64 fallback",
       "object deletion before metadata deletion",
@@ -65,12 +66,15 @@ function objectKeysAndChecksumsAreSafe() {
   restoreEnv("BLOB_READ_WRITE_TOKEN", previousToken);
 }
 
-function imageValidationRejectsSpoofedContent() {
+async function imageValidationRejectsSpoofedContent() {
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   const decoded = validateOperationalProofBuffer(png, "image/png");
   assert.deepEqual(decoded, { mimeType: "image/png", width: 1, height: 1 });
   assert.throws(() => validateOperationalProofBuffer(png, "image/jpeg"), /nu corespunde/);
   assert.throws(() => validateOperationalProofBuffer(Buffer.from("not-an-image"), "image/png"), /nu corespunde/);
+  const truncated = Buffer.concat([png.subarray(0, 33), Buffer.from([0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82])]);
+  await assert.rejects(() => decodeAndValidateOperationalProofBuffer(truncated, "image/png"), /corupta|decodata/);
+  await decodeAndValidateOperationalProofBuffer(png, "image/png");
 }
 
 function uploadLimitsFitTheFunctionBoundary() {
@@ -124,4 +128,7 @@ function restoreEnv(name: string, value: string | undefined) {
   else process.env[name] = value;
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

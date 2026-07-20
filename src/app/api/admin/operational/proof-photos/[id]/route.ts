@@ -4,8 +4,10 @@ import { recordAudit } from "@/lib/audit";
 import {
   OPERATIONAL_PROOF_DOCUMENT_TYPE,
   canViewOperationalProofPhoto,
-  isOperationalProofActive
+  isOperationalProofActive,
+  parseOperationalProofNotes
 } from "@/lib/operational-proof";
+import { fieldCanAccessOperationalProof } from "@/lib/operational-assignment";
 import { prisma } from "@/lib/prisma";
 import { emitStructuredLog, requestCorrelationId, safeErrorCode } from "@/lib/observability";
 
@@ -41,7 +43,8 @@ export async function GET(request: NextRequest, context: Context) {
           status: true,
           ownerId: true,
           sellerUserId: true,
-          salesperson: true
+          salesperson: true,
+          client: { select: { accountOwnerUserId: true } }
         }
       }
     }
@@ -50,7 +53,16 @@ export async function GET(request: NextRequest, context: Context) {
   if (!document || document.documentType !== OPERATIONAL_PROOF_DOCUMENT_TYPE || !document.reservation || !isOperationalProofActive(document)) {
     return NextResponse.json({ error: "Poza dovada nu exista." }, { status: 404, headers: noStoreHeaders });
   }
-  if (!canViewOperationalProofPhoto(session, document.reservation)) {
+  const proofNotes = parseOperationalProofNotes(document.notes);
+  const canView = session.role === "FIELD_OPERATOR"
+    ? Boolean(proofNotes && await fieldCanAccessOperationalProof({
+        session,
+        reservationId: document.reservation.id,
+        kind: proofNotes.kind,
+        legacyTaskId: proofNotes.taskId
+      }))
+    : canViewOperationalProofPhoto(session, document.reservation);
+  if (!canView) {
     return NextResponse.json({ error: "Nu ai acces la aceasta poza dovada." }, { status: 403, headers: noStoreHeaders });
   }
 

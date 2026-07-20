@@ -11,6 +11,7 @@ Goal: define checks required before launching major modules such as public redes
 - [ ] Staging/test `DATABASE_URL` is documented.
 - [ ] Vercel production environment variables are reviewed.
 - [ ] `OPERATION_TASKS_ENABLED` is not enabled in production until approved.
+- [ ] `OPERATIONAL_ASSIGNMENT_ENABLED` is enabled only for an approved Preview/Production pilot with explicit assigned tasks.
 - [ ] `OPERATION_TASK_READS_ENABLED` is not enabled in production until approved.
 - [ ] SmartBill confirm import is used only through authenticated UI and explicit confirm.
 - [ ] No secrets are committed.
@@ -224,4 +225,3 @@ Recommended:
 - [ ] Production logs show no new errors.
 - [ ] Feature flags remain in intended state.
 - [ ] Rollback target is known.
-

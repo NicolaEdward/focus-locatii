@@ -257,7 +257,8 @@ export async function getReservation(id: string, actor?: AuthSession | null) {
   return serializeReservation(reservation);
 }
 
-export async function listOperationReservations() {
+export async function listOperationReservations(session: AuthSession) {
+  if (session.role === "FIELD_OPERATOR") return [];
   const today = startOfUtcDay(new Date());
   const windowStart = addDays(today, -OPERATION_HISTORY_DAYS);
   const decorationWindowEnd = addDays(today, DECORATION_LOOKAHEAD_DAYS);
@@ -266,12 +267,28 @@ export async function listOperationReservations() {
   const reservations = await prisma.reservation.findMany({
     where: {
       status: { in: [...operationalReservationStatuses] },
-      OR: [
-        { installationDate: { gte: windowStart, lte: decorationWindowEnd } },
-        { neutralizationDate: { gte: windowStart, lte: neutralizationWindowEnd } },
-        { installationDate: null, periodStart: { gte: windowStart, lte: decorationWindowEnd } },
-        { neutralizationDate: null, periodEnd: { gte: windowStart, lte: neutralizationWindowEnd } },
-        { periodStart: { lte: neutralizationWindowEnd }, periodEnd: { gte: windowStart } }
+      AND: [
+        {
+          OR: [
+            { installationDate: { gte: windowStart, lte: decorationWindowEnd } },
+            { neutralizationDate: { gte: windowStart, lte: neutralizationWindowEnd } },
+            { installationDate: null, periodStart: { gte: windowStart, lte: decorationWindowEnd } },
+            { neutralizationDate: null, periodEnd: { gte: windowStart, lte: neutralizationWindowEnd } },
+            { periodStart: { lte: neutralizationWindowEnd }, periodEnd: { gte: windowStart } }
+          ]
+        },
+        ...(session.role === "SALES_AGENT" ? [{
+          OR: [
+            { ownerId: session.id },
+            { sellerUserId: session.id },
+            { client: { accountOwnerUserId: session.id } },
+            {
+              ownerId: null,
+              sellerUserId: null,
+              salesperson: { in: [session.name, session.email] }
+            }
+          ]
+        } satisfies Prisma.ReservationWhereInput] : [])
       ]
     },
     include: reservationOperationalInclude,

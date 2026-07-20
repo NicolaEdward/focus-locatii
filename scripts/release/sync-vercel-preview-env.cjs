@@ -5,7 +5,7 @@ const { spawnSync } = require("node:child_process");
 const fileName = process.env.PREVIEW_ENV_FILE || ".env.preview.local";
 const values = parseEnv(readFileSync(resolve(process.cwd(), fileName), "utf8"));
 const sensitive = ["DATABASE_URL", "AUTH_SECRET", "CRON_SECRET", "PREVIEW_TEST_PASSWORD"];
-const regular = ["APP_ENV", "ALLOW_SYNTHETIC_SEED", "PREVIEW_DATASET_ID"];
+const regular = ["APP_ENV", "ALLOW_SYNTHETIC_SEED", "PREVIEW_DATASET_ID", "OPERATIONAL_ASSIGNMENT_ENABLED"];
 const forbidden = [
   "RESEND_API_KEY",
   "NOTIFICATION_FROM_EMAIL",

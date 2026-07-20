@@ -31,7 +31,8 @@ const ids = {
   crmProspect: "preview-crm-prospect",
   crmOpportunity: "preview-crm-opportunity",
   crmAction: "preview-crm-action",
-  proof: "preview-proof-photo"
+  proof: "preview-proof-photo",
+  operationTaskDecoration: "preview-operation-task-decoration"
 } as const;
 
 function day(offset: number) {
@@ -135,6 +136,37 @@ async function main() {
     create: { id: ids.reservationHold, locationId: ids.holdLocation, clientId: ids.clientDirector, campaignId: ids.campaignDirector, status: "HOLD", clientName: "Mobility Preview SA", campaignName: "Campanie Mobility Preview", periodStart: day(3), periodEnd: day(33), holdExpiresAt: day(2), sellerUserId: director.id, ownerId: coo.id, amount: 18000, currency: "RON" }
   });
 
+  await prisma.operationTask.upsert({
+    where: { dedupeKey: `reservation:${ids.reservationBooked}:DECORATION:base` },
+    update: {
+      reservationId: ids.reservationBooked,
+      campaignId: ids.campaignAgent,
+      locationId: ids.bookedLocation,
+      kind: "DECORATION",
+      status: "NEW",
+      source: "SYSTEM_DERIVED",
+      scheduledFor: day(-6),
+      completedAt: null,
+      assignedToUserId: field.id,
+      createdByUserId: coo.id,
+      notes: "Task sintetic pentru pilotul Munca mea"
+    },
+    create: {
+      id: ids.operationTaskDecoration,
+      reservationId: ids.reservationBooked,
+      campaignId: ids.campaignAgent,
+      locationId: ids.bookedLocation,
+      kind: "DECORATION",
+      status: "NEW",
+      source: "SYSTEM_DERIVED",
+      dedupeKey: `reservation:${ids.reservationBooked}:DECORATION:base`,
+      scheduledFor: day(-6),
+      assignedToUserId: field.id,
+      createdByUserId: coo.id,
+      notes: "Task sintetic pentru pilotul Munca mea"
+    }
+  });
+
   await prisma.financialReportUpload.upsert({
     where: { id: ids.upload },
     update: { uploadedByUserId: finance.id, reportDate: day(0), originalFileName: "preview-synthetic.xlsx", fileHash: "preview-synthetic-v1", status: "confirmed", activeVersion: true },
@@ -152,7 +184,8 @@ async function main() {
   await prisma.crmOpportunity.upsert({ where: { id: ids.crmOpportunity }, update: { companyId: ids.crmCompany, sourceProspectId: ids.crmProspect, ownerId: agent.id, createdByUserId: agent.id, name: "Rețea OOH Preview", stage: "negotiation", needSummary: "Campanie urbană sintetică", quotedValue: new Prisma.Decimal("4000.00"), revisedValue: new Prisma.Decimal("4000.00"), currency: "EUR", decisionDate: day(8), initialSnapshot: { synthetic: true } }, create: { id: ids.crmOpportunity, companyId: ids.crmCompany, sourceProspectId: ids.crmProspect, ownerId: agent.id, createdByUserId: agent.id, name: "Rețea OOH Preview", stage: "negotiation", needSummary: "Campanie urbană sintetică", quotedValue: new Prisma.Decimal("4000.00"), revisedValue: new Prisma.Decimal("4000.00"), currency: "EUR", decisionDate: day(8), initialSnapshot: { synthetic: true } } });
   await prisma.crmNextAction.upsert({ where: { id: ids.crmAction }, update: { companyId: ids.crmCompany, prospectId: ids.crmProspect, opportunityId: ids.crmOpportunity, ownerId: agent.id, createdByUserId: agent.id, type: "call", description: "Follow-up sintetic Preview", dueAt: day(0), priority: "high", status: "open" }, create: { id: ids.crmAction, companyId: ids.crmCompany, prospectId: ids.crmProspect, opportunityId: ids.crmOpportunity, ownerId: agent.id, createdByUserId: agent.id, type: "call", description: "Follow-up sintetic Preview", dueAt: day(0), priority: "high", status: "open" } });
 
-  await prisma.clientDocument.upsert({ where: { id: ids.proof }, update: { clientId: ids.clientAgent, campaignId: ids.campaignAgent, reservationId: ids.reservationBooked, fileName: "preview-proof.png", fileType: "image/png", fileSize: 68, documentType: "operational_proof_photo", uploadedByUserId: field.id, expiryDate: day(30), notes: JSON.stringify({ synthetic: true }), storageUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", status: "active" }, create: { id: ids.proof, clientId: ids.clientAgent, campaignId: ids.campaignAgent, reservationId: ids.reservationBooked, fileName: "preview-proof.png", fileType: "image/png", fileSize: 68, documentType: "operational_proof_photo", uploadedByUserId: field.id, expiryDate: day(30), notes: JSON.stringify({ synthetic: true }), storageUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", status: "active" } });
+  const proofNotes = JSON.stringify({ purpose: "DECORATION_PROOF", kind: "decoration", taskId: null, uploadedByUserId: field.id, expiresInDays: 30, synthetic: true });
+  await prisma.clientDocument.upsert({ where: { id: ids.proof }, update: { clientId: ids.clientAgent, campaignId: ids.campaignAgent, reservationId: ids.reservationBooked, fileName: "preview-proof.png", fileType: "image/png", fileSize: 68, documentType: "operational_proof_photo", uploadedByUserId: field.id, expiryDate: day(30), notes: proofNotes, storageUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", status: "active" }, create: { id: ids.proof, clientId: ids.clientAgent, campaignId: ids.campaignAgent, reservationId: ids.reservationBooked, fileName: "preview-proof.png", fileType: "image/png", fileSize: 68, documentType: "operational_proof_photo", uploadedByUserId: field.id, expiryDate: day(30), notes: proofNotes, storageUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", status: "active" } });
 
   for (const [role, user] of users.entries()) {
     await prisma.appNotification.upsert({
@@ -162,7 +195,7 @@ async function main() {
     });
   }
 
-  console.log(JSON.stringify({ ok: true, dataset: process.env.PREVIEW_DATASET_ID, databaseFingerprint: identity.fingerprint, roles: [...users.keys()], syntheticLocations: locations.length }, null, 2));
+  console.log(JSON.stringify({ ok: true, dataset: process.env.PREVIEW_DATASET_ID, databaseFingerprint: identity.fingerprint, roles: [...users.keys()], syntheticLocations: locations.length, assignedPilotTasks: 1 }, null, 2));
 }
 
 async function upsertReceivable(id: string, row: { clientId: string; campaignId: string; ownerId: string; companyName: string; companyCode: string; invoiceNumber: string; clientName: string; dueDate: Date; invoiced: string; collected: string; remaining: string; currency: string; status: string }) {

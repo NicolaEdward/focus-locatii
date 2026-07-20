@@ -22,13 +22,13 @@ const pages = [
   { name: "sales-director-dashboard", route: "/admin/dashboard", role: "SALES_DIRECTOR", expected: "Agenda mea" },
   { name: "sales-agent-dashboard", route: "/admin/dashboard", role: "SALES_AGENT", expected: "Agenda mea" },
   { name: "finance-invoices", route: "/admin/financiar/incasari", role: "FINANCE_OPERATOR", expected: "Facturi clien" },
-  { name: "field-operational", route: "/admin/operational", role: "FIELD_OPERATOR", expected: "Opera" },
+  { name: "field-operational", route: "/admin/operational", role: "FIELD_OPERATOR", expected: "Munca mea" },
   { name: "locations", route: "/admin/locatii", role: "COO", expected: "Loca" },
   { name: "selector", route: "/admin/selectie-locatii", role: "COO", expected: "Selector" },
   { name: "clients", route: "/admin/clienti", role: "COO", expected: "Clien" },
   { name: "campaigns", route: "/admin/campanii", role: "COO", expected: "Campanii" },
   { name: "crm", route: "/admin/crm", role: "SALES_AGENT", expected: "CRM" },
-  { name: "operational", route: "/admin/operational", role: "COO", expected: "Opera" },
+  { name: "operational", route: "/admin/operational", role: "COO", expected: "Lucrari de atribuit" },
   { name: "ownership-integrity", route: "/admin/integritate-date", role: "COO", expected: "Integritate ownership" },
   { name: "public-locations", route: "/locatii", expected: "loca" }
 ];

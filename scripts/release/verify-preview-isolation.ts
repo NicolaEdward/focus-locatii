@@ -33,6 +33,9 @@ if (previewEnvFile) {
 for (const flag of ["OPERATION_TASKS_ENABLED", "OPERATION_TASK_READS_ENABLED", "ENABLE_LEGACY_RESERVATION_SYNC"]) {
   if (String(process.env[flag] || "").toLowerCase() === "true") throw new Error(`${flag} cannot be enabled in this milestone.`);
 }
+if (String(process.env.OPERATIONAL_ASSIGNMENT_ENABLED || "").toLowerCase() !== "true") {
+  throw new Error("OPERATIONAL_ASSIGNMENT_ENABLED must be enabled for the isolated Preview pilot.");
+}
 
 const preview = new PrismaClient({ datasources: { db: { url: previewUrl } } });
 const production = new PrismaClient({ datasources: { db: { url: productionUrl } } });

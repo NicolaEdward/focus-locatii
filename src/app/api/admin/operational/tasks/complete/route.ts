@@ -22,6 +22,11 @@ import { prisma } from "@/lib/prisma";
 import { updateReservationProductionNotesWithClient } from "@/lib/reservations";
 import { createOperationalNotifications } from "@/lib/notifications";
 import { emitStructuredLog, requestCorrelationId, safeErrorCode } from "@/lib/observability";
+import {
+  findOperationalTaskForWork,
+  getOperationalTaskForAccess,
+  operationalAssignmentEnabled
+} from "@/lib/operational-assignment";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,6 +52,7 @@ export async function POST(request: NextRequest) {
     const reservationId = textValue(form.get("reservationId"));
     const kind = textValue(form.get("kind"));
     const taskId = textValue(form.get("taskId"));
+    const operationTaskId = textValue(form.get("operationTaskId"));
     const completionNote = textValue(form.get("completionNote"));
     const files = form.getAll("files").filter((item): item is File => item instanceof File && item.size > 0);
 
@@ -55,6 +61,12 @@ export async function POST(request: NextRequest) {
     }
     if (!kind || !allowedKinds.has(kind)) {
       return NextResponse.json({ error: "Tip operational invalid." }, { status: 400, headers: noStoreHeaders });
+    }
+    if (session.role === "FIELD_OPERATOR" && (!operationalAssignmentEnabled() || !operationTaskId)) {
+      return NextResponse.json(
+        { error: "Finalizarea de teren necesita un task atribuit in pilotul operational." },
+        { status: 403, headers: noStoreHeaders }
+      );
     }
     if (files.length > OPERATIONAL_PROOF_MAX_FILES_PER_TASK) {
       return NextResponse.json({ error: `Poti incarca maximum ${OPERATIONAL_PROOF_MAX_FILES_PER_TASK} poze.` }, { status: 400, headers: noStoreHeaders });
@@ -79,8 +91,20 @@ export async function POST(request: NextRequest) {
     if (!existing) {
       return NextResponse.json({ error: "Lucrarea nu exista." }, { status: 404, headers: noStoreHeaders });
     }
-    if (!canCompleteOperationalReservation(session, existing)) {
+    const relationalTask = operationTaskId
+      ? await getOperationalTaskForAccess(operationTaskId, session)
+      : await findOperationalTaskForWork({ reservationId, kind: kind as OperationKind, legacyTaskId: taskId });
+    const fieldHasAssignment = session.role === "FIELD_OPERATOR"
+      && existing.status === "BOOKED"
+      && relationalTask?.assignedToUserId === session.id;
+    if (session.role === "FIELD_OPERATOR" ? !fieldHasAssignment : !canCompleteOperationalReservation(session, existing)) {
       return NextResponse.json({ error: "Nu ai acces sa finalizezi aceasta lucrare." }, { status: 403, headers: noStoreHeaders });
+    }
+    const relationalKindMatches = !relationalTask || (kind === "neutralization"
+      ? relationalTask.kind === "NEUTRALIZATION"
+      : relationalTask.kind === "DECORATION" || relationalTask.kind === "REDECORATION");
+    if (relationalTask && (relationalTask.reservationId !== reservationId || relationalTask.legacyTaskId !== taskId || !relationalKindMatches)) {
+      return NextResponse.json({ error: "Taskul nu corespunde lucrarii selectate." }, { status: 403, headers: noStoreHeaders });
     }
 
     const activeProofCount = await prisma.clientDocument.count({
@@ -96,17 +120,17 @@ export async function POST(request: NextRequest) {
         { status: 400, headers: noStoreHeaders }
       );
     }
-    if (session.role === "FIELD_OPERATOR" && activeProofCount + files.length < 1) {
+    if (session.role === "FIELD_OPERATOR" && files.length < 1) {
       return NextResponse.json(
         { error: "Incarca cel putin o poza dovada pentru finalizare." },
         { status: 400, headers: noStoreHeaders }
       );
     }
 
-    const currentStatus = taskId
+    const currentStatus = relationalTask?.status || (taskId
       ? operationExtraTasks(existing.productionNotes, kind as OperationKind).find((task) => task.id === taskId)?.status || "NEW"
-      : operationStatus(existing.productionNotes, kind as OperationKind);
-    if (currentStatus === "DONE" && files.length === 0) {
+      : operationStatus(existing.productionNotes, kind as OperationKind));
+    if (currentStatus === "DONE") {
       const reservation = await updateReservationProductionNotesWithClient(prisma, reservationId, existing.productionNotes || "", session);
       return NextResponse.json(
         {
@@ -157,6 +181,17 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      if (relationalTask) {
+        await tx.operationTask.update({
+          where: { id: relationalTask.id },
+          data: {
+            status: "DONE",
+            completedAt: uploadedAt,
+            ...(completionNote ? { notes: completionNote } : {})
+          }
+        });
+      }
+
       return updateReservationProductionNotesWithClient(tx, reservationId, nextProductionNotes, session);
     });
 
@@ -165,13 +200,13 @@ export async function POST(request: NextRequest) {
       action: `operation.${kind}.complete_with_proof`,
       entityType: "reservation",
       entityId: reservationId,
-      metadata: { taskId, proofPhotoCount: files.length, expiresAt: expiresAt.toISOString() },
+      metadata: { taskId, operationTaskId: relationalTask?.id || null, proofPhotoCount: files.length, expiresAt: expiresAt.toISOString() },
       request
     });
 
     try {
       await createOperationalNotifications({
-        recipientUserIds: [existing.ownerId, existing.sellerUserId, existing.client?.accountOwnerUserId],
+        recipientUserIds: [existing.ownerId, existing.sellerUserId, existing.client?.accountOwnerUserId, relationalTask?.assignedToUserId],
         actorUserId: session.id,
         type: `operation_${kind}_completed`,
         title: kind === "decoration" ? "Decorare finalizata" : "Neutralizare finalizata",

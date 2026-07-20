@@ -104,7 +104,8 @@ type OperationalReservationAccess = Pick<ReservationDTO, "status" | "ownerId" | 
 
 export function canAccessOperationalReservation(session: AuthSession, reservation: OperationalReservationAccess) {
   if (["SUPER_ADMIN", "COO", "SALES_DIRECTOR"].includes(session.role)) return true;
-  if (session.role === "FIELD_OPERATOR") return reservation.status === "BOOKED";
+  // Field access requires a relational assignment and is checked asynchronously at the API boundary.
+  if (session.role === "FIELD_OPERATOR") return false;
   if (session.role !== "SALES_AGENT") return false;
 
   const legacyOwner = reservation.salesperson === session.name || reservation.salesperson === session.email;
@@ -118,7 +119,7 @@ export function canAccessOperationalReservation(session: AuthSession, reservatio
 }
 
 export function canViewOperationalProofPhoto(session: AuthSession, reservation: OperationalReservationAccess) {
-  if (["SUPER_ADMIN", "COO", "SALES_DIRECTOR", "SALES_AGENT"].includes(session.role)) return true;
+  if (["SUPER_ADMIN", "COO", "SALES_DIRECTOR"].includes(session.role)) return true;
   return canAccessOperationalReservation(session, reservation);
 }
 

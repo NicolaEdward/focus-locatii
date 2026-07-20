@@ -31,8 +31,12 @@ assert.doesNotMatch(provisioner, /GRANT ALL/);
 assert.match(vercelEnvSync, /"DATABASE_URL", "AUTH_SECRET", "CRON_SECRET", "PREVIEW_TEST_PASSWORD"/);
 assert.match(vercelEnvSync, /RESEND_API_KEY/);
 assert.match(vercelEnvSync, /OPERATION_TASKS_ENABLED/);
+assert.match(vercelEnvSync, /OPERATIONAL_ASSIGNMENT_ENABLED/);
 assert.match(vercelEnvSync, /"preview"/);
-assert.doesNotMatch(previewSeed, /operationTask\.(create|upsert|update)/);
+assert.match(previewSeed, /operationTask\.upsert/);
+assert.match(previewSeed, /reservation:\$\{ids\.reservationBooked\}:DECORATION:base/);
+assert.match(previewSeed, /assignedToUserId: field\.id/);
+assert.doesNotMatch(previewSeed, /operationTask\.(create|update)/);
 assert.match(previewSeed, /FIELD_OPERATOR/);
 assert.match(previewSeed, /FINANCE_OPERATOR/);
 

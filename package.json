@@ -52,6 +52,10 @@
     "test:reservation-write-classification": "node scripts/test-reservation-write-classification.cjs",
     "test:operation-tasks": "node scripts/test-operation-tasks.cjs",
     "test:operational-proof": "node scripts/test-operational-proof-workflow.cjs",
+    "test:operational-proof-storage": "tsx scripts/test-operational-proof-storage.ts",
+    "test:operational-proof-storage:integration": "tsx scripts/test-operational-proof-storage-integration.ts",
+    "audit:operational-proof-storage": "tsx scripts/audit-operational-proof-storage.ts",
+    "backfill:operational-proof-storage": "tsx scripts/backfill-operational-proof-storage.ts",
     "test:operational-assignment": "tsx scripts/test-operational-assignment.ts",
     "audit:operational-assignment": "tsx scripts/audit-operational-assignment.ts",
     "test:operation-task-backfill": "node scripts/test-operation-task-backfill.cjs",
@@ -102,6 +106,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",
+    "@vercel/blob": "2.3.0",
     "clsx": "^2.1.1",
     "crc-32": "1.2.2",
     "framer-motion": "^12.0.0",

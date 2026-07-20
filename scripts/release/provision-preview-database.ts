@@ -64,6 +64,7 @@ const contents = [
   `PREVIEW_TEST_PASSWORD=${quote(testPassword)}`,
   `AUTH_SECRET=${quote(authSecret)}`,
   `CRON_SECRET=${quote(cronSecret)}`,
+  "OPERATIONAL_PROOF_STORAGE_ENABLED=true",
   "NEXT_PUBLIC_BASE_URL=http://127.0.0.1:3000",
   "",
 ].join("\n");

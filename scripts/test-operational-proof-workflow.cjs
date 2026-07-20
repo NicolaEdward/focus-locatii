@@ -50,7 +50,8 @@ function proofLibraryDefinesSafeRetention() {
   assert(source.includes('OPERATIONAL_PROOF_DOCUMENT_TYPE = "operational_proof_photo"'), "proof photos must use a dedicated document type");
   assert(source.includes("OPERATIONAL_PROOF_RETENTION_DAYS = 30"), "proof photos must expire after 30 days");
   assert(source.includes("OPERATIONAL_PROOF_MAX_FILES_PER_TASK = 10"), "proof photo count must be limited");
-  assert(source.includes("OPERATIONAL_PROOF_MAX_FILE_SIZE = 10 * 1024 * 1024"), "proof photo size must be limited");
+  assert(source.includes("OPERATIONAL_PROOF_MAX_FILE_SIZE = 4 * 1024 * 1024"), "proof photo size must fit the Vercel Function upload boundary");
+  assert(source.includes("OPERATIONAL_PROOF_MAX_TOTAL_SIZE = 4 * 1024 * 1024"), "the complete upload must fit the Vercel Function upload boundary");
   for (const mimeType of ["image/jpeg", "image/png", "image/webp"]) {
     assert(source.includes(mimeType), `${mimeType} should be accepted`);
   }
@@ -99,7 +100,8 @@ function cronIsProtectedAndLimitedToProofPhotos() {
   assert(route.includes("OPERATIONAL_PROOF_DOCUMENT_TYPE"), "cron must only scan proof photo documents");
   assert(route.includes('status: "active"'), "cron must only delete active proof photos");
   assert(route.includes("expiryDate: { lt: now }"), "cron must only delete expired proof photos");
-  assert(route.includes('storageUrl: `deleted:${document.id}`'), "cron should remove file payload after expiry");
+  assert(route.includes("deleteOperationalProofObject"), "cron should delete private objects before marking metadata deleted");
+  assert(route.includes('storageUrl: `deleted:${document.id}`'), "cron should remove the legacy file payload after expiry");
   assert(vercel.includes("/api/cron/delete-expired-operational-proof-photos"), "vercel.json should register the cleanup cron route");
   assert(vercel.includes('"schedule": "0 3 * * *"'), "cron should run daily");
 }

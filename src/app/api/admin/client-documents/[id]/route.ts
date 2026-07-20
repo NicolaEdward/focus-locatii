@@ -27,7 +27,7 @@ export async function GET(request: NextRequest, context: Context) {
   if (accessError) {
     return NextResponse.json({ error: accessError.error }, { status: accessError.status, headers: noStoreHeaders });
   }
-  if (document.storageUrl.startsWith("data:")) {
+  if (document.storageUrl?.startsWith("data:")) {
     const match = document.storageUrl.match(/^data:([^;]+);base64,(.+)$/);
     if (!match) return NextResponse.json({ error: "Fisier invalid." }, { status: 400, headers: noStoreHeaders });
     const body = Buffer.from(match[2], "base64");
@@ -38,7 +38,8 @@ export async function GET(request: NextRequest, context: Context) {
       }
     });
   }
-  return NextResponse.redirect(document.storageUrl);
+  if (document.storageUrl) return NextResponse.redirect(document.storageUrl);
+  return NextResponse.json({ error: "Documentul nu are un fisier disponibil." }, { status: 404, headers: noStoreHeaders });
 }
 
 export async function PATCH(request: NextRequest, context: Context) {

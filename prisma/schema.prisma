@@ -1250,7 +1250,13 @@ model ClientDocument {
   uploadedAt            DateTime @default(now())
   expiryDate            DateTime?
   notes                 String?  @db.Text
-  storageUrl            String   @db.LongText
+  storageUrl            String?  @db.LongText
+  storageProvider       String?  @db.VarChar(32)
+  storageKey            String?  @db.VarChar(512)
+  storageChecksum       String?  @db.VarChar(64)
+  storageEtag           String?  @db.VarChar(191)
+  storageMigratedAt     DateTime?
+  storageVerifiedAt     DateTime?
   status                String   @default("active")
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -1273,6 +1279,8 @@ model ClientDocument {
   @@index([financialPayableId])
   @@index([documentType])
   @@index([status])
+  @@index([documentType, status, expiryDate])
+  @@index([storageKey])
   @@index([uploadedByUserId])
   @@map("portfolio_client_documents")
 }

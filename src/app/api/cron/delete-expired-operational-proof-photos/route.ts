@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
+import {
+  OPERATIONAL_PROOF_STORAGE_PROVIDER,
+  deleteOperationalProofObject
+} from "@/lib/operational-proof-storage";
 import { prisma } from "@/lib/prisma";
 import { emitStructuredLog, observeRoute, safeErrorCode } from "@/lib/observability";
 
@@ -26,10 +30,17 @@ export async function GET(request: NextRequest) {
     const expired = await prisma.clientDocument.findMany({
     where: {
       documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE,
-      status: "active",
+      status: { in: ["active", "deleting"] },
       expiryDate: { lt: now }
     },
-    select: { id: true, notes: true },
+    select: {
+      id: true,
+      notes: true,
+      status: true,
+      storageProvider: true,
+      storageKey: true,
+      storageEtag: true
+    },
     take: 100
   });
 
@@ -38,14 +49,29 @@ export async function GET(request: NextRequest) {
 
     for (const document of expired) {
       try {
-        await prisma.clientDocument.update({
-        where: { id: document.id },
-        data: {
-          status: "deleted",
-          storageUrl: `deleted:${document.id}`,
-          notes: appendSystemDeletionNote(document.notes)
+        if (document.status === "active") {
+          const locked = await prisma.clientDocument.updateMany({
+            where: { id: document.id, status: "active" },
+            data: { status: "deleting" }
+          });
+          if (locked.count !== 1) continue;
         }
-      });
+        if (document.storageProvider === OPERATIONAL_PROOF_STORAGE_PROVIDER && document.storageKey) {
+          try {
+            await deleteOperationalProofObject(document.storageKey, document.storageEtag);
+          } catch (error) {
+            await prisma.clientDocument.updateMany({ where: { id: document.id, status: "deleting" }, data: { status: "active" } });
+            throw error;
+          }
+        }
+        await prisma.clientDocument.updateMany({
+          where: { id: document.id, status: "deleting" },
+          data: {
+            status: "deleted",
+            storageUrl: `deleted:${document.id}`,
+            notes: appendSystemDeletionNote(document.notes)
+          }
+        });
         deleted += 1;
       } catch (error) {
         failed += 1;

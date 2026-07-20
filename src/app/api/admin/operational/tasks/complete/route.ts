@@ -15,9 +15,16 @@ import {
   operationalProofDownloadPath,
   operationalProofExpiryDate,
   operationalProofNotes,
+  readAndValidateOperationalProofFile,
   safeOperationalProofFileName,
-  validateOperationalProofFile
+  validateOperationalProofFile,
+  validateOperationalProofUploadTotal
 } from "@/lib/operational-proof";
+import {
+  deleteOperationalProofObject,
+  uploadOperationalProofObject,
+  type StoredOperationalProof
+} from "@/lib/operational-proof-storage";
 import { prisma } from "@/lib/prisma";
 import { updateReservationProductionNotesWithClient } from "@/lib/reservations";
 import { createOperationalNotifications } from "@/lib/notifications";
@@ -72,6 +79,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Poti incarca maximum ${OPERATIONAL_PROOF_MAX_FILES_PER_TASK} poze.` }, { status: 400, headers: noStoreHeaders });
     }
     for (const file of files) validateOperationalProofFile(file);
+    validateOperationalProofUploadTotal(files);
 
     const existing = await prisma.reservation.findUnique({
       where: { id: reservationId },
@@ -111,7 +119,8 @@ export async function POST(request: NextRequest) {
       where: {
         reservationId,
         documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE,
-        status: "active"
+        status: "active",
+        OR: [{ expiryDate: null }, { expiryDate: { gte: new Date() } }]
       }
     });
     if (activeProofCount + files.length > OPERATIONAL_PROOF_MAX_FILES_PER_TASK) {
@@ -154,46 +163,74 @@ export async function POST(request: NextRequest) {
     const expiresAt = operationalProofExpiryDate(uploadedAt);
     const preparedFiles = await Promise.all(files.map(async (file) => ({
       file,
-      storageUrl: await fileToDataUrl(file)
+      safeFileName: safeOperationalProofFileName(file.name),
+      image: await readAndValidateOperationalProofFile(file)
     })));
-
-    const reservation = await prisma.$transaction(async (tx) => {
-      for (const { file, storageUrl } of preparedFiles) {
-        await tx.clientDocument.create({
-          data: {
-            reservationId,
-            fileName: safeOperationalProofFileName(file.name),
-            fileType: file.type,
-            fileSize: file.size,
-            documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE,
-            uploadedByUserId: session.id,
-            uploadedAt,
-            expiryDate: expiresAt,
-            notes: operationalProofNotes({
-              kind: kind as OperationKind,
-              taskId,
-              completionNote,
-              uploadedByUserId: session.id
-            }),
-            storageUrl,
-            status: "active"
-          }
+    const storedFiles: Array<(typeof preparedFiles)[number] & { stored: StoredOperationalProof }> = [];
+    try {
+      for (const prepared of preparedFiles) {
+        const stored = await uploadOperationalProofObject({
+          reservationId,
+          fileName: prepared.safeFileName,
+          contentType: prepared.image.mimeType,
+          bytes: prepared.image.bytes
         });
+        storedFiles.push({ ...prepared, stored });
       }
+    } catch (error) {
+      await cleanupUploadedProofs(storedFiles.map((item) => item.stored));
+      throw error;
+    }
 
-      if (relationalTask) {
-        await tx.operationTask.update({
-          where: { id: relationalTask.id },
-          data: {
-            status: "DONE",
-            completedAt: uploadedAt,
-            ...(completionNote ? { notes: completionNote } : {})
-          }
-        });
-      }
+    let reservation;
+    try {
+      reservation = await prisma.$transaction(async (tx) => {
+        for (const { safeFileName, image, stored } of storedFiles) {
+          await tx.clientDocument.create({
+            data: {
+              reservationId,
+              fileName: safeFileName,
+              fileType: image.mimeType,
+              fileSize: stored.bytes,
+              documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE,
+              uploadedByUserId: session.id,
+              uploadedAt,
+              expiryDate: expiresAt,
+              notes: operationalProofNotes({
+                kind: kind as OperationKind,
+                taskId,
+                completionNote,
+                uploadedByUserId: session.id
+              }),
+              storageUrl: null,
+              storageProvider: stored.provider,
+              storageKey: stored.key,
+              storageChecksum: stored.checksum,
+              storageEtag: stored.etag,
+              storageMigratedAt: uploadedAt,
+              storageVerifiedAt: uploadedAt,
+              status: "active"
+            }
+          });
+        }
 
-      return updateReservationProductionNotesWithClient(tx, reservationId, nextProductionNotes, session);
-    });
+        if (relationalTask) {
+          await tx.operationTask.update({
+            where: { id: relationalTask.id },
+            data: {
+              status: "DONE",
+              completedAt: uploadedAt,
+              ...(completionNote ? { notes: completionNote } : {})
+            }
+          });
+        }
+
+        return updateReservationProductionNotesWithClient(tx, reservationId, nextProductionNotes, session);
+      });
+    } catch (error) {
+      await cleanupUploadedProofs(storedFiles.map((item) => item.stored));
+      throw error;
+    }
 
     await recordAudit({
       actor: session,
@@ -273,8 +310,15 @@ function textValue(value: FormDataEntryValue | null) {
   return text || null;
 }
 
-async function fileToDataUrl(file: File) {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const type = file.type || "application/octet-stream";
-  return `data:${type};base64,${buffer.toString("base64")}`;
+async function cleanupUploadedProofs(files: StoredOperationalProof[]) {
+  if (!files.length) return;
+  const results = await Promise.allSettled(files.map((file) => deleteOperationalProofObject(file.key, file.etag)));
+  for (const result of results) {
+    if (result.status === "rejected") {
+      emitStructuredLog("error", "proof_storage_delete_failed", {
+        operation: "operational.proof_upload_compensation",
+        errorCode: safeErrorCode(result.reason, "PROOF_UPLOAD_COMPENSATION_FAILED")
+      });
+    }
+  }
 }

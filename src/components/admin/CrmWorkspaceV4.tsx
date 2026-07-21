@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   AlertCircle,
   ArrowRight,
@@ -194,7 +195,7 @@ export function CrmWorkspaceV4({ canViewTeam, canEdit, sessionUserId }: { canVie
     {notice ? <div className="fixed bottom-5 right-5 z-[100] max-w-sm rounded-md border border-emerald-400/30 bg-emerald-950 px-4 py-3 text-sm font-bold text-emerald-100 shadow-2xl"><Check className="mr-2 inline" size={17} />{notice}</div> : null}
     {error ? <ErrorState message={error} onRetry={() => void load()} /> : loading && !data ? <LoadingState /> : <WorkspaceBody view={view} data={data} onOpen={(kind, id) => setSelected({ kind, id })} />}
 
-    {data && data.pagination.pages > 1 && view !== "opportunities" ? <Pagination pagination={data.pagination} onPage={setPage} /> : null}
+    {data && data.pagination.pages > 1 ? <Pagination pagination={data.pagination} onPage={setPage} /> : null}
     {canEdit && createMode ? <CreateDialog mode={createMode} owners={owners} canViewTeam={canViewTeam} sessionUserId={sessionUserId} onClose={() => setCreateMode(null)} onCreated={(message) => { setCreateMode(null); completed(message); }} /> : null}
     {selected ? <RecordDrawer selected={selected} canEdit={canEdit} onClose={() => setSelected(null)} onChanged={completed} /> : null}
   </main>;
@@ -235,13 +236,15 @@ function ProspectingView({ rows, onOpen }: { rows: Prospect[]; onOpen: (kind: Re
 }
 
 function OpportunityPipeline({ rows, onOpen }: { rows: Opportunity[]; onOpen: (kind: RecordKind, id: string) => void }) {
-  const stages = CRM_OPPORTUNITY_STAGE_OPTIONS.filter((stage) => ["opportunity", "quoted", "negotiation", "contracting"].includes(stage.value));
+  if (!rows.length) return <EmptyState icon={<BriefcaseBusiness size={24} />} title="Nicio oportunitate" text="Nu exista oportunitati in etapele si filtrele selectate." />;
+  const stages = CRM_OPPORTUNITY_STAGE_OPTIONS.filter((stage) => rows.some((row) => row.stage === stage.value));
+  const minWidth = Math.max(280, stages.length * 280);
   return <section className="overflow-x-auto pb-2" aria-label="Pipeline oportunități">
-    <div className="grid min-w-[1080px] grid-cols-4 gap-3">{stages.map((stage) => {
+    <div className="grid gap-3" style={{ minWidth, gridTemplateColumns: `repeat(${stages.length}, minmax(260px, 1fr))` }}>{stages.map((stage) => {
       const stageRows = rows.filter((row) => row.stage === stage.value);
       return <div className="min-w-0 rounded-lg border border-slate-700 bg-focus-navy/30" key={stage.value}>
         <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3"><h2 className="text-sm font-black text-white">{stage.label}</h2><span className="rounded-full bg-white/5 px-2 py-1 text-xs font-black text-slate-300">{stageRows.length}</span></div>
-        <div className="min-h-48 space-y-2 p-2">{stageRows.length ? stageRows.map((row) => <OpportunityCard key={row.id} row={row} onOpen={onOpen} />) : <p className="px-3 py-8 text-center text-sm text-slate-500">Coloană liberă</p>}</div>
+        <div className="space-y-2 p-2">{stageRows.map((row) => <OpportunityCard key={row.id} row={row} onOpen={onOpen} />)}</div>
       </div>;
     })}</div>
   </section>;
@@ -376,6 +379,11 @@ function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { k
           {!canEdit ? <p className="rounded-md border border-slate-700 bg-focus-navy/40 px-4 py-3 text-sm text-slate-300">Ai acces complet la informații și istoric, fără drept de modificare.</p> : null}
           {canEdit && selected.kind === "prospect" && ["prospecting", "qualified"].includes(detail.status) ? <QualifyPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, payload.action === "qualify_prospect" ? "Prospectul a fost calificat." : "Oportunitatea a fost creată.")} /> : null}
           {canEdit && selected.kind === "opportunity" && ["opportunity", "quoted", "negotiation", "contracting"].includes(detail.stage) ? <OpportunityTransitionPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Etapa oportunității a fost actualizată.")} /> : null}
+          {selected.kind === "opportunity" && detail.stage === "won" ? <section className="rounded-lg border border-emerald-400/25 bg-emerald-950/25 p-4">
+            <SectionTitle title="Predare catre portofoliul comercial" count={0} />
+            <p className="text-sm text-slate-300">CRM-ul si portofoliul de clienti raman separate. Clientul si campania se creeaza sau se confirma numai printr-o actiune explicita.</p>
+            {canEdit ? <div className="mt-4 flex justify-end"><Link className={primaryButton} href={`/admin/clienti?crmOpportunityId=${encodeURIComponent(detail.id)}`}><ArrowRight size={17} /> Pregateste clientul si campania</Link></div> : null}
+          </section> : null}
           {canEdit ? <ActivityPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Update-ul a fost adăugat în istoric.")} /> : null}
           <details className="rounded-lg border border-slate-700 bg-focus-navy/25"><summary className="cursor-pointer px-4 py-3 font-black text-white">Firmă și contacte</summary><div className="border-t border-slate-700 p-4"><CompanyContacts detail={detail} canEdit={canEdit} pending={pending} command={command} /></div></details>
           <section><SectionTitle title="Istoric" count={events.length} /><Timeline rows={events} /></section>

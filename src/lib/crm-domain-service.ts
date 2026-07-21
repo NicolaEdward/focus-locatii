@@ -22,7 +22,7 @@ import {
   crmValidateActionForStage,
   type CrmProspectStatus
 } from "@/lib/crm-domain";
-import { crmOpportunityTotals } from "@/lib/crm-analytics-v4";
+import { crmOpportunityTotalsFromAggregates, type CrmOpportunityAggregate } from "@/lib/crm-analytics-v4";
 import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/rbac";
 import { normalizeTaxId } from "@/lib/tax-id";
@@ -99,24 +99,17 @@ export async function getCrmWorkspace(input: CrmWorkspaceInput, actor: AuthSessi
 
   const opportunityRowsPromise = view === "today" || view === "prospecting"
     ? Promise.resolve([])
-    : view === "opportunities" && !input.stage
-      ? Promise.all(activeOpportunityStages.map((stage) => prisma.crmOpportunity.findMany({
-          where: { ...opportunityWhere, stage },
-          select: opportunityCardSelect,
-          orderBy: [{ decisionDate: "asc" }, { updatedAt: "desc" }, { id: "asc" }],
-          take: Math.min(limit, 25)
-        }))).then((columns) => columns.flat())
-      : prisma.crmOpportunity.findMany({
-          where: opportunityWhere,
-          select: opportunityCardSelect,
-          orderBy: [{ decisionDate: "asc" }, { updatedAt: "desc" }, { id: "asc" }],
-          skip: (page - 1) * limit,
-          take: limit
-        });
-  const [prospectCount, opportunityCount, actionCount, prospectRows, opportunityRows, actionRows, metricOpportunities, recentWon] = await Promise.all([
-    prisma.crmProspect.count({ where: prospectWhere }),
-    prisma.crmOpportunity.count({ where: opportunityWhere }),
-    prisma.crmNextAction.count({ where: actionWhere }),
+    : prisma.crmOpportunity.findMany({
+        where: opportunityWhere,
+        select: opportunityCardSelect,
+        orderBy: [{ decisionDate: "asc" }, { updatedAt: "desc" }, { id: "asc" }],
+        skip: (page - 1) * limit,
+        take: limit
+      });
+  const [prospectCount, opportunityCount, actionCount, prospectRows, opportunityRows, actionRows, metricOpportunityTotals, summaryAggregate] = await Promise.all([
+    view === "prospecting" || view === "all" ? prisma.crmProspect.count({ where: prospectWhere }) : Promise.resolve(0),
+    view === "opportunities" || view === "all" ? prisma.crmOpportunity.count({ where: opportunityWhere }) : Promise.resolve(0),
+    view === "today" ? prisma.crmNextAction.count({ where: actionWhere }) : Promise.resolve(0),
     view === "today" || view === "opportunities"
       ? Promise.resolve([])
       : prisma.crmProspect.findMany({
@@ -136,21 +129,8 @@ export async function getCrmWorkspace(input: CrmWorkspaceInput, actor: AuthSessi
           skip: (page - 1) * limit,
           take: limit
         }),
-    prisma.crmOpportunity.findMany({
-      where: { ...(ownerId ? { ownerId } : {}), stage: { in: [...activeOpportunityStages, "won"] } },
-      select: { stage: true, currency: true, quotedValue: true, revisedValue: true, agreedValue: true }
-    }),
-    prisma.crmOpportunity.count({
-      where: { ...(ownerId ? { ownerId } : {}), stage: "won", wonAt: { gte: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)) } }
-    })
-  ]);
-
-  const [overdue, dueToday, missingAction, activeProspects, activeOpportunities] = await Promise.all([
-    prisma.crmNextAction.count({ where: { status: "open", ...(ownerId ? { ownerId } : {}), dueAt: { lt: dayStart } } }),
-    prisma.crmNextAction.count({ where: { status: "open", ...(ownerId ? { ownerId } : {}), dueAt: { gte: dayStart, lt: dayEnd } } }),
-    countActiveRecordsWithoutAction(ownerId),
-    prisma.crmProspect.count({ where: { ...(ownerId ? { ownerId } : {}), status: { in: activeProspectStatuses }, opportunities: { none: {} } } }),
-    prisma.crmOpportunity.count({ where: { ...(ownerId ? { ownerId } : {}), stage: { in: activeOpportunityStages } } })
+    aggregateOpportunityTotals(ownerId),
+    aggregateCrmSummary(ownerId, dayStart, dayEnd, new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)))
   ]);
 
   return {
@@ -168,15 +148,69 @@ export async function getCrmWorkspace(input: CrmWorkspaceInput, actor: AuthSessi
       pages: Math.max(1, Math.ceil((view === "today" ? actionCount : view === "prospecting" ? prospectCount : view === "opportunities" ? opportunityCount : Math.max(prospectCount, opportunityCount)) / limit))
     },
     summary: {
-      activeProspects,
-      activeOpportunities,
-      overdue,
-      dueToday,
-      missingAction,
-      wonThisMonth: recentWon,
-      forecastByLevel: crmOpportunityTotals(metricOpportunities)
+      activeProspects: numberValue(summaryAggregate.activeProspects),
+      activeOpportunities: numberValue(summaryAggregate.activeOpportunities),
+      overdue: numberValue(summaryAggregate.overdue),
+      dueToday: numberValue(summaryAggregate.dueToday),
+      missingAction: numberValue(summaryAggregate.missingAction),
+      wonThisMonth: numberValue(summaryAggregate.wonThisMonth),
+      forecastByLevel: crmOpportunityTotalsFromAggregates(metricOpportunityTotals)
     }
   };
+}
+
+async function aggregateOpportunityTotals(ownerId?: string) {
+  const ownerFilter = ownerId ? Prisma.sql`AND \`ownerId\` = ${ownerId}` : Prisma.empty;
+  return prisma.$queryRaw<CrmOpportunityAggregate[]>(Prisma.sql`
+    SELECT \`stage\`, \`currency\`, SUM(COALESCE(\`agreedValue\`, \`revisedValue\`, \`quotedValue\`, 0)) AS \`total\`
+    FROM \`portfolio_crm_opportunities\`
+    WHERE \`stage\` IN ('opportunity', 'quoted', 'negotiation', 'contracting', 'won')
+    ${ownerFilter}
+    GROUP BY \`stage\`, \`currency\`
+  `);
+}
+
+type CrmSummaryAggregate = {
+  overdue: unknown;
+  dueToday: unknown;
+  missingAction: unknown;
+  activeProspects: unknown;
+  activeOpportunities: unknown;
+  wonThisMonth: unknown;
+};
+
+async function aggregateCrmSummary(ownerId: string | undefined, dayStart: Date, dayEnd: Date, monthStart: Date) {
+  const actionOwner = ownerId ? Prisma.sql`AND a.\`ownerId\` = ${ownerId}` : Prisma.empty;
+  const prospectOwner = ownerId ? Prisma.sql`AND p.\`ownerId\` = ${ownerId}` : Prisma.empty;
+  const opportunityOwner = ownerId ? Prisma.sql`AND o.\`ownerId\` = ${ownerId}` : Prisma.empty;
+  const rows = await prisma.$queryRaw<CrmSummaryAggregate[]>(Prisma.sql`
+    SELECT
+      (SELECT COUNT(*) FROM \`portfolio_crm_next_actions\` a WHERE a.\`status\` = 'open' ${actionOwner} AND a.\`dueAt\` < ${dayStart}) AS \`overdue\`,
+      (SELECT COUNT(*) FROM \`portfolio_crm_next_actions\` a WHERE a.\`status\` = 'open' ${actionOwner} AND a.\`dueAt\` >= ${dayStart} AND a.\`dueAt\` < ${dayEnd}) AS \`dueToday\`,
+      (
+        (SELECT COUNT(*) FROM \`portfolio_crm_prospects\` p
+          WHERE p.\`status\` IN ('prospecting', 'qualified') ${prospectOwner}
+          AND NOT EXISTS (SELECT 1 FROM \`portfolio_crm_opportunities\` po WHERE po.\`sourceProspectId\` = p.\`id\`)
+          AND NOT EXISTS (SELECT 1 FROM \`portfolio_crm_next_actions\` pa WHERE pa.\`prospectId\` = p.\`id\` AND pa.\`status\` = 'open'))
+        +
+        (SELECT COUNT(*) FROM \`portfolio_crm_opportunities\` o
+          WHERE o.\`stage\` IN ('opportunity', 'quoted', 'negotiation', 'contracting') ${opportunityOwner}
+          AND NOT EXISTS (SELECT 1 FROM \`portfolio_crm_next_actions\` oa WHERE oa.\`opportunityId\` = o.\`id\` AND oa.\`status\` = 'open'))
+      ) AS \`missingAction\`,
+      (SELECT COUNT(*) FROM \`portfolio_crm_prospects\` p
+        WHERE p.\`status\` IN ('prospecting', 'qualified') ${prospectOwner}
+        AND NOT EXISTS (SELECT 1 FROM \`portfolio_crm_opportunities\` po WHERE po.\`sourceProspectId\` = p.\`id\`)) AS \`activeProspects\`,
+      (SELECT COUNT(*) FROM \`portfolio_crm_opportunities\` o
+        WHERE o.\`stage\` IN ('opportunity', 'quoted', 'negotiation', 'contracting') ${opportunityOwner}) AS \`activeOpportunities\`,
+      (SELECT COUNT(*) FROM \`portfolio_crm_opportunities\` o
+        WHERE o.\`stage\` = 'won' ${opportunityOwner} AND o.\`wonAt\` >= ${monthStart}) AS \`wonThisMonth\`
+  `);
+  return rows[0] || { overdue: 0, dueToday: 0, missingAction: 0, activeProspects: 0, activeOpportunities: 0, wonThisMonth: 0 };
+}
+
+function numberValue(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export async function getCrmRecord(kind: "prospect" | "opportunity", id: string, actor: AuthSession, eventCursor?: string | null) {
@@ -845,14 +879,6 @@ async function resolveOwner(actor: AuthSession, requested?: string | null) {
   const owner = await prisma.user.findFirst({ where: { id: ownerId, active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } }, select: { id: true } });
   if (!owner) throw new CrmDomainError("Responsabilul selectat nu este un utilizator comercial activ.");
   return owner.id;
-}
-
-async function countActiveRecordsWithoutAction(ownerId?: string) {
-  const [prospects, opportunities] = await Promise.all([
-    prisma.crmProspect.count({ where: { ...(ownerId ? { ownerId } : {}), status: { in: activeProspectStatuses }, opportunities: { none: {} }, nextActions: { none: { status: "open" } } } }),
-    prisma.crmOpportunity.count({ where: { ...(ownerId ? { ownerId } : {}), stage: { in: activeOpportunityStages }, nextActions: { none: { status: "open" } } } })
-  ]);
-  return prospects + opportunities;
 }
 
 async function listEvents(input: { companyId: string; prospectId?: string; opportunityId?: string; cursor?: string | null }) {

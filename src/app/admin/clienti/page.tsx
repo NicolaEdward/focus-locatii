@@ -17,11 +17,12 @@ export default async function ClientiPage({ searchParams }: { searchParams: Prom
   const params = await searchParams;
   const query = first(params.q) || "";
   const clientId = first(params.clientId);
+  const handoffOpportunityId = first(params.crmOpportunityId);
   const initialPortfolioFinance = first(params.tab) === "invoices" || first(params.view) === "finance";
   const [page, accountOwners] = await Promise.all([getClientsPage(session, { query }), validAccountOwners()]);
   return <>
     <AdminHeader session={session} />
-    <ClientsWorkspace initialPage={page} initialClientId={clientId} initialPortfolioFinance={initialPortfolioFinance} session={session} accountOwners={accountOwners} />
+    <ClientsWorkspace initialPage={page} initialClientId={clientId} handoffOpportunityId={handoffOpportunityId} initialPortfolioFinance={initialPortfolioFinance} session={session} accountOwners={accountOwners} />
   </>;
 }
 

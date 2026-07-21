@@ -24,6 +24,27 @@ export type CrmProspectStatus = typeof CRM_PROSPECT_STATUS_OPTIONS[number]["valu
 export type CrmOpportunityStage = typeof CRM_OPPORTUNITY_STAGE_OPTIONS[number]["value"];
 export type CrmForecastLevel = "pipeline" | "possible" | "commit" | "won" | "excluded";
 
+export const CRM_FORECAST_POLICY = {
+  mode: "stage_deterministic",
+  valueAggregation: "full_opportunity_value",
+  manualProbability: false,
+  stageLevels: {
+    opportunity: "pipeline",
+    quoted: "pipeline",
+    negotiation: "possible",
+    contracting: "commit",
+    won: "won",
+    lost: "excluded",
+    on_hold: "excluded",
+    inactive: "excluded"
+  }
+} as const satisfies {
+  mode: "stage_deterministic";
+  valueAggregation: "full_opportunity_value";
+  manualProbability: false;
+  stageLevels: Record<CrmOpportunityStage, CrmForecastLevel>;
+};
+
 export function crmAssertInitialProspectRequirements(status: string, normalizedTaxId?: string | null, contactName?: string | null) {
   if (!CRM_PROSPECT_STATUS_OPTIONS.some((option) => option.value === status)) {
     throw new Error("Stadiul initial al prospectului nu este valid.");
@@ -177,11 +198,7 @@ export function crmOpportunityStageLabel(stage: string) {
 }
 
 export function crmForecastForStage(stage: string): CrmForecastLevel {
-  if (stage === "negotiation") return "possible";
-  if (stage === "contracting") return "commit";
-  if (stage === "won") return "won";
-  if (["lost", "on_hold", "inactive"].includes(stage)) return "excluded";
-  return "pipeline";
+  return CRM_FORECAST_POLICY.stageLevels[stage as CrmOpportunityStage] || "pipeline";
 }
 
 export function crmForecastLabel(level: CrmForecastLevel) {
@@ -282,24 +299,6 @@ export function crmNormalizeCompanyName(value: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
-}
-
-export function crmLegacyProspectStatus(status: string): CrmProspectStatus {
-  if (["cold", "new", "contacted", "no_response"].includes(status)) return "prospecting";
-  if (status === "return_later") return "return_later";
-  if (status === "inactive") return "inactive";
-  if (status === "on_hold") return "on_hold";
-  return "qualified";
-}
-
-export function crmLegacyOpportunityStage(status: string): CrmOpportunityStage | null {
-  if (["brief_received", "offer_preparation"].includes(status)) return "opportunity";
-  if (status === "offer_sent") return "quoted";
-  if (status === "in_negotiation") return "negotiation";
-  if (status === "contracting") return "contracting";
-  if (["won", "account_management"].includes(status)) return "won";
-  if (status === "lost") return "lost";
-  return null;
 }
 
 function decimalNumber(value: unknown) {

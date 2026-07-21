@@ -7,6 +7,7 @@ import { Archive, CalendarDays, FileText, Plus, Save, Search, Upload, Wrench } f
 import type { AuthSession } from "@/lib/auth";
 import type { AccountOwnerOption } from "@/lib/client-campaigns";
 import type { CampaignListItem, CampaignOverview, ClientListItem, FinanceSummary, WorkspaceDocument, WorkspacePage } from "@/lib/client-campaign-workspaces";
+import type { CrmHandoffProposal } from "@/lib/crm-handoff-contract";
 import { hasAnyPermission } from "@/lib/rbac";
 import { companyEntities } from "@/lib/company-entities";
 import {
@@ -19,7 +20,7 @@ type ReservationRow = { id: string; locationId: string; locationCode: string; lo
 type DetailTab = "overview" | "reservations" | "documents" | "finance";
 type SectionData = { reservations?: ReservationRow[]; documents?: WorkspaceDocument[]; finance?: FinanceSummary };
 
-export function CampaignsWorkspace({ initialPage, initialCampaignId, initialClientId, openCreate, session, accountOwners }: { initialPage: WorkspacePage<CampaignListItem>; initialCampaignId?: string | null; initialClientId?: string | null; openCreate?: boolean; session: AuthSession; accountOwners: AccountOwnerOption[] }) {
+export function CampaignsWorkspace({ initialPage, initialCampaignId, initialClientId, handoffOpportunityId, openCreate, session, accountOwners }: { initialPage: WorkspacePage<CampaignListItem>; initialCampaignId?: string | null; initialClientId?: string | null; handoffOpportunityId?: string | null; openCreate?: boolean; session: AuthSession; accountOwners: AccountOwnerOption[] }) {
   const router = useRouter(); const pathname = usePathname();
   const [page, setPage] = useState(initialPage); const [query, setQuery] = useState(initialPage.query);
   const [selectedId, setSelectedId] = useState(initialCampaignId || ""); const [overview, setOverview] = useState<CampaignOverview | null>(null);
@@ -30,8 +31,10 @@ export function CampaignsWorkspace({ initialPage, initialCampaignId, initialClie
   const [form, setForm] = useState<CampaignForm>({ ...emptyCampaignForm, clientId: initialClientId || "", sellerUserId: ["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role) ? session.id : "", accountOwnerUserId: ["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role) ? session.id : "" });
   const [clientQuery, setClientQuery] = useState(""); const [clientOptions, setClientOptions] = useState<ClientListItem[]>([]);
   const [documentOpen, setDocumentOpen] = useState(false); const [operationTarget, setOperationTarget] = useState<ReservationRow | null>(null);
+  const [handoff, setHandoff] = useState<CrmHandoffProposal | null>(null); const [handoffBusy, setHandoffBusy] = useState(Boolean(handoffOpportunityId));
   const initialQuery = useRef(initialPage.query);
   const canManage = hasAnyPermission(session.role, ["campaigns.manage", "reservations.manage", "reservations.manage.own"]);
+  const canConfirmHandoff = canManage && session.role !== "COO";
   const canChangeOwner = ["COO", "SALES_DIRECTOR", "SUPER_ADMIN"].includes(session.role);
   const selectedSection = sections[selectedId] || {};
 
@@ -51,6 +54,47 @@ export function CampaignsWorkspace({ initialPage, initialCampaignId, initialClie
       });
     return () => { cancelled = true; };
   }, [clientOptions, editorOpen, form.clientId]);
+  useEffect(() => {
+    if (!handoffOpportunityId) return;
+    let cancelled = false;
+    setHandoffBusy(true);
+    fetch(`/api/admin/crm/opportunities/${encodeURIComponent(handoffOpportunityId)}/handoff`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error || "Predarea CRM nu a putut fi pregatita.");
+        return payload.proposal as CrmHandoffProposal;
+      })
+      .then((proposal) => {
+        if (cancelled) return;
+        setHandoff(proposal);
+        if (proposal.existingCampaign) {
+          setSelectedId(proposal.existingCampaign.id);
+          setEditorOpen(false);
+          setMessage("Campania exista deja. Am deschis dosarul existent fara a crea un duplicat.");
+          return;
+        }
+        if (!proposal.ready || !canConfirmHandoff) return;
+        const clientId = proposal.existingClient?.id || initialClientId || "";
+        setForm({
+          ...emptyCampaignForm,
+          clientId,
+          campaignName: proposal.campaign.name,
+          sellerUserId: proposal.owner?.id || "",
+          accountOwnerUserId: proposal.owner?.id || "",
+          startDate: proposal.campaign.startDate || "",
+          endDate: proposal.campaign.endDate || "",
+          currency: proposal.campaign.currency || "EUR",
+          totalContractValue: proposal.campaign.totalContractValue == null ? "" : String(proposal.campaign.totalContractValue)
+        });
+        setClientQuery(proposal.existingClient?.companyName || proposal.company.name);
+        if (proposal.existingClient) setClientOptions([{ id: proposal.existingClient.id, companyName: proposal.existingClient.companyName } as ClientListItem]);
+        setEditing(false);
+        setEditorOpen(true);
+      })
+      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Predarea CRM nu a putut fi pregatita."); })
+      .finally(() => { if (!cancelled) setHandoffBusy(false); });
+    return () => { cancelled = true; };
+  }, [canConfirmHandoff, handoffOpportunityId, initialClientId]);
 
   function updateUrl(nextId: string, nextQuery = query) { const params = new URLSearchParams(); if (nextQuery) params.set("q", nextQuery); if (nextId) params.set("campaignId", nextId); router.replace(`${pathname}${params.size ? `?${params}` : ""}`, { scroll: false }); }
 
@@ -58,7 +102,8 @@ export function CampaignsWorkspace({ initialPage, initialCampaignId, initialClie
   async function loadOverview(id: string) { setLoadingDetail(true); setError(""); setTab("overview"); setSections({}); try { const response = await fetch(`/api/admin/campaigns/${id}`, { cache: "no-store" }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error || "Campania nu a putut fi incarcata."); setOverview(payload.campaign); setForm(formFromOverview(payload.campaign)); } catch (cause) { setOverview(null); setError(cause instanceof Error ? cause.message : "Campania nu a putut fi incarcata."); } finally { setLoadingDetail(false); } }
   async function loadSection(section: Exclude<DetailTab, "overview">, force = false) { if (!selectedId || (!force && sections[selectedId]?.[section])) return; setLoadingSection(true); setError(""); try { const response = await fetch(`/api/admin/campaigns/${selectedId}/${section}`, { cache: "no-store" }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error || "Sectiunea nu a putut fi incarcata."); setSections((current) => ({ ...current, [selectedId]: { ...(current[selectedId] || {}), [section]: payload[section] } })); } catch (cause) { setError(cause instanceof Error ? cause.message : "Sectiunea nu a putut fi incarcata."); } finally { setLoadingSection(false); } }
 
-  async function saveCampaign() { setLoadingDetail(true); setError(""); setMessage(""); try { const response = await fetch(editing && selectedId ? `/api/admin/campaigns/${selectedId}` : "/api/admin/campaigns", { method: editing && selectedId ? "PATCH" : "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...form, campaignCode: nullable(form.campaignCode), sellerUserId: nullable(form.sellerUserId), accountOwnerUserId: nullable(form.accountOwnerUserId), startDate: nullable(form.startDate), endDate: nullable(form.endDate), totalContractValue: form.totalContractValue ? Number(form.totalContractValue.replace(",", ".")) : null, paymentTermDays: form.paymentTermDays ? Number(form.paymentTermDays) : null, notes: nullable(form.notes) }) }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error || "Campania nu a putut fi salvata."); const id = payload.campaign.id as string; setEditorOpen(false); setEditing(false); setSelectedId(id); updateUrl(id); setMessage(editing ? "Campania a fost actualizata." : "Campania a fost creata."); await loadPage(cursorTrail.at(-1) || null); await loadOverview(id); } catch (cause) { setError(cause instanceof Error ? cause.message : "Campania nu a putut fi salvata."); } finally { setLoadingDetail(false); } }
+  async function saveCampaign() { setLoadingDetail(true); setError(""); setMessage(""); try { const wasEditing = editing; const response = await fetch(wasEditing && selectedId ? `/api/admin/campaigns/${selectedId}` : "/api/admin/campaigns", { method: wasEditing && selectedId ? "PATCH" : "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...form, campaignCode: nullable(form.campaignCode), sellerUserId: nullable(form.sellerUserId), accountOwnerUserId: nullable(form.accountOwnerUserId), startDate: nullable(form.startDate), endDate: nullable(form.endDate), totalContractValue: form.totalContractValue ? Number(form.totalContractValue.replace(",", ".")) : null, paymentTermDays: form.paymentTermDays ? Number(form.paymentTermDays) : null, notes: nullable(form.notes) }) }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error || "Campania nu a putut fi salvata."); const id = payload.campaign.id as string; setEditorOpen(false); setEditing(false); setSelectedId(id); updateUrl(id); setMessage(wasEditing ? "Campania a fost actualizata." : "Campania a fost creata."); await loadPage(cursorTrail.at(-1) || null); await loadOverview(id); if (!wasEditing && handoff?.ready && canConfirmHandoff) await confirmCampaignHandoff(id); } catch (cause) { setError(cause instanceof Error ? cause.message : "Campania nu a putut fi salvata."); } finally { setLoadingDetail(false); } }
+  async function confirmCampaignHandoff(campaignId: string) { if (!handoff || !handoffOpportunityId) return; setHandoffBusy(true); try { const response = await fetch(`/api/admin/crm/opportunities/${encodeURIComponent(handoffOpportunityId)}/handoff`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: handoff.version, targetType: "campaign", targetId: campaignId, idempotencyKey: `crm-handoff-campaign-${handoffOpportunityId}-${campaignId}` }) }); const payload = await response.json().catch(() => null); if (!response.ok) { setError(`Campania este salvata, dar legatura CRM necesita reincercare: ${payload?.error || "eroare de audit"}`); return; } setMessage("Campania a fost confirmata explicit si legatura cu oportunitatea a fost auditata."); } catch (cause) { setError(`Campania este salvata, dar legatura CRM necesita reincercare: ${cause instanceof Error ? cause.message : "eroare de retea"}`); } finally { setHandoffBusy(false); } }
   async function archiveCampaign() { if (!selectedId || !overview) return; setLoadingDetail(true); setError(""); try { const response = await fetch(`/api/admin/campaigns/${selectedId}`, { method: "DELETE" }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error || "Campania nu a putut fi arhivata."); setSelectedId(""); setOverview(null); updateUrl(""); setMessage("Campania a fost arhivata."); await loadPage(null); } catch (cause) { setError(cause instanceof Error ? cause.message : "Campania nu a putut fi arhivata."); } finally { setLoadingDetail(false); } }
 
   function openCreateEditor() { setEditing(false); setForm({ ...emptyCampaignForm, clientId: initialClientId || "", sellerUserId: ["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role) ? session.id : "", accountOwnerUserId: ["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role) ? session.id : "" }); setClientQuery(""); setEditorOpen(true); }
@@ -68,6 +113,8 @@ export function CampaignsWorkspace({ initialPage, initialCampaignId, initialClie
 
   return <main className="focus-container grid min-w-0 gap-5 py-6">
     <WorkspaceHeader eyebrow="Portofoliu comercial" title="Campanii" description="Campaniile au propria lista si propriul dosar. Inchirierile, documentele si situatia financiara se incarca numai cand deschizi sectiunea respectiva." actions={<>{canManage ? <button className="focus-button" type="button" onClick={openCreateEditor}><Plus size={17} /> Campanie noua</button> : null}<Link className="focus-button secondary" href="/admin/clienti">Clienti</Link></>} />
+    {handoffBusy ? <Feedback tone="success">Pregatim datele oportunitatii castigate...</Feedback> : null}
+    {handoff ? <Panel title="Predare explicita din CRM" action={handoff.ready && handoff.existingCampaign && canConfirmHandoff ? <button className="focus-button" type="button" disabled={handoffBusy} onClick={() => void confirmCampaignHandoff(handoff.existingCampaign!.id)}><Save size={16} /> Confirma campania existenta</button> : undefined}><p className="text-sm text-slate-300">Campania nu este creata automat. {handoff.existingCampaign ? `Am identificat campania ${handoff.existingCampaign.campaignName}; confirma asocierea fara a crea un duplicat.` : "Verifica clientul, perioada, valoarea integrala si responsabilul, apoi salveaza explicit."}</p>{handoff.warnings.length ? <ul className="mt-2 grid gap-1 text-xs text-amber-200">{handoff.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}</Panel> : null}
     {message ? <Feedback tone="success">{message}</Feedback> : null}{error ? <Feedback tone="error">{error}</Feedback> : null}
     <section className="grid min-w-0 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
       <Panel title={`Campanii (${page.total})`}><label className="relative block"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input className="focus-input w-full pl-10" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Campanie, client sau cod" /></label><div className="mt-3 grid max-h-[calc(100vh-18rem)] gap-2 overflow-y-auto pr-1">{loadingList ? <LoadingState text="Actualizam lista..." /> : page.items.length ? page.items.map((campaign) => <button className={`rounded-lg border p-3 text-left ${selectedId === campaign.id ? "border-focus-yellow bg-focus-yellow/10" : "border-focus-line bg-focus-navy/30 hover:border-focus-yellow/50"}`} key={campaign.id} type="button" onClick={() => { setSelectedId(campaign.id); updateUrl(campaign.id); setError(""); setMessage(""); }}><span className="block truncate font-black text-white">{campaign.campaignName}</span><span className="mt-1 block truncate text-xs text-slate-400">{campaign.clientName} / {campaign.sellerName || "Fara agent"}</span><span className="mt-2 flex items-center justify-between gap-2"><StatusBadge value={campaign.status} /><span className="text-xs font-black text-white">{moneyLabel(campaign.totalContractValue, campaign.currency)}</span></span></button>) : <EmptyState>Nu exista campanii pentru cautarea curenta.</EmptyState>}</div><Pagination total={page.total} showing={page.items.length} canPrevious={cursorTrail.length > 1} canNext={Boolean(page.nextCursor)} busy={loadingList} onPrevious={previousPage} onNext={nextPage} /></Panel>

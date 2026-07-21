@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Building2, FileText, GitMerge, Plus, Save, Search, Upload, Users } from "lucide-react";
+import { ArrowRight, Building2, FileText, GitMerge, Plus, Save, Search, Upload, Users } from "lucide-react";
 import type { AuthSession } from "@/lib/auth";
 import type { AccountOwnerOption } from "@/lib/client-campaigns";
 import type { CampaignListItem, ClientListItem, ClientOverview, FinanceSummary, WorkspaceDocument, WorkspacePage } from "@/lib/client-campaign-workspaces";
+import type { CrmHandoffProposal } from "@/lib/crm-handoff-contract";
 import { hasAnyPermission } from "@/lib/rbac";
 import {
   Dialog, DocumentUploadDialog, DocumentsList, EmptyState, ErrorState, Feedback, Field, LoadingState,
@@ -18,7 +19,7 @@ type Contact = { id: string; name: string; role: string | null; email: string | 
 type DetailTab = "overview" | "contacts" | "campaigns" | "documents" | "finance";
 type SectionData = { contacts?: Contact[]; campaigns?: CampaignListItem[]; documents?: WorkspaceDocument[]; finance?: FinanceSummary };
 
-export function ClientsWorkspace({ initialPage, initialClientId, initialPortfolioFinance = false, session, accountOwners }: { initialPage: WorkspacePage<ClientListItem>; initialClientId?: string | null; initialPortfolioFinance?: boolean; session: AuthSession; accountOwners: AccountOwnerOption[] }) {
+export function ClientsWorkspace({ initialPage, initialClientId, handoffOpportunityId, initialPortfolioFinance = false, session, accountOwners }: { initialPage: WorkspacePage<ClientListItem>; initialClientId?: string | null; handoffOpportunityId?: string | null; initialPortfolioFinance?: boolean; session: AuthSession; accountOwners: AccountOwnerOption[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const [page, setPage] = useState(initialPage);
@@ -40,9 +41,17 @@ export function ClientsWorkspace({ initialPage, initialClientId, initialPortfoli
   const [mergeOpen, setMergeOpen] = useState(false);
   const [portfolioFinanceOpen, setPortfolioFinanceOpen] = useState(initialPortfolioFinance);
   const [portfolioFinance, setPortfolioFinance] = useState<FinanceSummary | null>(null);
+  const [handoff, setHandoff] = useState<CrmHandoffProposal | null>(null);
+  const [handoffBusy, setHandoffBusy] = useState(Boolean(handoffOpportunityId));
   const initialQuery = useRef(initialPage.query);
 
   const canManageClients = hasAnyPermission(session.role, ["clients.manage", "clients.manage.own"]);
+  const canConfirmHandoff = canManageClients && session.role !== "COO";
+  const canUseExistingHandoffClient = Boolean(
+    handoff?.existingClient
+    && canConfirmHandoff
+    && (["SALES_DIRECTOR", "SUPER_ADMIN"].includes(session.role) || handoff.existingClient.accountOwnerUserId === session.id)
+  );
   const canChangeOwner = ["COO", "SALES_DIRECTOR", "SUPER_ADMIN"].includes(session.role);
   const canMerge = ["COO", "SUPER_ADMIN"].includes(session.role);
   const selectedSection = sections[selectedId] || {};
@@ -79,6 +88,40 @@ export function ClientsWorkspace({ initialPage, initialClientId, initialPortfoli
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Facturile nu au putut fi incarcate."))
       .finally(() => setLoadingSection(false));
   }, [portfolioFinanceOpen, portfolioFinance]);
+
+  useEffect(() => {
+    if (!handoffOpportunityId) return;
+    let cancelled = false;
+    setHandoffBusy(true);
+    fetch(`/api/admin/crm/opportunities/${encodeURIComponent(handoffOpportunityId)}/handoff`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error || "Predarea CRM nu a putut fi pregatita.");
+        return payload.proposal as CrmHandoffProposal;
+      })
+      .then((proposal) => {
+        if (cancelled) return;
+        setHandoff(proposal);
+        if (proposal.existingClient) {
+          setSelectedId(proposal.existingClient.id);
+          return;
+        }
+        if (!proposal.ready || !canConfirmHandoff) return;
+        setClientForm({
+          ...emptyClientForm,
+          companyName: proposal.company.name,
+          taxId: proposal.company.taxId || "",
+          generalEmail: proposal.company.primaryContact?.email || "",
+          generalPhone: proposal.company.primaryContact?.phone || "",
+          website: proposal.company.website || "",
+          accountOwnerUserId: proposal.owner?.id || ""
+        });
+        setCreateOpen(true);
+      })
+      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Predarea CRM nu a putut fi pregatita."); })
+      .finally(() => { if (!cancelled) setHandoffBusy(false); });
+    return () => { cancelled = true; };
+  }, [canConfirmHandoff, handoffOpportunityId]);
 
   const updateUrl = (nextSelectedId: string, nextQuery = query) => {
     const params = new URLSearchParams();
@@ -146,8 +189,31 @@ export function ClientsWorkspace({ initialPage, initialClientId, initialPortfoli
       setMessage(mode === "create" ? "Clientul a fost creat." : "Clientul a fost actualizat.");
       setCreateOpen(false); setSelectedId(id); updateUrl(id); await loadPage(cursorTrail.at(-1) || null);
       await loadOverview(id);
+      if (handoff?.ready && canConfirmHandoff) await continueHandoff(id);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Clientul nu a putut fi salvat."); }
     finally { setLoadingDetail(false); }
+  }
+
+  async function continueHandoff(clientId: string) {
+    if (!handoff || !handoffOpportunityId) return;
+    setHandoffBusy(true); setError("");
+    try {
+      const response = await fetch(`/api/admin/crm/opportunities/${encodeURIComponent(handoffOpportunityId)}/handoff`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          version: handoff.version,
+          targetType: "client_account",
+          targetId: clientId,
+          idempotencyKey: `crm-handoff-client-${handoffOpportunityId}-${clientId}`
+        })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || "Predarea catre client nu a putut fi confirmata.");
+      router.push(`/admin/campanii?create=1&clientId=${encodeURIComponent(clientId)}&crmOpportunityId=${encodeURIComponent(handoffOpportunityId)}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Predarea catre client nu a putut fi confirmata.");
+    } finally { setHandoffBusy(false); }
   }
 
   async function addContact() {
@@ -169,6 +235,11 @@ export function ClientsWorkspace({ initialPage, initialClientId, initialPortfoli
 
   return <main className="focus-container grid min-w-0 gap-5 py-6">
     <WorkspaceHeader eyebrow="Portofoliu comercial" title="Clienti" description="Lista rapida pentru verificare si deduplicare. Contactele, documentele, campaniile si soldurile se incarca numai cand deschizi dosarul." actions={<>{canManageClients ? <button className="focus-button" type="button" onClick={() => { setClientForm({ ...emptyClientForm, accountOwnerUserId: ["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role) ? session.id : "" }); setCreateOpen(true); }}><Plus size={17} /> Client nou</button> : null}<button className="focus-button secondary" type="button" onClick={() => { setPortfolioFinanceOpen(true); setSelectedId(""); updateUrl("", query); router.replace(`${pathname}?tab=invoices${query ? `&q=${encodeURIComponent(query)}` : ""}`, { scroll: false }); }}><FileText size={16} /> Facturile mele</button><Link className="focus-button secondary" href="/admin/campanii">Campanii</Link></>} />
+    {handoffBusy ? <Feedback tone="success">Verificam daca firma exista deja in portofoliu...</Feedback> : null}
+    {handoff ? <Panel title="Predare explicita din CRM" action={handoff.ready && canUseExistingHandoffClient ? <button className="focus-button" type="button" disabled={handoffBusy} onClick={() => void continueHandoff(handoff.existingClient!.id)}><ArrowRight size={16} /> Continua cu campania</button> : undefined}>
+      <p className="text-sm text-slate-300">Oportunitatea castigata nu creeaza automat date in portofoliu. {handoff.existingClient ? `Am identificat clientul ${handoff.existingClient.companyName}.` : "Verifica datele precompletate si salveaza clientul pentru a continua."}</p>
+      {handoff.warnings.length ? <ul className="mt-2 grid gap-1 text-xs text-amber-200">{handoff.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
+    </Panel> : null}
     {message ? <Feedback tone="success">{message}</Feedback> : null}
     {error ? <Feedback tone="error">{error}</Feedback> : null}
     {portfolioFinanceOpen ? <PortfolioFinancePanel finance={portfolioFinance} loading={loadingSection} onClose={() => { setPortfolioFinanceOpen(false); router.replace(pathname, { scroll: false }); }} /> : <section className="grid min-w-0 gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">

@@ -201,7 +201,6 @@ export async function mergeClientAccounts(input: {
       where: { clientId: duplicate.id },
       data: { clientId: primary.id }
     });
-    const crmLeads = await tx.crmLead.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
     const contacts = await tx.clientContact.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
     const documents = await tx.clientDocument.updateMany({
       where: {
@@ -236,7 +235,6 @@ export async function mergeClientAccounts(input: {
         financialImportRows: financialImportRows.count,
         financialAliases: financialAliases.count,
         financialCredits: financialCredits.count,
-        crmLeads: crmLeads.count,
         contacts: contacts.count,
         documents: documents.count
       }

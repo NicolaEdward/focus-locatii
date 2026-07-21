@@ -15,6 +15,7 @@ main().catch((error) => {
 async function main() {
   domainRules();
   sourceArchitectureRules();
+  await handoffRuntimeRules();
   await exportRules();
   console.log(JSON.stringify({
     ok: true,
@@ -29,6 +30,9 @@ async function main() {
       "won never creates clients, campaigns, reservations, HOLD or BOOKED",
       "legacy client conversion is disabled",
       "legacy CRM writes are disabled",
+      "legacy CRM reads are retired with observable v4 replacements",
+      "historical legacy tables remain read-only",
+      "won handoff is explicit and does not create portfolio records",
       "server paging and bounded detail timeline",
       "private API permission checks",
       "new responsive CRM views and active opportunity columns",
@@ -37,6 +41,57 @@ async function main() {
       "migration is additive and preserves legacy CRM rows"
     ]
   }, null, 2));
+}
+
+async function handoffRuntimeRules() {
+  let storedEvent = null;
+  let eventCreates = 0;
+  class CrmDomainError extends Error {
+    constructor(message, code, status) { super(message); this.code = code; this.status = status; }
+  }
+  const tx = {
+    crmEvent: {
+      findUnique: async () => storedEvent,
+      findMany: async () => [],
+      create: async ({ data }) => {
+        eventCreates += 1;
+        storedEvent = { id: "event-1", opportunityId: data.opportunityId, metadata: data.metadata };
+        return storedEvent;
+      }
+    },
+    crmOpportunity: {
+      findFirst: async ({ where }) => where.version === 7 && where.stage === "won" && where.ownerId === "seller-1"
+        ? { id: "opp-1", companyId: "company-1", sourceProspectId: "prospect-1", ownerId: "seller-1", company: { name: "Test SRL", taxId: "RO123" } }
+        : null
+    },
+    clientAccount: {
+      findFirst: async ({ where }) => where.id === "client-1"
+        ? { id: "client-1", companyName: "Test SRL", taxId: "123", accountOwnerUserId: "seller-1" }
+        : null
+    },
+    campaign: { findFirst: async () => null }
+  };
+  const handoff = loadTsModule(path.join(process.cwd(), "src", "lib", "crm-handoff.ts"), {
+    "@/lib/prisma": { prisma: { $transaction: async (callback) => callback(tx) } },
+    "@/lib/clients": { normalizeClientName: (value) => value.toLowerCase().replace(/\bsrl\b/g, "").trim() },
+    "@/lib/crm-domain-service": { CrmDomainError, hasGlobalCrmAccess: () => false },
+    "@/lib/rbac": { hasAnyPermission: () => true },
+    "@/lib/tax-id": {
+      taxIdSearchValues: (value) => [value].filter(Boolean),
+      taxIdsMatch: (left, right) => String(left || "").replace(/^RO/, "") === String(right || "").replace(/^RO/, "")
+    }
+  });
+  const actor = { id: "seller-1", role: "SALES_AGENT", name: "Seller", email: "seller@example.test" };
+  const input = { opportunityId: "opp-1", version: 7, targetType: "client_account", targetId: "client-1", idempotencyKey: "handoff-client-1" };
+  const first = await handoff.recordCrmHandoff(input, actor);
+  const repeated = await handoff.recordCrmHandoff(input, actor);
+  assert.equal(first.repeated, false);
+  assert.equal(repeated.repeated, true);
+  assert.equal(eventCreates, 1, "an idempotent handoff must append one event only");
+  await assert.rejects(
+    () => handoff.recordCrmHandoff({ ...input, targetId: "client-other" }, actor),
+    (error) => error.code === "CRM_IDEMPOTENCY_CONFLICT"
+  );
 }
 
 function domainRules() {
@@ -51,6 +106,9 @@ function domainRules() {
   assert.equal(domain.crmForecastForStage("negotiation"), "possible");
   assert.equal(domain.crmForecastForStage("contracting"), "commit");
   assert.equal(domain.crmForecastForStage("won"), "won");
+  assert.equal(domain.CRM_FORECAST_POLICY.mode, "stage_deterministic");
+  assert.equal(domain.CRM_FORECAST_POLICY.valueAggregation, "full_opportunity_value");
+  assert.equal(domain.CRM_FORECAST_POLICY.manualProbability, false);
   assert.equal(domain.crmForecastForStage("lost"), "excluded");
   assert.doesNotThrow(() => domain.crmAssertOpportunityTransition("quoted", "negotiation"));
   assert.throws(() => domain.crmAssertOpportunityTransition("opportunity", "contracting"), /nu este permisa/);
@@ -71,6 +129,11 @@ function domainRules() {
   assert.equal(totals.possible.EUR, 6000, "full opportunity values must be summed without weighting");
   assert.equal(totals.commit.RON, 10000);
   assert.notEqual(totals.possible.EUR, 4800, "no probability multiplication is allowed");
+  const aggregateTotals = analytics.crmOpportunityTotalsFromAggregates([
+    { stage: "negotiation", currency: "EUR", total: 6000 },
+    { stage: "contracting", currency: "RON", total: 10000 }
+  ]);
+  assert.deepEqual(aggregateTotals, totals, "DB aggregates must preserve deterministic full-value forecast semantics");
   assert.equal(domain.crmCurrentOpportunityValue({ quotedValue: 4000, revisedValue: null, agreedValue: null }), 4000);
 }
 
@@ -85,13 +148,20 @@ function sourceArchitectureRules() {
   const queryRoute = read("src/app/api/admin/crm/workspace/route.ts");
   const detailRoute = read("src/app/api/admin/crm/records/[kind]/[id]/route.ts");
   const convertRoute = read("src/app/api/admin/crm/leads/[id]/convert/route.ts");
-  const legacyWriteRoutes = [
+  const legacyRoutes = [
     "src/app/api/admin/crm/leads/route.ts",
     "src/app/api/admin/crm/leads/[id]/route.ts",
     "src/app/api/admin/crm/leads/[id]/activities/route.ts",
     "src/app/api/admin/crm/leads/[id]/contacts/route.ts",
-    "src/app/api/admin/crm/leads/[id]/contacts/[contactId]/route.ts"
+    "src/app/api/admin/crm/leads/[id]/contacts/[contactId]/route.ts",
+    "src/app/api/admin/crm/leads/[id]/convert/route.ts",
+    "src/app/api/admin/crm/agenda/route.ts",
+    "src/app/api/admin/crm/duplicates/route.ts"
   ].map(read);
+  const legacyHelper = read("src/lib/crm-legacy.ts");
+  const handoff = read("src/lib/crm-handoff.ts");
+  const handoffRoute = read("src/app/api/admin/crm/opportunities/[id]/handoff/route.ts");
+  const clients = read("src/lib/clients.ts");
   const exportRoute = read("src/app/api/admin/crm/export.xlsx/route.ts");
   const notifications = read("src/lib/notifications.ts");
   const dashboard = read("src/lib/crm-dashboard.ts");
@@ -136,12 +206,17 @@ function sourceArchitectureRules() {
   assert(service.includes("OPPORTUNITY_WON"));
   assert(!service.includes("estimatedValue *"), "forecast must not multiply values");
   assert(!analyticsSource.includes("probability"), "analytics must not use probability");
+  assert(service.includes("aggregateOpportunityTotals(ownerId)"), "workspace totals should use a bounded DB aggregate");
+  assert(service.includes("aggregateCrmSummary(ownerId"), "workspace KPI cards should use one aggregate roundtrip");
+  assert(!service.includes("metricOpportunities.findMany"), "workspace must not fetch every opportunity for totals");
 
   assert(page.includes("CrmWorkspaceV4"));
   assert(!page.includes("CrmWorkspace\n"));
   for (const label of ["Astăzi", "Prospectare", "Oportunități", "Toate"]) assert(workspace.includes(label), `missing CRM view ${label}`);
   for (const stage of ["opportunity", "quoted", "negotiation", "contracting"]) assert(workspace.includes(stage));
-  assert(workspace.includes("min-w-[1080px] grid-cols-4"), "opportunity pipeline must be one controlled horizontal row");
+  assert(workspace.includes("rows.some((row) => row.stage === stage.value)"), "pipeline must render only stages represented by the filtered result");
+  assert(workspace.includes("gridTemplateColumns"), "pipeline columns should size from visible stages");
+  assert(!workspace.includes("Coloană liberă"), "empty opportunity columns must not be rendered");
   assert(workspace.includes("overflow-x-auto"));
   assert(workspace.includes("Prospect nou"));
   assert(workspace.includes("CRM_PROSPECT_STATUS_OPTIONS.map"), "new prospect form must expose every prospect stage");
@@ -153,7 +228,7 @@ function sourceArchitectureRules() {
   assert(workspace.includes("Următorul pas"));
   assert(!/probabilit|șanse de câștig|sanse de castig/i.test(workspace), "seller UI must not expose manual probability");
   assert(!/Converteste in client|Convertește în client/i.test(workspace));
-  assert(!workspace.includes("/admin/clienti"), "CRM UI must not depend on clients");
+  assert(workspace.includes("/admin/clienti?crmOpportunityId="), "won opportunity must expose an explicit handoff");
 
   assert(queryRoute.includes('["leads.view", "leads.view.own"]'));
   assert(commands.includes('["leads.manage", "leads.manage.own"]'));
@@ -168,9 +243,29 @@ function sourceArchitectureRules() {
   assert(service.includes("skip: (page - 1) * limit"));
   assert(service.includes("take: 30"), "timeline must be bounded and cursor-ready");
   assert(service.includes("cursor: { id: input.cursor }"));
-  assert(convertRoute.includes("CRM_CLIENT_CONVERSION_DISABLED"));
+  assert(convertRoute.includes("crmLegacyRetiredResponse"));
   assert(!convertRoute.includes("convertCrmLeadToClient"));
-  for (const route of legacyWriteRoutes) assert(route.includes("crmLegacyWriteDisabledResponse"), "legacy CRM mutations must be disabled");
+  for (const route of legacyRoutes) {
+    assert(route.includes("crmLegacyRetiredResponse"), "legacy CRM routes must be retired");
+    assert(!route.includes("crm-service"), "legacy CRM routes must not execute the old service");
+  }
+  assert(legacyHelper.includes('"crm_legacy_route_called"'), "legacy route usage must be observable");
+  assert(legacyHelper.includes("Deprecation"));
+  assert(legacyHelper.includes("Sunset"));
+  assert(!fs.existsSync(path.join(process.cwd(), "src/components/admin/CrmWorkspace.tsx")), "legacy CRM UI should be removed");
+  assert(!fs.existsSync(path.join(process.cwd(), "src/lib/crm-service.ts")), "legacy CRM service should be removed");
+  assert(!fs.existsSync(path.join(process.cwd(), "src/lib/crm.ts")), "legacy CRM constants should be removed");
+  assert(schema.includes("model CrmLead {"), "historical legacy rows must remain readable in Prisma");
+  assert(!clients.includes("tx.crmLead"), "client merge must not rewrite historical CRM links");
+  assert(handoff.includes('stage: "won"'), "handoff is available only for won opportunities");
+  assert(handoff.includes("version: input.version"), "handoff must use optimistic version checks");
+  assert(handoff.includes("idempotencyKey: input.idempotencyKey"), "handoff must append an idempotent event");
+  assert(handoff.includes("CLIENT_ACCOUNT_HANDOFF_CONFIRMED"));
+  assert(handoff.includes("CAMPAIGN_HANDOFF_CONFIRMED"));
+  assert(!handoff.includes("tx.clientAccount.create"), "handoff must not create ClientAccount automatically");
+  assert(!handoff.includes("tx.campaign.create"), "handoff must not create Campaign automatically");
+  assert(!handoff.includes("reservation.create"), "handoff must not create reservations");
+  assert(handoffRoute.includes('action: "crm.v4.handoff.confirm"'), "handoff confirmation must be audited");
   assert(notifications.includes("prisma.crmNextAction.findMany"));
   assert(!notifications.includes("prisma.crmLead.findMany"), "notifications must use the active standalone CRM source");
   assert(dashboard.includes("prisma.crmProspect.findMany"));

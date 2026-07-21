@@ -1,5 +1,9 @@
 # Focus Media CRM Modernization Plan
 
+> Document istoric. Contractul canonic implementat este CRM v4, descris in
+> `docs/CRM_V4_CONVERGENCE.md`. Referintele de mai jos la modelele CRM legacy,
+> probabilitate manuala si forecast ponderat nu mai descriu produsul activ.
+
 ## 1. Objective
 
 CRM-ul Focus Media trebuie sa devina instrumentul zilnic al vanzatorului, nu doar un tabel in care se introduc lead-uri.
@@ -363,9 +367,9 @@ Email:
 - conversie pe sursa;
 - exceptii, nu lista completa de activitati.
 
-Formula forecast:
-
-`estimatedValue * probability / 100`
+Politica de forecast din acest plan a fost inlocuita. CRM v4 insumeaza valoarea
+integrala a oportunitatilor si deriva nivelul de forecast determinist din etapa;
+nu foloseste probabilitate manuala si nu calculeaza valoare ponderata.
 
 Valorile si monedele nu se combina fara conversie explicita.
 

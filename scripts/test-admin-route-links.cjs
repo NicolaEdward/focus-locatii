@@ -17,7 +17,7 @@ const dashboardActionFiles = [
   "src/components/admin/RoleDashboard.tsx",
   "src/components/admin/DashboardHoldActions.tsx",
   "src/components/admin/CooCommandCenter.tsx",
-  "src/components/admin/CrmWorkspace.tsx"
+  "src/components/admin/CrmWorkspaceV4.tsx"
 ];
 
 for (const file of dashboardActionFiles) {

@@ -18,11 +18,12 @@ export default async function CampaniiPage({ searchParams }: { searchParams: Pro
   const query = first(params.q) || "";
   const campaignId = first(params.campaignId);
   const clientId = first(params.clientId);
+  const handoffOpportunityId = first(params.crmOpportunityId);
   const openCreate = first(params.create) === "1";
   const [page, accountOwners] = await Promise.all([getCampaignsPage(session, { query }), validAccountOwners()]);
   return <>
     <AdminHeader session={session} />
-    <CampaignsWorkspace initialPage={page} initialCampaignId={campaignId} initialClientId={clientId} openCreate={openCreate} session={session} accountOwners={accountOwners} />
+    <CampaignsWorkspace initialPage={page} initialCampaignId={campaignId} initialClientId={clientId} handoffOpportunityId={handoffOpportunityId} openCreate={openCreate} session={session} accountOwners={accountOwners} />
   </>;
 }
 

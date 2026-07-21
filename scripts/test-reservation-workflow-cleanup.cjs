@@ -14,6 +14,7 @@ function main() {
   operationControlsRemainPermissionGated();
   groupEditContextIsClear();
   bookingHoldRequirementsAreExplained();
+  cancellationReasonStaysOutOfPrismaPayload();
 
   console.log(JSON.stringify({
     ok: true,
@@ -26,7 +27,8 @@ function main() {
       "status-specific hold/cancel actions are hidden when invalid",
       "operation mutation controls remain gated by campaigns.operate",
       "group edit warning/context is visible",
-      "BOOKED versus HOLD requirements are explained"
+      "BOOKED versus HOLD requirements are explained",
+      "cancellation reason is stored in notes without reaching Prisma as a missing column"
     ]
   }, null, 2));
 }
@@ -111,6 +113,13 @@ function bookingHoldRequirementsAreExplained() {
   assert(panel.includes("Un HOLD blocheaza temporar locatia timp de 5 zile"), "hold requirements should be visible in business language");
   assert(panel.includes("O rezervare confirmata cere client si campanie reale"), "confirmed reservation requirements should be visible");
   assert(panel.includes('form.status === "BOOKED" && (!form.clientId || !form.campaignId)'), "booked save should stay blocked until linked client/campaign exists");
+}
+
+function cancellationReasonStaysOutOfPrismaPayload() {
+  const reservations = read("src", "lib", "reservations.ts");
+  assert(reservations.includes("delete data.cancellationReason;"), "single reservation cancellation must remove audit-only reason from Prisma payload");
+  assert(reservations.includes("notes: appendReservationNote(reservation.notes, `Anulare: ${options.cancellationReason}`)"), "group cancellation must preserve the reason in reservation notes");
+  assert(reservations.includes("void cancellationReason;"), "create payload must not pass cancellationReason to Prisma");
 }
 
 function read(...segments) {

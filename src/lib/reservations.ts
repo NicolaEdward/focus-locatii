@@ -1239,6 +1239,7 @@ function baseReservationData(input: ReturnType<typeof reservationInputSchema.par
     monthlyRentTotal,
     monthlyRentShare,
     contractGroupId,
+    cancellationReason,
     ...reservationData
   } = input;
   void locationId;
@@ -1249,6 +1250,7 @@ function baseReservationData(input: ReturnType<typeof reservationInputSchema.par
   void monthlyRentTotal;
   void monthlyRentShare;
   void contractGroupId;
+  void cancellationReason;
   if (!rentalContext) {
     const normalizedContractCompany = reservationData.contractCompany ? companyEntityOrThrow(reservationData.contractCompany) : null;
     return {
@@ -1285,6 +1287,9 @@ function reservationPatchData(
   existing: { status: string; periodEnd: Date; neutralizationDate: Date | null; contractCompany: string | null }
 ) {
   const data = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+  // The cancellation reason is audit context, not a Reservation column.
+  // It is appended to notes below and must never reach Prisma's update payload.
+  delete data.cancellationReason;
   for (const key of ["locationId", "clientName", "status", "periodStart", "periodEnd"]) {
     if (data[key] == null) delete data[key];
   }

@@ -76,6 +76,9 @@ async function main() {
   );
   const moved = await updateReservation(updateTarget.id, { periodStart: "2026-02-11", periodEnd: "2026-02-19" }, agentSession);
   assert.equal(moved.periodStart.slice(0, 10), "2026-02-11", "update to non-overlapping period succeeds");
+  const cancelledWithReason = await updateReservation(updateTarget.id, { status: "CANCELLED", cancellationReason: "QA cancellation reason" }, agentSession);
+  assert.equal(cancelledWithReason.status, "CANCELLED", "single reservation cancellation succeeds");
+  assert.match(cancelledWithReason.notes || "", /Anulare: QA cancellation reason/, "cancellation reason is preserved in notes");
 
   const linkedHold = await prisma.reservation.create({
     data: {
@@ -228,6 +231,7 @@ async function main() {
       "cancelled rows do not block",
       "update overlap rejected",
       "update non-overlap succeeds",
+      "single reservation cancellation preserves its reason without an invalid Prisma field",
       "BOOKED conversion rechecks conflicts",
       "concurrency overlapping create only one succeeds",
       "lifecycle and manual blocks reject writes",

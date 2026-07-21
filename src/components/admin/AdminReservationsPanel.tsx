@@ -331,25 +331,39 @@ export function AdminReservationsPanel({
       return;
     }
     let cancelled = false;
-    Promise.all([
-      fetch("/api/admin/sellers", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-      fetch("/api/admin/clients", { cache: "no-store" }).then((response) => response.ok ? response.json() : null)
-    ])
-      .then(([sellerPayload, clientPayload]) => {
+    fetch("/api/admin/sellers", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((sellerPayload) => {
         if (cancelled) return;
         if (sellerPayload?.sellers) setSellers(sellerPayload.sellers);
-        if (clientPayload?.clients) setClients(clientPayload.clients);
       })
       .catch(() => {
-        if (!cancelled) {
-          setSellers([]);
-          setClients([]);
-        }
+        if (!cancelled) setSellers([]);
       });
     return () => {
       cancelled = true;
     };
   }, [shouldLoadReservationOptions]);
+
+  useEffect(() => {
+    if (!shouldLoadReservationOptions) return;
+    const search = (editForm ? editClientSearch : clientSearch).trim();
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      fetch(`/api/admin/clients?limit=50${search ? `&q=${encodeURIComponent(search)}` : ""}`, { cache: "no-store" })
+        .then((response) => response.ok ? response.json() : null)
+        .then((payload) => {
+          if (cancelled || !payload?.clients) return;
+          setClients((current) => {
+            const selectedIds = new Set([form.clientId, editForm?.clientId].filter(Boolean));
+            const selected = current.filter((client) => selectedIds.has(client.id));
+            return [...selected, ...payload.clients.filter((client: ClientOption) => !selectedIds.has(client.id))];
+          });
+        })
+        .catch(() => { if (!cancelled) setClients([]); });
+    }, search ? 300 : 0);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [clientSearch, editClientSearch, editForm?.clientId, form.clientId, shouldLoadReservationOptions]);
 
   useEffect(() => {
     if (requestedPanel && panelAllowedInWorkspace(requestedPanel, workspace, isFieldOperator)) {
@@ -805,7 +819,7 @@ export function AdminReservationsPanel({
       const reservation = payload.reservation as ReservationDTO;
       setMessage(null);
       setEditingReservation(reservation);
-      setEditClientSearch("");
+      setEditClientSearch(reservation.clientName || reservation.clientCompany || "");
       const decorationCost = operationCost(reservation.productionNotes, "decoration");
       setEditForm({
         clientId: reservation.clientId || "",

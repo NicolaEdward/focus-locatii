@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
+import { getClientContacts } from "@/lib/client-campaign-workspaces";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -23,6 +24,17 @@ const contactSchema = z.object({
   isPrimary: z.boolean().optional(),
   notes: z.string().trim().max(2000).nullable().optional()
 });
+
+export async function GET(request: NextRequest, context: Context) {
+  const { session, response } = await requireAnyPermission(request, ["clients.view", "clients.view.own"]);
+  if (response || !session) return response;
+  const { id } = await context.params;
+  try {
+    return NextResponse.json({ contacts: await getClientContacts(session, id) }, { headers: noStoreHeaders });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Contactele nu pot fi afisate." }, { status: 403, headers: noStoreHeaders });
+  }
+}
 
 export async function POST(request: NextRequest, context: Context) {
   const { session, response } = await requireAnyPermission(request, ["clients.manage", "clients.manage.own"]);

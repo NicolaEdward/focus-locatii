@@ -191,6 +191,7 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
   const [manualOpen, setManualOpen] = useState(false);
   const [manualForm, setManualForm] = useState<ManualFinancialForm>(emptyManualForm);
   const [clients, setClients] = useState<Array<{ id: string; companyName: string }>>([]);
+  const [clientQuery, setClientQuery] = useState("");
   const [suppliers, setSuppliers] = useState<Array<{ id: string; supplierName: string }>>([]);
   const [campaigns, setCampaigns] = useState<Array<{ id: string; campaignName: string; clientId: string }>>([]);
 
@@ -229,25 +230,37 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      fetch("/api/admin/clients", { cache: "no-store" }).then((response) => response.ok ? response.json() : null),
-      fetch("/api/admin/suppliers", { cache: "no-store" }).then((response) => response.ok ? response.json() : null)
-    ])
-      .then(([clientPayload, supplierPayload]) => {
+    fetch("/api/admin/suppliers", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((supplierPayload) => {
         if (cancelled) return;
-        setClients(clientPayload?.clients || []);
         setSuppliers(supplierPayload?.suppliers || []);
       })
       .catch(() => {
-        if (!cancelled) {
-          setClients([]);
-          setSuppliers([]);
-        }
+        if (!cancelled) setSuppliers([]);
       });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const search = clientQuery.trim();
+    const timer = window.setTimeout(() => {
+      fetch(`/api/admin/clients?limit=50${search ? `&q=${encodeURIComponent(search)}` : ""}`, { cache: "no-store" })
+        .then((response) => response.ok ? response.json() : null)
+        .then((payload) => {
+          if (cancelled) return;
+          setClients((current) => {
+            const selected = current.filter((client) => client.id === manualForm.clientId);
+            return [...selected, ...(payload?.clients || []).filter((client: { id: string }) => client.id !== manualForm.clientId)];
+          });
+        })
+        .catch(() => { if (!cancelled) setClients([]); });
+    }, search ? 300 : 0);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [clientQuery, manualForm.clientId]);
 
   useEffect(() => {
     if (!manualForm.clientId) {
@@ -619,6 +632,8 @@ export function FinancialDashboardPanel({ financial }: { financial: DashboardDat
             form={manualForm}
             busy={busy}
             clients={clients}
+            clientQuery={clientQuery}
+            onClientQueryChange={setClientQuery}
             suppliers={suppliers}
             campaigns={campaigns}
             onChange={setManualForm}
@@ -709,6 +724,8 @@ function ManualEntryForm({
   form,
   busy,
   clients,
+  clientQuery,
+  onClientQueryChange,
   suppliers,
   campaigns,
   onChange,
@@ -717,6 +734,8 @@ function ManualEntryForm({
   form: ManualFinancialForm;
   busy: boolean;
   clients: Array<{ id: string; companyName: string }>;
+  clientQuery: string;
+  onClientQueryChange: (value: string) => void;
   suppliers: Array<{ id: string; supplierName: string }>;
   campaigns: Array<{ id: string; campaignName: string; clientId: string }>;
   onChange: React.Dispatch<React.SetStateAction<ManualFinancialForm>>;
@@ -739,15 +758,20 @@ function ManualEntryForm({
         </select>
       </label>
       {form.kind === "receivable" ? (
-        <label className="grid gap-1 text-sm font-bold text-slate-200">Client
-          <select className="focus-input" value={form.clientId} onChange={(event) => {
+        <div className="grid gap-2">
+          <label className="grid gap-1 text-sm font-bold text-slate-200">Cauta client
+            <input className="focus-input" value={clientQuery} onChange={(event) => onClientQueryChange(event.target.value)} placeholder="Companie sau CUI" />
+          </label>
+          <label className="grid gap-1 text-sm font-bold text-slate-200">Client
+            <select className="focus-input" value={form.clientId} onChange={(event) => {
             const client = clients.find((item) => item.id === event.target.value);
             onChange((current) => ({ ...current, clientId: event.target.value, campaignId: "", name: client?.companyName || "" }));
-          }}>
-            <option value="">Alege clientul</option>
-            {clients.map((client) => <option key={client.id} value={client.id}>{client.companyName}</option>)}
-          </select>
-        </label>
+            }}>
+              <option value="">Alege clientul</option>
+              {clients.map((client) => <option key={client.id} value={client.id}>{client.companyName}</option>)}
+            </select>
+          </label>
+        </div>
       ) : (
         <label className="grid gap-1 text-sm font-bold text-slate-200">Furnizor
           <select className="focus-input" value={form.supplierId} onChange={(event) => {

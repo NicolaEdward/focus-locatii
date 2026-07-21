@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { getClientCampaignsData } from "../src/lib/client-campaigns";
+import { getClientsPage } from "../src/lib/client-campaign-workspaces";
 import { findOrCreateClientAccount, normalizeClientName } from "../src/lib/clients";
 import { prisma } from "../src/lib/prisma";
 import { createSupplier, updateSupplier } from "../src/lib/suppliers";
@@ -57,11 +58,13 @@ async function main() {
     }
 
     const allClients = await getClientCampaignsData(session);
+    const pagedClients = await getClientsPage(session, { query: "Codex QA", limit: 50 });
     for (const clientId of createdClientIds) {
       const listed = allClients.clients.find((client) => client.clientId === clientId);
       assert(listed, `Created client ${clientId} must appear in unfiltered Clienti list.`);
       assert.equal(listed.status, "active", `Created client ${clientId} must remain active.`);
       assert.equal(listed.source, "client", `Created client ${clientId} must be a real client row.`);
+      assert(pagedClients.items.some((client) => client.id === clientId), `Created client ${clientId} must appear in the paginated canonical list.`);
     }
 
     for (const companyName of clientNames) {
@@ -106,6 +109,7 @@ async function main() {
       checked: [
         "create multiple active clients",
         "unfiltered client list contains newly created clients",
+        "paginated client list contains newly created clients",
         "client search contains newly created clients",
         "normalized client search works",
         "create supplier",

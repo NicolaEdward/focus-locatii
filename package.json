@@ -44,6 +44,8 @@
     "test:public-visibility": "node scripts/test-public-location-serialization.cjs",
     "test:document-access": "node scripts/test-document-access.cjs",
     "test:client-ownership": "node scripts/test-client-ownership.cjs",
+    "test:client-campaign-workspaces": "node scripts/test-client-campaign-workspaces.cjs",
+    "measure:client-campaign-workspaces": "node scripts/release/measure-client-campaign-workspaces.cjs",
     "audit:ownership-integrity": "tsx scripts/audit-ownership-integrity.ts",
     "test:ownership-integrity": "tsx scripts/test-ownership-integrity.ts",
     "test:reservation-integrity": "node scripts/test-reservation-integrity.cjs",

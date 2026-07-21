@@ -331,7 +331,10 @@ async function main() {
       "Public locations API exposes hidden rate card values"
     );
     assert(locations.every((location) => !location.internalNotes && !location.photoOriginalUrl), "Public locations API exposes internal fields");
-    assert(locations.every((location) => Array.isArray(location.reservations) && location.reservations.length === 0), "Public API exposes reservation details");
+    assert(
+      locations.every((location) => location.reservations == null || (Array.isArray(location.reservations) && location.reservations.length === 0)),
+      "Public API exposes reservation details"
+    );
     assert(locations.every((location) => location.availabilityText), "Some locations have missing availability text");
     assert(locations.every((location) => location.publicStatus && location.availabilityLabel), "Some locations have missing public availability labels");
     const validPublicStatuses = new Set(["AVAILABLE", "AVAILABLE_FROM", "BOOKED", "RESERVED"]);
@@ -378,7 +381,7 @@ async function main() {
     assert(page.includes("Focus Media") || page.includes("Locatii"), "Public locations page did not render expected content");
     assert(!page.includes("Disponibil cu data") && !page.includes("Disponibile cu data"), "Public page still shows available-from label");
     assert(page.includes("Disponibil"), "Public page does not show available inventory after legacy reset");
-    assert(page.includes("Media plan"), "Public page does not show media plan call-to-action");
+    assert(/selec(?:t|\u021b)ie client/i.test(page), "Public page does not show the location selection call-to-action");
 
     const admin = await fetch(`${BASE_URL}/admin/login`).then((response) => response.text());
     assert(admin.includes("email") || admin.includes("parola") || admin.includes("password"), "Admin login page did not render expected content");

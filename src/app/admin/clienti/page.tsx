@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { AdminHeader } from "@/components/admin/AdminHeader";
-import { ClientCampaignsWorkspace, type ClientCampaignsWorkspaceTab } from "@/components/admin/ClientCampaignsWorkspace";
+import { ClientsWorkspace } from "@/components/admin/client-campaigns/ClientsWorkspace";
 import { getAuthSession } from "@/lib/auth";
-import { getClientCampaignsData } from "@/lib/client-campaigns";
+import { getClientsPage } from "@/lib/client-campaign-workspaces";
+import { validAccountOwners } from "@/lib/clients";
 import { hasAnyPermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
@@ -14,14 +15,16 @@ export default async function ClientiPage({ searchParams }: { searchParams: Prom
     redirect("/admin/dashboard");
   }
   const params = await searchParams;
-  const requestedTab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
-  const allowedTabs: ClientCampaignsWorkspaceTab[] = ["clients", "campaigns", "invoices", "cleanup", "documents"];
-  const initialTab: ClientCampaignsWorkspaceTab = allowedTabs.includes(requestedTab as ClientCampaignsWorkspaceTab)
-    ? requestedTab as ClientCampaignsWorkspaceTab
-    : "clients";
-  const data = await getClientCampaignsData(session);
+  const query = first(params.q) || "";
+  const clientId = first(params.clientId);
+  const initialPortfolioFinance = first(params.tab) === "invoices" || first(params.view) === "finance";
+  const [page, accountOwners] = await Promise.all([getClientsPage(session, { query }), validAccountOwners()]);
   return <>
     <AdminHeader session={session} />
-    <ClientCampaignsWorkspace initialData={data} session={session} initialTab={initialTab} />
+    <ClientsWorkspace initialPage={page} initialClientId={clientId} initialPortfolioFinance={initialPortfolioFinance} session={session} accountOwners={accountOwners} />
   </>;
+}
+
+function first(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }

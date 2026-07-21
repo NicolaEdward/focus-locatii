@@ -68,32 +68,25 @@ function session(id, role) {
 
 function clientVisibilityAllowsSalesDeduplicationWithoutForeignEdits() {
   const clientsRoute = read("src", "app", "api", "admin", "clients", "route.ts");
+  const workspaceService = read("src", "lib", "client-campaign-workspaces.ts");
   assert(
-    !clientsRoute.includes('session.role === "SALES_AGENT" ? { accountOwnerUserId: session.id }'),
+    !blockFrom(workspaceService, "export async function getClientsPage", "export async function getCampaignsPage").includes('accountOwnerUserId: session.id'),
     "GET /api/admin/clients should not hide foreign clients from sales agents"
   );
   assert(
-    clientsRoute.includes('status: { notIn: ["merged", "archived"] }'),
+    workspaceService.includes('status: { notIn: ["merged", "archived"] }'),
     "GET /api/admin/clients should still hide merged/archived clients"
   );
-  assert(clientsRoute.includes("const isOwnClient = session.role !== \"SALES_AGENT\" || client.accountOwnerUserId === session.id"), "foreign clients should be visibly listed but sanitized for sales agents");
-  assert(clientsRoute.includes("contacts: []"), "foreign client contacts should not be exposed through the simple clients API");
+  assert(workspaceService.includes("canViewSensitiveClient"), "foreign client detail must be sanitized through one ownership policy");
+  assert(workspaceService.includes('if (session.role === "SALES_AGENT") return accountOwnerUserId === session.id'), "foreign sensitive data must remain hidden from sales agents");
+  const listBlock = blockFrom(workspaceService, "export async function getClientsPage", "export async function getCampaignsPage");
+  assert(!listBlock.includes("contacts: {") && !listBlock.includes("generalEmail: true"), "client list must not expose contact details");
+  assert(!listBlock.includes("documents: {") && !listBlock.includes("storageUrl"), "client list must not expose documents");
 
-  const clientCampaigns = read("src", "lib", "client-campaigns.ts");
-  const clientWhereBlock = blockFrom(clientCampaigns, "const clientWhere = {", "};");
-  assert(
-    !clientWhereBlock.includes("accountOwnerUserId: session.id"),
-    "client workspace should show all registered clients to sales agents"
-  );
-  assert(clientCampaigns.includes("const canViewClientDetails = session.role !== \"SALES_AGENT\" || client.accountOwnerUserId === session.id"), "client workspace should sanitize foreign client details for sales agents");
-  assert(clientCampaigns.includes("client: { is: { accountOwnerUserId: session.id } }"), "sales agent client workspace should only load documents for owned clients");
-  assert(clientCampaigns.includes("documents: canViewClientDetails ? client.documents.map(serializeDocument) : []"), "foreign client documents should not be exposed in the client workspace");
-
-  const workspace = read("src", "components", "admin", "ClientCampaignsWorkspace.tsx");
-  assert(workspace.includes("const canEditClient ="), "client workspace should separate visibility from edit rights");
-  assert(workspace.includes('session.role !== "SALES_AGENT" || client.accountOwnerUserId === session.id'), "foreign clients should be read-only for sales agents");
-  assert(workspace.includes("Client vizibil pentru verificare si evitare duplicate"), "read-only foreign clients should be explained in the UI");
-  assert(workspace.includes("canUploadDocument"), "document uploads should follow the same client ownership rule");
+  const workspace = read("src", "components", "admin", "client-campaigns", "ClientsWorkspace.tsx");
+  assert(workspace.includes("overview.canEdit"), "client workspace should separate visibility from edit rights");
+  assert(workspace.includes("Vizibil doar pentru prevenirea duplicatelor"), "read-only foreign clients should be explained in the UI");
+  assert(workspace.includes("DocumentUploadDialog") && workspace.includes("overview.canEdit"), "document uploads should follow the same client ownership rule");
 }
 
 function blockFrom(source, start, end) {

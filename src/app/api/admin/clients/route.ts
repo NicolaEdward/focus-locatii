@@ -11,6 +11,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { observeRoute, setObservabilityRole } from "@/lib/observability";
 import { resolveRequiredSalesOwner } from "@/lib/seller-users";
+import { getClientsPage } from "@/lib/client-campaign-workspaces";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -39,37 +40,10 @@ export async function GET(request: NextRequest) {
     if (response || !session) return response;
     setObservabilityRole(session.role);
     const query = request.nextUrl.searchParams.get("q")?.trim() || "";
-    const clients = await prisma.clientAccount.findMany({
-    where: {
-      status: { notIn: ["merged", "archived"] },
-      ...(query ? {
-        OR: [
-          { companyName: { contains: query } },
-          { normalizedName: { contains: normalizeClientName(query) } },
-          { taxId: { contains: query } }
-        ]
-      } : {})
-    },
-    include: {
-      accountOwner: { select: { id: true, name: true, email: true, role: true } },
-      contacts: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }], take: 3 }
-    },
-    orderBy: { companyName: "asc" },
-    take: 5000
-  });
-    const visibleClients = clients.map((client) => {
-      const isOwnClient = session.role !== "SALES_AGENT" || client.accountOwnerUserId === session.id;
-      if (isOwnClient) return client;
-      return {
-        ...client,
-        billingAddress: null,
-        generalEmail: null,
-        generalPhone: null,
-        notes: null,
-        contacts: []
-      };
-    });
-    return NextResponse.json({ clients: visibleClients }, { headers: noStoreHeaders });
+    const cursor = request.nextUrl.searchParams.get("cursor");
+    const limit = Number(request.nextUrl.searchParams.get("limit") || 30);
+    const page = await getClientsPage(session, { query, cursor, limit });
+    return NextResponse.json({ clients: page.items, page }, { headers: noStoreHeaders });
   });
 }
 

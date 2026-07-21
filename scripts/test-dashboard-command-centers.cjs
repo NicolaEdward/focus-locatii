@@ -46,7 +46,7 @@ assert(!salesService.includes("create(") && !salesService.includes("update("), "
 assert(salesService.includes("/admin/clienti?tab=invoices"), "sales invoices must link to the role-safe client workspace");
 
 assert(financePage.includes("params.status") && financePage.includes("initialFilters={filters}"), "COO filtered finance links must initialize the invoice workspace");
-assert(clientsPage.includes("params.tab") && clientsPage.includes("initialTab={initialTab}"), "sales links must open the requested client workspace tab");
+assert(clientsPage.includes("params.tab") && clientsPage.includes("initialPortfolioFinance={initialPortfolioFinance}"), "sales invoice links must open the lazy portfolio finance view");
 
 console.log(JSON.stringify({
   ok: true,

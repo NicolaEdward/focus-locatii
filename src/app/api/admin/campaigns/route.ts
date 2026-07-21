@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { createCampaign } from "@/lib/campaigns";
-import { prisma } from "@/lib/prisma";
+import { getCampaignsPage } from "@/lib/client-campaign-workspaces";
+import { observeRoute, setObservabilityRole } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -12,42 +13,17 @@ const noStoreHeaders = {
 };
 
 export async function GET(request: NextRequest) {
-  const { session, response } = await requireAnyPermission(request, ["campaigns.view", "campaigns.view.own"]);
-  if (response || !session) return response;
-  const clientId = request.nextUrl.searchParams.get("clientId") || undefined;
-  const query = request.nextUrl.searchParams.get("q")?.trim() || "";
-  const campaigns = await prisma.campaign.findMany({
-    where: {
-      archivedAt: null,
-      status: { not: "archived" },
-      ...(clientId ? { clientId } : {}),
-      ...(session.role === "SALES_AGENT"
-        ? {
-            OR: [
-              { sellerUserId: session.id },
-              { accountOwnerUserId: session.id },
-              { client: { accountOwnerUserId: session.id } }
-            ]
-          }
-        : {}),
-      ...(query
-        ? {
-            OR: [
-              { campaignName: { contains: query } },
-              { campaignCode: { contains: query } },
-              { client: { companyName: { contains: query } } }
-            ]
-          }
-        : {})
-    },
-    include: {
-      client: { select: { id: true, companyName: true, accountOwnerUserId: true } },
-      reservations: { select: { id: true, location: { select: { code: true, city: true } } } }
-    },
-    orderBy: [{ startDate: "desc" }, { updatedAt: "desc" }],
-    take: 300
+  return observeRoute(request, { route: "/api/admin/campaigns", operation: "campaigns.list" }, async () => {
+    const { session, response } = await requireAnyPermission(request, ["campaigns.view", "campaigns.view.own"]);
+    if (response || !session) return response;
+    setObservabilityRole(session.role);
+    const clientId = request.nextUrl.searchParams.get("clientId");
+    const query = request.nextUrl.searchParams.get("q")?.trim() || "";
+    const cursor = request.nextUrl.searchParams.get("cursor");
+    const limit = Number(request.nextUrl.searchParams.get("limit") || (clientId ? 50 : 30));
+    const page = await getCampaignsPage(session, { clientId, query, cursor, limit });
+    return NextResponse.json({ campaigns: page.items, page }, { headers: noStoreHeaders });
   });
-  return NextResponse.json({ campaigns }, { headers: noStoreHeaders });
 }
 
 export async function POST(request: NextRequest) {

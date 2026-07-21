@@ -73,7 +73,7 @@ export async function listReceivableRegistry(input: ReceivableRegistryInput = {}
     }),
     prisma.financialReceivable.count({ where: viewWhere }),
     view === "open" ? receivableOpenSummary(baseWhere, today) : Promise.resolve([]),
-    listIssuerCompanies()
+    view === "open" ? listIssuerCompanies() : Promise.resolve([])
   ]);
 
   return {
@@ -440,34 +440,68 @@ export async function searchReceivableOptions(input: {
 async function receivableOpenSummary(baseWhere: Prisma.FinancialReceivableWhereInput, today: Date) {
   const inSevenDays = addDays(today, 7);
   const openWhere: Prisma.FinancialReceivableWhereInput = { AND: [baseWhere, { remainingAmount: { gt: SETTLED_TOLERANCE } }] };
-  const [open, overdue, inTerm, dueSoon, needsReview] = await Promise.all([
-    prisma.financialReceivable.groupBy({ by: ["currency"], where: openWhere, _count: { _all: true }, _sum: { remainingAmount: true } }),
-    prisma.financialReceivable.groupBy({ by: ["currency"], where: { AND: [openWhere, { dueDate: { lt: today } }] }, _count: { _all: true }, _sum: { remainingAmount: true } }),
-    prisma.financialReceivable.groupBy({ by: ["currency"], where: { AND: [openWhere, { dueDate: { gte: today } }] }, _count: { _all: true }, _sum: { remainingAmount: true } }),
-    prisma.financialReceivable.groupBy({ by: ["currency"], where: { AND: [openWhere, { dueDate: { gte: today, lte: inSevenDays } }] }, _count: { _all: true }, _sum: { remainingAmount: true } }),
-    prisma.financialReceivable.groupBy({ by: ["currency"], where: { AND: [openWhere, { needsReview: true }] }, _count: { _all: true } })
-  ]);
-  const currencies = new Set(open.map((row) => row.currency || "NECUNOSCUTA"));
-  return [...currencies].sort().map((currency) => {
-    const pick = (rows: typeof open) => rows.find((row) => (row.currency || "NECUNOSCUTA") === currency);
-    const openRow = pick(open);
-    const overdueRow = pick(overdue);
-    const inTermRow = pick(inTerm);
-    const dueSoonRow = pick(dueSoon);
-    const reviewRow = needsReview.find((row) => (row.currency || "NECUNOSCUTA") === currency);
-    return {
-      currency,
-      openCount: openRow?._count._all || 0,
-      overdueCount: overdueRow?._count._all || 0,
-      inTermCount: inTermRow?._count._all || 0,
-      dueSoonCount: dueSoonRow?._count._all || 0,
-      needsReviewCount: reviewRow?._count._all || 0,
-      remaining: decimalString(openRow?._sum.remainingAmount),
-      overdue: decimalString(overdueRow?._sum.remainingAmount),
-      inTerm: decimalString(inTermRow?._sum.remainingAmount),
-      dueSoon: decimalString(dueSoonRow?._sum.remainingAmount)
-    };
+  const groups = await prisma.financialReceivable.groupBy({
+    by: ["currency", "dueDate", "needsReview"],
+    where: openWhere,
+    _count: { _all: true },
+    _sum: { remainingAmount: true }
   });
+  const summary = new Map<string, {
+    currency: string;
+    openCount: number;
+    overdueCount: number;
+    inTermCount: number;
+    dueSoonCount: number;
+    needsReviewCount: number;
+    remaining: Prisma.Decimal;
+    overdue: Prisma.Decimal;
+    inTerm: Prisma.Decimal;
+    dueSoon: Prisma.Decimal;
+  }>();
+  for (const group of groups) {
+    const currency = group.currency || "NECUNOSCUTA";
+    const current = summary.get(currency) || {
+      currency,
+      openCount: 0,
+      overdueCount: 0,
+      inTermCount: 0,
+      dueSoonCount: 0,
+      needsReviewCount: 0,
+      remaining: money(0),
+      overdue: money(0),
+      inTerm: money(0),
+      dueSoon: money(0)
+    };
+    const count = group._count._all;
+    const remaining = money(group._sum.remainingAmount);
+    const dueAt = group.dueDate?.getTime();
+    const isOverdue = dueAt !== undefined && dueAt < today.getTime();
+    const isInTerm = dueAt !== undefined && dueAt >= today.getTime();
+    const isDueSoon = isInTerm && dueAt <= inSevenDays.getTime();
+    current.openCount += count;
+    current.remaining = current.remaining.plus(remaining);
+    if (group.needsReview) current.needsReviewCount += count;
+    if (isOverdue) {
+      current.overdueCount += count;
+      current.overdue = current.overdue.plus(remaining);
+    }
+    if (isInTerm) {
+      current.inTermCount += count;
+      current.inTerm = current.inTerm.plus(remaining);
+    }
+    if (isDueSoon) {
+      current.dueSoonCount += count;
+      current.dueSoon = current.dueSoon.plus(remaining);
+    }
+    summary.set(currency, current);
+  }
+  return [...summary.values()].sort((left, right) => left.currency.localeCompare(right.currency)).map((row) => ({
+    ...row,
+    remaining: row.remaining.toFixed(2),
+    overdue: row.overdue.toFixed(2),
+    inTerm: row.inTerm.toFixed(2),
+    dueSoon: row.dueSoon.toFixed(2)
+  }));
 }
 
 export function classifyReceivableReconciliation(input: {

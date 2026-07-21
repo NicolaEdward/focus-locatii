@@ -12,7 +12,7 @@ const reconciliationRoute = read("src/app/api/admin/receivables-workspace/reconc
 
 assert.match(service, /remainingAmount:\s*\{ gt: SETTLED_TOLERANCE \}/, "default registry must contain only open balances");
 assert.match(service, /remainingAmount:\s*\{ lte: SETTLED_TOLERANCE \}/, "settled invoices must remain available in history");
-assert.match(service, /groupBy\(\{ by: \["currency"\]/, "summary must aggregate by currency in the database");
+assert.match(service, /by: \["currency", "dueDate", "needsReview"\]/, "summary must use one database aggregation by currency and due-date bucket");
 assert.match(service, /skip: \(page - 1\) \* take/);
 assert.match(service, /take\s*$/m);
 assert.doesNotMatch(service, /take:\s*5_?000/, "workspace must not hydrate thousands of options");

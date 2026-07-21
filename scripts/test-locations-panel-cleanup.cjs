@@ -45,8 +45,9 @@ function main() {
 
 function adminLocationTableIsScanFirst() {
   const dashboard = read("src", "components", "admin", "AdminDashboard.tsx");
+  const inventory = read("src", "components", "admin", "inventory", "InventoryList.tsx");
   assert(dashboard.includes('<section id="locatii"'), "locations page should expose a dedicated inventory section anchor");
-  const tableBlock = blockFrom(dashboard, "<table", "</table>");
+  const tableBlock = blockFrom(inventory, "<table", "</table>");
   assert(tableBlock.includes("<Th>Vizibilitate</Th>"), "table should show public/admin visibility summary");
   assert(tableBlock.includes("<Th>Status calculat</Th>"), "table should show computed availability/status label");
   assert(!tableBlock.includes("<Th>GPS</Th>"), "raw GPS column should be removed from first table view");
@@ -54,7 +55,7 @@ function adminLocationTableIsScanFirst() {
   assert(!tableBlock.includes("<select"), "table should not render inline status editors");
   assert(!tableBlock.includes("defaultValue={location.rateCard"), "table should not render inline rate card editors");
   assert(!tableBlock.includes("latReal?.toFixed"), "real/private coordinates should not render in first table view");
-  assert(!dashboard.includes("ToggleMini"), "public toggles should not be direct row controls");
+  assert(!inventory.includes("ToggleMini"), "public toggles should not be direct row controls");
   assert(dashboard.includes("Rezervari si HOLD-uri"), "locations page should foreground reservations and holds");
   assert(dashboard.includes("Inventar locatii"), "locations page should have a dedicated inventory section");
   assert(dashboard.includes("Selector oferta"), "locations page should cross-link to the sales selector");
@@ -71,15 +72,14 @@ function adminLocationTableIsScanFirst() {
 }
 
 function rowDangerousActionsAreInMenu() {
-  const dashboard = read("src", "components", "admin", "AdminDashboard.tsx");
-  const actionCell = blockFrom(dashboard, "<LocationActionMenu", "</Td>");
-  assert(actionCell.includes("onDuplicate={() => duplicate(location)}"), "duplicate should be routed through action menu");
-  assert(actionCell.includes("onDelete={() => remove(location)}"), "delete should be routed through action menu");
-  assert(!dashboard.includes('title="Duplicate"'), "duplicate should not be a first-level icon button");
-  assert(!dashboard.includes('title="Delete"'), "delete should not be a first-level icon button");
-  assert(dashboard.includes("Duplici locatia ${label}?"), "duplicate must require contextual confirmation");
-  assert(dashboard.includes("Stergi locatia ${label}?"), "delete must require contextual confirmation");
-  assert(dashboard.includes("Se va crea o copie ascunsa din portalul public"), "duplicate confirmation should explain the copy behavior");
+  const inventory = read("src", "components", "admin", "inventory", "InventoryList.tsx");
+  assert(inventory.includes("onDuplicate={() => duplicate(location)}"), "duplicate should be routed through action menu");
+  assert(inventory.includes("onDelete={() => remove(location)}"), "delete should be routed through action menu");
+  assert(!inventory.includes('title="Duplicate"'), "duplicate should not be a first-level icon button");
+  assert(!inventory.includes('title="Delete"'), "delete should not be a first-level icon button");
+  assert(inventory.includes("Duplici locatia ${label}?"), "duplicate must require contextual confirmation");
+  assert(inventory.includes("Stergi locatia ${label}?"), "delete must require contextual confirmation");
+  assert(inventory.includes("Se va crea o copie ascunsa din portalul public"), "duplicate confirmation should explain the copy behavior");
 }
 
 function locationEditorHasPracticalSections() {
@@ -109,10 +109,12 @@ function publicImpactFieldsHaveWarning() {
 
 function manualAvailabilityActionsAreClear() {
   const editor = read("src", "components", "admin", "LocationEditor.tsx");
-  assert(editor.includes("Nu folosi UNKNOWN pentru o locatie indisponibila"), "editor should warn against using UNKNOWN as unavailable");
-  assert(editor.includes("Marcheaza indisponibila"), "editor should expose a clear manual unavailable action");
-  assert(editor.includes("Marcheaza disponibila / activa"), "editor should expose a clear unblock/active action");
-  assert(editor.includes("Blocaj comercial manual"), "manual unavailable action should use block fields, not reservations");
+  const controls = read("src", "components", "admin", "inventory", "LocationAvailabilityControls.tsx");
+  assert(editor.includes("controlul canonic dedicat"), "editor should point users to the canonical availability control");
+  assert(!editor.includes('label="Motiv blocare"'), "editor should not expose a second legacy scalar block UI");
+  assert(controls.includes("Marcheaza indisponibila"), "detail view should expose a clear manual unavailable action");
+  assert(controls.includes("Marcheaza disponibila / activa"), "detail view should expose a clear unblock action");
+  assert(controls.includes("singurul control pentru blocajul comercial"), "manual unavailable action should use one canonical control");
 }
 
 function costFieldsAreClarified() {
@@ -175,14 +177,19 @@ function operationalWidgetsMovedToWorkspace() {
 function locationWorkspaceLoadsSummaryDataFirst() {
   const page = read("src", "app", "admin", "locatii", "page.tsx");
   const dashboard = read("src", "components", "admin", "AdminDashboard.tsx");
+  const lazyWorkspace = read("src", "components", "admin", "inventory", "LazyReservationWorkspace.tsx");
   const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
   const reservations = read("src", "lib", "reservations.ts");
   const locations = read("src", "lib", "locations.ts");
   const detailRoute = read("src", "app", "api", "reservations", "[id]", "route.ts");
-  assert(page.includes("includeDetails: false"), "locations page should load reservation summaries without nested history/photos");
+  assert(page.includes("listAdminLocationPage"), "locations page should load a bounded inventory page");
+  assert(page.includes("listReservationPage"), "locations page should load a bounded reservation page");
+  assert(!page.includes("listAdminLocations("), "locations page should not load the complete inventory");
+  assert(!page.includes("listReservations("), "locations page should not load the complete reservation registry");
   assert(!page.includes("listOperationReservations"), "locations page must not load the operational reservation dataset twice");
   assert(!dashboard.includes("operationReservations="), "locations dashboard should not serialize operational history into the page");
   assert(panel.includes('fetch(`/api/reservations/${summary.id}`'), "reservation detail should load only when edit is opened");
+  assert(lazyWorkspace.includes("dynamic("), "complete reservation workspace should load only on demand");
   assert(reservations.includes("reservationSummaryInclude"), "reservation summary query should use a narrow relation set");
   assert(locations.includes("effectiveBlockingReservationWhere"), "location summaries must use the canonical effective reservation rule");
   assert(!locations.includes("await expireStaleHolds()"), "location summaries must ignore expired holds without relying on a write during page load");

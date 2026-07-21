@@ -21,7 +21,9 @@ export async function GET(request: NextRequest) {
     locationId: request.nextUrl.searchParams.get("locationId"),
     from: request.nextUrl.searchParams.get("from"),
     to: request.nextUrl.searchParams.get("to")
-  }, session);
+  }, session, {
+    includeDetails: request.nextUrl.searchParams.get("view") !== "summary"
+  });
 
   return NextResponse.json({ reservations }, { headers: noStoreHeaders });
 }

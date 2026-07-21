@@ -244,6 +244,83 @@ export type LocationDTO = {
   updatedAt: string;
 };
 
+export type AdminLocationListItemDTO = {
+  id: string;
+  code: string;
+  categoryId: string;
+  categoryName: string;
+  categorySlug: string;
+  city: string | null;
+  county: string | null;
+  address: string | null;
+  type: string | null;
+  size: string | null;
+  sqm: number | null;
+  rateCard: string | null;
+  rateCardValue: number | null;
+  installationRemoval: string | null;
+  installationRemovalValue: number | null;
+  status: LocationStatus;
+  lifecycleStatus: LocationLifecycleStatus;
+  publicStatus: PublicAvailabilityStatus;
+  availabilityText: string | null;
+  availabilityLabel: string;
+  availabilityDetail: string | null;
+  latDisplay: number | null;
+  lngDisplay: number | null;
+  mapsUrl: string | null;
+  showPricePublic: boolean;
+  showInstallationCostPublic: boolean;
+  showInPublic: boolean;
+  mainPhotoUrl: string | null;
+  updatedAt: string;
+};
+
+export type AdminLocationPageDTO = {
+  items: AdminLocationListItemDTO[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+};
+
+export type ReservationListItemDTO = {
+  id: string;
+  locationId: string;
+  locationCode: string;
+  locationName: string | null;
+  status: ReservationStatus;
+  clientName: string;
+  campaignName: string | null;
+  salesperson: string | null;
+  contractNumber: string | null;
+  periodStart: string;
+  periodEnd: string;
+  holdExpiresAt: string | null;
+  amount: number | null;
+  currency: string | null;
+  updatedAt: string;
+};
+
+export type ReservationPageDTO = {
+  items: ReservationListItemDTO[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+};
+
+export type OccupancySummaryDTO = {
+  activeHolds: number;
+  occupiedNow: number;
+  upcoming: number;
+  activeOrUpcoming: number;
+};
+
 export type CategoryDTO = {
   id: string;
   name: string;

@@ -27,9 +27,10 @@ function main() {
 
 function adminDashboardHasDetailAction() {
   const dashboard = read("src", "components", "admin", "AdminDashboard.tsx");
+  const inventory = read("src", "components", "admin", "inventory", "InventoryList.tsx");
   assert(dashboard.includes("LocationDetailDrawer"), "AdminDashboard should render the location detail drawer");
-  assert(dashboard.includes("setDetailLocation(location)"), "location row should open the selected location in the drawer");
-  assert(dashboard.includes("Vezi detalii"), "location row should expose a clear details action");
+  assert(dashboard.includes("setDetailLocation(location)"), "inventory selection should open the location drawer");
+  assert(inventory.includes("> Detalii</button>"), "location row should expose a clear details action");
 }
 
 function timelineRouteIsReadOnlyAndUsesLocationId() {

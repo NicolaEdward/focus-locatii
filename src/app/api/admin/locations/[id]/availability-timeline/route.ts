@@ -127,7 +127,16 @@ export async function GET(request: NextRequest, context: Context) {
         isBookable: availability.isBookable,
         reasons: availability.reasons.map((reason) => reason.code),
         explanation: adminAvailabilityExplanation(availability),
-        dateSemantics: availability.dateSemantics
+        dateSemantics: availability.dateSemantics,
+        activeOverride: availability.activeOverride
+          ? {
+              id: availability.activeOverride.sourceId || "active-override",
+              type: availability.activeOverride.status,
+              reason: availability.activeOverride.reason,
+              periodStart: availability.activeOverride.from.toISOString(),
+              periodEnd: availability.activeOverride.openEnded ? null : availability.activeOverride.to.toISOString()
+            }
+          : null
       },
       periods,
       empty: periods.length === 0

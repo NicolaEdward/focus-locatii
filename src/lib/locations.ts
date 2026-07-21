@@ -8,7 +8,13 @@ import { isProductionSketchImage } from "@/lib/location-images";
 import { displayPhotoUrl, samplePhotoForCode } from "@/lib/photos";
 import { effectiveBlockingReservationWhere, isEffectiveBlockingReservation } from "@/lib/reservation-lifecycle";
 import { sortOperationalLocations } from "@/lib/location-order";
-import type { CategoryDTO, LocationDTO } from "@/types/location";
+import type {
+  AdminLocationListItemDTO,
+  AdminLocationPageDTO,
+  CategoryDTO,
+  LocationDTO,
+  LocationLifecycleStatus
+} from "@/types/location";
 
 const blockingReservationStatuses = ["BOOKED", "HOLD", "RESERVED"] as const;
 
@@ -53,6 +59,85 @@ function adminLocationListInclude(now: Date) {
     }
   };
 }
+
+function adminLocationSummarySelect(now: Date) {
+  const today = startOfUtcDay(now);
+  return {
+    id: true,
+    code: true,
+    categoryId: true,
+    city: true,
+    county: true,
+    address: true,
+    type: true,
+    size: true,
+    sqm: true,
+    rateCard: true,
+    rateCardValue: true,
+    installationRemoval: true,
+    installationRemovalValue: true,
+    status: true,
+    lifecycleStatus: true,
+    availabilityText: true,
+    availableFrom: true,
+    availableUntil: true,
+    bookedFrom: true,
+    bookedUntil: true,
+    blockedReason: true,
+    blockedFrom: true,
+    blockedUntil: true,
+    latDisplay: true,
+    lngDisplay: true,
+    mapsUrl: true,
+    showPricePublic: true,
+    showInstallationCostPublic: true,
+    showInPublic: true,
+    mainPhotoUrl: true,
+    updatedAt: true,
+    category: {
+      select: { name: true, slug: true }
+    },
+    reservations: {
+      where: {
+        periodEnd: { gte: today },
+        ...effectiveBlockingReservationWhere(now)
+      },
+      select: {
+        id: true,
+        status: true,
+        periodStart: true,
+        periodEnd: true,
+        holdExpiresAt: true,
+        createdAt: true
+      },
+      orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
+    },
+    availabilityOverrides: {
+      where: { clearedAt: null },
+      select: {
+        id: true,
+        type: true,
+        reason: true,
+        periodStart: true,
+        periodEnd: true,
+        clearedAt: true
+      },
+      orderBy: [{ periodStart: "asc" as const }, { periodEnd: "asc" as const }]
+    }
+  } satisfies Prisma.LocationSelect;
+}
+
+type AdminLocationSummaryRow = Prisma.LocationGetPayload<{
+  select: ReturnType<typeof adminLocationSummarySelect>;
+}>;
+
+export type AdminLocationListFilters = {
+  query?: string | null;
+  category?: string | null;
+  lifecycleStatus?: string | null;
+  page?: number | string | null;
+  pageSize?: number | string | null;
+};
 
 function publicLocationInclude(now: Date) {
   const today = startOfUtcDay(now);
@@ -444,6 +529,44 @@ export async function listAdminLocations() {
   ).sort(sortOperationalLocations);
 }
 
+export async function listAdminLocationPage(filters: AdminLocationListFilters = {}): Promise<AdminLocationPageDTO> {
+  const now = new Date();
+  const pageSize = clampInteger(filters.pageSize, 15, 10, 50);
+  const requestedPage = clampInteger(filters.page, 1, 1, 100_000);
+  const where = adminLocationListWhere(filters);
+  const total = await prisma.location.count({ where });
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const rows = await prisma.location.findMany({
+    where,
+    select: adminLocationSummarySelect(now),
+    orderBy: [{ updatedAt: "desc" }, { code: "asc" }],
+    skip: (page - 1) * pageSize,
+    take: pageSize
+  });
+
+  return {
+    items: rows.map((row) => serializeAdminLocationListItem(row, now)),
+    page,
+    pageSize,
+    total,
+    totalPages,
+    hasNextPage: page < totalPages,
+    hasPreviousPage: page > 1
+  };
+}
+
+export async function getAdminLocationListItem(idOrCode: string): Promise<AdminLocationListItemDTO | null> {
+  const value = idOrCode.trim();
+  if (!value) return null;
+  const now = new Date();
+  const row = await prisma.location.findFirst({
+    where: { OR: [{ id: value }, { code: value }] },
+    select: adminLocationSummarySelect(now)
+  });
+  return row ? serializeAdminLocationListItem(row, now) : null;
+}
+
 export async function getPublicLocation(id: string) {
   const now = new Date();
   const location = await prisma.location.findFirst({
@@ -461,6 +584,78 @@ export async function getAdminLocation(id: string) {
   });
 
   return location ? serializeLocation(location, { includeHiddenCommercials: true, includePrivateFields: true }) : null;
+}
+
+function adminLocationListWhere(filters: AdminLocationListFilters): Prisma.LocationWhereInput {
+  const query = String(filters.query || "").trim();
+  const category = String(filters.category || "").trim();
+  const lifecycleStatus = normalizeLifecycleFilter(filters.lifecycleStatus);
+  const and: Prisma.LocationWhereInput[] = [];
+
+  if (query) {
+    and.push({
+      OR: [
+        { code: { contains: query } },
+        { address: { contains: query } },
+        { city: { contains: query } },
+        { county: { contains: query } },
+        { type: { contains: query } },
+        { category: { name: { contains: query } } }
+      ]
+    });
+  }
+  if (category) and.push({ category: { slug: category } });
+  if (lifecycleStatus) and.push({ lifecycleStatus });
+
+  return and.length ? { AND: and } : {};
+}
+
+function serializeAdminLocationListItem(row: AdminLocationSummaryRow, now: Date): AdminLocationListItemDTO {
+  const availability = publicAvailability(row, now);
+  return {
+    id: row.id,
+    code: row.code,
+    categoryId: row.categoryId,
+    categoryName: row.category.name,
+    categorySlug: row.category.slug,
+    city: row.city,
+    county: row.county,
+    address: row.address,
+    type: normalizeMediaType(row.type, row.category.name, row.address, row.code),
+    size: row.size,
+    sqm: row.sqm,
+    rateCard: row.rateCard,
+    rateCardValue: row.rateCardValue,
+    installationRemoval: row.installationRemoval,
+    installationRemovalValue: row.installationRemovalValue,
+    status: row.status,
+    lifecycleStatus: row.lifecycleStatus as LocationLifecycleStatus,
+    publicStatus: availability.publicStatus,
+    availabilityText: row.availabilityText,
+    availabilityLabel: availability.label,
+    availabilityDetail: availability.detail,
+    latDisplay: row.latDisplay,
+    lngDisplay: row.lngDisplay,
+    mapsUrl: row.mapsUrl,
+    showPricePublic: row.showPricePublic,
+    showInstallationCostPublic: row.showInstallationCostPublic,
+    showInPublic: row.showInPublic,
+    mainPhotoUrl: displayPhotoUrl(row.mainPhotoUrl) || samplePhotoForCode(row.code),
+    updatedAt: row.updatedAt.toISOString()
+  };
+}
+
+function normalizeLifecycleFilter(value?: string | null): LocationLifecycleStatus | null {
+  return ["ACTIVE", "INACTIVE", "ARCHIVED", "MAINTENANCE"].includes(String(value || ""))
+    ? String(value) as LocationLifecycleStatus
+    : null;
+}
+
+function clampInteger(value: number | string | null | undefined, fallback: number, min: number, max: number) {
+  if (value == null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 }
 
 function startOfUtcDay(date: Date) {

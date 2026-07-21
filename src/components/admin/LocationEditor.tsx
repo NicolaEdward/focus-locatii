@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, CheckCircle2, Save, X } from "lucide-react";
+import { Save, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { MEDIA_TYPE_OPTIONS } from "@/lib/format";
 import type { CategoryDTO, GpsAuditStatus, LocationDTO, LocationLifecycleStatus, LocationStatus } from "@/types/location";
@@ -83,27 +83,6 @@ export function LocationEditor({
 
   function update<K extends keyof EditorState>(key: K, value: EditorState[K]) {
     setState((current) => ({ ...current, [key]: value }));
-  }
-
-  function markCommerciallyBlocked() {
-    setState((current) => ({
-      ...current,
-      blockedReason: current.blockedReason || "Blocaj comercial manual",
-      blockedFrom: current.blockedFrom || todayInputValue(),
-      availabilityText: current.availabilityText || "Indisponibila temporar"
-    }));
-  }
-
-  function clearCommercialBlock() {
-    setState((current) => ({
-      ...current,
-      lifecycleStatus: "ACTIVE",
-      blockedReason: "",
-      blockedFrom: "",
-      blockedUntil: "",
-      blockedNotes: "",
-      availabilityText: current.availabilityText === "Indisponibila temporar" ? "Disponibil" : current.availabilityText
-    }));
   }
 
   async function save() {
@@ -205,18 +184,8 @@ export function LocationEditor({
 
         <EditorSection title="Disponibilitate">
           <p className="rounded-lg border border-focus-line bg-focus-navy/40 p-3 text-sm font-bold text-slate-300">
-            Disponibilitatea comerciala se calculeaza din rezervari si blocaje manuale. Nu folosi UNKNOWN pentru o locatie indisponibila; foloseste blocajul comercial de mai jos.
+            Disponibilitatea comerciala se calculeaza din rezervari si blocaje manuale. Blocajul comercial se administreaza din Detalii locatie, prin controlul canonic dedicat.
           </p>
-          <div className="flex flex-wrap gap-2">
-            <button className="focus-button secondary" type="button" onClick={markCommerciallyBlocked}>
-              <Ban size={18} />
-              Marcheaza indisponibila
-            </button>
-            <button className="focus-button secondary" type="button" onClick={clearCommercialBlock}>
-              <CheckCircle2 size={18} />
-              Marcheaza disponibila / activa
-            </button>
-          </div>
           <div className="grid gap-4 md:grid-cols-3">
             <label className="grid gap-2">
               <span className="text-sm font-bold">Stare locatie</span>
@@ -246,14 +215,6 @@ export function LocationEditor({
             Statusul vechi ramane pentru compatibilitate cu importurile si datele existente. Disponibilitatea reala pentru vanzari se calculeaza din rezervari si blocaje.
           </p>
           <Textarea label="Text disponibilitate" value={state.availabilityText} onChange={(value) => update("availabilityText", value)} />
-          <div className="grid gap-4 md:grid-cols-2">
-            <Textarea label="Motiv blocare" value={state.blockedReason} onChange={(value) => update("blockedReason", value)} />
-            <Textarea label="Note blocare" value={state.blockedNotes} onChange={(value) => update("blockedNotes", value)} />
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Text label="Blocata din" type="date" value={state.blockedFrom} onChange={(value) => update("blockedFrom", value)} />
-            <Text label="Blocata pana la" type="date" value={state.blockedUntil} onChange={(value) => update("blockedUntil", value)} />
-          </div>
         </EditorSection>
 
         <EditorSection title="Galerie / Poze">
@@ -545,10 +506,6 @@ function toPayload(state: EditorState) {
     costType: nullable(state.costType),
     costSupplier: nullable(state.costSupplier),
     costNotes: nullable(state.costNotes),
-    blockedReason: nullable(state.blockedReason),
-    blockedFrom: dateOrNull(state.blockedFrom),
-    blockedUntil: dateOrNull(state.blockedUntil),
-    blockedNotes: nullable(state.blockedNotes),
     coordinateSource: nullable(state.coordinateSource),
     gpsAuditStatus: state.gpsAuditStatus,
     benefits: lines(state.benefits),
@@ -570,11 +527,6 @@ function numberOrNull(value: string) {
 
 function dateOrNull(value: string) {
   return value || null;
-}
-
-function todayInputValue() {
-  const today = new Date();
-  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 }
 
 function toDateInput(value?: string | null) {

@@ -3,8 +3,13 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { loadAvailabilityDecisions } from "@/lib/availability-service";
-import { expireStaleHolds, reservationLifecycleData } from "@/lib/reservation-lifecycle";
-import type { ReservationDTO } from "@/types/location";
+import {
+  effectiveBlockingReservationWhere,
+  effectiveHoldWhere,
+  expireStaleHolds,
+  reservationLifecycleData
+} from "@/lib/reservation-lifecycle";
+import type { OccupancySummaryDTO, ReservationDTO, ReservationListItemDTO, ReservationPageDTO } from "@/types/location";
 import type { AuthSession } from "@/lib/auth";
 import { assertReservationTransition } from "@/lib/reservation-workflow";
 import { emitStructuredLog } from "@/lib/observability";
@@ -205,38 +210,7 @@ export async function listReservations(filters: {
   from?: string | null;
   to?: string | null;
 } = {}, actor?: AuthSession | null, options: { includeDetails?: boolean } = {}) {
-  const from = parseDate(filters.from);
-  const to = parseDate(filters.to);
-  const where: Prisma.ReservationWhereInput = {
-    ...(actor?.role === "SALES_AGENT"
-      ? {
-          OR: [
-            { sellerUserId: actor.id },
-            { ownerId: actor.id },
-            { ownerId: null, salesperson: { in: [actor.name, actor.email] } }
-          ]
-        }
-      : {}),
-    ...(filters.status ? { status: filters.status as never } : {}),
-    ...(filters.locationId ? { locationId: filters.locationId } : {}),
-    ...(filters.client
-      ? {
-          OR: [
-            { clientName: { contains: filters.client } },
-            { clientCompany: { contains: filters.client } },
-            { campaignName: { contains: filters.client } }
-          ]
-        }
-      : {}),
-    ...(from || to
-      ? {
-          AND: [
-            from ? { periodEnd: { gte: from } } : {},
-            to ? { periodStart: { lte: to } } : {}
-          ]
-        }
-      : {})
-  };
+  const where = reservationListWhere(filters, actor);
 
   const reservationsWithSegments = await prisma.reservation.findMany({
     where,
@@ -246,6 +220,190 @@ export async function listReservations(filters: {
   });
 
   return reservationsWithSegments.map(serializeReservation);
+}
+
+export type ReservationPageFilters = {
+  query?: string | null;
+  status?: string | null;
+  scope?: "active" | "history" | "all" | string | null;
+  page?: number | string | null;
+  pageSize?: number | string | null;
+};
+
+const reservationListItemSelect = {
+  id: true,
+  locationId: true,
+  status: true,
+  clientName: true,
+  campaignName: true,
+  salesperson: true,
+  contractNumber: true,
+  periodStart: true,
+  periodEnd: true,
+  holdExpiresAt: true,
+  amount: true,
+  currency: true,
+  updatedAt: true,
+  location: { select: { code: true, address: true } }
+} satisfies Prisma.ReservationSelect;
+
+type ReservationListItemRow = Prisma.ReservationGetPayload<{ select: typeof reservationListItemSelect }>;
+
+export async function listReservationPage(
+  filters: ReservationPageFilters = {},
+  actor?: AuthSession | null
+): Promise<{ page: ReservationPageDTO; summary: OccupancySummaryDTO }> {
+  const now = new Date();
+  const today = startOfUtcDay(now);
+  const pageSize = clampInteger(filters.pageSize, 10, 10, 50);
+  const requestedPage = clampInteger(filters.page, 1, 1, 100_000);
+  const accessWhere = reservationAccessWhere(actor);
+  const where = paginatedReservationWhere(filters, actor, now, today);
+  const total = await prisma.reservation.count({ where });
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const pageNumber = Math.min(requestedPage, totalPages);
+
+  const [rows, activeHolds, occupiedNow, upcoming, activeOrUpcoming] = await Promise.all([
+    prisma.reservation.findMany({
+      where,
+      select: reservationListItemSelect,
+      orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }, { updatedAt: "desc" }],
+      skip: (pageNumber - 1) * pageSize,
+      take: pageSize
+    }),
+    prisma.reservation.count({
+      where: combineReservationWhere(accessWhere, effectiveHoldWhere(now), { periodEnd: { gte: today } })
+    }),
+    prisma.reservation.count({
+      where: combineReservationWhere(accessWhere, { status: "BOOKED", periodStart: { lte: today }, periodEnd: { gte: today } })
+    }),
+    prisma.reservation.count({
+      where: combineReservationWhere(accessWhere, effectiveBlockingReservationWhere(now), { periodStart: { gt: today } })
+    }),
+    prisma.reservation.count({
+      where: combineReservationWhere(accessWhere, effectiveBlockingReservationWhere(now), { periodEnd: { gte: today } })
+    })
+  ]);
+
+  return {
+    page: {
+      items: rows.map(serializeReservationListItem),
+      page: pageNumber,
+      pageSize,
+      total,
+      totalPages,
+      hasNextPage: pageNumber < totalPages,
+      hasPreviousPage: pageNumber > 1
+    },
+    summary: { activeHolds, occupiedNow, upcoming, activeOrUpcoming }
+  };
+}
+
+function reservationListWhere(
+  filters: { status?: string | null; client?: string | null; locationId?: string | null; from?: string | null; to?: string | null },
+  actor?: AuthSession | null
+): Prisma.ReservationWhereInput {
+  const from = parseDate(filters.from);
+  const to = parseDate(filters.to);
+  const parts: Prisma.ReservationWhereInput[] = [reservationAccessWhere(actor)];
+  if (filters.status) parts.push({ status: filters.status as never });
+  if (filters.locationId) parts.push({ locationId: filters.locationId });
+  if (filters.client) {
+    parts.push({
+      OR: [
+        { clientName: { contains: filters.client } },
+        { clientCompany: { contains: filters.client } },
+        { campaignName: { contains: filters.client } }
+      ]
+    });
+  }
+  if (from) parts.push({ periodEnd: { gte: from } });
+  if (to) parts.push({ periodStart: { lte: to } });
+  return combineReservationWhere(...parts);
+}
+
+function paginatedReservationWhere(
+  filters: ReservationPageFilters,
+  actor: AuthSession | null | undefined,
+  now: Date,
+  today: Date
+): Prisma.ReservationWhereInput {
+  const parts: Prisma.ReservationWhereInput[] = [reservationAccessWhere(actor)];
+  const query = String(filters.query || "").trim();
+  const scope = filters.scope === "history" || filters.scope === "all" ? filters.scope : "active";
+  const status = normalizeReservationStatus(filters.status);
+
+  if (status) parts.push({ status });
+  if (query) {
+    parts.push({
+      OR: [
+        { clientName: { contains: query } },
+        { clientCompany: { contains: query } },
+        { campaignName: { contains: query } },
+        { contractNumber: { contains: query } },
+        { salesperson: { contains: query } },
+        { location: { code: { contains: query } } },
+        { location: { address: { contains: query } } }
+      ]
+    });
+  }
+  if (scope === "active") {
+    parts.push(effectiveBlockingReservationWhere(now), { periodEnd: { gte: today } });
+  } else if (scope === "history") {
+    parts.push({ OR: [{ status: { in: ["CANCELLED", "EXPIRED"] } }, { periodEnd: { lt: today } }] });
+  }
+  return combineReservationWhere(...parts);
+}
+
+function reservationAccessWhere(actor?: AuthSession | null): Prisma.ReservationWhereInput {
+  if (actor?.role !== "SALES_AGENT") return {};
+  return {
+    OR: [
+      { sellerUserId: actor.id },
+      { ownerId: actor.id },
+      { ownerId: null, salesperson: { in: [actor.name, actor.email] } }
+    ]
+  };
+}
+
+function combineReservationWhere(...parts: Prisma.ReservationWhereInput[]) {
+  const active = parts.filter((part) => Object.keys(part).length > 0);
+  if (!active.length) return {};
+  if (active.length === 1) return active[0];
+  return { AND: active } satisfies Prisma.ReservationWhereInput;
+}
+
+function serializeReservationListItem(row: ReservationListItemRow): ReservationListItemDTO {
+  return {
+    id: row.id,
+    locationId: row.locationId,
+    locationCode: row.location.code,
+    locationName: row.location.address,
+    status: row.status as ReservationListItemDTO["status"],
+    clientName: row.clientName,
+    campaignName: row.campaignName,
+    salesperson: row.salesperson,
+    contractNumber: row.contractNumber,
+    periodStart: row.periodStart.toISOString(),
+    periodEnd: row.periodEnd.toISOString(),
+    holdExpiresAt: row.holdExpiresAt?.toISOString() || null,
+    amount: row.amount,
+    currency: row.currency,
+    updatedAt: row.updatedAt.toISOString()
+  };
+}
+
+function normalizeReservationStatus(value?: string | null) {
+  return ["HOLD", "RESERVED", "BOOKED", "CANCELLED", "EXPIRED"].includes(String(value || ""))
+    ? String(value) as ReservationDTO["status"]
+    : null;
+}
+
+function clampInteger(value: number | string | null | undefined, fallback: number, min: number, max: number) {
+  if (value == null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 }
 
 export async function getReservation(id: string, actor?: AuthSession | null) {

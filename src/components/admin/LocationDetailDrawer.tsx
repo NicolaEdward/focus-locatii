@@ -6,8 +6,9 @@ import { adminNewReservationHref, adminReservationHref } from "@/lib/admin-route
 import { monthlyRate, oneTimeRate, sqm } from "@/lib/format";
 import { mapsHref } from "@/lib/gps";
 import type { AuthSession } from "@/lib/auth";
-import type { LocationDTO } from "@/types/location";
+import type { AdminLocationListItemDTO, LocationDTO } from "@/types/location";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { LocationAvailabilityControls, type ActiveLocationOverride } from "@/components/admin/inventory/LocationAvailabilityControls";
 
 type LocationTimelineResponse = {
   location: LocationDTO;
@@ -49,6 +50,14 @@ type LocationTimelineResponse = {
   timeline: {
     generatedAt: string;
     empty: boolean;
+    availability: {
+      status: string;
+      isBookable: boolean;
+      reasons: string[];
+      explanation: string;
+      dateSemantics: "INCLUSIVE";
+      activeOverride: ActiveLocationOverride;
+    };
     periods: LocationTimelinePeriod[];
   };
   permissions: {
@@ -85,7 +94,7 @@ export function LocationDetailDrawer({
   onClose,
   onEdit
 }: {
-  location: LocationDTO;
+  location: AdminLocationListItemDTO;
   session: AuthSession;
   canEdit: boolean;
   onClose: () => void;
@@ -95,13 +104,14 @@ export function LocationDetailDrawer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const displayLocation = data?.location || location;
   const publicVisibility = data?.admin.publicVisibility || {
     showInPublic: location.showInPublic,
     showPricePublic: location.showPricePublic,
     showInstallationCostPublic: location.showInstallationCostPublic
   };
-  const images = useMemo(() => imageSet(displayLocation), [displayLocation]);
+  const images = useMemo(() => data ? imageSet(data.location) : imageSetFromSummary(location), [data, location]);
   const publicHref = `/locatii/${displayLocation.id}`;
   const mapsUrl = mapsHref(data?.admin.internal?.mapsUrl || displayLocation.mapsUrl, displayLocation.latDisplay, displayLocation.lngDisplay);
   const adminCommercial = data?.admin.commercial;
@@ -128,7 +138,7 @@ export function LocationDetailDrawer({
     return () => {
       cancelled = true;
     };
-  }, [location.id]);
+  }, [location.id, refreshKey]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -268,6 +278,22 @@ export function LocationDetailDrawer({
               {!loading && data?.timeline.periods.length ? <TimelineList periods={data.timeline.periods} /> : null}
             </Panel>
 
+            {canEdit && data?.admin.internal ? (
+              <Panel title="Blocaj comercial manual">
+                <LocationAvailabilityControls
+                  locationId={location.id}
+                  activeOverride={data.timeline.availability.activeOverride}
+                  legacyBlock={{
+                    reason: data.admin.internal.blockedReason,
+                    from: data.admin.internal.blockedFrom,
+                    until: data.admin.internal.blockedUntil,
+                    notes: data.admin.internal.blockedNotes
+                  }}
+                  onChanged={() => setRefreshKey((current) => current + 1)}
+                />
+              </Panel>
+            ) : null}
+
             <Panel title="Actiuni rapide">
               <div className="grid gap-2">
                 <a className="focus-button" href={adminNewReservationHref({ locationId: displayLocation.id })}>
@@ -398,6 +424,10 @@ function imageSet(location: LocationDTO) {
   const images = [location.mainPhotoUrl, ...location.images.map((image) => image.url)].filter(Boolean) as string[];
   const unique = [...new Set(images)].slice(0, 4);
   return unique.length ? unique : ["/samples/location-placeholder.svg"];
+}
+
+function imageSetFromSummary(location: AdminLocationListItemDTO) {
+  return location.mainPhotoUrl ? [location.mainPhotoUrl] : ["/samples/location-placeholder.svg"];
 }
 
 function date(value: string) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
-import { createReservation, listReservations } from "@/lib/reservations";
+import { createReservation, getReservationOccupancySummary, listReservations } from "@/lib/reservations";
 import { recordAudit } from "@/lib/audit";
 import { observeRoute, setObservabilityRole } from "@/lib/observability";
 
@@ -15,17 +15,23 @@ export async function GET(request: NextRequest) {
   const { session, response } = await requireAnyPermission(request, ["reservations.view", "reservations.view.own"]);
   if (response || !session) return response;
 
-  const reservations = await listReservations({
+  const view = request.nextUrl.searchParams.get("view");
+  if (view === "occupancy-summary") {
+    return NextResponse.json({ summary: await getReservationOccupancySummary(session) }, { headers: noStoreHeaders });
+  }
+
+  const summaryView = view === "summary";
+  const [reservations, summary] = await Promise.all([listReservations({
     status: request.nextUrl.searchParams.get("status"),
     client: request.nextUrl.searchParams.get("client"),
     locationId: request.nextUrl.searchParams.get("locationId"),
     from: request.nextUrl.searchParams.get("from"),
     to: request.nextUrl.searchParams.get("to")
   }, session, {
-    includeDetails: request.nextUrl.searchParams.get("view") !== "summary"
-  });
+    includeDetails: !summaryView
+  }), summaryView ? getReservationOccupancySummary(session) : Promise.resolve(null)]);
 
-  return NextResponse.json({ reservations }, { headers: noStoreHeaders });
+  return NextResponse.json({ reservations, ...(summary ? { summary } : {}) }, { headers: noStoreHeaders });
 }
 
 export async function POST(request: NextRequest) {

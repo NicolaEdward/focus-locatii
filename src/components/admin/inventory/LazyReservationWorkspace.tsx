@@ -4,10 +4,11 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { LoaderCircle, X } from "lucide-react";
 import type { AuthSession } from "@/lib/auth";
-import type { LocationDTO, OfferRequestDTO, ReservationDTO } from "@/types/location";
+import type { AdminLocationListItemDTO, OccupancySummaryDTO, OfferRequestDTO, ReservationDTO } from "@/types/location";
 
+const loadAdminReservationsPanel = () => import("@/components/admin/AdminReservationsPanel").then((module) => module.AdminReservationsPanel);
 const AdminReservationsPanel = dynamic(
-  () => import("@/components/admin/AdminReservationsPanel").then((module) => module.AdminReservationsPanel),
+  loadAdminReservationsPanel,
   { ssr: false, loading: () => <WorkspaceLoading /> }
 );
 
@@ -18,8 +19,9 @@ export type ReservationWorkspaceRequest = {
 };
 
 type WorkspacePayload = {
-  locations: LocationDTO[];
+  locations: AdminLocationListItemDTO[];
   reservations: ReservationDTO[];
+  occupancySummary: OccupancySummaryDTO;
   offerRequests: OfferRequestDTO[];
 };
 
@@ -46,9 +48,10 @@ export function LazyReservationWorkspace({
     setError(null);
     setPayload(null);
     syncWorkspaceUrl(request);
+    void loadAdminReservationsPanel();
 
     Promise.all([
-      fetch("/api/locations?scope=admin", { cache: "no-store", signal: controller.signal }).then(readPayload),
+      fetch("/api/admin/reservation-locations", { cache: "no-store", signal: controller.signal }).then(readPayload),
       fetch("/api/reservations?view=summary", { cache: "no-store", signal: controller.signal }).then(readPayload),
       fetch("/api/offer-requests", { cache: "no-store", signal: controller.signal }).then(async (response) => response.ok ? response.json() : { requests: [] })
     ])
@@ -57,6 +60,7 @@ export function LazyReservationWorkspace({
         setPayload({
           locations: locationsPayload.locations || [],
           reservations: reservationsPayload.reservations || [],
+          occupancySummary: reservationsPayload.summary || { activeHolds: 0, occupiedNow: 0, upcoming: 0, activeOrUpcoming: 0 },
           offerRequests: requestsPayload.requests || []
         });
       })
@@ -95,6 +99,7 @@ export function LazyReservationWorkspace({
               key={request.key}
               locations={payload.locations}
               initialReservations={payload.reservations}
+              initialOccupancySummary={payload.occupancySummary}
               initialOfferRequests={payload.offerRequests}
               onLocationsUpdated={(locations) => {
                 setPayload((current) => current ? { ...current, locations } : current);

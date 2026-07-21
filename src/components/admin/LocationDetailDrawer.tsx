@@ -407,9 +407,9 @@ function Badge({ status }: { status: LocationTimelinePeriod["status"] }) {
     BOOKED: "border-red-300/60 bg-red-400/10 text-red-100"
   }[status];
   const label = {
-    HOLD: "Hold",
-    RESERVED: "Rezervat",
-    BOOKED: "Inchiriat"
+    HOLD: "HOLD",
+    RESERVED: "HOLD",
+    BOOKED: "Rezervat"
   }[status];
   return <span className={`rounded-full border px-2.5 py-1 text-xs font-black uppercase ${className}`}>{label}</span>;
 }

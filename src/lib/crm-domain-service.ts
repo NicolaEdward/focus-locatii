@@ -4,6 +4,7 @@ import {
   CRM_ACTIVE_OPPORTUNITY_STAGES,
   CRM_ACTIVE_PROSPECT_STATUSES,
   crmAddBusinessDays,
+  crmAssertInitialProspectRequirements,
   crmAssertOpportunityTransition,
   crmAssertProspectTransition,
   crmCurrentOpportunityValue,
@@ -18,7 +19,8 @@ import {
   crmOpportunityStageLabel,
   crmProspectStatusLabel,
   crmStartOfLocalDay,
-  crmValidateActionForStage
+  crmValidateActionForStage,
+  type CrmProspectStatus
 } from "@/lib/crm-domain";
 import { crmOpportunityTotals } from "@/lib/crm-analytics-v4";
 import { prisma } from "@/lib/prisma";
@@ -77,6 +79,7 @@ export async function getCrmWorkspace(input: CrmWorkspaceInput, actor: AuthSessi
     ...(ownerId ? { ownerId } : {}),
     ...(input.source ? { source: input.source } : {}),
     ...(input.status ? { status: input.status } : view === "prospecting" ? { status: { in: activeProspectStatuses } } : {}),
+    ...((view === "prospecting" || view === "all") ? { opportunities: { none: {} } } : {}),
     company: companyFilter
   };
   const opportunityWhere: Prisma.CrmOpportunityWhereInput = {
@@ -146,7 +149,7 @@ export async function getCrmWorkspace(input: CrmWorkspaceInput, actor: AuthSessi
     prisma.crmNextAction.count({ where: { status: "open", ...(ownerId ? { ownerId } : {}), dueAt: { lt: dayStart } } }),
     prisma.crmNextAction.count({ where: { status: "open", ...(ownerId ? { ownerId } : {}), dueAt: { gte: dayStart, lt: dayEnd } } }),
     countActiveRecordsWithoutAction(ownerId),
-    prisma.crmProspect.count({ where: { ...(ownerId ? { ownerId } : {}), status: { in: activeProspectStatuses } } }),
+    prisma.crmProspect.count({ where: { ...(ownerId ? { ownerId } : {}), status: { in: activeProspectStatuses }, opportunities: { none: {} } } }),
     prisma.crmOpportunity.count({ where: { ...(ownerId ? { ownerId } : {}), stage: { in: activeOpportunityStages } } })
   ]);
 
@@ -242,6 +245,7 @@ export async function createColdProspect(input: {
   website?: string | null;
   source?: string | null;
   ownerId?: string | null;
+  status?: CrmProspectStatus | null;
   contactName?: string | null;
   contactRole?: string | null;
   email?: string | null;
@@ -260,6 +264,8 @@ export async function createColdProspect(input: {
   const normalizedWebsiteDomain = crmNormalizeWebsiteDomain(input.website);
   const normalizedEmail = crmNormalizeEmail(input.email);
   const normalizedPhone = crmNormalizePhone(input.phone);
+  const status = input.status || "prospecting";
+  crmAssertInitialProspectRequirements(status, normalizedTaxId, input.contactName);
   const duplicates = await findCrmDuplicates(input, actor);
   const exact = duplicates.find((duplicate) => duplicate.match === "exact_tax_id");
   const reusable = exact || duplicates.find((duplicate) => duplicate.name.toLowerCase() === companyName.toLowerCase());
@@ -270,9 +276,20 @@ export async function createColdProspect(input: {
     throw new CrmDomainError("Am gasit firme similare. Verifica inainte de a crea o inregistrare noua.", "CRM_POSSIBLE_DUPLICATE", 409, { duplicates });
   }
   const hasContact = Boolean(input.contactName?.trim() || input.email?.trim() || input.phone?.trim());
-  const actionType = input.nextActionType || crmDefaultNextAction(hasContact);
-  crmValidateActionForStage("prospecting", actionType, input.nextActionDescription);
-  const dueAt = input.nextActionDueAt || crmAddBusinessDays(new Date(), 3);
+  const needsNextAction = !["disqualified", "inactive"].includes(status);
+  const actionType = !needsNextAction
+    ? null
+    : input.nextActionType || (status === "qualified"
+      ? "create_opportunity"
+      : status === "prospecting"
+        ? crmDefaultNextAction(hasContact)
+        : "other");
+  const actionDescription = input.nextActionDescription?.trim()
+    || (status === "return_later" ? "Revenire ulterioara" : status === "on_hold" ? "Revenire dupa perioada de asteptare" : null);
+  if (actionType) crmValidateActionForStage(status, actionType, actionDescription);
+  const dueAt = actionType
+    ? input.nextActionDueAt || crmAddBusinessDays(new Date(), status === "qualified" ? 2 : status === "prospecting" ? 3 : 10)
+    : null;
   return prisma.$transaction(async (tx) => {
     if (input.idempotencyKey) {
       const existingEvent = await tx.crmEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { prospectId: true } });
@@ -325,30 +342,33 @@ export async function createColdProspect(input: {
         ownerId,
         createdByUserId: actor.id,
         source: input.source?.trim() || "Prospectare proprie",
-        status: "prospecting",
+        status,
         contactState: hasContact ? "uncontacted" : "contact_missing",
-        initialSnapshot: jsonValue({ companyName, taxId: input.taxId || null, source: input.source || "Prospectare proprie", ownerId })
+        qualifiedAt: status === "qualified" ? new Date() : null,
+        initialSnapshot: jsonValue({ companyName, taxId: input.taxId || null, source: input.source || "Prospectare proprie", ownerId, status })
       }
     });
-    await tx.crmNextAction.create({
-      data: {
-        companyId: company.id,
-        prospectId: prospect.id,
-        ownerId,
-        createdByUserId: actor.id,
-        type: actionType,
-        description: input.nextActionDescription?.trim() || null,
-        dueAt
-      }
-    });
+    if (actionType && dueAt) {
+      await tx.crmNextAction.create({
+        data: {
+          companyId: company.id,
+          prospectId: prospect.id,
+          ownerId,
+          createdByUserId: actor.id,
+          type: actionType,
+          description: actionDescription,
+          dueAt
+        }
+      });
+    }
     await tx.crmEvent.create({
       data: {
         companyId: company.id,
         prospectId: prospect.id,
         actorUserId: actor.id,
         type: "PROSPECT_CREATED",
-        summary: "Prospect Cold creat.",
-        nextValues: jsonValue({ status: "prospecting", ownerId, nextActionType: actionType, nextActionDueAt: dueAt.toISOString() }),
+        summary: `Prospect creat direct in stadiul ${crmProspectStatusLabel(status)}.`,
+        nextValues: jsonValue({ status, ownerId, nextActionType: actionType, nextActionDueAt: dueAt?.toISOString() || null }),
         idempotencyKey: input.idempotencyKey || null
       }
     });
@@ -829,7 +849,7 @@ async function resolveOwner(actor: AuthSession, requested?: string | null) {
 
 async function countActiveRecordsWithoutAction(ownerId?: string) {
   const [prospects, opportunities] = await Promise.all([
-    prisma.crmProspect.count({ where: { ...(ownerId ? { ownerId } : {}), OR: [{ status: "prospecting" }, { status: "qualified", opportunities: { none: { stage: { in: [...activeOpportunityStages, "on_hold"] } } } }], nextActions: { none: { status: "open" } } } }),
+    prisma.crmProspect.count({ where: { ...(ownerId ? { ownerId } : {}), status: { in: activeProspectStatuses }, opportunities: { none: {} }, nextActions: { none: { status: "open" } } } }),
     prisma.crmOpportunity.count({ where: { ...(ownerId ? { ownerId } : {}), stage: { in: activeOpportunityStages }, nextActions: { none: { status: "open" } } } })
   ]);
   return prospects + opportunities;

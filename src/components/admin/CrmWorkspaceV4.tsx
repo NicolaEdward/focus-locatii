@@ -272,6 +272,8 @@ function CreateDialog({ mode, owners, canViewTeam, sessionUserId, onClose, onCre
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [duplicatePayload, setDuplicatePayload] = useState<Record<string, unknown> | null>(null);
+  const [prospectStatus, setProspectStatus] = useState<(typeof CRM_PROSPECT_STATUS_OPTIONS)[number]["value"]>("prospecting");
+  const qualifiedProspect = mode === "prospect" && prospectStatus === "qualified";
 
   async function submit(event: FormEvent<HTMLFormElement>, allowPotentialDuplicate = false) {
     event.preventDefault(); setPending(true); setError("");
@@ -279,6 +281,7 @@ function CreateDialog({ mode, owners, canViewTeam, sessionUserId, onClose, onCre
     const payload: Record<string, unknown> = duplicatePayload && allowPotentialDuplicate ? { ...duplicatePayload, allowPotentialDuplicate: true } : {
       action: mode === "prospect" ? "create_prospect" : "create_inbound",
       companyName: textValue(form, "companyName"), taxId: textValue(form, "taxId"), industry: textValue(form, "industry"), source: textValue(form, "source"),
+      status: mode === "prospect" ? prospectStatus : undefined,
       ownerId: textValue(form, "ownerId") || sessionUserId, contactName: textValue(form, "contactName"), contactRole: textValue(form, "contactRole"),
       email: textValue(form, "email"), phone: textValue(form, "phone"), nextActionDueAt: textValue(form, "nextActionDueAt"),
       nextActionType: mode === "prospect" ? undefined : "request_full_brief",
@@ -297,20 +300,22 @@ function CreateDialog({ mode, owners, canViewTeam, sessionUserId, onClose, onCre
     finally { setPending(false); }
   }
 
-  return <ModalShell title={mode === "prospect" ? "Prospect Cold nou" : "Oportunitate inbound"} onClose={onClose}>
+  return <ModalShell title={mode === "prospect" ? "Prospect nou" : "Oportunitate inbound"} onClose={onClose}>
     <form className="space-y-5" onSubmit={submit}>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Firmă *"><input className={fieldClass} name="companyName" required minLength={2} autoFocus /></Field>
-        <Field label={mode === "inbound" ? "CUI *" : "CUI (opțional la Cold)"}><input className={fieldClass} name="taxId" required={mode === "inbound"} /></Field>
+        <Field label={mode === "inbound" || qualifiedProspect ? "CUI *" : "CUI (opțional)"}><input className={fieldClass} name="taxId" required={mode === "inbound" || qualifiedProspect} /></Field>
+        {mode === "prospect" ? <Field label="Stadiu inițial"><select className={fieldClass} value={prospectStatus} onChange={(event) => setProspectStatus(event.target.value as (typeof CRM_PROSPECT_STATUS_OPTIONS)[number]["value"])}>{CRM_PROSPECT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field> : null}
         <Field label="Domeniu"><input className={fieldClass} name="industry" placeholder="Retail, betting, auto..." /></Field>
         <Field label="Sursă"><input className={fieldClass} name="source" placeholder="Prospectare proprie" /></Field>
         {canViewTeam ? <Field label="Responsabil"><select className={fieldClass} name="ownerId" defaultValue={sessionUserId}><option value={sessionUserId}>Eu</option>{owners.filter((owner) => owner.id !== sessionUserId).map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></Field> : null}
-        <Field label={mode === "inbound" ? "Persoană de contact *" : "Persoană de contact"}><input className={fieldClass} name="contactName" required={mode === "inbound"} /></Field>
+        <Field label={mode === "inbound" || qualifiedProspect ? "Persoană de contact *" : "Persoană de contact"}><input className={fieldClass} name="contactName" required={mode === "inbound" || qualifiedProspect} /></Field>
         <Field label="Funcție"><input className={fieldClass} name="contactRole" /></Field>
         <Field label="Email"><input className={fieldClass} name="email" type="email" /></Field>
         <Field label="Telefon"><input className={fieldClass} name="phone" inputMode="tel" /></Field>
         <Field label="Următorul contact"><input className={fieldClass} name="nextActionDueAt" type="datetime-local" /></Field>
       </div>
+      {qualifiedProspect ? <p className="rounded-md border border-emerald-400/25 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-100">Un prospect calificat pornește cu CUI și persoană de contact obligatorii. Oportunitatea comercială se creează separat, când există o nevoie OOH concretă.</p> : null}
       {mode === "inbound" ? <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Oportunitate"><input className={fieldClass} name="opportunityName" placeholder="Firmă - OOH" /></Field>
         <Field label="Nevoie concretă *" wide><textarea className={`${fieldClass} min-h-24`} name="needSummary" required /></Field>
@@ -369,7 +374,7 @@ function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { k
             <ActionSummary action={detail.nextAction} />
           </section>
           {!canEdit ? <p className="rounded-md border border-slate-700 bg-focus-navy/40 px-4 py-3 text-sm text-slate-300">Ai acces complet la informații și istoric, fără drept de modificare.</p> : null}
-          {canEdit && selected.kind === "prospect" && detail.status === "prospecting" ? <QualifyPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, payload.action === "qualify_prospect" ? "Prospectul a fost calificat." : "Prospectul a fost calificat și oportunitatea a fost creată.")} /> : null}
+          {canEdit && selected.kind === "prospect" && ["prospecting", "qualified"].includes(detail.status) ? <QualifyPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, payload.action === "qualify_prospect" ? "Prospectul a fost calificat." : "Oportunitatea a fost creată.")} /> : null}
           {canEdit && selected.kind === "opportunity" && ["opportunity", "quoted", "negotiation", "contracting"].includes(detail.stage) ? <OpportunityTransitionPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Etapa oportunității a fost actualizată.")} /> : null}
           {canEdit ? <ActivityPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Update-ul a fost adăugat în istoric.")} /> : null}
           <details className="rounded-lg border border-slate-700 bg-focus-navy/25"><summary className="cursor-pointer px-4 py-3 font-black text-white">Firmă și contacte</summary><div className="border-t border-slate-700 p-4"><CompanyContacts detail={detail} canEdit={canEdit} pending={pending} command={command} /></div></details>
@@ -394,9 +399,10 @@ function QualifyPanel({ detail, pending, onSubmit }: { detail: any; pending: boo
       geography: textValue(form, "geography"), formats: textValue(form, "formats"), nextActionType: "request_full_brief", nextActionDueAt: textValue(form, "nextActionDueAt") });
   }
   const ready = Boolean(detail.company?.taxId && detail.company?.contacts?.length);
-  return <section className="rounded-lg border border-focus-yellow/25 bg-focus-yellow/[.035] p-4"><SectionTitle title="Calificare OOH" count={0} />
+  const alreadyQualified = detail.status === "qualified";
+  return <section className="rounded-lg border border-focus-yellow/25 bg-focus-yellow/[.035] p-4"><SectionTitle title={alreadyQualified ? "Creează oportunitatea" : "Calificare OOH"} count={0} />
     {!ready ? <p className="mb-4 rounded-md bg-amber-950/60 px-3 py-2 text-sm text-amber-100">Completează CUI-ul și cel puțin un contact în secțiunea Firmă și contacte.</p> : null}
-    <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}><Field label="Oportunitate"><input className={fieldClass} name="opportunityName" defaultValue={`${detail.companyName} - OOH`} /></Field><Field label="Nevoie concretă" wide><textarea className={`${fieldClass} min-h-20`} name="needSummary" /></Field><Field label="Geografie"><input className={fieldClass} name="geography" /></Field><Field label="Formate"><input className={fieldClass} name="formats" /></Field><Field label="Următorul pas *"><input className={fieldClass} name="nextActionDueAt" type="datetime-local" required defaultValue={localInputDate(addDays(new Date(), 2))} /></Field><div className="flex flex-wrap items-end justify-end gap-2 sm:col-span-2"><button className={secondaryButton} disabled={pending || !ready} name="intent" type="submit" value="qualify_only">Califică fără oportunitate</button><button className={primaryButton} disabled={pending || !ready} name="intent" type="submit" value="qualify_and_create"><ArrowRight size={17} /> Califică și creează oportunitatea</button></div></form>
+    <form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}><Field label="Oportunitate"><input className={fieldClass} name="opportunityName" defaultValue={`${detail.companyName} - OOH`} /></Field><Field label="Nevoie concretă" wide><textarea className={`${fieldClass} min-h-20`} name="needSummary" /></Field><Field label="Geografie"><input className={fieldClass} name="geography" /></Field><Field label="Formate"><input className={fieldClass} name="formats" /></Field><Field label="Următorul pas *"><input className={fieldClass} name="nextActionDueAt" type="datetime-local" required defaultValue={localInputDate(addDays(new Date(), 2))} /></Field><div className="flex flex-wrap items-end justify-end gap-2 sm:col-span-2">{!alreadyQualified ? <button className={secondaryButton} disabled={pending || !ready} name="intent" type="submit" value="qualify_only">Califică fără oportunitate</button> : null}<button className={primaryButton} disabled={pending || !ready} name="intent" type="submit" value="qualify_and_create"><ArrowRight size={17} /> {alreadyQualified ? "Creează oportunitatea" : "Califică și creează oportunitatea"}</button></div></form>
   </section>;
 }
 

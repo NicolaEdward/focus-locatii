@@ -14,6 +14,8 @@ function main() {
   const reservationsService = read("src", "lib", "reservations.ts");
   const locationRoute = read("src", "app", "api", "admin", "locations", "route.ts");
   const reservationRoute = read("src", "app", "api", "admin", "reservations", "route.ts");
+  const reservationLocationsRoute = read("src", "app", "api", "admin", "reservation-locations", "route.ts");
+  const lifecycleDomain = read("src", "lib", "reservation-lifecycle-domain.ts");
   const operationalPage = read("src", "app", "admin", "operational", "page.tsx");
   const editor = read("src", "components", "admin", "LocationEditor.tsx");
   const overrideControls = read("src", "components", "admin", "inventory", "LocationAvailabilityControls.tsx");
@@ -30,6 +32,8 @@ function main() {
   assert(!dashboard.includes('import { AdminReservationsPanel }'), "the 3951-line workspace must not enter the initial dashboard chunk");
   assert(lazyWorkspace.includes("dynamic("), "legacy reservation workspace must be code-split");
   assert(lazyWorkspace.includes('view=summary'), "lazy workspace should avoid nested reservation history until edit");
+  assert(lazyWorkspace.includes("void loadAdminReservationsPanel()"), "workspace code and data should preload in parallel");
+  assert(lazyWorkspace.includes("/api/admin/reservation-locations"), "workspace must use the compact reservation location DTO");
 
   assert(locationsService.includes("adminLocationSummarySelect"), "inventory list must have an explicit minimal select");
   assert(locationsService.includes("take: pageSize"), "inventory list must have a bounded page size");
@@ -45,7 +49,13 @@ function main() {
   assert(reservations.includes('setScope("history")'), "history must load only after the user opens it");
   assert(!reservationRoute.includes("documents"), "reservation list route must not return operational proof metadata");
   assert(locationRoute.includes('requirePermission(request, "inventory.view")'), "inventory list API must enforce RBAC");
+  assert(reservationLocationsRoute.includes('requirePermission(request, "inventory.view")'), "reservation location options must enforce RBAC");
   assert(reservationRoute.includes('requireAnyPermission(request, ["reservations.view", "reservations.view.own"])'), "reservation list API must enforce RBAC");
+  assert(reservations.includes('value="HOLD_ACTIVE"'), "technical HOLD/RESERVED statuses must have one business filter");
+  assert(lifecycleDomain.includes('BOOKED: "Rezervat"'), "BOOKED must be displayed as Rezervat");
+  assert(lifecycleDomain.includes('RESERVED: "HOLD"'), "RESERVED must be displayed as HOLD");
+  assert(lazyWorkspace.includes("initialOccupancySummary"), "workspace must receive the canonical occupancy summary");
+  assert(read("src", "app", "api", "reservations", "route.ts").includes('view === "occupancy-summary"'), "mutations must refresh a compact occupancy summary");
 
   assert(operationalPage.includes("AdminReservationsPanel"), "operational workflows must remain in the operational module");
   assert(!editor.includes('label="Motiv blocare"'), "legacy scalar block editor must not remain as a second write UI");
@@ -55,7 +65,7 @@ function main() {
   assert(reservationsService.includes("assertCanonicalReservationAvailabilityForWrite"), "reservation writes must keep the canonical conflict service");
   assert(reservationsService.includes("lockReservationLocationsForWrite"), "reservation writes must keep the row lock");
 
-  console.log(JSON.stringify({ ok: true, checked: 25 }, null, 2));
+  console.log(JSON.stringify({ ok: true, checked: 27 }, null, 2));
 }
 
 function blockFrom(source, start, end) {

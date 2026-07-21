@@ -24,6 +24,18 @@ export type CrmProspectStatus = typeof CRM_PROSPECT_STATUS_OPTIONS[number]["valu
 export type CrmOpportunityStage = typeof CRM_OPPORTUNITY_STAGE_OPTIONS[number]["value"];
 export type CrmForecastLevel = "pipeline" | "possible" | "commit" | "won" | "excluded";
 
+export function crmAssertInitialProspectRequirements(status: string, normalizedTaxId?: string | null, contactName?: string | null) {
+  if (!CRM_PROSPECT_STATUS_OPTIONS.some((option) => option.value === status)) {
+    throw new Error("Stadiul initial al prospectului nu este valid.");
+  }
+  if (status === "qualified" && !normalizedTaxId) {
+    throw new Error("CUI-ul este obligatoriu pentru un prospect calificat.");
+  }
+  if (status === "qualified" && !contactName?.trim()) {
+    throw new Error("Persoana de contact este obligatorie pentru un prospect calificat.");
+  }
+}
+
 export const CRM_ACTIVE_PROSPECT_STATUSES: readonly CrmProspectStatus[] = ["prospecting", "qualified"];
 export const CRM_ACTIVE_OPPORTUNITY_STAGES: readonly CrmOpportunityStage[] = [
   "opportunity",

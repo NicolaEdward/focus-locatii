@@ -57,6 +57,11 @@ function domainRules() {
   assert.doesNotThrow(() => domain.crmAssertProspectTransition("prospecting", "qualified"));
   assert.throws(() => domain.crmAssertProspectTransition("inactive", "qualified"), /nu este permisa/);
   assert.throws(() => domain.crmValidateActionForStage("prospecting", "send_final_version"), /nu este disponibila/);
+  assert.doesNotThrow(() => domain.crmAssertInitialProspectRequirements("prospecting", null, null));
+  assert.doesNotThrow(() => domain.crmAssertInitialProspectRequirements("return_later", null, null));
+  assert.doesNotThrow(() => domain.crmAssertInitialProspectRequirements("qualified", "RO12345678", "Contact Test"));
+  assert.throws(() => domain.crmAssertInitialProspectRequirements("qualified", null, "Contact Test"), /CUI-ul este obligatoriu/);
+  assert.throws(() => domain.crmAssertInitialProspectRequirements("qualified", "RO12345678", null), /Persoana de contact este obligatorie/);
 
   const totals = analytics.crmOpportunityTotals([
     { stage: "negotiation", quotedValue: 4000, currency: "EUR" },
@@ -124,6 +129,8 @@ function sourceArchitectureRules() {
   assert(service.includes("CRM_VERSION_CONFLICT"));
   assert(service.includes("idempotencyKey"));
   assert(service.includes("CRM_ACTIVE_PROSPECT_EXISTS"));
+  assert(service.includes("opportunities: { none: {} }"), "converted prospects must not be listed beside their opportunities");
+  assert(commands.includes('"return_later", "disqualified", "on_hold", "inactive"'), "create API must validate every initial prospect stage");
   assert(service.includes("CUI-ul este obligatoriu inainte de calificare"));
   assert(service.includes("Valoarea integrala, moneda si data estimata"));
   assert(service.includes("OPPORTUNITY_WON"));
@@ -136,7 +143,9 @@ function sourceArchitectureRules() {
   for (const stage of ["opportunity", "quoted", "negotiation", "contracting"]) assert(workspace.includes(stage));
   assert(workspace.includes("min-w-[1080px] grid-cols-4"), "opportunity pipeline must be one controlled horizontal row");
   assert(workspace.includes("overflow-x-auto"));
-  assert(workspace.includes("Prospect Cold nou"));
+  assert(workspace.includes("Prospect nou"));
+  assert(workspace.includes("CRM_PROSPECT_STATUS_OPTIONS.map"), "new prospect form must expose every prospect stage");
+  assert(workspace.includes("qualifiedProspect"), "qualified create fields must be conditionally required");
   assert(workspace.includes("Oportunitate inbound"));
   assert(workspace.includes('value="qualify_only"'));
   assert(commands.includes('raw.action === "qualify_prospect"'));

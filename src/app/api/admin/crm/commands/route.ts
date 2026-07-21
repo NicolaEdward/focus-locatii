@@ -81,7 +81,7 @@ const idempotency = z.string().trim().max(191).nullable().optional();
 
 const createProspectSchema = z.object({
   action: z.literal("create_prospect"), companyName: z.string().trim().min(2).max(191), taxId: optionalText, industry: optionalText,
-  website: optionalText, source: optionalText, ownerId: optionalText, contactName: optionalText, contactRole: optionalText,
+  website: optionalText, source: optionalText, ownerId: optionalText, status: z.enum(["prospecting", "qualified", "return_later", "disqualified", "on_hold", "inactive"]).optional(), contactName: optionalText, contactRole: optionalText,
   email: z.string().trim().email().nullable().optional().or(z.literal("")), phone: optionalText, nextActionType: optionalText,
   nextActionDescription: optionalText, nextActionDueAt: optionalDate, allowPotentialDuplicate: z.boolean().optional(), idempotencyKey: idempotency
 });

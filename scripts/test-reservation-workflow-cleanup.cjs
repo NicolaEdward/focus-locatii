@@ -108,8 +108,8 @@ function groupEditContextIsClear() {
 
 function bookingHoldRequirementsAreExplained() {
   const panel = read("src", "components", "admin", "AdminReservationsPanel.tsx");
-  assert(panel.includes("HOLD/RESERVED poate porni cu date de contact sau client estimat"), "hold requirements should be visible");
-  assert(panel.includes("BOOKED cere client si campanie reale din baza de date"), "booked requirements should be visible");
+  assert(panel.includes("Un HOLD blocheaza temporar locatia timp de 5 zile"), "hold requirements should be visible in business language");
+  assert(panel.includes("O rezervare confirmata cere client si campanie reale"), "confirmed reservation requirements should be visible");
   assert(panel.includes('form.status === "BOOKED" && (!form.clientId || !form.campaignId)'), "booked save should stay blocked until linked client/campaign exists");
 }
 

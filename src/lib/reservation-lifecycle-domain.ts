@@ -1,5 +1,15 @@
 export const HOLD_DURATION_DAYS = 5;
 
+export function reservationBusinessStatusLabel(status: string) {
+  return ({
+    HOLD: "HOLD",
+    RESERVED: "HOLD",
+    BOOKED: "Rezervat",
+    CANCELLED: "Anulat",
+    EXPIRED: "Expirat"
+  } as Record<string, string>)[status] || status;
+}
+
 const HOLD_STATUSES = ["HOLD", "RESERVED"] as const;
 
 export function holdExpirationFrom(value = new Date()) {

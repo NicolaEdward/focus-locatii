@@ -19,6 +19,9 @@ async function main() {
     "/admin/locatii",
     "/api/admin/locations?page=1",
     "/api/admin/reservations?scope=active&page=1",
+    "/api/admin/reservation-locations",
+    "/api/reservations?view=occupancy-summary",
+    "/api/reservations?view=summary",
     "/api/reservations",
     "/api/locations?scope=admin"
   ];

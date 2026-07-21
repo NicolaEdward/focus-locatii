@@ -199,11 +199,11 @@ export function LocationEditor({
             <label className="grid gap-2">
               <span className="text-sm font-bold">Status disponibilitate vechi</span>
               <select className="focus-input" value={state.status} onChange={(event) => update("status", event.target.value as LocationStatus)}>
-                <option value="AVAILABLE">AVAILABLE</option>
-                <option value="AVAILABLE_FROM">AVAILABLE_FROM</option>
-                <option value="BOOKED">BOOKED</option>
-                <option value="RESERVED">RESERVED</option>
-                <option value="UNKNOWN">UNKNOWN</option>
+                <option value="AVAILABLE">Disponibila</option>
+                <option value="AVAILABLE_FROM">Disponibila dintr-o data</option>
+                <option value="BOOKED">Rezervata (legacy)</option>
+                <option value="RESERVED">HOLD (legacy)</option>
+                <option value="UNKNOWN">De verificat</option>
               </select>
             </label>
             <Text label="Disponibil din" type="date" value={state.availableFrom} onChange={(value) => update("availableFrom", value)} />

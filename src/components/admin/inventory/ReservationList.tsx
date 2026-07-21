@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CalendarDays, History, LoaderCircle, Search, Settings2 } from "lucide-react";
 import type { OccupancySummaryDTO, ReservationListItemDTO, ReservationPageDTO } from "@/types/location";
 import { OccupancySummary } from "@/components/admin/inventory/OccupancySummary";
+import { reservationBusinessStatusLabel } from "@/lib/reservation-lifecycle-domain";
 
 type ReservationFilters = {
   query: string;
@@ -89,7 +90,7 @@ export function ReservationList({
         <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_190px_auto]">
           <label className="relative min-w-0"><Search className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-slate-400" /><input className="focus-input min-w-0 pl-10" value={query} onChange={(event) => changeFilter(() => setQuery(event.target.value))} placeholder="Client, campanie, locatie, contract" /></label>
           <select className="focus-input min-w-0" value={status} onChange={(event) => changeFilter(() => setStatus(event.target.value))}>
-            <option value="">Toate statusurile</option><option value="HOLD">HOLD</option><option value="RESERVED">RESERVED</option><option value="BOOKED">BOOKED</option><option value="CANCELLED">CANCELLED</option><option value="EXPIRED">EXPIRED</option>
+            <option value="">Toate statusurile</option><option value="HOLD_ACTIVE">HOLD</option><option value="BOOKED">Rezervat</option><option value="CANCELLED">Anulat</option><option value="EXPIRED">Expirat</option>
           </select>
           <div className="inline-flex rounded-lg border border-focus-line bg-focus-navy p-1" aria-label="Perioada rezervarilor">
             <button className={`rounded-md px-3 py-2 text-sm font-black ${scope === "active" ? "bg-focus-yellow text-focus-navy" : "text-slate-200"}`} type="button" onClick={() => changeFilter(() => setScope("active"))}>Active</button>
@@ -121,7 +122,7 @@ function ReservationCard({ item, onOpen }: { item: ReservationListItemDTO; onOpe
 
 function ReservationStatus({ status, holdExpiresAt }: { status: ReservationListItemDTO["status"]; holdExpiresAt: string | null }) {
   const tone = status === "BOOKED" ? "border-red-400/40 bg-red-400/10 text-red-100" : status === "HOLD" || status === "RESERVED" ? "border-amber-400/40 bg-amber-400/10 text-amber-100" : "border-slate-500/40 bg-slate-500/10 text-slate-200";
-  return <div><span className={`inline-flex rounded-full border px-2 py-1 text-xs font-black ${tone}`}>{status}</span>{holdExpiresAt && (status === "HOLD" || status === "RESERVED") ? <p className="mt-1 text-[11px] text-slate-400">Expira {formatDateTime(holdExpiresAt)}</p> : null}</div>;
+  return <div><span className={`inline-flex rounded-full border px-2 py-1 text-xs font-black ${tone}`}>{reservationBusinessStatusLabel(status)}</span>{holdExpiresAt && (status === "HOLD" || status === "RESERVED") ? <p className="mt-1 text-[11px] text-slate-400">Expira {formatDateTime(holdExpiresAt)}</p> : null}</div>;
 }
 
 function Th({ children }: { children: ReactNode }) { return <th className="px-4 py-3 font-black">{children}</th>; }

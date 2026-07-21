@@ -9,6 +9,7 @@ const baseUrl = String(process.env.CAPTURE_BASE_URL || "http://127.0.0.1:3015").
 const password = process.env.PREVIEW_TEST_PASSWORD;
 const debugPort = Number(process.env.CAPTURE_CHROME_PORT || 9231);
 const outDir = path.resolve(process.cwd(), process.env.CAPTURE_OUT_DIR || "artifacts/release-screenshots");
+const workflowChecks = process.env.CAPTURE_WORKFLOW_CHECKS === "true";
 if (!password) throw new Error("PREVIEW_TEST_PASSWORD lipsește.");
 
 const viewports = [
@@ -97,6 +98,7 @@ async function capturePage(page, viewport, cookie) {
     const snippet = await client.send("Runtime.evaluate", { expression: "document.body.innerText.slice(0, 800)", returnByValue: true });
     throw new Error(`${page.name}/${viewport.name} nu conține «${page.expected}»: ${snippet.result?.value || ""}`);
   }
+  if (workflowChecks && viewport.name === "desktop") await runWorkflowCheck(client, page.name);
   const overflow = await client.send("Runtime.evaluate", { expression: "document.documentElement.scrollWidth > document.documentElement.clientWidth + 1", returnByValue: true });
   if (overflow.result?.value) throw new Error(`${page.name}/${viewport.name} are overflow orizontal.`);
   const screenshot = await client.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
@@ -121,6 +123,79 @@ async function capturePage(page, viewport, cookie) {
   if (errors.length) console.error(JSON.stringify({ errors: errors.map((event) => ({ method: event.method, params: event.params })), requestDiagnostics, failedBodies }, null, 2));
   if (errors.length) throw new Error(`${page.name}/${viewport.name} are ${errors.length} erori console/runtime.`);
   return filePath;
+}
+
+async function runWorkflowCheck(client, pageName) {
+  if (pageName === "locations") {
+    const before = await occupancyValues(client);
+    const startedAt = Date.now();
+    await clickButton(client, "Rezervare noua");
+    await waitForExpression(client, "document.body.textContent.includes('Gestionare completa rezervari')", 30000);
+    await waitForExpression(client, "document.body.innerText.toLocaleLowerCase('ro').split('ocupate acum').length >= 3", 30000);
+    const after = await occupancyValues(client);
+    for (const label of Object.keys(before)) {
+      if (!before[label]?.length) throw new Error(`Statistica ${label} lipseste din pagina principala.`);
+      if (after[label]?.length < 2 || after[label].some((value) => value !== before[label][0])) {
+        throw new Error(`Statisticile ${label} nu coincid intre pagina si panoul complet: ${JSON.stringify({ before, after })}`);
+      }
+    }
+    const labels = await client.send("Runtime.evaluate", {
+      expression: "document.body.textContent.includes('HOLD - 5 zile') && document.body.textContent.includes('Rezervat - contract confirmat')",
+      returnByValue: true
+    });
+    if (!labels.result?.value) throw new Error("Etichetele comerciale HOLD/Rezervat lipsesc din formularul de rezervare.");
+    console.log(JSON.stringify({ workflow: "location-reservation", loadMs: Date.now() - startedAt, occupancy: before }));
+    return;
+  }
+
+  if (pageName === "crm") {
+    await clickButton(client, "Prospect nou");
+    await waitForExpression(client, "document.body.textContent.includes('Stadiu inițial')", 10000);
+    const qualified = await client.send("Runtime.evaluate", {
+      expression: `(() => {
+        const select = Array.from(document.querySelectorAll('select')).find((item) => Array.from(item.options).some((option) => option.value === 'qualified'));
+        if (!select) return false;
+        select.value = 'qualified';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    if (!qualified.result?.value) throw new Error("Stadiul Calificat nu exista in formularul de prospect.");
+    await waitForExpression(client, `(() => {
+      const taxId = document.querySelector('input[name="taxId"]');
+      const contact = document.querySelector('input[name="contactName"]');
+      return Boolean(taxId?.required && contact?.required && document.body.textContent.includes('persoană de contact obligatorii'));
+    })()`, 10000);
+    console.log(JSON.stringify({ workflow: "crm-qualified-prospect", requiredFields: ["taxId", "contactName"] }));
+  }
+}
+
+async function clickButton(client, text) {
+  const result = await client.send("Runtime.evaluate", {
+    expression: `(() => {
+      const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.trim().includes(${JSON.stringify(text)}));
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`,
+    returnByValue: true
+  });
+  if (!result.result?.value) throw new Error(`Butonul ${text} nu a fost gasit.`);
+}
+
+async function occupancyValues(client) {
+  const labels = ["Ocupate acum", "HOLD activ", "Urmeaza", "Active / viitoare"];
+  const result = await client.send("Runtime.evaluate", {
+    expression: `(() => {
+      const lines = document.body.innerText.split('\\n').map((line) => line.trim()).filter(Boolean);
+      return Object.fromEntries(${JSON.stringify(labels)}.map((label) => [label, lines
+        .map((line, index) => line.toLocaleLowerCase('ro') === label.toLocaleLowerCase('ro') ? lines.slice(index + 1, index + 4).find((candidate) => /^\\d+$/.test(candidate)) : null)
+        .filter(Boolean)]));
+    })()`,
+    returnByValue: true
+  });
+  return result.result?.value || {};
 }
 
 async function login(email) {

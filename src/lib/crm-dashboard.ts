@@ -29,8 +29,8 @@ export async function getCrmTeamDashboardData(now = new Date()) {
     prisma.crmEvent.groupBy({ by: ["actorUserId"], where: { actorUserId: { not: null }, occurredAt: { gte: lastThirtyDays } }, _count: { _all: true } })
   ]);
 
-  const activeProspects = prospects.filter((row) => activeProspectStatuses.includes(row.status));
-  const actionableProspects = activeProspects.filter((row) => row.status === "prospecting" || !row.opportunities.length);
+  const activeProspects = prospects.filter((row) => activeProspectStatuses.includes(row.status) && !row.opportunities.length);
+  const actionableProspects = activeProspects;
   const activeOpportunities = opportunities.filter((row) => activeOpportunityStages.includes(row.stage));
   const activeRecords = [...activeProspects, ...activeOpportunities];
   const totals = crmOpportunityTotals(opportunities);
@@ -56,8 +56,8 @@ export async function getCrmTeamDashboardData(now = new Date()) {
   const sellerRows = sellers.map((seller) => {
     const ownProspects = prospects.filter((row) => row.ownerId === seller.id);
     const ownOpportunities = opportunities.filter((row) => row.ownerId === seller.id);
-    const ownActiveProspects = ownProspects.filter((row) => activeProspectStatuses.includes(row.status));
-    const ownActionableProspects = ownActiveProspects.filter((row) => row.status === "prospecting" || !row.opportunities.length);
+    const ownActiveProspects = ownProspects.filter((row) => activeProspectStatuses.includes(row.status) && !row.opportunities.length);
+    const ownActionableProspects = ownActiveProspects;
     const ownActiveOpportunities = ownOpportunities.filter((row) => activeOpportunityStages.includes(row.stage));
     const ownActive = [...ownActiveProspects, ...ownActiveOpportunities];
     const ownActions = actions.filter((row) => row.ownerId === seller.id);

@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { AdminSalesMap } from "@/components/admin/AdminSalesMap";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import type { LocationDTO, OfferRequestDTO, OfferRequestStatus, ReservationDTO, ReservationStatus } from "@/types/location";
+import type { AdminLocationListItemDTO, OccupancySummaryDTO, OfferRequestDTO, OfferRequestStatus, ReservationDTO, ReservationStatus } from "@/types/location";
 import { calculateAvailability } from "@/lib/availability";
 import {
   isOperationActive,
@@ -45,6 +45,7 @@ import {
 import type { AuthSession } from "@/lib/auth";
 import { hasAnyPermission, hasPermission } from "@/lib/rbac";
 import { allowedReservationTransitions } from "@/lib/reservation-workflow";
+import { reservationBusinessStatusLabel } from "@/lib/reservation-lifecycle-domain";
 import { companyEntities, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS } from "@/lib/operation-schedule";
 import { OPERATIONAL_PROOF_MAX_FILES_PER_TASK, canCompleteOperationalReservation, canRescheduleOperationalReservation } from "@/lib/operational-proof";
@@ -244,15 +245,17 @@ const requestStatuses: OfferRequestStatus[] = ["NEW", "CONTACTED", "ARCHIVED"];
 export function AdminReservationsPanel({
   locations,
   initialReservations,
+  initialOccupancySummary,
   initialOfferRequests,
   onLocationsUpdated,
   session,
   workspace = "locations"
 }: {
-  locations: LocationDTO[];
+  locations: AdminLocationListItemDTO[];
   initialReservations: ReservationDTO[];
+  initialOccupancySummary?: OccupancySummaryDTO;
   initialOfferRequests: OfferRequestDTO[];
-  onLocationsUpdated?: (locations: LocationDTO[]) => void;
+  onLocationsUpdated?: (locations: AdminLocationListItemDTO[]) => void;
   session: AuthSession;
   workspace?: ReservationsWorkspace;
 }) {
@@ -283,6 +286,9 @@ export function AdminReservationsPanel({
     isOperationalWorkspace ? "decorations" : "sales"
   );
   const [reservations, setReservations] = useState(initialReservations);
+  const [occupancySummary, setOccupancySummary] = useState<OccupancySummaryDTO>(
+    initialOccupancySummary || summarizeReservationOccupancy(initialReservations)
+  );
   const [offerRequests, setOfferRequests] = useState(initialOfferRequests);
   const [form, setForm] = useState<ReservationForm>(initialForm);
   const [sellers, setSellers] = useState<SellerUser[]>([]);
@@ -323,6 +329,10 @@ export function AdminReservationsPanel({
   useEffect(() => {
     setReservations(initialReservations);
   }, [initialReservations]);
+
+  useEffect(() => {
+    setOccupancySummary(initialOccupancySummary || summarizeReservationOccupancy(initialReservations));
+  }, [initialOccupancySummary, initialReservations]);
 
   useEffect(() => {
     if (!shouldLoadReservationOptions) {
@@ -470,7 +480,7 @@ export function AdminReservationsPanel({
   }, [locationSearch, sortedLocations]);
 
   const selectedLocations = useMemo(
-    () => form.locationIds.map((id) => locationsById.get(id)).filter(Boolean) as LocationDTO[],
+    () => form.locationIds.map((id) => locationsById.get(id)).filter(Boolean) as AdminLocationListItemDTO[],
     [form.locationIds, locationsById]
   );
 
@@ -511,17 +521,6 @@ export function AdminReservationsPanel({
 
   const reservationFormDirty = useMemo(() => isReservationFormDirty(form, initialForm), [form, initialForm]);
   const reservationFormPeriodError = useMemo(() => reservationPeriodError(form.periodStart, form.periodEnd), [form.periodEnd, form.periodStart]);
-
-  const locationStats = useMemo(
-    () => ({
-      total: locations.length,
-      available: locations.filter((location) => location.publicStatus === "AVAILABLE" && !location.availabilityDetail).length,
-      futureBooked: locations.filter((location) => location.publicStatus === "AVAILABLE" && Boolean(location.availabilityDetail)).length,
-      holds: locations.filter((location) => location.publicStatus === "RESERVED").length,
-      occupied: locations.filter((location) => location.publicStatus === "BOOKED").length
-    }),
-    [locations]
-  );
 
   const monthlySales = useMemo(() => {
     const range = monthInputRange(salesLogMonth);
@@ -709,7 +708,7 @@ export function AdminReservationsPanel({
     [allDecorationTasks, allNeutralizationTasks, decorationWindowEnd, futureReservations.length, neutralizationWindowEnd, operationalReservations.length]
   );
 
-  const toggleLocation = useCallback((location: LocationDTO) => {
+  const toggleLocation = useCallback((location: AdminLocationListItemDTO) => {
     setForm((current) => {
       const isSelected = current.locationIds.includes(location.id);
       return {
@@ -1196,13 +1195,20 @@ export function AdminReservationsPanel({
   }
 
   async function refreshLocations() {
-    if (!onLocationsUpdated) return;
-    const response = await fetch(`/api/locations?scope=admin&ts=${Date.now()}`, {
-      cache: "no-store"
-    });
-    if (!response.ok) return;
-    const payload = await response.json();
-    if (Array.isArray(payload.locations)) onLocationsUpdated(payload.locations);
+    const [locationsResponse, summaryResponse] = await Promise.all([
+      onLocationsUpdated
+        ? fetch(`/api/admin/reservation-locations?ts=${Date.now()}`, { cache: "no-store" })
+        : Promise.resolve(null),
+      fetch(`/api/reservations?view=occupancy-summary&ts=${Date.now()}`, { cache: "no-store" })
+    ]);
+    if (locationsResponse?.ok) {
+      const payload = await locationsResponse.json();
+      if (Array.isArray(payload.locations)) onLocationsUpdated?.(payload.locations);
+    }
+    if (summaryResponse.ok) {
+      const payload = await summaryResponse.json();
+      if (payload.summary) setOccupancySummary(payload.summary);
+    }
   }
 
   const visibleOfferRequests = offerRequests.filter((request) => {
@@ -1235,11 +1241,10 @@ export function AdminReservationsPanel({
               </>
             ) : (
               <>
-                <MiniStat label="Total locatii" value={locationStats.total.toString()} />
-                <MiniStat label="Libere acum" value={locationStats.available.toString()} tone="green" />
-                <MiniStat label="Libere temporar" value={locationStats.futureBooked.toString()} tone="yellow" />
-                <MiniStat label="Hold activ" value={locationStats.holds.toString()} tone="yellow" />
-                <MiniStat label="Ocupate" value={locationStats.occupied.toString()} tone="red" />
+                <MiniStat label="Ocupate acum" value={occupancySummary.occupiedNow.toString()} tone="red" />
+                <MiniStat label="HOLD activ" value={occupancySummary.activeHolds.toString()} tone="yellow" />
+                <MiniStat label="Urmeaza" value={occupancySummary.upcoming.toString()} />
+                <MiniStat label="Active / viitoare" value={occupancySummary.activeOrUpcoming.toString()} tone="green" />
               </>
             )}
           </div>
@@ -1398,11 +1403,11 @@ export function AdminReservationsPanel({
                   campaignName: status === "BOOKED" ? "" : form.campaignName
                 })}
               >
-                <option value="RESERVED">Hold intern - 5 zile</option>
-                {canCreateBookedReservation ? <option value="BOOKED">Inchiriat / contract inchis</option> : null}
+                <option value="RESERVED">HOLD - 5 zile</option>
+                {canCreateBookedReservation ? <option value="BOOKED">Rezervat - contract confirmat</option> : null}
               </SelectField>
               <p className="rounded-lg border border-focus-line bg-focus-navy/35 px-3 py-2 text-xs font-bold text-slate-400 md:col-span-2">
-                HOLD/RESERVED poate porni cu date de contact sau client estimat. BOOKED cere client si campanie reale din baza de date, ca facturarea si operatiunile sa fie legate corect.
+                Un HOLD blocheaza temporar locatia timp de 5 zile. O rezervare confirmata cere client si campanie reale, ca facturarea si operatiunile sa fie legate corect.
               </p>
               <SellerAssignmentField
                 canAssignOtherSeller={canAssignOtherSeller}
@@ -1701,7 +1706,7 @@ export function AdminReservationsPanel({
                   <p className="text-xs font-black uppercase text-focus-yellow">In lucru acum</p>
                   <h3 className="font-display text-2xl font-black uppercase text-white">Inchirieri active ({activeRentals.length})</h3>
                   <p className="mt-1 text-sm font-bold text-slate-300">
-                    Contracte BOOKED aflate in perioada curenta. De aici corectezi rapid clientul, campania, perioada sau pretul fara sa cauti dupa luna vanzarii.
+                    Rezervari confirmate aflate in perioada curenta. De aici corectezi rapid clientul, campania, perioada sau pretul fara sa cauti dupa luna vanzarii.
                   </p>
                 </div>
               </div>
@@ -1916,9 +1921,9 @@ function SelectedLocationsCard({
   onRemove,
   onClear
 }: {
-  selectedLocations: LocationDTO[];
+  selectedLocations: AdminLocationListItemDTO[];
   rentShare: number | null;
-  onRemove: (location: LocationDTO) => void;
+  onRemove: (location: AdminLocationListItemDTO) => void;
   onClear: () => void;
 }) {
   if (!selectedLocations.length) {
@@ -2403,7 +2408,7 @@ function ReservationSummary({
   periodEnd,
   monthlyRentTotal
 }: {
-  selectedLocations: LocationDTO[];
+  selectedLocations: AdminLocationListItemDTO[];
   clientName: string;
   periodStart: string;
   periodEnd: string;
@@ -2916,7 +2921,7 @@ function ReservationsTable({
   highlightedReservationId
 }: {
   reservations: ReservationDTO[];
-  locationsById: Map<string, LocationDTO>;
+  locationsById: Map<string, AdminLocationListItemDTO>;
   onDelete: (id: string) => void;
   onEdit: (reservation: ReservationDTO) => void;
   onStatusChange: (id: string, status: ReservationStatus) => void;
@@ -3044,7 +3049,7 @@ function DecorationBillingSummary({
   visible = true
 }: {
   report: DecorationBillingReport;
-  locationsById: Map<string, LocationDTO>;
+  locationsById: Map<string, AdminLocationListItemDTO>;
   month: string;
   onMonthChange: (value: string) => void;
   visible?: boolean;
@@ -3158,7 +3163,7 @@ function OperationsTable({
   showCost = true
 }: {
   tasks: OperationTableTask[];
-  locationsById: Map<string, LocationDTO>;
+  locationsById: Map<string, AdminLocationListItemDTO>;
   type: "decoration" | "neutralization";
   today: Date;
   onStatusChange: (id: string, kind: OperationKind, status: OperationStatus, taskId?: string | null) => void;
@@ -3871,14 +3876,7 @@ function moneyLabel(value: number) {
 }
 
 function statusLabel(status: ReservationStatus) {
-  const labels: Record<ReservationStatus, string> = {
-    HOLD: "Hold intern - 5 zile",
-    RESERVED: "Hold intern - 5 zile",
-    BOOKED: "Inchiriat / inchis",
-    CANCELLED: "Anulat",
-    EXPIRED: "Expirat"
-  };
-  return labels[status];
+  return reservationBusinessStatusLabel(status);
 }
 
 function requestStatusLabel(status: OfferRequestStatus) {
@@ -3925,6 +3923,29 @@ function occupiedPeriodsLabel(locationId: string, reservations: ReservationDTO[]
     .slice(0, 3)
     .map((reservation) => `${dateLabel(reservation.periodStart)} - ${dateLabel(reservation.periodEnd)}`);
   return periods.length ? `Ocupat: ${periods.join("; ")}` : null;
+}
+
+function summarizeReservationOccupancy(reservations: ReservationDTO[], now = new Date()): OccupancySummaryDTO {
+  const today = startOfUtcDay(now);
+  const blocks = (reservation: ReservationDTO) => {
+    if (reservation.status === "BOOKED") return true;
+    if (reservation.status !== "HOLD" && reservation.status !== "RESERVED") return false;
+    const expiresAt = reservation.holdExpiresAt
+      ? new Date(reservation.holdExpiresAt)
+      : addDays(new Date(reservation.createdAt), 5);
+    return expiresAt > now;
+  };
+
+  return {
+    activeHolds: reservations.filter((row) =>
+      (row.status === "HOLD" || row.status === "RESERVED") && blocks(row) && new Date(row.periodEnd) >= today
+    ).length,
+    occupiedNow: reservations.filter((row) =>
+      row.status === "BOOKED" && new Date(row.periodStart) <= today && new Date(row.periodEnd) >= today
+    ).length,
+    upcoming: reservations.filter((row) => blocks(row) && new Date(row.periodStart) > today).length,
+    activeOrUpcoming: reservations.filter((row) => blocks(row) && new Date(row.periodEnd) >= today).length
+  };
 }
 
 function currentMonthInputValue() {

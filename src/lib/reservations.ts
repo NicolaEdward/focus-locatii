@@ -259,18 +259,42 @@ export async function listReservationPage(
   const requestedPage = clampInteger(filters.page, 1, 1, 100_000);
   const accessWhere = reservationAccessWhere(actor);
   const where = paginatedReservationWhere(filters, actor, now, today);
-  const total = await prisma.reservation.count({ where });
+  const [total, summary] = await Promise.all([
+    prisma.reservation.count({ where }),
+    getReservationOccupancySummary(actor, now)
+  ]);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const pageNumber = Math.min(requestedPage, totalPages);
 
-  const [rows, activeHolds, occupiedNow, upcoming, activeOrUpcoming] = await Promise.all([
-    prisma.reservation.findMany({
-      where,
-      select: reservationListItemSelect,
-      orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }, { updatedAt: "desc" }],
-      skip: (pageNumber - 1) * pageSize,
-      take: pageSize
-    }),
+  const rows = await prisma.reservation.findMany({
+    where,
+    select: reservationListItemSelect,
+    orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }, { updatedAt: "desc" }],
+    skip: (pageNumber - 1) * pageSize,
+    take: pageSize
+  });
+
+  return {
+    page: {
+      items: rows.map(serializeReservationListItem),
+      page: pageNumber,
+      pageSize,
+      total,
+      totalPages,
+      hasNextPage: pageNumber < totalPages,
+      hasPreviousPage: pageNumber > 1
+    },
+    summary
+  };
+}
+
+export async function getReservationOccupancySummary(
+  actor?: AuthSession | null,
+  now = new Date()
+): Promise<OccupancySummaryDTO> {
+  const today = startOfUtcDay(now);
+  const accessWhere = reservationAccessWhere(actor);
+  const [activeHolds, occupiedNow, upcoming, activeOrUpcoming] = await Promise.all([
     prisma.reservation.count({
       where: combineReservationWhere(accessWhere, effectiveHoldWhere(now), { periodEnd: { gte: today } })
     }),
@@ -285,18 +309,7 @@ export async function listReservationPage(
     })
   ]);
 
-  return {
-    page: {
-      items: rows.map(serializeReservationListItem),
-      page: pageNumber,
-      pageSize,
-      total,
-      totalPages,
-      hasNextPage: pageNumber < totalPages,
-      hasPreviousPage: pageNumber > 1
-    },
-    summary: { activeHolds, occupiedNow, upcoming, activeOrUpcoming }
-  };
+  return { activeHolds, occupiedNow, upcoming, activeOrUpcoming };
 }
 
 function reservationListWhere(
@@ -333,7 +346,8 @@ function paginatedReservationWhere(
   const scope = filters.scope === "history" || filters.scope === "all" ? filters.scope : "active";
   const status = normalizeReservationStatus(filters.status);
 
-  if (status) parts.push({ status });
+  if (filters.status === "HOLD_ACTIVE") parts.push({ status: { in: ["HOLD", "RESERVED"] } });
+  else if (status) parts.push({ status });
   if (query) {
     parts.push({
       OR: [

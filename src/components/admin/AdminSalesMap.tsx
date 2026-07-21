@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { LocationDTO } from "@/types/location";
+import type { AdminLocationListItemDTO } from "@/types/location";
 
 type LeafletModule = typeof import("leaflet");
 
@@ -10,9 +10,9 @@ export function AdminSalesMap({
   selectedIds,
   onSelect
 }: {
-  locations: LocationDTO[];
+  locations: AdminLocationListItemDTO[];
   selectedIds?: string[];
-  onSelect: (location: LocationDTO) => void;
+  onSelect: (location: AdminLocationListItemDTO) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
@@ -109,12 +109,12 @@ export function AdminSalesMap({
   return <div ref={containerRef} className="h-[340px] min-h-[340px] rounded-lg border border-focus-line" />;
 }
 
-function statusClass(location: LocationDTO) {
+function statusClass(location: AdminLocationListItemDTO) {
   if (location.publicStatus === "AVAILABLE") return location.availabilityDetail ? "available_from" : "available";
   return location.publicStatus.toLowerCase();
 }
 
-function markerTitle(location: LocationDTO) {
+function markerTitle(location: AdminLocationListItemDTO) {
   return `${location.code} - ${location.city || "N/A"} - ${location.availabilityLabel}`;
 }
 

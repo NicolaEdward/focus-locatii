@@ -3,7 +3,7 @@ import { AdminHeader } from "@/components/admin/AdminHeader";
 import { ReceivablesWorkspace } from "@/components/admin/ReceivablesWorkspace";
 import { getAuthSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/rbac";
-import { listReceivablesWorkspace } from "@/lib/receivables-import-service";
+import { listReceivableRegistry } from "@/lib/receivables-workspace-service";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -19,18 +19,20 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
     companyCode: firstParam(params.companyCode),
     currency: firstParam(params.currency)
   };
-  const workspace = await listReceivablesWorkspace({
+  const registry = await listReceivableRegistry({
     query: filters.query,
     status: filters.status,
     companyCode: filters.companyCode,
     currency: filters.currency,
-    take: 100
+    view: "open",
+    page: Number(firstParam(params.page) || 1),
+    take: 40
   });
   return (
     <>
       <AdminHeader session={session} />
       <ReceivablesWorkspace
-        initialWorkspace={workspace}
+        initialRegistry={registry}
         initialFilters={filters}
         canImport={hasPermission(session.role, "finance.upload")}
         canValidate={hasPermission(session.role, "finance.validate")}

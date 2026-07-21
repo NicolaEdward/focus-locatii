@@ -126,6 +126,23 @@ async function capturePage(page, viewport, cookie) {
 }
 
 async function runWorkflowCheck(client, pageName) {
+  if (pageName === "finance-invoices") {
+    const initial = await client.send("Runtime.evaluate", {
+      expression: "document.body.textContent.includes('Solduri de încasat') && !document.body.textContent.includes('Reconciliere legacy')",
+      returnByValue: true
+    });
+    if (!initial.result?.value) throw new Error("Registrul financiar activ sau restricția reconciliere pentru Finance lipsesc.");
+    await clickButton(client, "Istoric facturi");
+    await waitForExpression(client, "document.body.textContent.includes('Facturi încasate')", 10000);
+    await clickButton(client, "De încasat");
+    await waitForExpression(client, "document.body.textContent.includes('Solduri de încasat')", 10000);
+    await clickButton(client, "Înregistrează plată");
+    await waitForExpression(client, "document.body.textContent.includes('Încasat anterior') && document.body.textContent.includes('Sold rămas')", 10000);
+    await clickButton(client, "Închide");
+    console.log(JSON.stringify({ workflow: "receivables-read-only", checked: ["settled-history", "payment-preview", "finance-rbac"] }));
+    return;
+  }
+
   if (pageName === "locations") {
     const before = await occupancyValues(client);
     const startedAt = Date.now();

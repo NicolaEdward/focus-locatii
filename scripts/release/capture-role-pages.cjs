@@ -307,7 +307,7 @@ async function clickButton(client, text) {
 }
 
 async function occupancyValues(client) {
-  const labels = ["Ocupate acum", "HOLD activ", "Urmeaza", "Active / viitoare"];
+  const labels = ["Ocupate acum", "HOLD activ", "Rezervari viitoare", "Total blocante"];
   const result = await client.send("Runtime.evaluate", {
     expression: `(() => {
       const lines = document.body.innerText.split('\\n').map((line) => line.trim()).filter(Boolean);

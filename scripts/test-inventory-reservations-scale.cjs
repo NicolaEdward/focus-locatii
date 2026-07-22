@@ -16,6 +16,7 @@ function main() {
   const reservationRoute = read("src", "app", "api", "admin", "reservations", "route.ts");
   const reservationLocationsRoute = read("src", "app", "api", "admin", "reservation-locations", "route.ts");
   const lifecycleDomain = read("src", "lib", "reservation-lifecycle-domain.ts");
+  const occupancySummary = read("src", "components", "admin", "inventory", "OccupancySummary.tsx");
   const operationalPage = read("src", "app", "admin", "operational", "page.tsx");
   const editor = read("src", "components", "admin", "LocationEditor.tsx");
   const overrideControls = read("src", "components", "admin", "inventory", "LocationAvailabilityControls.tsx");
@@ -63,6 +64,9 @@ function main() {
   assert(reservationWorkspace.includes('aria-label="Numele vanzatorului pentru alocare"'), "offer request assignment input must have an accessible label");
   assert(lifecycleDomain.includes('BOOKED: "Rezervat"'), "BOOKED must be displayed as Rezervat");
   assert(lifecycleDomain.includes('RESERVED: "HOLD"'), "RESERVED must be displayed as HOLD");
+  assert(lifecycleDomain.includes("activeOrUpcoming: input.occupiedNow + input.activeHolds + input.upcoming"), "occupancy total must reconcile from mutually exclusive cards");
+  assert(reservationsService.includes('{ status: "BOOKED", periodStart: { gt: today }'), "future reservation count must exclude HOLD rows already shown separately");
+  assert(occupancySummary.includes('"Rezervari viitoare"') && occupancySummary.includes('"Total blocante"'), "occupancy labels must explain the reconciled categories");
   assert(lazyWorkspace.includes("initialOccupancySummary"), "workspace must receive the canonical occupancy summary");
   assert(read("src", "app", "api", "reservations", "route.ts").includes('view === "occupancy-summary"'), "mutations must refresh a compact occupancy summary");
 
@@ -74,7 +78,7 @@ function main() {
   assert(reservationsService.includes("assertCanonicalReservationAvailabilityForWrite"), "reservation writes must keep the canonical conflict service");
   assert(reservationsService.includes("lockReservationLocationsForWrite"), "reservation writes must keep the row lock");
 
-  console.log(JSON.stringify({ ok: true, checked: 35 }, null, 2));
+  console.log(JSON.stringify({ ok: true, checked: 38 }, null, 2));
 }
 
 function blockFrom(source, start, end) {

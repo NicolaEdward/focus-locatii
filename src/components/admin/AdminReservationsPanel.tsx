@@ -45,7 +45,7 @@ import {
 import type { AuthSession } from "@/lib/auth";
 import { hasAnyPermission, hasPermission } from "@/lib/rbac";
 import { allowedReservationTransitions } from "@/lib/reservation-workflow";
-import { reservationBusinessStatusLabel } from "@/lib/reservation-lifecycle-domain";
+import { reservationBusinessStatusLabel, summarizeReservationOccupancy } from "@/lib/reservation-lifecycle-domain";
 import { companyEntities, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS } from "@/lib/operation-schedule";
 import { OPERATIONAL_PROOF_MAX_FILES_PER_TASK, canCompleteOperationalReservation, canRescheduleOperationalReservation } from "@/lib/operational-proof";
@@ -1244,8 +1244,8 @@ export function AdminReservationsPanel({
               <>
                 <MiniStat label="Ocupate acum" value={occupancySummary.occupiedNow.toString()} tone="red" />
                 <MiniStat label="HOLD activ" value={occupancySummary.activeHolds.toString()} tone="yellow" />
-                <MiniStat label="Urmeaza" value={occupancySummary.upcoming.toString()} />
-                <MiniStat label="Active / viitoare" value={occupancySummary.activeOrUpcoming.toString()} tone="green" />
+                <MiniStat label="Rezervari viitoare" value={occupancySummary.upcoming.toString()} />
+                <MiniStat label="Total blocante" value={occupancySummary.activeOrUpcoming.toString()} tone="green" />
               </>
             )}
           </div>
@@ -3926,29 +3926,6 @@ function occupiedPeriodsLabel(locationId: string, reservations: ReservationDTO[]
     .slice(0, 3)
     .map((reservation) => `${dateLabel(reservation.periodStart)} - ${dateLabel(reservation.periodEnd)}`);
   return periods.length ? `Ocupat: ${periods.join("; ")}` : null;
-}
-
-function summarizeReservationOccupancy(reservations: ReservationDTO[], now = new Date()): OccupancySummaryDTO {
-  const today = startOfUtcDay(now);
-  const blocks = (reservation: ReservationDTO) => {
-    if (reservation.status === "BOOKED") return true;
-    if (reservation.status !== "HOLD" && reservation.status !== "RESERVED") return false;
-    const expiresAt = reservation.holdExpiresAt
-      ? new Date(reservation.holdExpiresAt)
-      : addDays(new Date(reservation.createdAt), 5);
-    return expiresAt > now;
-  };
-
-  return {
-    activeHolds: reservations.filter((row) =>
-      (row.status === "HOLD" || row.status === "RESERVED") && blocks(row) && new Date(row.periodEnd) >= today
-    ).length,
-    occupiedNow: reservations.filter((row) =>
-      row.status === "BOOKED" && new Date(row.periodStart) <= today && new Date(row.periodEnd) >= today
-    ).length,
-    upcoming: reservations.filter((row) => blocks(row) && new Date(row.periodStart) > today).length,
-    activeOrUpcoming: reservations.filter((row) => blocks(row) && new Date(row.periodEnd) >= today).length
-  };
 }
 
 function currentMonthInputValue() {

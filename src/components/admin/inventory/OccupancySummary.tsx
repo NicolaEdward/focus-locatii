@@ -5,8 +5,8 @@ export function OccupancySummary({ summary }: { summary: OccupancySummaryDTO }) 
   const cards = [
     { label: "Ocupate acum", value: summary.occupiedNow, icon: ShieldCheck, tone: "text-red-200" },
     { label: "HOLD activ", value: summary.activeHolds, icon: TimerReset, tone: "text-amber-200" },
-    { label: "Urmeaza", value: summary.upcoming, icon: CalendarClock, tone: "text-sky-200" },
-    { label: "Active / viitoare", value: summary.activeOrUpcoming, icon: Clock3, tone: "text-emerald-200" }
+    { label: "Rezervari viitoare", value: summary.upcoming, icon: CalendarClock, tone: "text-sky-200" },
+    { label: "Total blocante", value: summary.activeOrUpcoming, icon: Clock3, tone: "text-emerald-200" }
   ];
 
   return (

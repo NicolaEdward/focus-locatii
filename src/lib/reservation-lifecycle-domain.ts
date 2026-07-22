@@ -39,3 +39,48 @@ export function isEffectiveBlockingReservation(
 export function isHoldStatus(status: string) {
   return HOLD_STATUSES.includes(status as (typeof HOLD_STATUSES)[number]);
 }
+
+export type ReservationOccupancySummary = {
+  activeHolds: number;
+  occupiedNow: number;
+  upcoming: number;
+  activeOrUpcoming: number;
+};
+
+export function occupancySummaryFromCounts(input: Omit<ReservationOccupancySummary, "activeOrUpcoming">): ReservationOccupancySummary {
+  return {
+    ...input,
+    activeOrUpcoming: input.occupiedNow + input.activeHolds + input.upcoming
+  };
+}
+
+export function summarizeReservationOccupancy(
+  reservations: Array<{
+    status: string;
+    periodStart: string | Date;
+    periodEnd: string | Date;
+    holdExpiresAt: string | Date | null;
+    createdAt: string | Date;
+  }>,
+  now = new Date()
+): ReservationOccupancySummary {
+  const today = startOfUtcDay(now);
+  const activeHolds = reservations.filter((row) =>
+    isEffectiveHold({
+      status: row.status,
+      holdExpiresAt: row.holdExpiresAt ? new Date(row.holdExpiresAt) : null,
+      createdAt: new Date(row.createdAt)
+    }, now) && new Date(row.periodEnd) >= today
+  ).length;
+  const occupiedNow = reservations.filter((row) =>
+    row.status === "BOOKED" && new Date(row.periodStart) <= today && new Date(row.periodEnd) >= today
+  ).length;
+  const upcoming = reservations.filter((row) =>
+    row.status === "BOOKED" && new Date(row.periodStart) > today && new Date(row.periodEnd) >= today
+  ).length;
+  return occupancySummaryFromCounts({ activeHolds, occupiedNow, upcoming });
+}
+
+function startOfUtcDay(value: Date) {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+}

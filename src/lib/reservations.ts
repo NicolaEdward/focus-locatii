@@ -9,6 +9,7 @@ import {
   expireStaleHolds,
   reservationLifecycleData
 } from "@/lib/reservation-lifecycle";
+import { occupancySummaryFromCounts } from "@/lib/reservation-lifecycle-domain";
 import type { OccupancySummaryDTO, ReservationDTO, ReservationListItemDTO, ReservationPageDTO } from "@/types/location";
 import type { AuthSession } from "@/lib/auth";
 import { assertReservationTransition } from "@/lib/reservation-workflow";
@@ -294,7 +295,7 @@ export async function getReservationOccupancySummary(
 ): Promise<OccupancySummaryDTO> {
   const today = startOfUtcDay(now);
   const accessWhere = reservationAccessWhere(actor);
-  const [activeHolds, occupiedNow, upcoming, activeOrUpcoming] = await Promise.all([
+  const [activeHolds, occupiedNow, upcoming] = await Promise.all([
     prisma.reservation.count({
       where: combineReservationWhere(accessWhere, effectiveHoldWhere(now), { periodEnd: { gte: today } })
     }),
@@ -302,14 +303,11 @@ export async function getReservationOccupancySummary(
       where: combineReservationWhere(accessWhere, { status: "BOOKED", periodStart: { lte: today }, periodEnd: { gte: today } })
     }),
     prisma.reservation.count({
-      where: combineReservationWhere(accessWhere, effectiveBlockingReservationWhere(now), { periodStart: { gt: today } })
-    }),
-    prisma.reservation.count({
-      where: combineReservationWhere(accessWhere, effectiveBlockingReservationWhere(now), { periodEnd: { gte: today } })
+      where: combineReservationWhere(accessWhere, { status: "BOOKED", periodStart: { gt: today }, periodEnd: { gte: today } })
     })
   ]);
 
-  return { activeHolds, occupiedNow, upcoming, activeOrUpcoming };
+  return occupancySummaryFromCounts({ activeHolds, occupiedNow, upcoming });
 }
 
 function reservationListWhere(

@@ -39,7 +39,7 @@ async function main() {
   const locations = Array.isArray(payload) ? payload : payload.locations || [];
   assert(locations.length >= 1, `Live public locations are missing: ${locations.length}`);
   assert(
-    locations.every((location) => Array.isArray(location.reservations) && location.reservations.length === 0),
+    locations.every((location) => location.reservations == null || (Array.isArray(location.reservations) && location.reservations.length === 0)),
     "Live public locations API exposes reservations"
   );
   assert(locations.every((location) => !location.rateCard && !location.rateCardValue), "Live public API exposes hidden rate card");
@@ -71,7 +71,7 @@ async function main() {
     header: 1,
     defval: ""
   });
-  assert(rows[1]?.[0] === "Nr" && rows[1]?.[12] === "Availability", "Live admin export headers mismatch");
+  assert(rows[1]?.[0] === "Nr" && rows[1]?.[12] === "Schita" && rows[1]?.[13] === "Availability", "Live admin export headers mismatch");
 
   const publicPage = await fetch(`${BASE_URL}/locatii`).then((response) => response.text());
   assert(publicPage.includes("Focus Media") || publicPage.includes("PORTOFOLIU"), "Live public page content missing");

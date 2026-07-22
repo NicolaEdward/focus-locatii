@@ -4,6 +4,7 @@ import { recordAudit } from "@/lib/audit";
 import { createCampaign } from "@/lib/campaigns";
 import { getCampaignsPage } from "@/lib/client-campaign-workspaces";
 import { observeRoute, setObservabilityRole } from "@/lib/observability";
+import { CAMPAIGN_EFFECTIVE_STATUSES, type CampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -20,8 +21,12 @@ export async function GET(request: NextRequest) {
     const clientId = request.nextUrl.searchParams.get("clientId");
     const query = request.nextUrl.searchParams.get("q")?.trim() || "";
     const cursor = request.nextUrl.searchParams.get("cursor");
+    const requestedStatus = request.nextUrl.searchParams.get("effectiveStatus");
+    const effectiveStatus = CAMPAIGN_EFFECTIVE_STATUSES.includes(requestedStatus as CampaignEffectiveStatus)
+      ? requestedStatus as CampaignEffectiveStatus
+      : null;
     const limit = Number(request.nextUrl.searchParams.get("limit") || (clientId ? 50 : 30));
-    const page = await getCampaignsPage(session, { clientId, query, cursor, limit });
+    const page = await getCampaignsPage(session, { clientId, query, cursor, limit, effectiveStatus });
     return NextResponse.json({ campaigns: page.items, page }, { headers: noStoreHeaders });
   });
 }

@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { decideAvailability } from "@/lib/availability";
 import { effectiveBlockingReservationWhere, effectiveHoldExpiresAt, effectiveHoldWhere } from "@/lib/reservation-lifecycle";
 import { addUtcDays, daysFromToday, decimalString, startOfUtcDay } from "@/lib/dashboard/dashboard-utils";
+import { campaignEffectiveStatusWhere } from "@/lib/campaigns/campaign-effective-status";
 
 export type DashboardMoney = { currency: string; amount: string; count: number };
 
@@ -90,7 +91,12 @@ export async function getCooDashboardData(session: AuthSession, now = new Date()
       _count: { _all: true }, _sum: { remainingAmount: true }
     }),
     prisma.campaign.findMany({
-      where: { archivedAt: null, status: "active" },
+      where: {
+        OR: [
+          campaignEffectiveStatusWhere("ACTIVE", now),
+          { AND: [campaignEffectiveStatusWhere("SCHEDULED", now), { startDate: { lte: inSevenDays } }] }
+        ]
+      },
       select: {
         id: true, campaignName: true, startDate: true, endDate: true,
         client: { select: { companyName: true } },
@@ -99,9 +105,9 @@ export async function getCooDashboardData(session: AuthSession, now = new Date()
       orderBy: [{ startDate: "asc" }, { endDate: "asc" }], take: 100
     }),
     Promise.all([
-      prisma.campaign.count({ where: { archivedAt: null, status: "active", startDate: { lte: today }, endDate: { gte: today } } }),
-      prisma.campaign.count({ where: { archivedAt: null, status: "active", startDate: { gte: today, lte: inSevenDays } } }),
-      prisma.campaign.count({ where: { archivedAt: null, status: "active", endDate: { gte: today, lte: inSevenDays } } })
+      prisma.campaign.count({ where: campaignEffectiveStatusWhere("ACTIVE", now) }),
+      prisma.campaign.count({ where: { AND: [{ OR: [campaignEffectiveStatusWhere("ACTIVE", now), campaignEffectiveStatusWhere("SCHEDULED", now)] }, { startDate: { gte: today, lte: inSevenDays } }] } }),
+      prisma.campaign.count({ where: { AND: [campaignEffectiveStatusWhere("ACTIVE", now), { endDate: { gte: today, lte: inSevenDays } }] } })
     ]),
     prisma.reservation.findMany({
       where: { status: "BOOKED", periodEnd: { gte: addUtcDays(today, -120) } },

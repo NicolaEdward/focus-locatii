@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { money, receivableStatus } from "@/lib/receivables-domain";
+import { deriveCampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
 
 const SETTLED_TOLERANCE = new Prisma.Decimal("0.01");
 
@@ -406,11 +407,15 @@ export async function searchReceivableOptions(input: {
         ...(input.clientId ? { clientId: input.clientId } : {}),
         ...(query ? { campaignName: { contains: query } } : {})
       },
-      select: { id: true, campaignName: true, startDate: true },
+      select: { id: true, campaignName: true, status: true, startDate: true, endDate: true },
       orderBy: { startDate: "desc" },
       take
     });
-    return items.map((row) => ({ id: row.id, label: row.campaignName, detail: iso(row.startDate) }));
+    return items.map((row) => ({
+      id: row.id,
+      label: row.campaignName,
+      detail: `${deriveCampaignEffectiveStatus(row).label} / ${iso(row.startDate) || "fara data"}`
+    }));
   }
   if (input.type === "locations") {
     const items = await prisma.location.findMany({

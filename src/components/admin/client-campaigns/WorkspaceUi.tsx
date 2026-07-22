@@ -205,7 +205,7 @@ export function nullable(value: string) { const text = value.trim(); return text
 export function dateInput(value?: string | null) { return value ? value.slice(0, 10) : ""; }
 
 function statusLabel(value: string) {
-  const labels: Record<string, string> = { draft: "Ciorna", planned: "Planificata", active: "Activa", completed: "Finalizata", cancelled: "Anulata", prospect: "Prospect", inactive: "Inactiv", overdue: "Restanta", in_term: "In termen", due_soon: "Scadenta curand", BOOKED: "Rezervat", HOLD: "HOLD", RESERVED: "HOLD" };
+  const labels: Record<string, string> = { draft: "Ciorna", planned: "Planificata", active: "Activa", completed: "Finalizata", cancelled: "Anulata", incomplete: "Incompleta", scheduled: "Programata", ended: "Incheiata", archived: "Arhivata", prospect: "Prospect", inactive: "Inactiv", overdue: "Restanta", in_term: "In termen", due_soon: "Scadenta curand", BOOKED: "Rezervat", HOLD: "HOLD", RESERVED: "HOLD" };
   return labels[value] || labels[value.toLowerCase()] || value;
 }
 

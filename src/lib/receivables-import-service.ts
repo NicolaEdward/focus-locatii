@@ -18,6 +18,7 @@ import {
   type ReceivablesCompanyCode,
   type ReceivablesImportRow
 } from "@/lib/receivables-import-parser";
+import { deriveCampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
 
 const ACTIVE_PAYMENT_STATUS = "active";
 
@@ -669,7 +670,7 @@ export async function listReceivablesWorkspace(input?: {
     }),
     prisma.campaign.findMany({
       where: { archivedAt: null },
-      select: { id: true, campaignName: true, clientId: true, startDate: true, endDate: true },
+      select: { id: true, campaignName: true, clientId: true, status: true, startDate: true, endDate: true },
       orderBy: { startDate: "desc" },
       take: 2000
     }),
@@ -688,7 +689,7 @@ export async function listReceivablesWorkspace(input?: {
     aliases,
     payments: payments.map((payment) => serializePayment(payment)),
     credits: credits.map((credit) => ({ ...credit, amount: credit.amount.toFixed(2), remainingAmount: credit.remainingAmount.toFixed(2), createdAt: credit.createdAt.toISOString() })),
-    campaigns: campaigns.map((campaign) => ({ ...campaign, startDate: campaign.startDate?.toISOString() || null, endDate: campaign.endDate?.toISOString() || null })),
+    campaigns: campaigns.map((campaign) => ({ ...campaign, effectiveStatus: deriveCampaignEffectiveStatus(campaign).effectiveStatus, startDate: campaign.startDate?.toISOString() || null, endDate: campaign.endDate?.toISOString() || null })),
     locations
   };
 }

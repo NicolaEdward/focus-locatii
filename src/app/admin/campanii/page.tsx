@@ -5,6 +5,7 @@ import { getAuthSession } from "@/lib/auth";
 import { getCampaignsPage } from "@/lib/client-campaign-workspaces";
 import { validAccountOwners } from "@/lib/clients";
 import { hasAnyPermission } from "@/lib/rbac";
+import { CAMPAIGN_EFFECTIVE_STATUSES, type CampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
 
 export const dynamic = "force-dynamic";
 
@@ -20,10 +21,14 @@ export default async function CampaniiPage({ searchParams }: { searchParams: Pro
   const clientId = first(params.clientId);
   const handoffOpportunityId = first(params.crmOpportunityId);
   const openCreate = first(params.create) === "1";
-  const [page, accountOwners] = await Promise.all([getCampaignsPage(session, { query }), validAccountOwners()]);
+  const requestedStatus = first(params.effectiveStatus);
+  const effectiveStatus = CAMPAIGN_EFFECTIVE_STATUSES.includes(requestedStatus as CampaignEffectiveStatus)
+    ? requestedStatus as CampaignEffectiveStatus
+    : null;
+  const [page, accountOwners] = await Promise.all([getCampaignsPage(session, { query, effectiveStatus }), validAccountOwners()]);
   return <>
     <AdminHeader session={session} />
-    <CampaignsWorkspace initialPage={page} initialCampaignId={campaignId} initialClientId={clientId} handoffOpportunityId={handoffOpportunityId} openCreate={openCreate} session={session} accountOwners={accountOwners} />
+    <CampaignsWorkspace initialPage={page} initialEffectiveStatus={effectiveStatus} initialCampaignId={campaignId} initialClientId={clientId} handoffOpportunityId={handoffOpportunityId} openCreate={openCreate} session={session} accountOwners={accountOwners} />
   </>;
 }
 

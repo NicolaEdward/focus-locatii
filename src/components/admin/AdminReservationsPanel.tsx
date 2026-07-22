@@ -79,6 +79,7 @@ type CampaignOption = {
   campaignName: string;
   clientId: string;
   status: string;
+  effectiveStatus?: string;
   companyEntity?: string | null;
   currency?: string | null;
   paymentTermType?: string | null;
@@ -1466,7 +1467,7 @@ export function AdminReservationsPanel({
                     <option value="">{form.clientId ? "Alege campania clientului" : "Alege mai intai clientul"}</option>
                     {campaigns.map((campaign) => (
                       <option key={campaign.id} value={campaign.id}>
-                        {campaign.campaignName} - {campaign.status}
+                        {campaign.campaignName} - {campaign.effectiveStatus || campaign.status}
                       </option>
                     ))}
                   </SelectField>
@@ -2639,7 +2640,7 @@ function ReservationEditDialog({
                 ) : null}
                 {campaigns.map((campaign) => (
                   <option key={campaign.id} value={campaign.id}>
-                    {campaign.campaignName} - {campaign.status}
+                    {campaign.campaignName} - {campaign.effectiveStatus || campaign.status}
                   </option>
                 ))}
               </SelectField>

@@ -4,6 +4,11 @@ import { normalizeClientName } from "@/lib/clients";
 import { moneyNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
+import {
+  campaignEffectiveStatusWhere,
+  deriveCampaignEffectiveStatus,
+  type CampaignEffectiveStatus
+} from "@/lib/campaigns/campaign-effective-status";
 
 export const CLIENT_CAMPAIGN_PAGE_SIZE = 30;
 const MAX_PAGE_SIZE = 50;
@@ -36,6 +41,7 @@ export type CampaignListItem = {
   campaignName: string;
   campaignCode: string | null;
   status: string;
+  effectiveStatus: CampaignEffectiveStatus;
   clientName: string;
   companyEntity: string | null;
   sellerUserId: string | null;
@@ -82,6 +88,7 @@ export type CampaignOverview = {
   campaignName: string;
   campaignCode: string | null;
   status: string;
+  effectiveStatus: CampaignEffectiveStatus;
   campaignType: string;
   companyEntity: string | null;
   sellerUserId: string | null;
@@ -140,7 +147,7 @@ type PageInput = {
   limit?: number;
 };
 
-type CampaignPageInput = PageInput & { clientId?: string | null };
+type CampaignPageInput = PageInput & { clientId?: string | null; effectiveStatus?: CampaignEffectiveStatus | null };
 
 export async function getClientsPage(session: AuthSession, input: PageInput = {}): Promise<WorkspacePage<ClientListItem>> {
   const query = String(input.query || "").trim().slice(0, 120);
@@ -205,6 +212,7 @@ export async function getCampaignsPage(session: AuthSession, input: CampaignPage
     archivedAt: null,
     status: { not: "archived" },
     ...(input.clientId ? { clientId: input.clientId } : {}),
+    ...(input.effectiveStatus ? campaignEffectiveStatusWhere(input.effectiveStatus) : {}),
     ...campaignReadScope(session),
     ...(query ? {
       AND: [{
@@ -257,6 +265,7 @@ export async function getCampaignsPage(session: AuthSession, input: CampaignPage
       campaignName: row.campaignName,
       campaignCode: row.campaignCode,
       status: row.status,
+      effectiveStatus: deriveCampaignEffectiveStatus(row).effectiveStatus,
       clientName: row.client.companyName,
       companyEntity: row.companyEntity,
       sellerUserId: row.sellerUserId,
@@ -375,6 +384,7 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
     campaignName: campaign.campaignName,
     campaignCode: campaign.campaignCode,
     status: campaign.status,
+    effectiveStatus: deriveCampaignEffectiveStatus(campaign).effectiveStatus,
     campaignType: campaign.campaignType,
     companyEntity: campaign.companyEntity,
     sellerUserId: campaign.sellerUserId,

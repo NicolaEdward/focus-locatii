@@ -7,6 +7,7 @@ import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
 import { effectiveHoldExpiresAt, effectiveHoldWhere } from "@/lib/reservation-lifecycle";
 import { addUtcDays, daysFromToday, decimalString, startOfUtcDay } from "@/lib/dashboard/dashboard-utils";
+import { campaignEffectiveStatusWhere } from "@/lib/campaigns/campaign-effective-status";
 
 export type SalesAgendaItem = {
   id: string;
@@ -64,10 +65,9 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
     }),
     prisma.campaign.findMany({
       where: {
-        archivedAt: null,
-        status: "active",
         AND: [
           campaignOwnership,
+          { OR: [campaignEffectiveStatusWhere("ACTIVE", now), campaignEffectiveStatusWhere("SCHEDULED", now)] },
           {
             OR: [
               { startDate: { lte: inSevenDays }, endDate: { gte: today } },
@@ -98,8 +98,8 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
       prisma.crmNextAction.count({ where: { ownerId, status: "open", dueAt: { gte: today, lt: tomorrow } } }),
       prisma.financialReceivable.count({ where: { includedInReport: true, needsReview: false, remainingAmount: { gt: 0 }, dueDate: { lt: today }, ...invoiceOwnership } }),
       prisma.financialReceivable.count({ where: { includedInReport: true, needsReview: false, remainingAmount: { gt: 0 }, dueDate: { gte: today, lte: inSevenDays }, ...invoiceOwnership } }),
-      prisma.campaign.count({ where: { archivedAt: null, status: "active", startDate: { gte: today, lte: inSevenDays }, ...campaignOwnership } }),
-      prisma.campaign.count({ where: { archivedAt: null, status: "active", endDate: { gte: today, lte: inSevenDays }, ...campaignOwnership } })
+      prisma.campaign.count({ where: { AND: [campaignOwnership, { OR: [campaignEffectiveStatusWhere("ACTIVE", now), campaignEffectiveStatusWhere("SCHEDULED", now)] }, { startDate: { gte: today, lte: inSevenDays } }] } }),
+      prisma.campaign.count({ where: { AND: [campaignOwnership, campaignEffectiveStatusWhere("ACTIVE", now), { endDate: { gte: today, lte: inSevenDays } }] } })
     ])
   ]);
 

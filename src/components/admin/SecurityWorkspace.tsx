@@ -108,4 +108,4 @@ function deviceLabel(userAgent: string | null) {
   const device = /Mobile|Android|iPhone/.test(value) ? "mobil" : "desktop";
   return `${browser} / ${device}`;
 }
-function formatDate(value: string) { return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
+function formatDate(value: string) { return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Bucharest" }).format(new Date(value)); }

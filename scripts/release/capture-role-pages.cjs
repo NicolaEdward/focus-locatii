@@ -7,6 +7,8 @@ const accounts = require("./preview-accounts.json");
 loadEnvFile(process.env.ENV_FILE);
 const baseUrl = String(process.env.CAPTURE_BASE_URL || "http://127.0.0.1:3015").replace(/\/$/, "");
 const password = process.env.PREVIEW_TEST_PASSWORD;
+const vercelShareToken = process.env.VERCEL_SHARE_TOKEN;
+let vercelShareCookie = null;
 const debugPort = Number(process.env.CAPTURE_CHROME_PORT || 9231);
 const outDir = path.resolve(process.cwd(), process.env.CAPTURE_OUT_DIR || "artifacts/release-screenshots");
 const workflowChecks = process.env.CAPTURE_WORKFLOW_CHECKS === "true";
@@ -36,6 +38,7 @@ const pages = [
 ];
 
 async function main() {
+  await ensureVercelShareCookie();
   fs.mkdirSync(outDir, { recursive: true });
   const chromePath = findChrome();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "focus-release-chrome-"));
@@ -86,6 +89,11 @@ async function capturePage(page, viewport, cookie) {
   if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
     await client.send("Network.setExtraHTTPHeaders", { headers: { "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET, "x-vercel-set-bypass-cookie": "true" } });
   }
+  if (vercelShareCookie) {
+    const [name, value] = vercelShareCookie.split("=");
+    const url = new URL(baseUrl);
+    await client.send("Network.setCookie", { name, value, domain: url.hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" });
+  }
   if (cookie) {
     const [name, value] = cookie.split("=");
     const url = new URL(baseUrl);
@@ -104,7 +112,10 @@ async function capturePage(page, viewport, cookie) {
   if (overflow.result?.value) throw new Error(`${page.name}/${viewport.name} are overflow orizontal.`);
   const screenshot = await client.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
   fs.writeFileSync(filePath, Buffer.from(screenshot.data, "base64"));
-  const errors = client.events.filter((event) => event.method === "Runtime.exceptionThrown" || (event.method === "Runtime.consoleAPICalled" && event.params?.type === "error") || (event.method === "Log.entryAdded" && event.params?.entry?.level === "error"));
+  const errors = client.events.filter((event) => {
+    if (event.method === "Log.entryAdded" && String(event.params?.entry?.text || "").includes("vercel.live/_next-live/feedback")) return false;
+    return event.method === "Runtime.exceptionThrown" || (event.method === "Runtime.consoleAPICalled" && event.params?.type === "error") || (event.method === "Log.entryAdded" && event.params?.entry?.level === "error");
+  });
   const failedRequestIds = errors.map((event) => event.params?.entry?.networkRequestId).filter(Boolean);
   const failedBodies = [];
   for (const requestId of failedRequestIds) {
@@ -231,7 +242,16 @@ async function requestJson(route) {
 }
 
 function requestHeaders(base = {}) {
-  return process.env.VERCEL_AUTOMATION_BYPASS_SECRET ? { ...base, "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET } : base;
+  const headers = process.env.VERCEL_AUTOMATION_BYPASS_SECRET ? { ...base, "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET } : { ...base };
+  if (vercelShareCookie) headers.cookie = vercelShareCookie;
+  return headers;
+}
+
+async function ensureVercelShareCookie() {
+  if (!vercelShareToken || vercelShareCookie) return;
+  const response = await fetch(`${baseUrl}/?_vercel_share=${encodeURIComponent(vercelShareToken)}`, { redirect: "manual" });
+  vercelShareCookie = response.headers.get("set-cookie")?.split(";")[0] || null;
+  if (!vercelShareCookie) throw new Error("Vercel share token did not produce a bypass cookie.");
 }
 
 function findChrome() {

@@ -5,6 +5,8 @@ const accounts = require("./preview-accounts.json");
 loadEnvFile(process.env.ENV_FILE);
 const baseUrl = String(process.env.SMOKE_BASE_URL || "http://127.0.0.1:3015").replace(/\/$/, "");
 const password = process.env.PREVIEW_TEST_PASSWORD;
+const vercelShareToken = process.env.VERCEL_SHARE_TOKEN;
+let vercelShareCookie = null;
 if (!password) throw new Error("PREVIEW_TEST_PASSWORD is missing.");
 
 const adminRoutes = [
@@ -34,6 +36,7 @@ const allowed = {
 };
 
 async function main() {
+  await ensureVercelShareCookie();
   const health = await request("/api/health/db");
   assert(health.status === 200, `DB health returned ${health.status}.`);
 
@@ -86,11 +89,22 @@ async function main() {
 
 function request(route, options = {}) {
   const headers = new Headers(options.headers || {});
+  if (vercelShareCookie) {
+    const existingCookie = headers.get("cookie");
+    headers.set("cookie", existingCookie ? `${existingCookie}; ${vercelShareCookie}` : vercelShareCookie);
+  }
   if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
     headers.set("x-vercel-protection-bypass", process.env.VERCEL_AUTOMATION_BYPASS_SECRET);
     headers.set("x-vercel-set-bypass-cookie", "true");
   }
   return fetch(`${baseUrl}${route}`, { ...options, headers });
+}
+
+async function ensureVercelShareCookie() {
+  if (!vercelShareToken || vercelShareCookie) return;
+  const response = await fetch(`${baseUrl}/?_vercel_share=${encodeURIComponent(vercelShareToken)}`, { redirect: "manual" });
+  vercelShareCookie = response.headers.get("set-cookie")?.split(";")[0] || null;
+  if (!vercelShareCookie) throw new Error("Vercel share token did not produce a bypass cookie.");
 }
 
 async function redirectTarget(response) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
+import { emitStructuredLog, safeErrorCode } from "@/lib/observability";
 import {
   addCrmCompanyContact,
   addCrmUpdate,
@@ -31,14 +32,40 @@ export async function POST(request: NextRequest) {
     const raw = baseSchema.parse(await request.json());
     const result = await executeCommand(raw, session);
     const target = commandTarget(raw);
-    if (target) await resolveCrmNotificationsForRecord(target.kind, target.id, session.id);
+    if (target) {
+      try {
+        await resolveCrmNotificationsForRecord(target.kind, target.id, session.id);
+      } catch (error) {
+        emitStructuredLog("error", "crm_notification_resolution_failed", {
+          operation: "crm.command.post_commit",
+          role: session.role,
+          entityType: target.kind,
+          entityId: target.id,
+          errorCode: safeErrorCode(error, "CRM_NOTIFICATION_RESOLUTION_FAILED")
+        });
+      }
+    }
     await recordAudit({ actor: session, action: `crm.v4.${raw.action}`, entityType: "crm_domain", entityId: recordId(result), metadata: { command: raw.action }, request });
     return NextResponse.json({ result }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: error.issues[0]?.message || "Date CRM invalide.", code: "CRM_INPUT_INVALID" }, { status: 400 });
     if (error instanceof CrmDomainError) return NextResponse.json({ error: error.message, code: error.code, details: error.details }, { status: error.status });
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Comanda CRM nu a putut fi executata." }, { status: 400 });
+    if (isTemporaryDatabaseError(error)) {
+      return NextResponse.json(
+        { error: "Baza de date a raspuns prea greu. Datele nu au fost salvate partial; incearca din nou.", code: "CRM_TEMPORARY_DATABASE_DELAY" },
+        { status: 503, headers: { "Retry-After": "2" } }
+      );
+    }
+    return NextResponse.json({ error: "Comanda CRM nu a putut fi executata.", code: "CRM_COMMAND_FAILED" }, { status: 500 });
   }
+}
+
+function isTemporaryDatabaseError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+  if (["P1001", "P2024", "P2028"].includes(code)) return true;
+  const message = error instanceof Error ? error.message : "";
+  return /Transaction already closed|Transaction not found|expired transaction|Can't reach database server/i.test(message);
 }
 
 async function executeCommand(raw: z.infer<typeof baseSchema>, session: NonNullable<Awaited<ReturnType<typeof requireAnyPermission>>["session"]>) {

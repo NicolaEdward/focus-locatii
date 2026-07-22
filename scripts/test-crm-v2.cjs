@@ -145,6 +145,7 @@ function sourceArchitectureRules() {
   const workspace = read("src/components/admin/CrmWorkspaceV4.tsx");
   const page = read("src/app/admin/crm/page.tsx");
   const commands = read("src/app/api/admin/crm/commands/route.ts");
+  const vercelConfig = JSON.parse(read("vercel.json"));
   const queryRoute = read("src/app/api/admin/crm/workspace/route.ts");
   const detailRoute = read("src/app/api/admin/crm/records/[kind]/[id]/route.ts");
   const convertRoute = read("src/app/api/admin/crm/leads/[id]/convert/route.ts");
@@ -195,6 +196,11 @@ function sourceArchitectureRules() {
     assert(!service.includes(forbidden), `CRM v4 service must not use ${forbidden}`);
   }
   assert(service.includes("prisma.$transaction"), "CRM mutations must be transactional");
+  assert(service.includes("maxWait: 10_000") && service.includes("timeout: 30_000"), "CRM transactions need an explicit timeout for remote DB latency");
+  assert(commands.includes("CRM_TEMPORARY_DATABASE_DELAY"), "temporary database failures must return a safe CRM error");
+  assert(!commands.includes('return NextResponse.json({ error: error instanceof Error ? error.message'), "raw Prisma errors must not be exposed to CRM users");
+  assert(commands.includes("crm_notification_resolution_failed"), "post-commit notification failure must not report the CRM command as failed");
+  assert.deepEqual(vercelConfig.regions, ["fra1"], "Vercel functions must run near the Amsterdam database");
   assert(service.includes("version: input.version"), "CRM updates must use optimistic version checks");
   assert(service.includes("CRM_VERSION_CONFLICT"));
   assert(service.includes("idempotencyKey"));

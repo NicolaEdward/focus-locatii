@@ -32,6 +32,11 @@ const activeOpportunityStages = [...CRM_ACTIVE_OPPORTUNITY_STAGES];
 const closedProspectStatuses = ["return_later", "disqualified", "on_hold", "inactive"];
 const closedOpportunityStages = ["won", "lost", "on_hold", "inactive"];
 const defaultPageSize = 24;
+const CRM_TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
+
+function crmTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>) {
+  return prisma.$transaction(work, CRM_TRANSACTION_OPTIONS);
+}
 
 export class CrmDomainError extends Error {
   constructor(message: string, public readonly code = "CRM_VALIDATION", public readonly status = 400, public readonly details?: unknown) {
@@ -324,7 +329,7 @@ export async function createColdProspect(input: {
   const dueAt = actionType
     ? input.nextActionDueAt || crmAddBusinessDays(new Date(), status === "qualified" ? 2 : status === "prospecting" ? 3 : 10)
     : null;
-  return prisma.$transaction(async (tx) => {
+  return crmTransaction(async (tx) => {
     if (input.idempotencyKey) {
       const existingEvent = await tx.crmEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { prospectId: true } });
       if (existingEvent?.prospectId) return getProspectAfterTransaction(tx, existingEvent.prospectId);
@@ -464,7 +469,7 @@ export async function qualifyProspect(input: {
   idempotencyKey?: string | null;
 }, actor: AuthSession) {
   assertCanManage(actor);
-  return prisma.$transaction(async (tx) => {
+  return crmTransaction(async (tx) => {
     if (input.idempotencyKey) {
       const event = await tx.crmEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { prospectId: true } });
       if (event?.prospectId) return getProspectAfterTransaction(tx, event.prospectId);
@@ -502,7 +507,7 @@ export async function qualifyProspectAndCreateOpportunity(input: {
 }, actor: AuthSession) {
   assertCanManage(actor);
   crmValidateActionForStage("opportunity", input.nextActionType, input.nextActionDescription);
-  return prisma.$transaction(async (tx) => {
+  return crmTransaction(async (tx) => {
     if (input.idempotencyKey) {
       const event = await tx.crmEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { opportunityId: true } });
       if (event?.opportunityId) return getOpportunityAfterTransaction(tx, event.opportunityId);
@@ -596,7 +601,7 @@ export async function transitionProspect(input: {
   nextActionDueAt?: Date | null;
 }, actor: AuthSession) {
   assertCanManage(actor);
-  return prisma.$transaction(async (tx) => {
+  return crmTransaction(async (tx) => {
     const prospect = await tx.crmProspect.findFirst({ where: { id: input.prospectId, ...prospectScope(actor) } });
     if (!prospect) throw new CrmDomainError("Prospectul nu exista sau nu iti este alocat.", "CRM_NOT_FOUND", 404);
     crmAssertProspectTransition(prospect.status, input.toStatus);
@@ -657,7 +662,7 @@ export async function transitionOpportunity(input: {
   idempotencyKey?: string | null;
 }, actor: AuthSession) {
   assertCanManage(actor);
-  return prisma.$transaction(async (tx) => {
+  return crmTransaction(async (tx) => {
     if (input.idempotencyKey) {
       const existing = await tx.crmEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { opportunityId: true } });
       if (existing?.opportunityId) return getOpportunityAfterTransaction(tx, existing.opportunityId);
@@ -745,7 +750,7 @@ export async function addCrmUpdate(input: {
   idempotencyKey?: string | null;
 }, actor: AuthSession) {
   assertCanManage(actor);
-  return prisma.$transaction(async (tx) => {
+  return crmTransaction(async (tx) => {
     if (input.idempotencyKey) {
       const event = await tx.crmEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { id: true } });
       if (event) return input.kind === "prospect" ? getProspectAfterTransaction(tx, input.id) : getOpportunityAfterTransaction(tx, input.id);
@@ -790,7 +795,7 @@ export async function updateCrmCompany(input: {
     const duplicate = await prisma.crmCompany.findFirst({ where: { normalizedTaxId, id: { not: company.id } }, select: { id: true, name: true } });
     if (duplicate) throw new CrmDomainError(`CUI-ul apartine deja firmei ${duplicate.name}.`, "CRM_DUPLICATE_TAX_ID", 409, duplicate);
   }
-  return prisma.$transaction(async (tx) => {
+  return crmTransaction(async (tx) => {
     const result = await tx.crmCompany.updateMany({
       where: { id: company.id, version: input.version },
       data: {
@@ -831,7 +836,7 @@ export async function addCrmCompanyContact(input: {
   assertCanManage(actor);
   const company = await prisma.crmCompany.findUnique({ where: { id: input.companyId }, select: { id: true, ownerId: true } });
   if (!company || (!hasGlobalCrmAccess(actor) && company.ownerId !== actor.id)) throw new CrmDomainError("Firma nu exista sau nu iti este alocata.", "CRM_NOT_FOUND", 404);
-  return prisma.$transaction(async (tx) => {
+  return crmTransaction(async (tx) => {
     if (input.isPrimary) await tx.crmCompanyContact.updateMany({ where: { companyId: company.id, isPrimary: true }, data: { isPrimary: false } });
     const contact = await tx.crmCompanyContact.create({ data: { companyId: company.id, name: requiredText(input.name, "Numele contactului este obligatoriu."), role: input.role?.trim() || null, email: input.email?.trim() || null, normalizedEmail: crmNormalizeEmail(input.email), phone: input.phone?.trim() || null, normalizedPhone: crmNormalizePhone(input.phone), preferredChannel: input.preferredChannel?.trim() || null, isDecisionMaker: Boolean(input.isDecisionMaker), isPrimary: Boolean(input.isPrimary), createdByUserId: actor.id } });
     await tx.crmEvent.create({ data: { companyId: company.id, actorUserId: actor.id, type: "CONTACT_CREATED", summary: `Contact adaugat: ${contact.name}.`, metadata: jsonValue({ contactId: contact.id }) } });

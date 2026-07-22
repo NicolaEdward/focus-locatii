@@ -42,6 +42,9 @@ async function backupModel({ prisma, backupDir, fileName, modelName, query = {} 
 async function main() {
   loadLocalEnv();
   const apply = process.argv.includes("--apply");
+  if (apply) {
+    throw new Error("Resetul legacy cu scrieri a fost retras. Scriptul poate fi folosit numai pentru audit read-only.");
+  }
   const prisma = new PrismaClient();
   const runId = new Date().toISOString().replace(/[:.]/g, "-");
   const backupDir = path.join(process.cwd(), "backups", `legacy-reset-${runId}`);

@@ -9,7 +9,7 @@ export async function createLocation(input: unknown) {
   const parsed = locationInputSchema.parse(input);
   const category = await getOrCreateCategory(parsed.categoryName);
   const { imageUrls, productionSketchUrl, data } = withoutCategoryNameAndImages(parsed);
-  const normalizedData = normalizeLocationData(data);
+  const normalizedData = normalizeLocationData(withoutLegacyAvailabilityState(data));
 
   return prisma.$transaction(async (tx) => {
     const location = await tx.location.create({
@@ -30,7 +30,7 @@ export async function updateLocation(id: string, input: unknown) {
   const parsed = locationPatchSchema.parse(input);
   const category = parsed.categoryName ? await getOrCreateCategory(parsed.categoryName) : null;
   const { imageUrls, productionSketchUrl, data } = withoutCategoryNameAndImages(parsed);
-  const normalizedData = normalizeLocationData(data);
+  const normalizedData = normalizeLocationData(withoutLegacyAvailabilityState(data));
 
   return prisma.$transaction(async (tx) => {
     const location = await tx.location.update({
@@ -72,12 +72,12 @@ export async function duplicateLocation(id: string) {
       rateCardValue: original.rateCardValue,
       installationRemoval: original.installationRemoval,
       installationRemovalValue: original.installationRemovalValue,
-      availabilityText: original.availabilityText,
-      availableFrom: original.availableFrom,
-      availableUntil: original.availableUntil,
-      bookedFrom: original.bookedFrom,
-      bookedUntil: original.bookedUntil,
-      status: original.status,
+      availabilityText: null,
+      availableFrom: null,
+      availableUntil: null,
+      bookedFrom: null,
+      bookedUntil: null,
+      status: "UNKNOWN",
       lifecycleStatus: original.lifecycleStatus,
       latReal: original.latReal,
       lngReal: original.lngReal,
@@ -102,11 +102,11 @@ export async function duplicateLocation(id: string) {
       costType: original.costType,
       costSupplier: original.costSupplier,
       costNotes: original.costNotes,
-      blockedReason: original.blockedReason,
-      blockedByUserId: original.blockedByUserId,
-      blockedFrom: original.blockedFrom,
-      blockedUntil: original.blockedUntil,
-      blockedNotes: original.blockedNotes,
+      blockedReason: null,
+      blockedByUserId: null,
+      blockedFrom: null,
+      blockedUntil: null,
+      blockedNotes: null,
       coordinateSource: original.coordinateSource,
       gpsAuditStatus: original.gpsAuditStatus,
       benefits: original.benefits ?? undefined,
@@ -320,6 +320,34 @@ export async function restoreCoordinatesFromMapsUrls() {
 function withoutCategoryNameAndImages<T extends { categoryName?: string; imageUrls?: string[]; productionSketchUrl?: string | null }>(input: T) {
   const { categoryName, imageUrls, productionSketchUrl, ...data } = input;
   return { imageUrls, productionSketchUrl, data };
+}
+
+function withoutLegacyAvailabilityState<T extends {
+  status?: unknown;
+  availableFrom?: unknown;
+  availableUntil?: unknown;
+  bookedFrom?: unknown;
+  bookedUntil?: unknown;
+  blockedReason?: unknown;
+  blockedByUserId?: unknown;
+  blockedFrom?: unknown;
+  blockedUntil?: unknown;
+  blockedNotes?: unknown;
+}>(data: T) {
+  const {
+    status: _status,
+    availableFrom: _availableFrom,
+    availableUntil: _availableUntil,
+    bookedFrom: _bookedFrom,
+    bookedUntil: _bookedUntil,
+    blockedReason: _blockedReason,
+    blockedByUserId: _blockedByUserId,
+    blockedFrom: _blockedFrom,
+    blockedUntil: _blockedUntil,
+    blockedNotes: _blockedNotes,
+    ...canonicalData
+  } = data;
+  return canonicalData;
 }
 
 function normalizeLocationData<T extends { type?: string | null; categoryName?: string; address?: string | null; code?: string }>(data: T) {

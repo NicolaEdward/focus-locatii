@@ -30,6 +30,8 @@ async function main() {
   console.log(JSON.stringify({ baseUrl, results }, null, 2));
 }
 
+export {};
+
 void main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;

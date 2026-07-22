@@ -76,15 +76,19 @@ assert(availability.includes("Locatie inactiva"), "inactive lifecycle status sho
 
 assert(!blockRoute.includes('status: "UNKNOWN"'), "block route must not abuse UNKNOWN for unavailable locations");
 assert(!blockRoute.includes('status: "AVAILABLE"'), "unblock route must not overwrite legacy availability status");
-assert(blockRoute.includes("prisma.$transaction"), "block route should update legacy fields and override records atomically");
-assert(blockRoute.includes("createManualAvailabilityOverride"), "block route must sync the new override model");
+assert(blockRoute.includes("prisma.$transaction"), "block route should update canonical overrides atomically");
+assert(blockRoute.includes("createManualAvailabilityOverride"), "block route must write the canonical override model");
 assert(blockRoute.includes("clearManualAvailabilityOverrides"), "unblock route must clear override model entries");
+const createBlockBranch = blockRoute.slice(blockRoute.indexOf("if (input.blocked) {"), blockRoute.indexOf("} else {", blockRoute.indexOf("if (input.blocked) {")));
+assert(!createBlockBranch.includes("blockedReason: input"), "new manual blocks must not write legacy scalar fields");
 
 assert(conflictPreview.includes("loadAvailabilityDecisions"), "reservation conflict preview must include canonical overrides and legacy blocks");
 
 assert(editor.includes("Stare locatie"), "location editor must expose lifecycle status separately");
-assert(editor.includes("Status disponibilitate vechi"), "legacy status must be labelled as compatibility state");
-assert(editor.includes("Statusul vechi ramane pentru compatibilitate"), "editor must warn users about legacy status meaning");
+assert(!editor.includes("Status disponibilitate vechi"), "legacy availability status must no longer be editable");
+assert(editor.includes("Campurile istorice sunt doar citite pentru compatibilitate"), "editor must explain the read-only compatibility state");
+const editorPayload = editor.slice(editor.indexOf("function toPayload"), editor.indexOf("function nullable"));
+assert(!editorPayload.includes("status: state.status"), "editor payload must not write legacy availability status");
 assert(editor.includes("lifecycleStatus"), "editor payload must include lifecycleStatus");
 assert(validation.includes("locationLifecycleStatusSchema"), "validation must accept lifecycle status");
 assert(locations.includes('"lifecycleStatus"'), "public serializer must remove lifecycleStatus from public DTOs");

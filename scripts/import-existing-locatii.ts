@@ -29,14 +29,6 @@ type LegacyRow = {
   face?: string | null;
 };
 
-function statusFromLegacy(status?: string | null) {
-  const text = String(status || "").toLowerCase();
-  if (/(disponibil|available)/.test(text)) return "AVAILABLE" as const;
-  if (/(rezervat|reserved)/.test(text)) return "RESERVED" as const;
-  if (/(ocupat|booked|indisponibil)/.test(text)) return "BOOKED" as const;
-  return "UNKNOWN" as const;
-}
-
 async function main() {
   loadLocalEnv();
   const connection = await mysql.createConnection(mysqlOptions());
@@ -80,7 +72,6 @@ async function main() {
       installationRemoval: row.decoration_cost == null ? null : String(row.decoration_cost),
       installationRemovalValue: row.decoration_cost == null ? null : Number(row.decoration_cost),
       availabilityText: normalizeText(row.status) || normalizeText(row.data_start),
-      status: statusFromLegacy(row.status),
       latReal: coords?.lat ?? null,
       lngReal: coords?.lng ?? null,
       latDisplay: coords?.lat ?? null,

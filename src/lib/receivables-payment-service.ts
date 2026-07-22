@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { AuthSession } from "@/lib/auth";
+import { assertReceivablePaymentTransition } from "@/lib/financial-state-machine";
 import { money, receivableStatus } from "@/lib/receivables-domain";
 import { prisma } from "@/lib/prisma";
 
@@ -82,6 +83,7 @@ export async function cancelReceivablePayment(input: {
     });
     if (!payment) throw new Error("Încasarea nu există.");
     if (payment.status === "cancelled") return paymentMutationResult(tx, payment.receivableId, payment.id, true);
+    assertReceivablePaymentTransition(payment.status, "cancelled");
     await tx.financialReceivablePayment.update({
       where: { id: payment.id },
       data: {
@@ -123,6 +125,7 @@ export async function correctReceivablePayment(input: Omit<ReceivablePaymentInpu
     });
     if (!original) throw new Error("Încasarea nu există.");
     if (original.status !== "active") throw new Error("Doar o încasare activă poate fi corectată.");
+    assertReceivablePaymentTransition(original.status, "cancelled");
     const amount = money(input.amount);
     if (!amount.greaterThan(0)) throw new Error("Suma corectată trebuie să fie mai mare decât zero.");
     const currentTotal = await activePaymentTotal(tx, original.receivableId);

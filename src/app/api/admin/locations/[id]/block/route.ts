@@ -32,25 +32,11 @@ export async function PATCH(request: NextRequest, context: Context) {
   try {
     const input = bodySchema.parse(await request.json());
     const location = await prisma.$transaction(async (tx) => {
-      const updated = await tx.location.update({
+      const existing = await tx.location.findUnique({
         where: { id },
-        data: input.blocked
-          ? {
-              blockedReason: input.blockedReason || "Blocat operational",
-              blockedByUserId: session.id,
-              blockedFrom: parseDate(input.blockedFrom) || new Date(),
-              blockedUntil: parseDate(input.blockedUntil),
-              blockedNotes: input.blockedNotes || null
-            }
-          : {
-              blockedReason: null,
-              blockedByUserId: null,
-              blockedFrom: null,
-              blockedUntil: null,
-              blockedNotes: null
-            },
         select: { id: true, code: true, blockedReason: true, blockedUntil: true, status: true }
       });
+      if (!existing) throw new Error("Locatia nu exista.");
 
       if (input.blocked) {
         await createManualAvailabilityOverride({
@@ -69,9 +55,20 @@ export async function PATCH(request: NextRequest, context: Context) {
           clearedByUserId: session.id,
           type: "COMMERCIAL_BLOCK"
         });
+        // Compatibility cleanup only: new blocks are stored exclusively as overrides.
+        await tx.location.update({
+          where: { id },
+          data: {
+            blockedReason: null,
+            blockedByUserId: null,
+            blockedFrom: null,
+            blockedUntil: null,
+            blockedNotes: null
+          }
+        });
       }
 
-      return updated;
+      return existing;
     });
 
     await recordAudit({

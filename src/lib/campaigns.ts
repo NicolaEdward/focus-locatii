@@ -2,6 +2,12 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import type { AuthSession } from "@/lib/auth";
 import { paymentTermDays } from "@/lib/billing";
+import {
+  CAMPAIGN_STATUSES,
+  assertCampaignStatusForCreate,
+  assertCampaignStatusTransition,
+  parseCampaignStatus
+} from "@/lib/campaign-state";
 import { companyEntityOrDefault, companyEntityOrThrow } from "@/lib/company-entities";
 import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
 import { resolveRequiredSalesOwner } from "@/lib/seller-users";
@@ -34,7 +40,7 @@ export const campaignInputSchema = z.object({
   clientId: z.string().trim().min(1),
   campaignName: z.string().trim().min(2).max(191),
   campaignCode: optionalText,
-  status: z.string().trim().max(80).optional(),
+  status: z.enum(CAMPAIGN_STATUSES).optional(),
   campaignType: z.enum(["direct_client", "agency"]).optional(),
   agencyClientId: optionalText,
   endClientId: optionalText,
@@ -56,6 +62,7 @@ export const campaignInputSchema = z.object({
 
 export async function createCampaign(input: unknown, actor: AuthSession) {
   const parsed = normalizeCampaignForCreate(campaignInputSchema.parse(input), actor);
+  assertCampaignStatusForCreate(parsed.status);
   const client = await prisma.clientAccount.findUnique({ where: { id: parsed.clientId } });
   if (!client || ["archived", "merged"].includes(client.status)) {
     throw new Error("Campania trebuie legata de un client activ.");
@@ -82,6 +89,12 @@ export async function updateCampaign(id: string, input: unknown, actor: AuthSess
   const existing = await prisma.campaign.findUnique({ where: { id }, include: { client: true } });
   if (!existing) throw new Error("Campania nu exista.");
   assertCanMutateCampaign(existing, actor);
+  if (parsed.status !== undefined) {
+    if (parsed.status === "archived") {
+      throw new Error("Foloseste actiunea dedicata de arhivare pentru a verifica inchirierile active.");
+    }
+    parsed.status = assertCampaignStatusTransition(existing.status, parsed.status);
+  }
   if (parsed.clientId && parsed.clientId !== existing.clientId) {
     const activeRentals = await prisma.reservation.count({ where: { campaignId: id, ...effectiveBlockingReservationWhere() } });
     if (activeRentals > 0) {
@@ -116,6 +129,7 @@ export async function archiveCampaign(id: string, actor: AuthSession) {
   const existing = await prisma.campaign.findUnique({ where: { id }, include: { client: true } });
   if (!existing) throw new Error("Campania nu exista.");
   assertCanMutateCampaign(existing, actor);
+  assertCampaignStatusTransition(existing.status, "archived");
   const activeRentals = await prisma.reservation.count({ where: { campaignId: id, ...effectiveBlockingReservationWhere() } });
   if (activeRentals > 0) {
     throw new Error("Campania are inchirieri/hold-uri active. Anuleaza-le sau muta-le inainte de arhivare.");
@@ -146,7 +160,7 @@ function normalizeCampaignForCreate(input: z.infer<typeof campaignInputSchema>, 
   const paymentDays = paymentTermDays(input.paymentTermType || "30_days", input.paymentTermDays ?? null);
   return {
     ...input,
-    status: input.status || "draft",
+    status: parseCampaignStatus(input.status || "draft"),
     campaignType: input.campaignType || "direct_client",
     companyEntity: companyEntityOrDefault(input.companyEntity),
     currency: input.currency || "EUR",

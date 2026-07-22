@@ -54,6 +54,8 @@ assert(
   /\["COO", "SUPER_ADMIN"\]\.includes\(session\.role\)/.test(legacySyncRoute),
   "legacy reservation sync route must be restricted to COO/SUPER_ADMIN"
 );
+assert(legacySyncRoute.includes("LEGACY_RESERVATION_SYNC_RETIRED"), "legacy reservation sync route must be retired");
+assert(!legacySyncRoute.includes("syncLegacyReservations"), "retired route must not invoke the legacy writer");
 
 const notesOnlyBlock = blockFrom(commandCenterRoute, 'input.action === "approveException"', 'input.action === "createTask"');
 assert(notesOnlyBlock.includes("productionNotes"), "command-center exception/resolution branch must be productionNotes-only");
@@ -71,7 +73,7 @@ console.log(JSON.stringify({
     "client merge moves campaigns and reservations",
     "client merge updates reservation denormalized client fields",
     "client merge preserves reservation availability fields",
-    "legacy sync classified as import-only/admin sync",
+    "legacy sync writer retained as history but runtime route retired",
     "command-center direct write classified as notes-only"
   ]
 }, null, 2));

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
+import { assertFinancialUploadTransition } from "@/lib/financial-state-machine";
 import { prisma } from "@/lib/prisma";
 
 type Context = {
@@ -47,6 +48,7 @@ export async function POST(request: NextRequest, context: Context) {
         receivableNeedsReview
       }, { status: 409, headers: noStoreHeaders });
     }
+    assertFinancialUploadTransition(upload.status, "confirmed");
 
     await prisma.$transaction([
       prisma.financialReportUpload.updateMany({ where: { activeVersion: true }, data: { activeVersion: false } }),
@@ -91,6 +93,7 @@ export async function DELETE(request: NextRequest, context: Context) {
     if (upload.activeVersion || upload.status === "confirmed") {
       return NextResponse.json({ error: "Nu poti anula raportul activ confirmat. Arhiveaza-l doar dupa incarcarea unui raport nou valid." }, { status: 409, headers: noStoreHeaders });
     }
+    assertFinancialUploadTransition(upload.status, "rejected");
     await prisma.financialReportUpload.update({
       where: { id },
       data: {

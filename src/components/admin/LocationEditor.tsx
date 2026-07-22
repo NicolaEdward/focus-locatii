@@ -186,7 +186,7 @@ export function LocationEditor({
           <p className="rounded-lg border border-focus-line bg-focus-navy/40 p-3 text-sm font-bold text-slate-300">
             Disponibilitatea comerciala se calculeaza din rezervari si blocaje manuale. Blocajul comercial se administreaza din Detalii locatie, prin controlul canonic dedicat.
           </p>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-2">
               <span className="text-sm font-bold">Stare locatie</span>
               <select className="focus-input" value={state.lifecycleStatus} onChange={(event) => update("lifecycleStatus", event.target.value as LocationLifecycleStatus)}>
@@ -196,24 +196,11 @@ export function LocationEditor({
                 <option value="MAINTENANCE">Mentenanta</option>
               </select>
             </label>
-            <label className="grid gap-2">
-              <span className="text-sm font-bold">Status disponibilitate vechi</span>
-              <select className="focus-input" value={state.status} onChange={(event) => update("status", event.target.value as LocationStatus)}>
-                <option value="AVAILABLE">Disponibila</option>
-                <option value="AVAILABLE_FROM">Disponibila dintr-o data</option>
-                <option value="BOOKED">Rezervata (legacy)</option>
-                <option value="RESERVED">HOLD (legacy)</option>
-                <option value="UNKNOWN">De verificat</option>
-              </select>
-            </label>
-            <Text label="Disponibil din" type="date" value={state.availableFrom} onChange={(value) => update("availableFrom", value)} />
-            <Text label="Disponibil pana la" type="date" value={state.availableUntil} onChange={(value) => update("availableUntil", value)} />
-            <Text label="Inchiriat/rezervat din" type="date" value={state.bookedFrom} onChange={(value) => update("bookedFrom", value)} />
-            <Text label="Inchiriat/rezervat pana la" type="date" value={state.bookedUntil} onChange={(value) => update("bookedUntil", value)} />
+            <div className="rounded-lg border border-focus-line bg-focus-navy/30 p-3 text-sm text-slate-300">
+              <strong className="block text-white">Disponibilitate calculata</strong>
+              Rezervarile si override-urile comerciale sunt singura sursa pentru vanzari. Campurile istorice sunt doar citite pentru compatibilitate.
+            </div>
           </div>
-          <p className="text-xs font-semibold text-slate-400">
-            Statusul vechi ramane pentru compatibilitate cu importurile si datele existente. Disponibilitatea reala pentru vanzari se calculeaza din rezervari si blocaje.
-          </p>
           <Textarea label="Text disponibilitate" value={state.availabilityText} onChange={(value) => update("availabilityText", value)} />
         </EditorSection>
 
@@ -476,11 +463,6 @@ function toPayload(state: EditorState) {
     installationRemoval: nullable(state.installationRemoval),
     installationRemovalValue: numberOrNull(state.installationRemovalValue),
     availabilityText: nullable(state.availabilityText),
-    availableFrom: dateOrNull(state.availableFrom),
-    availableUntil: dateOrNull(state.availableUntil),
-    bookedFrom: dateOrNull(state.bookedFrom),
-    bookedUntil: dateOrNull(state.bookedUntil),
-    status: state.status,
     lifecycleStatus: state.lifecycleStatus,
     latReal: numberOrNull(state.latReal),
     lngReal: numberOrNull(state.lngReal),

@@ -1,6 +1,10 @@
 import { Prisma } from "@prisma/client";
 import type { AuthSession } from "@/lib/auth";
 import { normalizeClientName } from "@/lib/clients";
+import {
+  assertFinancialUploadTransition,
+  assertReceivableImportRowTransition
+} from "@/lib/financial-state-machine";
 import { prisma } from "@/lib/prisma";
 import {
   matchClientCandidates,
@@ -229,6 +233,7 @@ export async function resolveReceivablesImportRow(input: {
   }
   const companyCode = input.companyCode || row.companyCode;
   const status = input.action === "ignore" ? "ignored" : "resolved";
+  assertReceivableImportRowTransition(row.status, status);
   await prisma.$transaction(async (tx) => {
     await tx.financialReceivableImportRow.update({
       where: { id: row.id },
@@ -285,6 +290,7 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
     });
     if (!upload) throw new Error("Importul nu există.");
     if (upload.status === "confirmed") return { alreadyConfirmed: true, created: 0, updated: 0, unchanged: 0, ignored: 0 };
+    assertFinancialUploadTransition(upload.status, "confirmed");
     const blocked = upload.receivableImportRows.filter((row) => !["allocated_auto", "resolved", "ignored"].includes(row.status));
     if (blocked.length) throw new Error(`${blocked.length} rânduri necesită rezolvare înainte de import.`);
 
@@ -507,13 +513,15 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
           lastImportedAt: new Date()
         }
       });
+      const finalRowStatus = wasCreated || changed ? "imported" : "unchanged";
+      assertReceivableImportRowTransition(row.status, finalRowStatus);
       await tx.financialReceivableImportRow.update({
         where: { id: row.id },
         data: {
           receivableId: receivable.id,
           campaignId: linkedCampaignId,
           locationId: linkedLocationId,
-          status: wasCreated || changed ? "imported" : "unchanged",
+          status: finalRowStatus,
           resolvedByUserId: row.resolvedByUserId || input.actor.id,
           resolvedAt: row.resolvedAt || new Date()
         }

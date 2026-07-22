@@ -110,8 +110,6 @@ function inventoryLocationData(input: {
   const coords = extractCoordinatesFromMapsUrl(input.mapsUrl);
   const audit = auditCoordinates({ city, lat: coords?.lat, lng: coords?.lng });
   const availabilityText = normalizeText(input.record.availability);
-  const status = statusFromAvailability(availabilityText);
-  const availabilityDate = dateFromAvailability(availabilityText);
   const mainPhotoUrl = googleDriveToViewUrl(input.photoOriginalUrl);
   return {
     nr,
@@ -128,11 +126,6 @@ function inventoryLocationData(input: {
     installationRemoval: normalizeText(input.record.installationRemoval),
     installationRemovalValue: parseNumber(input.record.installationRemoval),
     availabilityText,
-    availableFrom: status === "AVAILABLE_FROM" ? availabilityDate : null,
-    availableUntil: null,
-    bookedFrom: null,
-    bookedUntil: status === "BOOKED" ? availabilityDate : null,
-    status,
     latReal: coords?.lat ?? null,
     lngReal: coords?.lng ?? null,
     latDisplay: coords?.lat ?? null,

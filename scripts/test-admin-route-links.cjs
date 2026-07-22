@@ -60,6 +60,13 @@ const adminDashboard = read("src/components/admin/AdminDashboard.tsx");
 assert.equal(adminDashboard.includes("Backup JSON"), false, "Developer-ish Backup JSON label should not be visible.");
 assert.match(adminDashboard, /locationId/, "Admin locations page should understand locationId focus query params.");
 
+const gpsAudit = read("src/components/admin/GpsAuditDashboard.tsx");
+assert.match(gpsAudit, /aria-label="Filtreaza locatiile dupa statusul GPS"/, "GPS status filter should have an accessible label.");
+
+const userManagement = read("src/components/admin/UserManagement.tsx");
+assert.match(userManagement, /aria-label=\{`Rol pentru \$\{user\.name\}`\}/, "User role selectors should identify the affected user.");
+assert.match(userManagement, /focus-input w-\[190px\] min-w-\[190px\]/, "User role labels should remain readable in the account table.");
+
 const reservationsPanel = read("src/components/admin/AdminReservationsPanel.tsx");
 assert.match(reservationsPanel, /reservationId/, "Reservations panel should understand reservationId focus query params.");
 assert.match(reservationsPanel, /newReservation/, "Reservations panel should understand newReservation focus query params.");

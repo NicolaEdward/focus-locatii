@@ -19,6 +19,7 @@ function main() {
   const operationalPage = read("src", "app", "admin", "operational", "page.tsx");
   const editor = read("src", "components", "admin", "LocationEditor.tsx");
   const overrideControls = read("src", "components", "admin", "inventory", "LocationAvailabilityControls.tsx");
+  const reservationWorkspace = read("src", "components", "admin", "AdminReservationsPanel.tsx");
 
   assert(page.includes("listAdminLocationPage"), "initial inventory must use the paginated service");
   assert(page.includes("listReservationPage"), "initial occupancy must use the paginated reservation service");
@@ -52,6 +53,14 @@ function main() {
   assert(reservationLocationsRoute.includes('requirePermission(request, "inventory.view")'), "reservation location options must enforce RBAC");
   assert(reservationRoute.includes('requireAnyPermission(request, ["reservations.view", "reservations.view.own"])'), "reservation list API must enforce RBAC");
   assert(reservations.includes('value="HOLD_ACTIVE"'), "technical HOLD/RESERVED statuses must have one business filter");
+  assert(reservations.includes('aria-label="Filtreaza rezervarile dupa status"'), "reservation status filter must have an accessible label");
+  assert(inventory.includes('aria-label="Filtreaza inventarul dupa categorie"'), "inventory category filter must have an accessible label");
+  assert(inventory.includes('aria-label="Filtreaza inventarul dupa stare"'), "inventory lifecycle filter must have an accessible label");
+  assert(reservationWorkspace.includes('id="rezervari-workspace"'), "lazy reservation workspace must use a unique anchor id");
+  assert(!reservationWorkspace.includes('id="rezervari"'), "lazy reservation workspace must not duplicate the main reservations anchor");
+  assert(reservationWorkspace.includes('aria-label="Filtreaza solicitarile dupa status"'), "offer request status filter must have an accessible label");
+  assert(reservationWorkspace.includes('aria-label="Filtreaza solicitarile dupa responsabil"'), "offer request owner filter must have an accessible label");
+  assert(reservationWorkspace.includes('aria-label="Numele vanzatorului pentru alocare"'), "offer request assignment input must have an accessible label");
   assert(lifecycleDomain.includes('BOOKED: "Rezervat"'), "BOOKED must be displayed as Rezervat");
   assert(lifecycleDomain.includes('RESERVED: "HOLD"'), "RESERVED must be displayed as HOLD");
   assert(lazyWorkspace.includes("initialOccupancySummary"), "workspace must receive the canonical occupancy summary");
@@ -65,7 +74,7 @@ function main() {
   assert(reservationsService.includes("assertCanonicalReservationAvailabilityForWrite"), "reservation writes must keep the canonical conflict service");
   assert(reservationsService.includes("lockReservationLocationsForWrite"), "reservation writes must keep the row lock");
 
-  console.log(JSON.stringify({ ok: true, checked: 27 }, null, 2));
+  console.log(JSON.stringify({ ok: true, checked: 35 }, null, 2));
 }
 
 function blockFrom(source, start, end) {

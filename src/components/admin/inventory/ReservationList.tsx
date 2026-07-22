@@ -89,7 +89,7 @@ export function ReservationList({
 
         <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_190px_auto]">
           <label className="relative min-w-0"><Search className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-slate-400" /><input className="focus-input min-w-0 pl-10" value={query} onChange={(event) => changeFilter(() => setQuery(event.target.value))} placeholder="Client, campanie, locatie, contract" /></label>
-          <select className="focus-input min-w-0" value={status} onChange={(event) => changeFilter(() => setStatus(event.target.value))}>
+          <select aria-label="Filtreaza rezervarile dupa status" className="focus-input min-w-0" value={status} onChange={(event) => changeFilter(() => setStatus(event.target.value))}>
             <option value="">Toate statusurile</option><option value="HOLD_ACTIVE">HOLD</option><option value="BOOKED">Rezervat</option><option value="CANCELLED">Anulat</option><option value="EXPIRED">Expirat</option>
           </select>
           <div className="inline-flex rounded-lg border border-focus-line bg-focus-navy p-1" aria-label="Perioada rezervarilor">

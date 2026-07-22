@@ -4,6 +4,7 @@ const path = require("node:path");
 const { loadTsModule } = require("./load-ts-module.cjs");
 
 loadLocalEnv();
+assertSyntheticEnvironment();
 
 const { prisma } = loadTsModule(path.join(process.cwd(), "src", "lib", "prisma.ts"));
 const {
@@ -394,5 +395,12 @@ function loadLocalEnv() {
       }
       if (!process.env[key]) process.env[key] = value;
     }
+  }
+}
+
+function assertSyntheticEnvironment() {
+  const appEnv = String(process.env.APP_ENV || "").trim().toLowerCase();
+  if (!["preview", "test"].includes(appEnv) || process.env.ALLOW_SYNTHETIC_SEED !== "true") {
+    throw new Error("Reservation integrity fixtures require an isolated Preview/Test database.");
   }
 }

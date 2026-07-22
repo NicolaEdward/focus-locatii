@@ -5,6 +5,9 @@ import { findOrCreateClientAccount, normalizeClientName } from "../src/lib/clien
 import { prisma } from "../src/lib/prisma";
 import { createSupplier, updateSupplier } from "../src/lib/suppliers";
 import type { AuthSession } from "../src/lib/auth";
+import { assertSyntheticEnvironment } from "./release/env-utils";
+
+assertSyntheticEnvironment();
 
 async function main() {
   const user = await prisma.user.findFirst({

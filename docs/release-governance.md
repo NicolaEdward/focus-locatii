@@ -71,22 +71,17 @@ Compare two snapshots with `pnpm run release:compare-snapshots <before.json> <af
 
 ## Rollback baseline
 
-Stable Production at the start of this milestone:
+Stable Production before the Milestone 16 release:
 
-- Commit: `01f4b63fc60faf024a369d4676d150b37ac0af93`
-- Deployment: `dpl_H7dsUvW2gQeBAEfd5EV5Ki6mRMXx`
-- URL: `https://focus-locatii-fvxjl45xx-edward-s-projects23.vercel.app`
+- Commit: `3a915f6b5997b80c25c524f6a1a7363f972af2b0`
+- Deployment: `dpl_EdYd9uZxbcLUggCqoSEqRHQT4Rn9`
+- URL: `https://focus-locatii-kr6vvssyn-edward-s-projects23.vercel.app`
 - Public alias: `https://locatii.focusmedia.ro`
-
-Previous Production deployment:
-
-- Deployment: `dpl_Btim6YgQSuCoJP7RjhMvbe8FfdDT`
-- URL: `https://focus-locatii-gmdbn50oi-edward-s-projects23.vercel.app`
 
 Rollback to the milestone baseline:
 
 ```powershell
-pnpm dlx vercel rollback dpl_H7dsUvW2gQeBAEfd5EV5Ki6mRMXx
+pnpm dlx vercel rollback dpl_EdYd9uZxbcLUggCqoSEqRHQT4Rn9
 ```
 
-This milestone does not deploy Production. A future release must re-confirm the deployment IDs immediately before release.
+The deployment ID must be re-confirmed immediately before every release. See [FINAL_RELEASE_RUNBOOK.md](./FINAL_RELEASE_RUNBOOK.md).

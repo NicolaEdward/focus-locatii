@@ -18,6 +18,8 @@ const workflow = read(".github/workflows/release-governance.yml");
 const docs = read("docs/release-governance.md");
 const packageJson = JSON.parse(read("package.json"));
 const pnpmWorkspace = read("pnpm-workspace.yaml");
+const reservationIntegrity = read("scripts/test-reservation-integrity.cjs");
+const clientSupplierWorkflow = read("scripts/test-client-supplier-workflows.ts");
 
 assert.match(envUtils, /ALLOW_SYNTHETIC_SEED/);
 assert.match(envUtils, /PREVIEW_DATASET_ID/);
@@ -55,6 +57,9 @@ assert.match(isolation, /preview\.appNotification\.create/);
 assert.doesNotMatch(isolation, /production\.[\s\S]*?\.(create|update|upsert|delete)\(/);
 assert.match(isolation, /RESEND_API_KEY/);
 assert.match(isolation, /ADMIN_PASSWORD/);
+assert.match(reservationIntegrity, /assertSyntheticEnvironment\(\)/);
+assert.match(reservationIntegrity, /ALLOW_SYNTHETIC_SEED/);
+assert.match(clientSupplierWorkflow, /assertSyntheticEnvironment\(\)/);
 
 for (const route of [
   "/admin/dashboard",
@@ -65,6 +70,11 @@ for (const route of [
   "/admin/crm",
   "/admin/operational",
   "/admin/financiar/incasari",
+  "/admin/furnizori",
+  "/admin/locatii/import",
+  "/admin/locatii/gps",
+  "/admin/utilizatori",
+  "/admin/integritate-date",
   "/locatii",
 ]) {
   assert.ok(smoke.includes(route), `Missing smoke route ${route}`);

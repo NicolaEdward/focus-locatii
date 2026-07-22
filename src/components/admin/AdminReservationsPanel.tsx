@@ -1218,7 +1218,7 @@ export function AdminReservationsPanel({
   });
 
   return (
-    <section className="grid scroll-mt-28 gap-5" id="rezervari">
+    <section className="grid scroll-mt-28 gap-5" id="rezervari-workspace">
       <div className="focus-card rounded-lg p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1768,7 +1768,7 @@ export function AdminReservationsPanel({
             <h2 className="font-display text-3xl font-black uppercase text-white">Solicitari oferta</h2>
           </div>
           <div className="grid w-full gap-2 md:w-auto md:grid-cols-[180px_220px_220px]">
-            <select className="focus-input" value={requestStatusFilter} onChange={(event) => setRequestStatusFilter(event.target.value)}>
+            <select aria-label="Filtreaza solicitarile dupa status" className="focus-input" value={requestStatusFilter} onChange={(event) => setRequestStatusFilter(event.target.value)}>
               <option value="">Toate solicitarile</option>
               {requestStatuses.map((status) => (
                 <option key={status} value={status}>
@@ -1777,12 +1777,14 @@ export function AdminReservationsPanel({
               ))}
             </select>
             <input
+              aria-label="Filtreaza solicitarile dupa responsabil"
               className="focus-input"
               value={requestOwnerFilter}
               onChange={(event) => setRequestOwnerFilter(event.target.value)}
               placeholder="Filtru responsabil"
             />
             <input
+              aria-label="Numele vanzatorului pentru alocare"
               className="focus-input"
               value={requestOwnerName}
               onChange={(event) => setRequestOwnerName(event.target.value)}

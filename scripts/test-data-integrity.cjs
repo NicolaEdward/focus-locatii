@@ -43,6 +43,7 @@ async function main() {
       invalidActiveCampaigns,
       activeSupplierInvoicesWithoutSupplier,
       documentCollations,
+      databaseCollations,
       sampleClient,
       activeLegacyReservations,
       activeBillingItems,
@@ -101,6 +102,11 @@ async function main() {
           AND TABLE_NAME = 'portfolio_client_documents'
           AND DATA_TYPE IN ('varchar','text','longtext')
       `,
+      prisma.$queryRaw`
+        SELECT DEFAULT_COLLATION_NAME as collationName
+        FROM information_schema.SCHEMATA
+        WHERE SCHEMA_NAME = DATABASE()
+      `,
       prisma.clientAccount.findFirst({
         where: { status: { notIn: ["merged", "archived"] } },
         include: { documents: true, accountOwner: { select: { id: true, name: true } } }
@@ -143,7 +149,9 @@ async function main() {
     const duplicateGroups = Array.from(groups.entries()).filter(([, rows]) => rows.length > 1);
     assert(duplicateGroups.length === 0, `Exista grupuri de clienti activi duplicati: ${duplicateGroups.map(([key]) => key).join(", ")}`);
 
-    const badDocumentCollations = documentCollations.filter((row) => row.collationName !== "utf8mb4_0900_ai_ci");
+    const databaseCollation = databaseCollations[0]?.collationName;
+    assert(/^utf8mb4_[a-z0-9_]+$/i.test(databaseCollation || ""), "Collation-ul bazei curente nu a putut fi validat.");
+    const badDocumentCollations = documentCollations.filter((row) => row.collationName !== databaseCollation);
     assert(badDocumentCollations.length === 0, `Tabela documentelor are collation diferit: ${badDocumentCollations.map((row) => `${row.columnName}:${row.collationName}`).join(", ")}`);
 
     const campaignLikeClients = clients.filter((client) => looksLikeCampaignClient(client.companyName));

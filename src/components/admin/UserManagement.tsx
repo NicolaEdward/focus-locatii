@@ -110,7 +110,7 @@ export function UserManagement({ initialUsers, currentUserId, invitesAvailable }
           <p className="mt-1 text-xs text-slate-400">Conturile cu istoric se dezactiveaza, nu se sterg. Astfel, rezervarile si auditul raman corecte.</p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-sm">
+          <table className="w-full min-w-[1020px] text-sm">
             <thead className="bg-focus-navy/70 text-left text-xs uppercase text-slate-400">
               <tr><th className="px-4 py-3">Utilizator</th><th className="px-4 py-3">Rol</th><th className="px-4 py-3">Ultima autentificare</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Actiuni</th></tr>
             </thead>
@@ -119,7 +119,7 @@ export function UserManagement({ initialUsers, currentUserId, invitesAvailable }
                 <Fragment key={user.id}>
                   <tr className="border-t border-focus-line">
                     <td className="px-4 py-3"><strong>{user.name}</strong><span className="block text-xs text-slate-400">{user.email}{user.id === currentUserId ? " / contul tau" : ""}</span></td>
-                    <td className="px-4 py-3"><select className="focus-input" value={user.role} onChange={(event) => update(user.id, { role: event.target.value as UserRole })}>{USER_ROLES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></td>
+                    <td className="w-[200px] px-4 py-3"><select aria-label={`Rol pentru ${user.name}`} className="focus-input w-[190px] min-w-[190px]" value={user.role} onChange={(event) => update(user.id, { role: event.target.value as UserRole })}>{USER_ROLES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></td>
                     <td className="px-4 py-3 text-slate-400">{user.lastLoginAt ? formatDate(user.lastLoginAt) : "Niciodata"}</td>
                     <td className="px-4 py-3"><span className={`inline-flex items-center gap-2 font-bold ${user.active ? "text-emerald-300" : "text-slate-500"}`}>{user.active ? <Check size={16} /> : <UserRoundX size={16} />}{user.active ? "Activ" : "Inactiv"}</span></td>
                     <td className="px-4 py-3">

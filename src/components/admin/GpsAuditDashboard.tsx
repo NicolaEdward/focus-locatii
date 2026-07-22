@@ -119,7 +119,7 @@ export function GpsAuditDashboard({ initialLocations }: { initialLocations: Loca
           />
 
           <aside className="focus-card grid max-h-[520px] gap-3 overflow-auto rounded-lg p-4">
-            <select className="focus-input" value={filter} onChange={(event) => setFilter(event.target.value)}>
+            <select aria-label="Filtreaza locatiile dupa statusul GPS" className="focus-input" value={filter} onChange={(event) => setFilter(event.target.value)}>
               <option value="">Toate statusurile GPS</option>
               <option value="OK">OK</option>
               <option value="CORRECTED">CORRECTED</option>

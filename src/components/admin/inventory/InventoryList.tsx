@@ -121,11 +121,11 @@ export function InventoryList({
             placeholder="Cauta cod, adresa, oras sau format"
           />
         </label>
-        <select className="focus-input min-w-0" value={category} onChange={(event) => changeFilter(() => setCategory(event.target.value))}>
+        <select aria-label="Filtreaza inventarul dupa categorie" className="focus-input min-w-0" value={category} onChange={(event) => changeFilter(() => setCategory(event.target.value))}>
           <option value="">Toate categoriile</option>
           {categories.map((item) => <option key={item.id} value={item.slug}>{item.name}</option>)}
         </select>
-        <select className="focus-input min-w-0" value={status} onChange={(event) => changeFilter(() => setStatus(event.target.value))}>
+        <select aria-label="Filtreaza inventarul dupa stare" className="focus-input min-w-0" value={status} onChange={(event) => changeFilter(() => setStatus(event.target.value))}>
           <option value="">Toate starile</option>
           <option value="ACTIVE">Active</option>
           <option value="MAINTENANCE">Mentenanta</option>

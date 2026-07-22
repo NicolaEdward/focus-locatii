@@ -104,6 +104,14 @@ See [OPERATIONAL_ASSIGNMENT_PILOT.md](./OPERATIONAL_ASSIGNMENT_PILOT.md).
 
 See [release-governance.md](./release-governance.md) and [domain-state-cleanup-runbook.md](./domain-state-cleanup-runbook.md).
 
-## Current cleanup status
+## Stabilized release status
 
-Milestone 15 establishes application state machines and canonical writers without destructive schema changes. Historical CRM data, ImportBatch, OperationTask compatibility, and legacy location columns remain preserved. Their removal is a future contract phase, not part of the current release.
+Milestone 16 validates the product after the stabilization sequence. The release keeps canonical availability, finance, CRM v4, ownership rules and operational assignment boundaries intact. Historical CRM data, ImportBatch, OperationTask compatibility, legacy location columns and archived finance snapshots remain preserved; they are tracked in [DEPRECATION_REGISTER.md](./DEPRECATION_REGISTER.md), not deleted as part of hardening.
+
+The official release references are:
+
+- [ROUTE_CATALOG.md](./ROUTE_CATALOG.md) for page/API ownership and role access;
+- [SOURCE_OF_TRUTH_MATRIX.md](./SOURCE_OF_TRUTH_MATRIX.md) for canonical readers and writers;
+- [STABILIZATION_AUDIT_DELTA.md](./STABILIZATION_AUDIT_DELTA.md) for verified before/after evidence;
+- [FINAL_RELEASE_RUNBOOK.md](./FINAL_RELEASE_RUNBOOK.md) for Preview, Production and rollback gates;
+- [OPEN_DECISIONS.md](./OPEN_DECISIONS.md) for product decisions that remain intentionally unresolved.

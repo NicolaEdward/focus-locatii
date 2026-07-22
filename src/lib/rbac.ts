@@ -48,7 +48,11 @@ export const PERMISSIONS = [
   "finance.validate",
   "finance.confirm",
   "finance.export",
-  "finance.manage"
+  "finance.manage",
+  "finance.integrations.saga.view",
+  "finance.integrations.saga.sync",
+  "finance.integrations.saga.reconcile",
+  "finance.integrations.saga.configure"
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -83,7 +87,9 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "finance.validate",
     "finance.confirm",
     "finance.export",
-    "finance.manage"
+    "finance.manage",
+    "finance.integrations.saga.view",
+    "finance.integrations.saga.reconcile"
   ],
   SALES_DIRECTOR: [
     "dashboard.sales.view",
@@ -127,7 +133,10 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "finance.view",
     "finance.upload",
     "finance.validate",
-    "finance.confirm"
+    "finance.confirm",
+    "finance.integrations.saga.view",
+    "finance.integrations.saga.sync",
+    "finance.integrations.saga.reconcile"
   ],
   FIELD_OPERATOR: [
     "dashboard.operations.view"

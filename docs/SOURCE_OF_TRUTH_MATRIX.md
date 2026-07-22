@@ -5,9 +5,10 @@
 | Is a location bookable? | lifecycle + active override + effective reservation decision | write APIs, selector, public adapter, exports, dashboard, inventory | local component status logic or stored HOLD status alone |
 | Does a HOLD block? | effective expiry rule in availability layer | every availability consumer | cron normalization as correctness dependency |
 | Who owns a sale/client? | explicit seller/owner fields with documented precedence | Sales scoping, dashboards, notifications | silent name or role fallback |
-| What is a campaign state? | campaign state machine/service | clients/campaigns/dashboard/operations | free-form status writes |
+| What is a campaign state? | administrative state machine + derived `campaign-effective-status` decision in Europe/Bucharest | clients/campaigns/dashboard/operations/finance selectors | persisted `active` used as time truth or React-side date rules |
 | What is an invoice balance? | invoice amount minus active payment ledger | finance UI, dashboard, notifications | imported collected snapshot overwriting manual ledger |
 | What has been collected? | individual active payment records | finance history/summary | one mutable `collected` field |
+| What does SAGA say? | restricted SAGA integration adapter and shadow reconciliation report | Finance/COO integration review | second invoice registry or direct accounting payload in UI |
 | What is current operational work? | BOOKED-derived work plus controlled explicit assignment | operational manager and Field inbox | HOLD/RESERVED or unrestricted reservation list |
 | Who may view proof photos? | operational task/reservation authorization service | assigned Field, policy-authorized Sales, COO/Admin | public DTO or permanent public URL |
 | What is the CRM record? | CRM v4 company/prospect/opportunity/event | CRM workspace/export/COO read view | `ClientAccount` or legacy CRM writer |
@@ -21,7 +22,7 @@
 
 1. Selector reads availability and never creates reservations.
 2. CRM does not create clients, campaigns, reservations or finance records automatically.
-3. SmartBill and spreadsheets are inputs to the canonical finance register, not alternate ledgers.
+3. SmartBill, spreadsheets and future SAGA reads are inputs to the canonical finance register, not alternate ledgers.
 4. Proof photos are private temporary evidence, not public gallery media or production sketches.
 5. Dashboards and smoke checks are read-only.
 6. Historical compatibility models remain read-only until a separately approved contract migration.

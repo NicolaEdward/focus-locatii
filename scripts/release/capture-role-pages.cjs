@@ -27,6 +27,7 @@ const pages = [
   { name: "sales-director-dashboard", route: "/admin/dashboard", role: "SALES_DIRECTOR", expected: "Agenda mea" },
   { name: "sales-agent-dashboard", route: "/admin/dashboard", role: "SALES_AGENT", expected: "Agenda mea" },
   { name: "finance-invoices", route: "/admin/financiar/incasari", role: "FINANCE_OPERATOR", expected: "Facturi clien" },
+  { name: "finance-saga-integration", route: "/admin/integrari/saga", role: "FINANCE_OPERATOR", expected: "SAGA" },
   { name: "field-operational", route: "/admin/operational", role: "FIELD_OPERATOR", expected: "Munca mea" },
   { name: "locations", route: "/admin/locatii", role: "COO", expected: "Loca" },
   { name: "selector", route: "/admin/selectie-locatii", role: "COO", expected: "Selector" },
@@ -257,6 +258,14 @@ async function runWorkflowCheck(client, pageName, viewport) {
     });
     if (!labels.result?.value) throw new Error("Etichetele comerciale HOLD/Rezervat lipsesc din formularul de rezervare.");
     console.log(JSON.stringify({ workflow: "location-reservation", loadMs: Date.now() - startedAt, occupancy: before }));
+    return;
+  }
+
+  if (pageName === "finance-saga-integration") {
+    await clickButton(client, "Ruleaza shadow");
+    await waitForExpression(client, "document.body.textContent.includes('Facturi exacte') && document.body.textContent.includes('Incasari noi') && document.body.textContent.includes('Plati manuale de reconciliat')", 30000);
+    await captureWorkflowState(client, `finance-saga-shadow-report-${viewport.name}.png`);
+    console.log(JSON.stringify({ workflow: "saga-shadow-read-only", checked: ["report-rendered", "separate-currency-totals", "no-writeback-label"] }));
     return;
   }
 

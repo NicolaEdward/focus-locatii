@@ -21,6 +21,7 @@
 | `/admin/locatii/gps` | GPS audit and display-coordinate maintenance | inventory managers | location GPS service |
 | `/admin/utilizatori` | Users, roles, invites and administrative recovery | users.manage | identity/user service |
 | `/admin/integritate-date` | Ownership integrity report and dry-run | COO/SUPER_ADMIN | ownership integrity service |
+| `/admin/integrari/saga` | Restricted read-only SAGA shadow reconciliation | COO, FINANCE_OPERATOR, SUPER_ADMIN | integration adapter over canonical finance registry |
 | `/admin/securitate` | MFA/session management | authenticated roles | identity/session service |
 | `/admin/accepta-invitatie` | One-time invite acceptance | invited user | identity token service |
 | `/admin/resetare-parola` | One-time password reset | token holder | identity token service |
@@ -39,6 +40,7 @@
 | `/api/admin/operational/*` | Assignment, completion, reschedule and private proof | assigned/owner/global RBAC; IDOR protected |
 | `/api/admin/receivables*` | Canonical invoice/payment/import workspace | finance RBAC; ledger semantics preserved |
 | `/api/admin/financial/smartbill/*` | Restricted upstream SmartBill integration | integration/admin context only |
+| `/api/admin/integrations/saga/shadow` | SAGA status and fixture-only shadow reconciliation | no Production writes; finance integration permissions |
 | `/api/admin/notifications*` | Authenticated notification inbox | no creation during dashboard reads |
 | `/api/auth/*` | Login, MFA, reset, invite and sessions | origin/CSRF and distributed rate limiting |
 | `/api/import/*`, `/api/gps/*` | Restricted inventory tools | validate/stage before write |
@@ -50,6 +52,6 @@
 
 - COO: all routes in the release smoke matrix.
 - Sales Director/Agent: Dashboard, Locations, Selector, Clients, Campaigns, CRM, Operational and Security; no global Finance, Suppliers, Import, GPS, Users or Integrity report.
-- Finance Operator: Clients, Campaigns, Customer invoices, Suppliers and Security.
+- Finance Operator: Clients, Campaigns, Customer invoices, Suppliers, SAGA shadow integration and Security.
 - Field Operator: Operational assigned inbox and Security only.
 - Unauthenticated requests to protected routes redirect to `/admin/login`.

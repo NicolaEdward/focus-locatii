@@ -18,6 +18,7 @@ const adminRoutes = [
   "/admin/crm",
   "/admin/operational",
   "/admin/financiar/incasari",
+  "/admin/integrari/saga",
   "/admin/furnizori",
   "/admin/locatii/import",
   "/admin/locatii/gps",
@@ -34,9 +35,9 @@ const expectedDashboard = {
 };
 const allowed = {
   COO: new Set(adminRoutes),
-  SALES_DIRECTOR: new Set(adminRoutes.filter((route) => !["/admin/financiar/incasari", "/admin/furnizori", "/admin/locatii/import", "/admin/locatii/gps", "/admin/utilizatori", "/admin/integritate-date"].includes(route))),
-  SALES_AGENT: new Set(adminRoutes.filter((route) => !["/admin/financiar/incasari", "/admin/furnizori", "/admin/locatii/import", "/admin/locatii/gps", "/admin/utilizatori", "/admin/integritate-date"].includes(route))),
-  FINANCE_OPERATOR: new Set(["/admin/clienti", "/admin/campanii", "/admin/financiar/incasari", "/admin/furnizori", "/admin/securitate"]),
+  SALES_DIRECTOR: new Set(adminRoutes.filter((route) => !["/admin/financiar/incasari", "/admin/integrari/saga", "/admin/furnizori", "/admin/locatii/import", "/admin/locatii/gps", "/admin/utilizatori", "/admin/integritate-date"].includes(route))),
+  SALES_AGENT: new Set(adminRoutes.filter((route) => !["/admin/financiar/incasari", "/admin/integrari/saga", "/admin/furnizori", "/admin/locatii/import", "/admin/locatii/gps", "/admin/utilizatori", "/admin/integritate-date"].includes(route))),
+  FINANCE_OPERATOR: new Set(["/admin/clienti", "/admin/campanii", "/admin/financiar/incasari", "/admin/integrari/saga", "/admin/furnizori", "/admin/securitate"]),
   FIELD_OPERATOR: new Set(["/admin/operational", "/admin/securitate"]),
 };
 

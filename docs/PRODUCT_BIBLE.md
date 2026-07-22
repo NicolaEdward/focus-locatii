@@ -58,6 +58,19 @@ Valid states are `draft`, `planned`, `active`, `completed`, `cancelled`, and `ar
 
 Transition details are maintained in [domain-state-cleanup-runbook.md](./domain-state-cleanup-runbook.md).
 
+### Effective campaign lifecycle
+
+The stored status remains an administrative workflow state. Display and time-based business decisions use the shared derived lifecycle in `Europe/Bucharest`, with the end date inclusive:
+
+- archived or cancelled always wins;
+- draft remains draft;
+- missing/invalid dates are incomplete;
+- before start is scheduled;
+- start through end day is active;
+- after end is ended.
+
+The derived value is not persisted daily. Campaign lists, client detail, dashboards and finance/reservation selectors use the same decision service.
+
 ## Financial state and ledger rules
 
 - RON and EUR are never summed together.
@@ -69,6 +82,9 @@ Transition details are maintained in [domain-state-cleanup-runbook.md](./domain-
 - Import rows and uploads have explicit transition guards.
 - Completed invoices remain available in history but are not part of open-balance operational KPIs.
 - SmartBill remains a restricted integration source; normal work happens in Facturi clienti.
+- SAGA remains a restricted upstream shadow source until its official read/write contract and entity credentials are approved. It never replaces the manual payment ledger.
+
+See [SAGA_RECEIVABLES_SHADOW_FOUNDATION.md](./SAGA_RECEIVABLES_SHADOW_FOUNDATION.md).
 
 ## CRM boundary
 

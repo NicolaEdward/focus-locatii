@@ -48,6 +48,7 @@ assert(
   "Furnizori should live inside the Financiar workflow menu."
 );
 assert.match(header, /label="Setari"/, "AdminHeader should expose Setari instead of a vague Admin button.");
+assert.match(header, /href="\/admin\/integrari\/saga"/, "AdminHeader should expose SAGA only through the integrations settings context.");
 assert.match(header, /href="\/admin\/operational"/, "AdminHeader should expose a dedicated Operational workspace.");
 assert.match(header, /session\.role === "FIELD_OPERATOR"/, "AdminHeader should treat field operators as a restricted navigation role.");
 assert.match(header, /!\s*isFieldOperator \? <NotificationBell \/> : null/, "Field operators should not load generic admin notifications.");
@@ -102,6 +103,13 @@ assert.match(clientsPage, /hasAnyPermission\(session\.role, \["clients\.view", "
 
 const campaignsPage = read("src/app/admin/campanii/page.tsx");
 assert.match(campaignsPage, /hasAnyPermission\(session\.role, \["campaigns\.view", "campaigns\.view\.own", "clients\.view", "clients\.view\.own", "finance\.view"\]\)/, "Campaigns page should guard direct access by commercial/finance permissions.");
+
+const sagaPage = read("src/app/admin/integrari/saga/page.tsx");
+assert.match(sagaPage, /hasPermission\(session\.role, "finance\.integrations\.saga\.view"\)/, "SAGA integration page should require its dedicated view permission.");
+
+const sagaApi = read("src/app/api/admin/integrations/saga/shadow/route.ts");
+assert.match(sagaApi, /requirePermission\(request, "finance\.integrations\.saga\.view"\)/, "SAGA status API should require its dedicated view permission.");
+assert.match(sagaApi, /requireAnyPermission\(request, \["finance\.integrations\.saga\.sync", "finance\.integrations\.saga\.reconcile"\]\)/, "SAGA shadow reconciliation should require an explicit sync or reconcile permission.");
 
 const clientCampaignsApi = read("src/app/api/admin/client-campaigns/route.ts");
 assert.match(clientCampaignsApi, /requireAnyPermission\(request, \["clients\.view", "clients\.view\.own", "campaigns\.view", "campaigns\.view\.own", "finance\.view"\]\)/, "Client/campaign API should not be available to generic operations-only accounts.");

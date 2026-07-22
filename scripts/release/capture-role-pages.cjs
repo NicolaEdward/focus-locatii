@@ -31,6 +31,7 @@ const pages = [
   { name: "crm", route: "/admin/crm", role: "SALES_AGENT", expected: "CRM" },
   { name: "operational", route: "/admin/operational", role: "COO", expected: "Lucrari de atribuit" },
   { name: "ownership-integrity", route: "/admin/integritate-date", role: "COO", expected: "Integritate ownership" },
+  { name: "account-security", route: "/admin/securitate", role: "COO", expected: "Securitate si sesiuni" },
   { name: "public-locations", route: "/locatii", expected: "loca" }
 ];
 

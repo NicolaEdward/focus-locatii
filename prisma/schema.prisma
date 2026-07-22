@@ -355,10 +355,99 @@ model User {
   createdSuppliers Supplier[] @relation("SupplierCreator")
   assignedOperationTasks OperationTask[] @relation("OperationTaskAssignee")
   createdOperationTasks OperationTask[] @relation("OperationTaskCreator")
+  authMfaCredential AuthMfaCredential?
+  authRecoveryTokens AuthActionToken[] @relation("AuthActionTokenUser")
+  createdAuthInvites AuthActionToken[] @relation("AuthActionTokenCreator")
+  authSessions AuthSessionRecord[]
 
   @@index([role])
   @@index([active])
   @@map("portfolio_users")
+}
+
+model AuthMfaCredential {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  secretCiphertext String    @db.Text
+  secretIv         String
+  secretTag        String
+  enabledAt        DateTime?
+  lastUsedStep     BigInt?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recoveryCodes AuthRecoveryCode[]
+
+  @@index([enabledAt])
+  @@map("portfolio_auth_mfa_credentials")
+}
+
+model AuthRecoveryCode {
+  id           String    @id @default(cuid())
+  credentialId String
+  codeHash     String    @unique
+  usedAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  credential AuthMfaCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+
+  @@index([credentialId, usedAt])
+  @@map("portfolio_auth_recovery_codes")
+}
+
+model AuthActionToken {
+  id              String    @id @default(cuid())
+  tokenHash       String    @unique
+  type            String    @db.VarChar(64)
+  userId          String?
+  email           String?   @db.VarChar(254)
+  name            String?
+  role            String?   @db.VarChar(64)
+  createdByUserId String?
+  expiresAt       DateTime
+  usedAt          DateTime?
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user      User? @relation("AuthActionTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("AuthActionTokenCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([type, expiresAt, usedAt])
+  @@index([userId])
+  @@index([createdByUserId])
+  @@map("portfolio_auth_action_tokens")
+}
+
+model AuthSessionRecord {
+  id            String    @id
+  userId        String
+  ipHash        String?
+  userAgent     String?   @db.VarChar(512)
+  mfaVerifiedAt DateTime?
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@index([expiresAt])
+  @@map("portfolio_auth_sessions")
+}
+
+model SecurityRateLimit {
+  keyHash         String   @id
+  scope           String   @db.VarChar(64)
+  count           Int      @default(0)
+  windowStartedAt DateTime
+  expiresAt       DateTime
+  updatedAt       DateTime @updatedAt
+
+  @@index([scope, expiresAt])
+  @@map("portfolio_security_rate_limits")
 }
 
 model ClientAccount {

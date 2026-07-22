@@ -16,6 +16,7 @@ const adminRoutes = [
   "/admin/crm",
   "/admin/operational",
   "/admin/financiar/incasari",
+  "/admin/securitate",
 ];
 const expectedDashboard = {
   COO: "/admin/dashboard",
@@ -28,8 +29,8 @@ const allowed = {
   COO: new Set(adminRoutes),
   SALES_DIRECTOR: new Set(adminRoutes.filter((route) => route !== "/admin/financiar/incasari")),
   SALES_AGENT: new Set(adminRoutes.filter((route) => route !== "/admin/financiar/incasari")),
-  FINANCE_OPERATOR: new Set(["/admin/clienti", "/admin/campanii", "/admin/financiar/incasari"]),
-  FIELD_OPERATOR: new Set(["/admin/operational"]),
+  FINANCE_OPERATOR: new Set(["/admin/clienti", "/admin/campanii", "/admin/financiar/incasari", "/admin/securitate"]),
+  FIELD_OPERATOR: new Set(["/admin/operational", "/admin/securitate"]),
 };
 
 async function main() {

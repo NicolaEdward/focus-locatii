@@ -28,6 +28,7 @@ export function ShortlistDrawer({
   const [offerEmail, setOfferEmail] = useState("");
   const [offerPhone, setOfferPhone] = useState("");
   const [offerMessage, setOfferMessage] = useState("");
+  const [website, setWebsite] = useState("");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [sendingOffer, setSendingOffer] = useState(false);
@@ -81,7 +82,8 @@ export function ShortlistDrawer({
           phone: offerPhone,
           message: [offerMessage, periodSummary].filter(Boolean).join("\n\n"),
           selectedLocationIds: locations.map((location) => location.id),
-          source: "portal-client"
+          source: "portal-client",
+          website
         })
       });
       const payload = await response.json();
@@ -96,6 +98,7 @@ export function ShortlistDrawer({
       setOfferEmail("");
       setOfferPhone("");
       setOfferMessage("");
+      setWebsite("");
     } catch (error) {
       setOfferError(error instanceof Error ? error.message : "Solicitarea nu a putut fi trimisa.");
     } finally {
@@ -157,6 +160,10 @@ export function ShortlistDrawer({
       </section>
 
       <div className="flex-1 overflow-auto px-5 py-4">
+        <label className="absolute -left-[10000px] h-px w-px overflow-hidden" aria-hidden="true">
+          Website
+          <input tabIndex={-1} autoComplete="off" value={website} onChange={(event) => setWebsite(event.target.value)} />
+        </label>
         {locations.length ? (
           <div className="grid gap-3">
             {locations.map((location) => (

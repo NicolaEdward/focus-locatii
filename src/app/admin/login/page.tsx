@@ -3,6 +3,7 @@ import { FocusLogo } from "@/components/brand/FocusLogo";
 import { LoginForm } from "@/components/admin/LoginForm";
 import { getAdminSession } from "@/lib/auth";
 import { dashboardPathForRole } from "@/lib/rbac";
+import { authEmailCapability } from "@/lib/transactional-email";
 
 export default async function AdminLoginPage() {
   const session = await getAdminSession();
@@ -14,7 +15,7 @@ export default async function AdminLoginPage() {
         <div className="mx-auto">
           <FocusLogo />
         </div>
-        <LoginForm />
+        <LoginForm passwordResetAvailable={authEmailCapability().enabled} />
       </div>
     </main>
   );

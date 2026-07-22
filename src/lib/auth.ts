@@ -10,9 +10,11 @@ import {
   type Permission,
   type UserRole
 } from "@/lib/rbac";
+import { AUTH_SESSION_SECONDS, createAuthSessionRecord, resolveRegisteredSession } from "@/lib/auth-sessions";
+import { mutationRequestError } from "@/lib/request-security";
+import { authSecret, base64Url, secureEqual } from "@/lib/security-secrets";
 
 export const ADMIN_COOKIE = "focus_admin_session";
-const SESSION_SECONDS = 60 * 60 * 12;
 
 export type AuthSession = {
   id: string;
@@ -20,33 +22,14 @@ export type AuthSession = {
   name: string;
   role: UserRole;
   tokenVersion: number;
+  sessionId?: string;
+  mfaVerifiedAt?: string;
   iat: number;
   exp: number;
 };
 
-function base64url(input: string | Buffer) {
-  return Buffer.from(input)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-function sessionSecret() {
-  const value = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
-  if (value && value.length >= 32) return value;
-  if (process.env.NODE_ENV !== "production") return "focus-media-local-development-secret-change-me";
-  throw new Error("AUTH_SECRET trebuie sa aiba minimum 32 de caractere.");
-}
-
 function sign(payload: string) {
-  return base64url(crypto.createHmac("sha256", sessionSecret()).update(payload).digest());
-}
-
-function secureEqual(left: string, right: string) {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  return base64Url(crypto.createHmac("sha256", authSecret()).update(payload).digest());
 }
 
 export function createSessionToken(user: {
@@ -55,10 +38,12 @@ export function createSessionToken(user: {
   name: string;
   role: UserRole;
   tokenVersion: number;
+  sessionId?: string;
+  mfaVerifiedAt?: string;
 }) {
   const now = Math.floor(Date.now() / 1000);
-  const session: AuthSession = { ...user, iat: now, exp: now + SESSION_SECONDS };
-  const payload = base64url(JSON.stringify(session));
+  const session: AuthSession = { ...user, iat: now, exp: now + AUTH_SESSION_SECONDS };
+  const payload = base64Url(JSON.stringify(session));
   return `${payload}.${sign(payload)}`;
 }
 
@@ -88,6 +73,16 @@ export function verifySessionToken(token?: string | null): AuthSession | null {
 
 async function resolveSession(session: AuthSession | null) {
   if (!session) return null;
+  if (session.sessionId) {
+    const record = await resolveRegisteredSession({ id: session.id, sessionId: session.sessionId, tokenVersion: session.tokenVersion });
+    if (!record || !isUserRole(record.user.role)) return null;
+    return {
+      ...session,
+      ...record.user,
+      role: record.user.role as UserRole,
+      mfaVerifiedAt: record.mfaVerifiedAt?.toISOString() || session.mfaVerifiedAt
+    };
+  }
   const user = await prisma.user.findFirst({
     where: { id: session.id, active: true, tokenVersion: session.tokenVersion },
     select: { id: true, email: true, name: true, role: true, tokenVersion: true }
@@ -108,7 +103,7 @@ export async function getAuthSessionFromRequest(request: NextRequest) {
 }
 
 export async function requirePermission(request: NextRequest, permission: Permission) {
-  const originError = mutationOriginError(request);
+  const originError = mutationRequestError(request);
   if (originError) return { session: null, response: originError };
   const session = await getAuthSessionFromRequest(request);
   if (!session) {
@@ -121,7 +116,7 @@ export async function requirePermission(request: NextRequest, permission: Permis
 }
 
 export async function requireAnyPermission(request: NextRequest, permissions: readonly Permission[]) {
-  const originError = mutationOriginError(request);
+  const originError = mutationRequestError(request);
   if (originError) return { session: null, response: originError };
   const session = await getAuthSessionFromRequest(request);
   if (!session) {
@@ -149,8 +144,28 @@ export function setSessionCookie(response: NextResponse, user: Parameters<typeof
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: SESSION_SECONDS
+    maxAge: AUTH_SESSION_SECONDS
   });
+}
+
+export async function establishAuthenticatedSession(
+  response: NextResponse,
+  user: Parameters<typeof createSessionToken>[0],
+  request: NextRequest,
+  mfaVerifiedAt?: Date | null
+) {
+  const record = await createAuthSessionRecord(user.id, request, mfaVerifiedAt);
+  setSessionCookie(response, {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    tokenVersion: user.tokenVersion,
+    sessionId: record.id,
+    mfaVerifiedAt: mfaVerifiedAt?.toISOString()
+  });
+  await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+  return record;
 }
 
 export function clearAdminCookie(response: NextResponse) {
@@ -166,7 +181,7 @@ export function clearAdminCookie(response: NextResponse) {
 export async function hashPassword(password: string) {
   const salt = crypto.randomBytes(16);
   const derived = await scrypt(password, salt);
-  return `scrypt$${base64url(salt)}$${base64url(derived)}`;
+  return `scrypt$${base64Url(salt)}$${base64Url(derived)}`;
 }
 
 export async function verifyPassword(password: string, storedHash: string) {
@@ -184,48 +199,21 @@ export async function verifyPassword(password: string, storedHash: string) {
 
 export async function authenticateCredentials(emailInput: string, password: string) {
   const email = emailInput.trim().toLowerCase();
-  let user = await prisma.user.findUnique({ where: { email } });
-
-  if (!user && (await prisma.user.count()) === 0 && legacyAdminMatches(email, password)) {
-    user = await prisma.user.create({
-      data: {
-        email,
-        name: "Administrator Focus Media",
-        passwordHash: await hashPassword(password),
-        role: "SUPER_ADMIN"
-      }
-    });
-  }
+  const user = await prisma.user.findUnique({
+    where: { email },
+    include: { authMfaCredential: { select: { enabledAt: true } } }
+  });
 
   if (!user || !user.active || !(await verifyPassword(password, user.passwordHash))) return null;
-  await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     role: user.role as UserRole,
     tokenVersion: user.tokenVersion,
+    mfaEnrolled: Boolean(user.authMfaCredential?.enabledAt),
     dashboardPath: dashboardPathForRole(user.role as UserRole)
   };
-}
-
-function legacyAdminMatches(email: string, password: string) {
-  const expectedEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
-  const expectedPassword = process.env.ADMIN_PASSWORD;
-  if (!expectedEmail || !expectedPassword) return false;
-  return secureEqual(email, expectedEmail) && secureEqual(password, expectedPassword);
-}
-
-function mutationOriginError(request: NextRequest) {
-  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return null;
-  const origin = request.headers.get("origin");
-  if (!origin) return null;
-  try {
-    if (new URL(origin).host === request.nextUrl.host) return null;
-  } catch {
-    // Invalid Origin is rejected below.
-  }
-  return NextResponse.json({ error: "Origine nepermisa." }, { status: 403 });
 }
 
 function scrypt(password: string, salt: Buffer, keyLength = 64) {

@@ -18,6 +18,7 @@ import {
   Settings,
   Shield,
   ShieldCheck,
+  KeyRound,
   Truck,
   UserRoundCheck,
   Users
@@ -98,6 +99,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
         </nav>
         <div className="col-start-3 row-start-1 flex shrink-0 items-center gap-2">
           {!isFieldOperator ? <NotificationBell /> : null}
+          <Link className="focus-button secondary px-3" href="/admin/securitate" prefetch={false} aria-label="Securitatea contului" title="Securitatea contului"><KeyRound size={18} /></Link>
           <div className="relative z-50">
             <LogoutButton />
           </div>

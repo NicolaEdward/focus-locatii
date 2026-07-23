@@ -7,7 +7,7 @@ type Context = { params: Promise<{ id: string; rowId: string }> };
 export const dynamic = "force-dynamic";
 
 const schema = z.object({
-  action: z.enum(["confirm", "create", "ignore", "confirm_credit"]),
+  action: z.enum(["confirm", "create", "ignore", "confirm_credit", "confirm_ledger"]),
   clientId: z.string().trim().nullable().optional(),
   receivableId: z.string().trim().nullable().optional(),
   campaignId: z.string().trim().nullable().optional(),

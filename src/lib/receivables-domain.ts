@@ -93,6 +93,17 @@ export function reconcileReceivableAmounts(input: {
   };
 }
 
+export function shouldKeepExistingReceivableLedger(input: {
+  reconciliationState: ReturnType<typeof reconcileReceivableAmounts>["state"];
+  rowStatus: string;
+  resolutionAction?: string | null;
+}) {
+  return input.reconciliationState === "conflict" && (
+    input.resolutionAction === "confirm_ledger" ||
+    (input.rowStatus === "resolved" && input.resolutionAction === "confirm")
+  );
+}
+
 export function receivableStatus(input: {
   invoiceAmount: ReceivableMoney;
   collectedAmount: ReceivableMoney;

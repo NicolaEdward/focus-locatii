@@ -11,7 +11,8 @@ import {
   money,
   receivableCanonicalKey,
   receivableStatus,
-  reconcileReceivableAmounts
+  reconcileReceivableAmounts,
+  shouldKeepExistingReceivableLedger
 } from "@/lib/receivables-domain";
 import {
   parseReceivablesWorkbook,
@@ -79,6 +80,10 @@ export async function stageReceivablesImport(input: {
         canonicalKey: true,
         includedInReport: true,
         updatedAt: true,
+        payments: {
+          where: { status: ACTIVE_PAYMENT_STATUS },
+          select: { amount: true }
+        },
         _count: { select: { payments: true } }
       }
     })
@@ -210,7 +215,7 @@ export async function resolveReceivablesImportRow(input: {
   uploadId: string;
   rowId: string;
   actor: AuthSession;
-  action: "confirm" | "create" | "ignore" | "confirm_credit";
+  action: "confirm" | "create" | "ignore" | "confirm_credit" | "confirm_ledger";
   clientId?: string | null;
   receivableId?: string | null;
   campaignId?: string | null;
@@ -233,6 +238,25 @@ export async function resolveReceivablesImportRow(input: {
     throw new Error("Numărul facturii, moneda și valoarea sunt obligatorii.");
   }
   const companyCode = input.companyCode || row.companyCode;
+  if (input.action === "confirm_ledger") {
+    if (!row.receivableId || row.reportCollectedAmount == null) {
+      throw new Error("Rândul nu are un registru existent care poate fi păstrat.");
+    }
+    const existing = await prisma.financialReceivable.findUnique({
+      where: { id: row.receivableId },
+      select: {
+        collectedAmount: true,
+        payments: { where: { status: ACTIVE_PAYMENT_STATUS }, select: { amount: true } }
+      }
+    });
+    if (!existing) throw new Error("Factura existentă nu mai este disponibilă.");
+    const activeLedger = existing.payments.length
+      ? existing.payments.reduce((total, payment) => total.plus(payment.amount), money(0))
+      : money(existing.collectedAmount);
+    if (!money(row.reportCollectedAmount).lessThan(activeLedger.minus("0.01"))) {
+      throw new Error("Registrul aplicației nu depășește valoarea raportată; folosește confirmarea normală.");
+    }
+  }
   const status = input.action === "ignore" ? "ignored" : "resolved";
   assertReceivableImportRowTransition(row.status, status);
   await prisma.$transaction(async (tx) => {
@@ -440,7 +464,12 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
         reportCollectedAmount: row.reportCollectedAmount,
         allowOverpayment: row.resolutionAction === "confirm_credit"
       });
-      if (reconciliation.state === "conflict" || reconciliation.state === "overpayment_confirmation") {
+      const keepsExistingLedger = shouldKeepExistingReceivableLedger({
+        reconciliationState: reconciliation.state,
+        rowStatus: row.status,
+        resolutionAction: row.resolutionAction
+      });
+      if ((reconciliation.state === "conflict" && !keepsExistingLedger) || reconciliation.state === "overpayment_confirmation") {
         throw new Error(`${row.rawInvoiceNumber || row.normalizedInvoiceNumber}: ${reconciliation.message}`);
       }
       let importPaymentId: string | null = null;
@@ -547,7 +576,9 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
               collectedAmount: collected.toFixed(2),
               remainingAmount: remaining.toFixed(2),
               currency: row.currency,
-              status: receivableStatus({ invoiceAmount: row.invoiceAmount, collectedAmount: collected, dueDate: row.dueDate })
+              status: receivableStatus({ invoiceAmount: row.invoiceAmount, collectedAmount: collected, dueDate: row.dueDate }),
+              resolutionAction: row.resolutionAction,
+              keptExistingLedger: keepsExistingLedger
             }
           }
         }
@@ -744,7 +775,7 @@ function classifyImportRow(input: {
   row: ReceivablesImportRow;
   clients: Array<{ id: string; companyName: string; normalizedName: string | null; aliases: unknown; accountOwnerUserId: string | null }>;
   aliases: Array<{ companyCode: string; normalizedAlias: string; clientId: string }>;
-  existingReceivables: Array<{ id: string; clientId: string | null; companyCode: string | null; normalizedInvoiceNumber: string | null; currency: string | null; invoicedAmount: Prisma.Decimal | null; collectedAmount: Prisma.Decimal | null; remainingAmount: Prisma.Decimal | null; lastReportDate: Date | null; rawRowJson: Prisma.JsonValue | null; canonicalKey: string | null; includedInReport: boolean; updatedAt: Date; _count: { payments: number } }>;
+  existingReceivables: Array<{ id: string; clientId: string | null; companyCode: string | null; normalizedInvoiceNumber: string | null; currency: string | null; invoicedAmount: Prisma.Decimal | null; collectedAmount: Prisma.Decimal | null; remainingAmount: Prisma.Decimal | null; lastReportDate: Date | null; rawRowJson: Prisma.JsonValue | null; canonicalKey: string | null; includedInReport: boolean; updatedAt: Date; payments: Array<{ amount: Prisma.Decimal }>; _count: { payments: number } }>;
   duplicateInvoiceKeys: Set<string>;
 }) {
   const { row } = input;
@@ -765,16 +796,19 @@ function classifyImportRow(input: {
   }
   const matchedInvoice = exactInvoice.length === 1 ? exactInvoice[0] : consolidatedExact;
   if (matchedInvoice && clientMatch.level === "safe") {
-    if (money(row.reportCollectedAmount).lessThan(money(matchedInvoice.collectedAmount).minus("0.01"))) {
+    const activeLedger = matchedInvoice.payments.length
+      ? matchedInvoice.payments.reduce((total, payment) => total.plus(payment.amount), money(0))
+      : money(matchedInvoice.collectedAmount);
+    if (money(row.reportCollectedAmount).lessThan(activeLedger.minus("0.01"))) {
       return classification(
         row,
         "conflict",
         "conflict",
         0,
-        `Raportul indică ${money(row.reportCollectedAmount).toFixed(2)} încasat, dar aplicația are deja ${money(matchedInvoice.collectedAmount).toFixed(2)}. Încasările existente nu vor fi suprascrise.`,
+        `Raportul indică ${money(row.reportCollectedAmount).toFixed(2)} încasat, dar aplicația are deja ${activeLedger.toFixed(2)}. Încasările existente nu vor fi suprascrise.`,
         clientId,
         matchedInvoice.id,
-        null
+        "keep_active_ledger"
       );
     }
     const unchanged = sourceHashFromRaw(matchedInvoice.rawRowJson) === row.sourceHash;
@@ -814,6 +848,7 @@ function consolidateHistoricalDuplicates(rows: Array<{
   canonicalKey: string | null;
   includedInReport: boolean;
   updatedAt: Date;
+  payments: Array<{ amount: Prisma.Decimal }>;
   _count: { payments: number };
 }>) {
   if (rows.length < 2) return rows[0] || null;

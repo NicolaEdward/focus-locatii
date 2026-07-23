@@ -29,7 +29,8 @@ assert.match(component, /separată de activitatea curentă și de KPI-urile oper
 assert.doesNotMatch(component, /InvoiceMetric label="Încasat"/, "collected totals must not dominate operational statistics");
 assert.doesNotMatch(component, /window\.(prompt|confirm)/);
 assert.match(component, /api\(`\/api\/admin\/receivables-workspace\/\$\{endpoint\}/, "secondary tabs must load lazily");
-assert.match(component, /options\?type=/, "large allocation options must load contextually");
+assert.match(component, /receivables-workspace\/options\?\$\{params\}/, "large allocation options must load contextually");
+assert.match(component, /params\.set\("selectedId"/, "the proposed allocation must remain visible in contextual options");
 assert.match(component, /Plățile manuale existente rămân sursa prioritară/);
 
 assert.match(page, /listReceivableRegistry/);

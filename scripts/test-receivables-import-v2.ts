@@ -9,7 +9,8 @@ import {
   receivableCanonicalKey,
   receivableLedgerSnapshot,
   receivableStatus,
-  reconcileReceivableAmounts
+  reconcileReceivableAmounts,
+  shouldKeepExistingReceivableLedger
 } from "../src/lib/receivables-domain";
 import { parseReceivablesWorkbook } from "../src/lib/receivables-import-parser";
 
@@ -73,6 +74,10 @@ assert.equal(partial.importDelta.toFixed(2), "500.00");
 assert.equal(partial.remainingAmount.toFixed(2), "2500.00");
 const futureOldReport = reconcileReceivableAmounts({ invoiceAmount: "4000", ledgerCollectedAmount: "1500", reportCollectedAmount: "1000" });
 assert.equal(futureOldReport.state, "conflict", "an older/incomplete report cannot erase manual payments");
+assert.equal(shouldKeepExistingReceivableLedger({ reconciliationState: futureOldReport.state, rowStatus: "conflict", resolutionAction: null }), false, "an unresolved ledger conflict must block import");
+assert.equal(shouldKeepExistingReceivableLedger({ reconciliationState: futureOldReport.state, rowStatus: "resolved", resolutionAction: "confirm" }), true, "a previously confirmed mapping must preserve the active ledger");
+assert.equal(shouldKeepExistingReceivableLedger({ reconciliationState: futureOldReport.state, rowStatus: "resolved", resolutionAction: "confirm_ledger" }), true, "explicit ledger confirmation must preserve existing payments");
+assert.equal(shouldKeepExistingReceivableLedger({ reconciliationState: futureOldReport.state, rowStatus: "resolved", resolutionAction: "create" }), false, "unrelated resolution actions must not bypass reconciliation");
 const overpaymentBlocked = reconcileReceivableAmounts({ invoiceAmount: "1000", ledgerCollectedAmount: "0", reportCollectedAmount: "1061.45" });
 assert.equal(overpaymentBlocked.state, "overpayment_confirmation");
 const overpaymentAccepted = reconcileReceivableAmounts({ invoiceAmount: "1000", ledgerCollectedAmount: "0", reportCollectedAmount: "1061.45", allowOverpayment: true });
@@ -153,7 +158,11 @@ assert.doesNotMatch(workspace, /window\.(prompt|confirm)/, "financial actions mu
 assert.match(workspaceService, /financialReceivable\.groupBy/, "workspace KPI totals must be calculated in the database");
 assert.match(workspaceService, /view === "history"/, "paid invoices must use a separate history view");
 assert.match(rowRoute, /currency: z\.enum\(\["RON", "EUR"\]\)/);
+assert.match(rowRoute, /confirm_ledger/);
 assert.match(service, /Motivul corectării monedei este obligatoriu/);
+assert.match(service, /keptExistingLedger/);
+assert.match(workspace, /Păstrează încasările existente din aplicație/);
+assert.match(workspaceService, /selectedId/, "the proposed canonical client must remain selectable even when the raw Excel name does not match");
 assert.match(service, /previousCurrency: row\.currency, currency/);
 assert.match(service, /maxWait: 10_000/);
 assert.match(service, /timeout: 120_000/);

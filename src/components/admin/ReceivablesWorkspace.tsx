@@ -43,6 +43,7 @@ type PaginationValue = { page: number; take: number; total: number; totalPages: 
 type LazyData = { items: JsonMap[]; pagination?: PaginationValue; totals?: JsonMap[] };
 type Option = { id: string; label: string; detail?: string | null };
 type Tab = "receivables" | "settled" | "import" | "history" | "payments" | "credits" | "aliases" | "reconciliation";
+type RowResolutionAction = "confirm" | "ignore" | "confirm_credit" | "confirm_ledger";
 
 const tabs: Array<[Tab, string, typeof ReceiptText]> = [
   ["receivables", "De încasat", ReceiptText],
@@ -105,7 +106,7 @@ export function ReceivablesWorkspace({
   const [allocationTarget, setAllocationTarget] = useState<JsonMap | null>(null);
   const [allocationOptions, setAllocationOptions] = useState<Record<string, Option[]>>(emptyOptions);
   const [optionSearch, setOptionSearch] = useState("");
-  const [rowAction, setRowAction] = useState<{ row: JsonMap; action: "confirm" | "ignore" | "confirm_credit" } | null>(null);
+  const [rowAction, setRowAction] = useState<{ row: JsonMap; action: RowResolutionAction } | null>(null);
   const [confirmImportOpen, setConfirmImportOpen] = useState(false);
   const [paymentAction, setPaymentAction] = useState<{ payment: JsonMap; type: "cancel" | "correct" } | null>(null);
   const [aliasAction, setAliasAction] = useState<{ alias: JsonMap; type: "delete" | "edit" } | null>(null);
@@ -210,26 +211,48 @@ export function ReceivablesWorkspace({
       campaigns: row.campaignDetails || "",
       locations: row.locationRaw || row.location || ""
     };
+    const selectedIds = {
+      clients: row.clientId,
+      receivables: row.receivableId,
+      campaigns: row.campaignId,
+      locations: row.locationId
+    };
     const result = await Promise.all((Object.keys(terms) as Array<keyof typeof terms>).map(async (type) => {
       const term = commonQuery || String(terms[type]);
-      const payload = await api(`/api/admin/receivables-workspace/options?type=${type}&q=${encodeURIComponent(term.slice(0, 80))}&take=20`);
+      const params = new URLSearchParams({ type, q: term.slice(0, 80), take: "20" });
+      if (selectedIds[type]) params.set("selectedId", String(selectedIds[type]));
+      if (type === "campaigns" && row.clientId) params.set("clientId", String(row.clientId));
+      const payload = await api(`/api/admin/receivables-workspace/options?${params}`);
       return [type, payload.items] as const;
     }));
     setAllocationOptions(Object.fromEntries(result));
   }
 
+  async function loadClientOptions(row: JsonMap, queryValue = "") {
+    const params = new URLSearchParams({
+      type: "clients",
+      q: String(queryValue || row.clientNameRaw || "").slice(0, 80),
+      take: "20"
+    });
+    if (row.clientId) params.set("selectedId", String(row.clientId));
+    const payload = await api(`/api/admin/receivables-workspace/options?${params}`);
+    setAllocationOptions((current) => ({ ...current, clients: payload.items }));
+  }
+
   async function openAllocation(row: JsonMap) {
-    setAllocationTarget(row); setOptionSearch(""); setBusy(true); setError(null);
+    setAllocationTarget(row); setAllocationOptions(emptyOptions); setOptionSearch(""); setBusy(true); setError(null);
     try { await loadOptions(row); }
     catch (optionsError) { setError(optionsError instanceof Error ? optionsError.message : "Opțiunile nu au putut fi încărcate."); }
     finally { setBusy(false); }
   }
 
-  async function openRowAction(row: JsonMap, action: "confirm" | "ignore" | "confirm_credit") {
+  async function openRowAction(row: JsonMap, action: RowResolutionAction) {
     setRowAction({ row, action });
+    setAllocationOptions(emptyOptions);
+    setOptionSearch(String(row.clientNameRaw || ""));
     if (action !== "ignore") {
       setBusy(true);
-      try { await loadOptions(row); }
+      try { await loadClientOptions(row); }
       catch (optionsError) { setError(optionsError instanceof Error ? optionsError.message : "Clienții nu au putut fi încărcați."); }
       finally { setBusy(false); }
     }
@@ -482,7 +505,7 @@ export function ReceivablesWorkspace({
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-focus-line pb-4"><div><h3 className="font-black text-white">{preview.upload.originalFileName}</h3><p className="text-xs text-slate-400">Raport: {formatDate(preview.upload.reportDate)} · Stare: {preview.upload.status}</p></div>{canConfirm && preview.upload.status !== "confirmed" ? <button className="focus-button" type="button" disabled={busy || blockers > 0} onClick={() => setConfirmImportOpen(true)}><BadgeCheck size={17} /> Confirmă importul</button> : null}</div>
               {blockers ? <p className="mt-3 flex items-center gap-2 rounded-md bg-red-950/40 p-3 text-sm font-bold text-red-200"><CircleAlert size={17} /> {blockers} rânduri trebuie rezolvate înainte de confirmare.</p> : null}
               <div className="mt-4 flex gap-2 overflow-x-auto pb-2">{Object.entries(groupLabels).map(([key, label]) => <button key={key} className={`focus-button whitespace-nowrap ${previewGroup === key ? "" : "secondary"}`} type="button" onClick={() => setPreviewGroup(key)}>{label} <span className="rounded bg-black/20 px-1.5">{preview.groups?.[key]?.length || 0}</span></button>)}</div>
-              <div className="mt-2 overflow-x-auto rounded-lg border border-focus-line"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-focus-navy text-xs uppercase text-slate-300"><tr><th className="p-3">Rând</th><th className="p-3">Client sursă</th><th className="p-3">Factură</th><th className="p-3">Scadență</th><th className="p-3 text-right">Facturat</th><th className="p-3 text-right">Încasat</th><th className="p-3 text-right">Rest</th><th className="p-3">Acțiuni</th></tr></thead><tbody>{activeGroupRows.map((row: JsonMap) => <tr key={row.id} className="border-t border-focus-line bg-focus-panel/50 align-top"><td className="p-3 text-slate-400">{row.rowNumber}</td><td className="p-3"><strong className="text-white">{row.clientNameRaw || "-"}</strong><span className="mt-1 block max-w-72 text-xs text-slate-400">{row.matchReason}</span></td><td className="p-3"><span className="block text-white">{row.rawInvoiceNumber || "-"}</span>{row.rawInvoiceNumber && row.normalizedInvoiceNumber && normalizeVisible(row.rawInvoiceNumber) !== row.normalizedInvoiceNumber ? <span className="text-xs text-amber-300">Normalizat: {row.normalizedInvoiceNumber}</span> : null}</td><td className="p-3 text-slate-200">{formatDate(row.dueDate)}</td><td className="p-3 text-right text-white">{moneyLabel(row.invoiceAmount, row.currency)}</td><td className="p-3 text-right text-emerald-300">{moneyLabel(row.reportCollectedAmount, row.currency)}</td><td className="p-3 text-right font-bold text-focus-yellow">{moneyLabel(row.reportRemainingAmount, row.currency)}</td><td className="p-3"><div className="flex min-w-64 flex-wrap gap-2">{canValidate && !["imported", "unchanged", "ignored"].includes(row.status) ? <><button className="focus-button" type="button" disabled={busy} onClick={() => void openRowAction(row, row.status === "needs_confirmation" && Number(row.reportRemainingAmount) < 0 ? "confirm_credit" : "confirm")}>Confirmă</button><button className="focus-button secondary" type="button" disabled={busy} onClick={() => void openAllocation(row)}>Alocare detaliată</button><button className="focus-button secondary" type="button" disabled={busy} onClick={() => void openRowAction(row, "ignore")}>Ignoră</button></> : <StatusBadge value={row.status} />}</div></td></tr>)}</tbody></table></div>
+              <div className="mt-2 overflow-x-auto rounded-lg border border-focus-line"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-focus-navy text-xs uppercase text-slate-300"><tr><th className="p-3">Rând</th><th className="p-3">Client sursă</th><th className="p-3">Factură</th><th className="p-3">Scadență</th><th className="p-3 text-right">Facturat</th><th className="p-3 text-right">Încasat</th><th className="p-3 text-right">Rest</th><th className="p-3">Acțiuni</th></tr></thead><tbody>{activeGroupRows.map((row: JsonMap) => <tr key={row.id} className="border-t border-focus-line bg-focus-panel/50 align-top"><td className="p-3 text-slate-400">{row.rowNumber}</td><td className="p-3"><strong className="text-white">{row.clientNameRaw || "-"}</strong><span className="mt-1 block max-w-72 text-xs text-slate-400">{row.matchReason}</span></td><td className="p-3"><span className="block text-white">{row.rawInvoiceNumber || "-"}</span>{row.rawInvoiceNumber && row.normalizedInvoiceNumber && normalizeVisible(row.rawInvoiceNumber) !== row.normalizedInvoiceNumber ? <span className="text-xs text-amber-300">Normalizat: {row.normalizedInvoiceNumber}</span> : null}</td><td className="p-3 text-slate-200">{formatDate(row.dueDate)}</td><td className="p-3 text-right text-white">{moneyLabel(row.invoiceAmount, row.currency)}</td><td className="p-3 text-right text-emerald-300">{moneyLabel(row.reportCollectedAmount, row.currency)}</td><td className="p-3 text-right font-bold text-focus-yellow">{moneyLabel(row.reportRemainingAmount, row.currency)}</td><td className="p-3"><div className="flex min-w-64 flex-wrap gap-2">{canValidate && !["imported", "unchanged", "ignored"].includes(row.status) ? <><button className="focus-button" type="button" disabled={busy} onClick={() => void openRowAction(row, rowConfirmationAction(row))}>{row.proposedAction === "keep_active_ledger" ? "Păstrează încasările" : "Confirmă"}</button><button className="focus-button secondary" type="button" disabled={busy} onClick={() => void openAllocation(row)}>Alocare detaliată</button><button className="focus-button secondary" type="button" disabled={busy} onClick={() => void openRowAction(row, "ignore")}>Ignoră</button></> : <StatusBadge value={row.status} />}</div></td></tr>)}</tbody></table></div>
               {!activeGroupRows.length ? <Empty text={`Nu există rânduri în categoria „${groupLabels[previewGroup]}”.`} /> : null}
             </div> : <Empty text="Încarcă un raport pentru a vedea preview-ul și alocările propuse." />}
           </div>
@@ -503,9 +526,44 @@ export function ReceivablesWorkspace({
         <button className="focus-button mt-5 w-full justify-center" disabled={busy || !paymentAmount} type="submit"><Banknote size={18} /> {busy ? "Se salvează..." : "Salvează plata"}</button>
       </form></Modal> : null}
 
-      {allocationTarget ? <Modal title="Alocare manuală" subtitle={`${allocationTarget.clientNameRaw || "Rând fără client"} · ${allocationTarget.rawInvoiceNumber || "Fără număr"}`} onClose={() => setAllocationTarget(null)}><form onSubmit={submitAllocation}><div className="mb-4 flex gap-2"><input className="focus-input min-w-0 flex-1" value={optionSearch} onChange={(event) => setOptionSearch(event.target.value)} placeholder="Caută client, factură, campanie sau locație" /><button className="focus-button secondary" type="button" disabled={busy} onClick={() => void loadOptions(allocationTarget, optionSearch)}>Caută</button></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Firmă emitentă"><select className="focus-input" name="companyCode" defaultValue={allocationTarget.companyCode}><option value="FOCUS_MEDIA">Focus Media Outdoor</option><option value="EXCELLENCE_MEDIA">Excellence Media Production</option><option value="FOCUS_BG">Focus Media EOOD Bulgaria</option></select></Field><Field label="Monedă"><select className="focus-input" name="currency" defaultValue={allocationTarget.currency || "RON"}><option value="RON">RON</option><option value="EUR">EUR</option></select></Field><OptionField label="Client" name="clientId" options={allocationOptions.clients} defaultValue={allocationTarget.clientId} required /><OptionField label="Factură existentă" name="receivableId" options={allocationOptions.receivables} defaultValue={allocationTarget.receivableId} empty="Creează factură nouă" /><OptionField label="Campanie" name="campaignId" options={allocationOptions.campaigns} defaultValue={allocationTarget.campaignId} empty="Fără campanie" /><OptionField label="Locație" name="locationId" options={allocationOptions.locations} defaultValue={allocationTarget.locationId} empty="Fără locație" /><Field label="Acțiune"><select className="focus-input" name="action" defaultValue={Number(allocationTarget.reportRemainingAmount) < 0 ? "confirm_credit" : "create"}><option value="create">Creează / actualizează factura</option><option value="confirm">Confirmă potrivirea</option><option value="confirm_credit">Confirmă și creditul clientului</option></select></Field><label className="flex items-center gap-2 text-sm font-bold text-slate-200"><input type="checkbox" name="saveAlias" /> Salvează denumirea ca alias confirmat</label><Field label="Observație / motiv" wide><textarea className="focus-input min-h-20" name="reason" placeholder="Obligatoriu dacă modifici moneda." /></Field></div><button className="focus-button mt-5 w-full justify-center" disabled={busy} type="submit"><BadgeCheck size={18} /> Salvează alocarea</button></form></Modal> : null}
+      {allocationTarget ? <Modal title="Alocare manuală" subtitle={`${allocationTarget.clientNameRaw || "Rând fără client"} · ${allocationTarget.rawInvoiceNumber || "Fără număr"}`} onClose={() => setAllocationTarget(null)}><form onSubmit={submitAllocation}><div className="mb-4 flex gap-2"><input className="focus-input min-w-0 flex-1" value={optionSearch} onChange={(event) => setOptionSearch(event.target.value)} placeholder="Caută client, factură, campanie sau locație" /><button className="focus-button secondary" type="button" disabled={busy} onClick={() => void loadOptions(allocationTarget, optionSearch)}>Caută</button></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Firmă emitentă"><select className="focus-input" name="companyCode" defaultValue={allocationTarget.companyCode}><option value="FOCUS_MEDIA">Focus Media Outdoor</option><option value="EXCELLENCE_MEDIA">Excellence Media Production</option><option value="FOCUS_BG">Focus Media EOOD Bulgaria</option></select></Field><Field label="Monedă"><select className="focus-input" name="currency" defaultValue={allocationTarget.currency || "RON"}><option value="RON">RON</option><option value="EUR">EUR</option></select></Field><OptionField label="Client" name="clientId" options={allocationOptions.clients} defaultValue={allocationTarget.clientId} required /><OptionField label="Factură existentă" name="receivableId" options={allocationOptions.receivables} defaultValue={allocationTarget.receivableId} empty="Creează factură nouă" /><OptionField label="Campanie" name="campaignId" options={allocationOptions.campaigns} defaultValue={allocationTarget.campaignId} empty="Fără campanie" /><OptionField label="Locație" name="locationId" options={allocationOptions.locations} defaultValue={allocationTarget.locationId} empty="Fără locație" /><Field label="Acțiune"><select className="focus-input" name="action" defaultValue={allocationTarget.proposedAction === "keep_active_ledger" ? "confirm_ledger" : Number(allocationTarget.reportRemainingAmount) < 0 ? "confirm_credit" : "create"}><option value="create">Creează / actualizează factura</option><option value="confirm">Confirmă potrivirea</option><option value="confirm_credit">Confirmă și creditul clientului</option>{allocationTarget.proposedAction === "keep_active_ledger" ? <option value="confirm_ledger">Păstrează încasările existente din aplicație</option> : null}</select></Field><label className="flex items-center gap-2 text-sm font-bold text-slate-200"><input type="checkbox" name="saveAlias" /> Salvează denumirea ca alias confirmat</label><Field label="Observație / motiv" wide><textarea className="focus-input min-h-20" name="reason" placeholder="Obligatoriu dacă modifici moneda." /></Field></div><button className="focus-button mt-5 w-full justify-center" disabled={busy} type="submit"><BadgeCheck size={18} /> Salvează alocarea</button></form></Modal> : null}
 
-      {rowAction ? <Modal title={rowAction.action === "ignore" ? "Ignoră rândul" : "Confirmă alocarea"} subtitle={`${rowAction.row.clientNameRaw || "Client neidentificat"} · ${rowAction.row.rawInvoiceNumber || "Fără număr"}`} onClose={() => setRowAction(null)}><form onSubmit={resolveRow}><p className="rounded-md bg-focus-navy/60 p-3 text-sm text-slate-300">Sursă: <strong className="text-white">{rowAction.row.clientNameRaw || "-"}</strong><br />Potrivire propusă: <strong className="text-white">{rowAction.row.matchReason || "Fără potrivire sigură"}</strong></p>{rowAction.action !== "ignore" ? <div className="mt-4"><OptionField label="Client canonic" name="clientId" options={allocationOptions.clients} defaultValue={rowAction.row.clientId} required /><label className="mt-3 flex items-center gap-2 text-sm text-slate-200"><input type="checkbox" name="saveAlias" /> Salvează această denumire ca alias pentru importurile viitoare</label></div> : null}<Field label={rowAction.action === "ignore" ? "Motivul ignorării" : "Observație"}><textarea className="focus-input mt-4 min-h-24 w-full" name="reason" required={rowAction.action === "ignore"} /></Field><button className="focus-button mt-5 w-full justify-center" disabled={busy} type="submit">{rowAction.action === "ignore" ? "Ignoră cu motiv" : "Confirmă alocarea"}</button></form></Modal> : null}
+      {rowAction ? (
+        <Modal
+          title={rowAction.action === "ignore" ? "Ignoră rândul" : rowAction.action === "confirm_ledger" ? "Păstrează registrul aplicației" : "Confirmă alocarea"}
+          subtitle={`${rowAction.row.clientNameRaw || "Client neidentificat"} · ${rowAction.row.rawInvoiceNumber || "Fără număr"}`}
+          onClose={() => setRowAction(null)}
+        >
+          <form onSubmit={resolveRow}>
+            <p className="rounded-md bg-focus-navy/60 p-3 text-sm text-slate-300">
+              Sursă: <strong className="text-white">{rowAction.row.clientNameRaw || "-"}</strong><br />
+              Potrivire propusă: <strong className="text-white">{rowAction.row.matchReason || "Fără potrivire sigură"}</strong>
+            </p>
+            {rowAction.action === "confirm_ledger" ? (
+              <p className="mt-3 rounded-md border border-amber-500/50 bg-amber-950/40 p-3 text-sm text-amber-100">
+                Raportul nu va reduce încasările deja înregistrate. Factura va păstra totalul calculat din registrul aplicației.
+              </p>
+            ) : null}
+            {rowAction.action !== "ignore" ? (
+              <div className="mt-4">
+                <div className="mb-3 flex gap-2">
+                  <input className="focus-input min-w-0 flex-1" value={optionSearch} onChange={(event) => setOptionSearch(event.target.value)} placeholder="Caută clientul după nume sau CUI" />
+                  <button className="focus-button secondary" type="button" disabled={busy} onClick={() => void loadClientOptions(rowAction.row, optionSearch)}>Caută</button>
+                </div>
+                <OptionField label="Client canonic" name="clientId" options={allocationOptions.clients} defaultValue={rowAction.row.clientId} required />
+                {!busy && allocationOptions.clients.length === 0 ? <p className="mt-2 text-xs text-amber-200">Nu există rezultate pentru căutarea curentă. Modifică termenul și apasă „Caută”.</p> : null}
+                <label className="mt-3 flex items-center gap-2 text-sm text-slate-200"><input type="checkbox" name="saveAlias" /> Salvează această denumire ca alias pentru importurile viitoare</label>
+              </div>
+            ) : null}
+            <Field label={rowAction.action === "ignore" ? "Motivul ignorării" : "Observație"}>
+              <textarea className="focus-input mt-4 min-h-24 w-full" name="reason" required={rowAction.action === "ignore"} />
+            </Field>
+            <button className="focus-button mt-5 w-full justify-center" disabled={busy} type="submit">
+              {rowAction.action === "ignore" ? "Ignoră cu motiv" : rowAction.action === "confirm_ledger" ? "Confirmă și păstrează încasările" : "Confirmă alocarea"}
+            </button>
+          </form>
+        </Modal>
+      ) : null}
 
       {confirmImportOpen && preview ? <Modal title="Confirmă importul" subtitle={preview.upload.originalFileName} onClose={() => setConfirmImportOpen(false)}><p className="text-sm text-slate-300">Confirmarea aplică tranzacțional rândurile validate. Plățile manuale existente rămân sursa prioritară și nu sunt suprascrise.</p><div className="mt-4 rounded-md bg-focus-navy/60 p-4 text-sm text-slate-200"><strong>{preview.rowCount || Object.values(preview.groups || {}).flat().length} rânduri analizate</strong><br />{blockers} blocaje rămase</div><button className="focus-button mt-5 w-full justify-center" disabled={busy || blockers > 0} type="button" onClick={() => void confirmImport()}>Confirmă importul tranzacțional</button></Modal> : null}
 
@@ -553,5 +611,10 @@ function statusLabel(value: string) { return ({ collected: "Încasată", collect
 function moneyLabel(value: unknown, currency: unknown) { const number = Number(value || 0); return `${new Intl.NumberFormat("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(number)} ${String(currency || "")}`.trim(); }
 function formatDate(value: unknown) { if (!value) return "-"; const date = new Date(String(value)); return Number.isNaN(date.getTime()) ? "-" : new Intl.DateTimeFormat("ro-RO").format(date); }
 function normalizeVisible(value: string) { return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, ""); }
+function rowConfirmationAction(row: JsonMap): RowResolutionAction {
+  if (row.proposedAction === "keep_active_ledger") return "confirm_ledger";
+  if (row.status === "needs_confirmation" && Number(row.reportRemainingAmount) < 0) return "confirm_credit";
+  return "confirm";
+}
 function firstNonEmptyGroup(preview: JsonMap, preferred?: string) { if (preferred && preview.groups?.[preferred]?.length) return preferred; return ["conflict", "manual", "needs_confirmation", "allocated_auto", "updates", "existing", "credit", "unchanged", "imported", "ignored"].find((key) => preview.groups?.[key]?.length) || "allocated_auto"; }
 function nullableFormValue(data: FormData, key: string) { const value = String(data.get(key) || "").trim(); return value || null; }

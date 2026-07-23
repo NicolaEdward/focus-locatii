@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
       type: parsed.data,
       query: request.nextUrl.searchParams.get("q") || "",
       clientId: request.nextUrl.searchParams.get("clientId") || undefined,
+      selectedId: request.nextUrl.searchParams.get("selectedId") || undefined,
       take: Number(request.nextUrl.searchParams.get("take") || 20)
     });
     return NextResponse.json({ items });

@@ -384,20 +384,33 @@ export async function searchReceivableOptions(input: {
   type: "clients" | "campaigns" | "locations" | "receivables";
   query?: string;
   clientId?: string;
+  selectedId?: string;
   take?: number;
 }) {
   const query = input.query?.trim() || "";
   const take = normalizedTake(input.take, 20, 5, 50);
   if (input.type === "clients") {
-    const items = await prisma.clientAccount.findMany({
-      where: {
-        status: { notIn: ["merged", "archived"] },
-        ...(query ? { OR: [{ companyName: { contains: query } }, { taxId: { contains: query } }] } : {})
-      },
-      select: { id: true, companyName: true, taxId: true },
-      orderBy: { companyName: "asc" },
-      take
-    });
+    const where: Prisma.ClientAccountWhereInput = {
+      status: { notIn: ["merged", "archived"] },
+      ...(query ? { OR: [{ companyName: { contains: query } }, { taxId: { contains: query } }] } : {})
+    };
+    const [matches, selected] = await Promise.all([
+      prisma.clientAccount.findMany({
+        where,
+        select: { id: true, companyName: true, taxId: true },
+        orderBy: { companyName: "asc" },
+        take
+      }),
+      input.selectedId
+        ? prisma.clientAccount.findFirst({
+            where: { id: input.selectedId, status: { notIn: ["merged", "archived"] } },
+            select: { id: true, companyName: true, taxId: true }
+          })
+        : Promise.resolve(null)
+    ]);
+    const items = selected && !matches.some((item) => item.id === selected.id)
+      ? [selected, ...matches].slice(0, take)
+      : matches;
     return items.map((row) => ({ id: row.id, label: row.companyName, detail: row.taxId }));
   }
   if (input.type === "campaigns") {

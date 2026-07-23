@@ -207,6 +207,11 @@ export function evaluateDocumentAccess(
     };
   }
 
+  if (session.role === "D_CEO") {
+    return action === "view"
+      ? null
+      : { allowed: false, status: 403, error: "Rolul D-CEO poate doar consulta documente." };
+  }
   if (["SUPER_ADMIN", "COO", "SALES_DIRECTOR"].includes(session.role)) return null;
 
   if (session.role === "FINANCE_OPERATOR") {

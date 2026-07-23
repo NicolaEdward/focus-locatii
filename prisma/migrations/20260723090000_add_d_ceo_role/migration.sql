@@ -1,0 +1,10 @@
+ALTER TABLE `portfolio_users`
+  MODIFY COLUMN `role` ENUM(
+    'SUPER_ADMIN',
+    'COO',
+    'D_CEO',
+    'SALES_DIRECTOR',
+    'SALES_AGENT',
+    'FINANCE_OPERATOR',
+    'FIELD_OPERATOR'
+  ) NOT NULL DEFAULT 'SALES_AGENT';

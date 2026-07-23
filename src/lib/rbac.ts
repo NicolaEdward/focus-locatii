@@ -1,4 +1,4 @@
-export const USER_ROLES = ["SUPER_ADMIN", "COO", "SALES_DIRECTOR", "SALES_AGENT", "FINANCE_OPERATOR", "FIELD_OPERATOR"] as const;
+export const USER_ROLES = ["SUPER_ADMIN", "COO", "D_CEO", "SALES_DIRECTOR", "SALES_AGENT", "FINANCE_OPERATOR", "FIELD_OPERATOR"] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
 
@@ -91,6 +91,23 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "finance.integrations.saga.view",
     "finance.integrations.saga.reconcile"
   ],
+  D_CEO: [
+    "dashboard.executive.view",
+    "dashboard.operations.view",
+    "dashboard.sales.view",
+    "clients.view",
+    "leads.view",
+    "opportunities.view",
+    "proposals.view",
+    "campaigns.view",
+    "inventory.view",
+    "reservations.view",
+    "reports.view",
+    "audit.view",
+    "dashboard.finance.view",
+    "finance.view",
+    "finance.integrations.saga.view"
+  ],
   SALES_DIRECTOR: [
     "dashboard.sales.view",
     "clients.view",
@@ -146,6 +163,7 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
 export const ROLE_LABELS: Record<UserRole, string> = {
   SUPER_ADMIN: "Super administrator",
   COO: "COO",
+  D_CEO: "D-CEO",
   SALES_DIRECTOR: "Director de vanzari",
   SALES_AGENT: "Agent de vanzari",
   FINANCE_OPERATOR: "Operator financiar",
@@ -175,5 +193,11 @@ export function dashboardPathForRole(role: UserRole) {
 }
 
 export function hasGlobalDataAccess(role: UserRole) {
-  return role !== "SALES_AGENT" && role !== "FINANCE_OPERATOR" && role !== "FIELD_OPERATOR";
+  return (["SUPER_ADMIN", "COO", "D_CEO", "SALES_DIRECTOR"] as const).includes(
+    role as "SUPER_ADMIN" | "COO" | "D_CEO" | "SALES_DIRECTOR"
+  );
+}
+
+export function isBusinessReadOnlyRole(role: UserRole) {
+  return role === "D_CEO";
 }

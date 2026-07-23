@@ -34,6 +34,7 @@ import { hasAnyPermission, hasPermission, ROLE_LABELS } from "@/lib/rbac";
 export function AdminHeader({ session }: { session: AuthSession }) {
   const pathname = usePathname() || "";
   const isFieldOperator = session.role === "FIELD_OPERATOR";
+  const isDceo = session.role === "D_CEO";
   const canViewInventory = hasPermission(session.role, "inventory.view");
   const canManageInventory = hasPermission(session.role, "inventory.manage");
   const canExportSales = hasPermission(session.role, "reports.view");
@@ -101,7 +102,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           {!isFieldOperator ? <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Portal public</AdminNavLink> : null}
         </nav>
         <div className="col-start-3 row-start-1 flex shrink-0 items-center gap-2">
-          {!isFieldOperator ? <NotificationBell /> : null}
+          {!isFieldOperator && !isDceo ? <NotificationBell /> : null}
           <Link className="focus-button secondary px-3" href="/admin/securitate" prefetch={false} aria-label="Securitatea contului" title="Securitatea contului"><KeyRound size={18} /></Link>
           <div className="relative z-50">
             <LogoutButton />

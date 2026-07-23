@@ -103,6 +103,7 @@ type OperationalReservationAccess = Pick<ReservationDTO, "status" | "ownerId" | 
 };
 
 export function canAccessOperationalReservation(session: AuthSession, reservation: OperationalReservationAccess) {
+  if (session.role === "D_CEO") return true;
   if (["SUPER_ADMIN", "COO", "SALES_DIRECTOR"].includes(session.role)) return true;
   // Field access requires a relational assignment and is checked asynchronously at the API boundary.
   if (session.role === "FIELD_OPERATOR") return false;
@@ -124,12 +125,13 @@ export function canViewOperationalProofPhoto(session: AuthSession, reservation: 
 }
 
 export function canCompleteOperationalReservation(session: AuthSession, reservation: OperationalReservationAccess) {
+  if (session.role === "D_CEO") return false;
   if (reservation.status !== "BOOKED") return false;
   return canAccessOperationalReservation(session, reservation);
 }
 
 export function canRescheduleOperationalReservation(session: AuthSession, reservation: OperationalReservationAccess) {
   if (reservation.status !== "BOOKED") return false;
-  if (session.role === "FIELD_OPERATOR") return false;
+  if (session.role === "FIELD_OPERATOR" || session.role === "D_CEO") return false;
   return canAccessOperationalReservation(session, reservation);
 }

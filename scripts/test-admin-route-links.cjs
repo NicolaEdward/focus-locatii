@@ -51,7 +51,7 @@ assert.match(header, /label="Setari"/, "AdminHeader should expose Setari instead
 assert.match(header, /href="\/admin\/integrari\/saga"/, "AdminHeader should expose SAGA only through the integrations settings context.");
 assert.match(header, /href="\/admin\/operational"/, "AdminHeader should expose a dedicated Operational workspace.");
 assert.match(header, /session\.role === "FIELD_OPERATOR"/, "AdminHeader should treat field operators as a restricted navigation role.");
-assert.match(header, /!\s*isFieldOperator \? <NotificationBell \/> : null/, "Field operators should not load generic admin notifications.");
+assert.match(header, /!\s*isFieldOperator && !isDceo \? <NotificationBell \/> : null/, "Field operators and read-only D-CEO users should not load mutable generic notifications.");
 assert.match(header, /"dashboard\.operations\.view"/, "Operational navigation should include the dedicated operations dashboard permission.");
 assert.equal(header.includes('<AdminNavLink href="/admin/campanii"'), false, "Campanii should not be a misleading top-level nav item.");
 assert.equal(header.includes('<AdminNavLink href="/admin/furnizori"'), false, "Furnizori should not clutter top-level navigation.");

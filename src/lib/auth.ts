@@ -13,6 +13,7 @@ import {
 import { AUTH_SESSION_SECONDS, createAuthSessionRecord, resolveRegisteredSession } from "@/lib/auth-sessions";
 import { mutationRequestError } from "@/lib/request-security";
 import { authSecret, base64Url, secureEqual } from "@/lib/security-secrets";
+import { dceoBusinessMutationError } from "@/lib/business-mutation-policy";
 
 export const ADMIN_COOKIE = "focus_admin_session";
 
@@ -109,6 +110,8 @@ export async function requirePermission(request: NextRequest, permission: Permis
   if (!session) {
     return { session: null, response: NextResponse.json({ error: "Autentificare necesara." }, { status: 401 }) };
   }
+  const businessMutationError = dceoBusinessMutationError(request, session.role);
+  if (businessMutationError) return { session, response: businessMutationError };
   if (!hasPermission(session.role, permission)) {
     return { session, response: NextResponse.json({ error: "Nu ai permisiunea necesara." }, { status: 403 }) };
   }
@@ -122,6 +125,8 @@ export async function requireAnyPermission(request: NextRequest, permissions: re
   if (!session) {
     return { session: null, response: NextResponse.json({ error: "Autentificare necesara." }, { status: 401 }) };
   }
+  const businessMutationError = dceoBusinessMutationError(request, session.role);
+  if (businessMutationError) return { session, response: businessMutationError };
   if (!hasAnyPermission(session.role, permissions)) {
     return { session, response: NextResponse.json({ error: "Nu ai permisiunea necesara." }, { status: 403 }) };
   }

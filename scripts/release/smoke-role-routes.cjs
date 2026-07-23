@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { PrismaClient } = require("@prisma/client");
 const accounts = require("./preview-accounts.json");
 
 loadEnvFile(process.env.ENV_FILE);
@@ -8,6 +9,7 @@ const password = process.env.PREVIEW_TEST_PASSWORD;
 const vercelShareToken = process.env.VERCEL_SHARE_TOKEN;
 let vercelShareCookie = null;
 if (!password) throw new Error("PREVIEW_TEST_PASSWORD is missing.");
+const prisma = new PrismaClient();
 
 const adminRoutes = [
   "/admin/dashboard",
@@ -28,6 +30,7 @@ const adminRoutes = [
 ];
 const expectedDashboard = {
   COO: "/admin/dashboard",
+  D_CEO: "/admin/dashboard",
   SALES_DIRECTOR: "/admin/dashboard",
   SALES_AGENT: "/admin/dashboard",
   FINANCE_OPERATOR: "/admin/financiar/incasari",
@@ -35,6 +38,7 @@ const expectedDashboard = {
 };
 const allowed = {
   COO: new Set(adminRoutes),
+  D_CEO: new Set(adminRoutes.filter((route) => !["/admin/locatii/import", "/admin/locatii/gps", "/admin/utilizatori", "/admin/integritate-date"].includes(route))),
   SALES_DIRECTOR: new Set(adminRoutes.filter((route) => !["/admin/financiar/incasari", "/admin/integrari/saga", "/admin/furnizori", "/admin/locatii/import", "/admin/locatii/gps", "/admin/utilizatori", "/admin/integritate-date"].includes(route))),
   SALES_AGENT: new Set(adminRoutes.filter((route) => !["/admin/financiar/incasari", "/admin/integrari/saga", "/admin/furnizori", "/admin/locatii/import", "/admin/locatii/gps", "/admin/utilizatori", "/admin/integritate-date"].includes(route))),
   FINANCE_OPERATOR: new Set(["/admin/clienti", "/admin/campanii", "/admin/financiar/incasari", "/admin/integrari/saga", "/admin/furnizori", "/admin/securitate"]),
@@ -42,6 +46,7 @@ const allowed = {
 };
 
 async function main() {
+  const businessCountsBefore = await businessCounts();
   await ensureVercelShareCookie();
   const health = await request("/api/health/db");
   assert(health.status === 200, `DB health returned ${health.status}.`);
@@ -90,7 +95,34 @@ async function main() {
     assert(response.status === 200, `${route} returned ${response.status}.`);
   }
 
-  console.log(JSON.stringify({ ok: true, baseUrl, roles: roleResults, publicLocations: locations.length, checkedAdminRoutes: adminRoutes }, null, 2));
+  const businessCountsAfter = await businessCounts();
+  assert(
+    JSON.stringify(businessCountsAfter) === JSON.stringify(businessCountsBefore),
+    "Role-based navigation changed sensitive business counts."
+  );
+  console.log(JSON.stringify({
+    ok: true,
+    baseUrl,
+    roles: roleResults,
+    publicLocations: locations.length,
+    checkedAdminRoutes: adminRoutes,
+    businessCountsBefore,
+    businessCountsAfter
+  }, null, 2));
+}
+
+async function businessCounts() {
+  const [reservations, holds, booked, receivables, payments, notifications, proofs, operationTasks] = await Promise.all([
+    prisma.reservation.count(),
+    prisma.reservation.count({ where: { status: "HOLD" } }),
+    prisma.reservation.count({ where: { status: "BOOKED" } }),
+    prisma.financialReceivable.count(),
+    prisma.financialReceivablePayment.count(),
+    prisma.appNotification.count(),
+    prisma.clientDocument.count({ where: { documentType: "operational_proof_photo" } }),
+    prisma.operationTask.count()
+  ]);
+  return { reservations, holds, booked, receivables, payments, notifications, proofs, operationTasks };
 }
 
 function request(route, options = {}) {
@@ -142,7 +174,7 @@ function loadEnvFile(fileName) {
   }
 }
 
-main().catch((error) => {
+main().finally(() => prisma.$disconnect()).catch((error) => {
   console.error(error?.stack || String(error));
   process.exit(1);
 });

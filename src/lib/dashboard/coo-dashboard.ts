@@ -31,7 +31,7 @@ export type CooDashboardData = Awaited<ReturnType<typeof getCooDashboardData>>;
 const activeOpportunityStages = ["opportunity", "quoted", "negotiation", "contracting"];
 
 export async function getCooDashboardData(session: AuthSession, now = new Date()) {
-  if (!["COO", "SUPER_ADMIN"].includes(session.role)) throw new Error("Dashboard COO nepermis pentru acest rol.");
+  if (!["COO", "D_CEO", "SUPER_ADMIN"].includes(session.role)) throw new Error("Dashboard executiv nepermis pentru acest rol.");
   const today = startOfUtcDay(now);
   const inSevenDays = addUtcDays(today, 7);
   const inThirtyDays = addUtcDays(today, 30);

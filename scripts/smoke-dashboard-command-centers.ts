@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { UserRole } from "@prisma/client";
 import { ADMIN_COOKIE, createSessionToken } from "../src/lib/auth";
 import { prisma } from "../src/lib/prisma";
 
@@ -71,7 +72,7 @@ async function main() {
 
 const userSelect = { id: true, email: true, name: true, role: true, tokenVersion: true } as const;
 
-function cookieFor(user: { id: string; email: string; name: string; role: "SUPER_ADMIN" | "COO" | "SALES_DIRECTOR" | "SALES_AGENT" | "FINANCE_OPERATOR" | "FIELD_OPERATOR"; tokenVersion: number }) {
+function cookieFor(user: { id: string; email: string; name: string; role: UserRole; tokenVersion: number }) {
   return `${ADMIN_COOKIE}=${createSessionToken(user)}`;
 }
 

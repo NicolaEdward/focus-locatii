@@ -92,8 +92,8 @@ export async function updateUser(id: string, input: unknown, actorId: string, ac
 
 function assertUserRoleChangeAllowed(currentRole: UserRole | null, nextRole: UserRole, actorRole: UserRole) {
   if (actorRole === "SUPER_ADMIN") return;
-  if (currentRole === "SUPER_ADMIN" || nextRole === "SUPER_ADMIN") {
-    throw new Error("Doar SUPER_ADMIN poate crea sau modifica un cont SUPER_ADMIN.");
+  if (currentRole === "SUPER_ADMIN" || nextRole === "SUPER_ADMIN" || currentRole === "D_CEO" || nextRole === "D_CEO") {
+    throw new Error("Doar SUPER_ADMIN poate crea sau modifica un cont SUPER_ADMIN sau D-CEO.");
   }
 }
 

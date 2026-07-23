@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { dashboardPathForRole, hasPermission, permissionsForRole, ROLE_LABELS, USER_ROLES } from "../src/lib/rbac";
+import { dashboardPathForRole, hasGlobalDataAccess, hasPermission, isBusinessReadOnlyRole, permissionsForRole, ROLE_LABELS, USER_ROLES } from "../src/lib/rbac";
+import { classifyDceoRequest } from "../src/lib/business-mutation-policy";
 import { allowedReservationTransitions, canTransitionReservation } from "../src/lib/reservation-workflow";
 
 for (const role of USER_ROLES) {
@@ -15,6 +16,23 @@ assert.equal(hasPermission("SALES_DIRECTOR", "leads.manage"), true);
 assert.equal(hasPermission("SALES_AGENT", "leads.view.own"), true);
 assert.equal(hasPermission("SALES_AGENT", "leads.manage.own"), true);
 assert.equal(hasPermission("COO", "leads.view"), true);
+assert.equal(hasPermission("D_CEO", "leads.view"), true);
+assert.equal(hasPermission("D_CEO", "finance.view"), true);
+assert.equal(hasPermission("D_CEO", "inventory.manage"), false);
+assert.equal(hasPermission("D_CEO", "finance.manage"), false);
+assert.equal(hasPermission("D_CEO", "campaigns.operate"), false);
+assert.equal(hasPermission("D_CEO", "users.manage"), false);
+assert.equal(ROLE_LABELS.D_CEO, "D-CEO");
+assert.equal(hasGlobalDataAccess("D_CEO"), true);
+assert.equal(hasGlobalDataAccess("FINANCE_OPERATOR"), false);
+assert.equal(isBusinessReadOnlyRole("D_CEO"), true);
+assert.equal(classifyDceoRequest("GET", "/api/admin/clients"), "SAFE_READ");
+assert.equal(classifyDceoRequest("GET", "/api/admin/crm/export.xlsx"), "BUSINESS_MUTATION");
+assert.equal(classifyDceoRequest("POST", "/api/admin/location-selection/availability"), "READ_ONLY_COMPUTATION");
+assert.equal(classifyDceoRequest("POST", "/api/admin/reservations/conflict-preview"), "READ_ONLY_COMPUTATION");
+assert.equal(classifyDceoRequest("POST", "/api/admin/campaigns"), "BUSINESS_MUTATION");
+assert.equal(classifyDceoRequest("PATCH", "/api/admin/notifications/example"), "BUSINESS_MUTATION");
+assert.equal(classifyDceoRequest("POST", "/api/auth/security/mfa/enroll"), "ACCOUNT_SECURITY");
 assert.equal(hasPermission("SUPER_ADMIN", "leads.manage"), true);
 assert.equal(hasPermission("COO", "campaigns.operate"), true);
 assert.equal(hasPermission("SUPER_ADMIN", "campaigns.operate"), true);
@@ -52,4 +70,4 @@ assert.equal(canTransitionReservation("COMPLETED" as never, "RESERVED"), false);
 assert.equal(allowedReservationTransitions("RESERVED", "SALES_AGENT").includes("BOOKED"), false);
 assert.equal(allowedReservationTransitions("RESERVED", "SALES_DIRECTOR").includes("BOOKED"), true);
 
-console.log(JSON.stringify({ ok: true, roles: USER_ROLES, checks: 44 }, null, 2));
+console.log(JSON.stringify({ ok: true, roles: USER_ROLES, checks: 60 }, null, 2));

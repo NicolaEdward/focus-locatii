@@ -13,7 +13,7 @@ const financePage = read("src", "app", "admin", "financiar", "incasari", "page.t
 const clientsPage = read("src", "app", "admin", "clienti", "page.tsx");
 
 assert(page.includes("getRoleDashboardData"), "dashboard route must load role-specific DTOs");
-assert(dispatcher.includes('["COO", "SUPER_ADMIN"]'), "COO and SUPER_ADMIN must receive the executive command center");
+assert(dispatcher.includes('["COO", "D_CEO", "SUPER_ADMIN"]'), "COO, D-CEO and SUPER_ADMIN must receive the executive command center");
 assert(dispatcher.includes('["SALES_AGENT", "SALES_DIRECTOR"]'), "sales roles must receive the sales agenda");
 assert(!dispatcher.includes("getDashboardData"), "active roles must not execute the heavy legacy dashboard service");
 

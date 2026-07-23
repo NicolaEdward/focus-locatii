@@ -54,12 +54,12 @@ export function AdminHeader({ session }: { session: AuthSession }) {
       <div className="focus-container grid min-h-20 min-w-0 grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 py-3 2xl:flex">
         <div className="flex min-w-0 shrink-0 items-center gap-4">
           <FocusLogo href="/admin/dashboard" prefetch={false} />
-          <div className="hidden border-l border-focus-line pl-4 lg:block">
+          <div className="hidden border-l border-focus-line pl-4 2xl:block">
             <p className="text-sm font-bold text-white">{session.name}</p>
             <p className="text-xs text-slate-400">{ROLE_LABELS[session.role]}</p>
           </div>
         </div>
-        <nav className="admin-nav order-3 col-span-3 flex w-full min-w-0 flex-wrap items-center gap-2 2xl:order-none 2xl:col-span-1 2xl:flex-1" aria-label="Navigatie administrare">
+        <nav className="admin-nav order-3 col-span-3 flex w-full min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-1 2xl:order-none 2xl:col-span-1 2xl:flex-1 2xl:flex-wrap 2xl:overflow-visible 2xl:pb-0" aria-label="Navigatie administrare">
           {!isFieldOperator ? <AdminNavLink href="/admin/dashboard" active={isActiveAdminPath(pathname, "/admin/dashboard")}><Gauge size={18} />Dashboard</AdminNavLink> : null}
           {hasCommercialMenu ? (
             <AdminNavMenu

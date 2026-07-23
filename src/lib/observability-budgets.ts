@@ -1,4 +1,5 @@
 export type ObservabilityBudgetKey =
+  | "executive_overview_api"
   | "admin_locations_html"
   | "admin_clients_html"
   | "admin_receivables_html"
@@ -35,6 +36,13 @@ export type BudgetViolation = {
 // Initial limits intentionally leave headroom above the July 2026 preview baseline.
 // Warning logs support tuning; only the severe threshold fails the release gate.
 export const OBSERVABILITY_BUDGETS: Record<ObservabilityBudgetKey, PerformanceBudget> = {
+  executive_overview_api: {
+    route: "/api/admin/executive/overview",
+    durationMs: { warning: 1_000, severe: 2_000 },
+    payloadBytes: { warning: 100_000, severe: 200_000 },
+    queryCount: { warning: 15, severe: 30 },
+    slowQueryCount: { warning: 1, severe: 3 }
+  },
   admin_locations_html: {
     route: "/admin/locatii",
     durationMs: { warning: 1_500, severe: 3_000 },

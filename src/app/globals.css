@@ -23,6 +23,7 @@
 
 .admin-nav {
   scrollbar-width: none;
+  overscroll-behavior-inline: contain;
 }
 
 .admin-nav::-webkit-scrollbar {

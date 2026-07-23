@@ -12,6 +12,7 @@ let vercelShareCookie = null;
 const debugPort = Number(process.env.CAPTURE_CHROME_PORT || 9231);
 const outDir = path.resolve(process.cwd(), process.env.CAPTURE_OUT_DIR || "artifacts/release-screenshots");
 const workflowChecks = process.env.CAPTURE_WORKFLOW_CHECKS === "true";
+const performanceRuns = Math.max(1, Math.min(10, Number(process.env.CAPTURE_PERFORMANCE_RUNS || 1)));
 if (!password) throw new Error("PREVIEW_TEST_PASSWORD lipsește.");
 
 const viewports = [
@@ -23,7 +24,8 @@ const viewports = [
 const pages = [
   { name: "admin-login", route: "/admin/login", expected: "Autentificare" },
   { name: "public-home", route: "/", expected: "loca" },
-  { name: "coo-dashboard", route: "/admin/dashboard", role: "COO", expected: "Rezumat executiv" },
+  { name: "coo-dashboard", route: "/admin/dashboard", role: "COO", expected: "Control executiv" },
+  { name: "d-ceo-dashboard", route: "/admin/dashboard", role: "D_CEO", expected: "Company Pulse" },
   { name: "sales-director-dashboard", route: "/admin/dashboard", role: "SALES_DIRECTOR", expected: "Agenda mea" },
   { name: "sales-agent-dashboard", route: "/admin/dashboard", role: "SALES_AGENT", expected: "Agenda mea" },
   { name: "finance-invoices", route: "/admin/financiar/incasari", role: "FINANCE_OPERATOR", expected: "Facturi clien" },
@@ -96,6 +98,14 @@ async function capturePage(page, viewport, cookie) {
   await client.send("Runtime.enable");
   await client.send("Log.enable");
   await client.send("Network.enable");
+  await client.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `window.__focusLcpMs = 0;
+      new PerformanceObserver((list) => {
+        const entries = list.getEntries();
+        const latest = entries[entries.length - 1];
+        if (latest) window.__focusLcpMs = latest.startTime;
+      }).observe({ type: 'largest-contentful-paint', buffered: true });`
+  });
   await client.send("Emulation.setDeviceMetricsOverride", { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: viewport.width < 700 });
   if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
     await client.send("Network.setExtraHTTPHeaders", { headers: { "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET, "x-vercel-set-bypass-cookie": "true" } });
@@ -113,6 +123,7 @@ async function capturePage(page, viewport, cookie) {
   await client.send("Page.navigate", { url: `${baseUrl}${page.route}` });
   await waitForExpression(client, "document.readyState === 'complete'", 30000);
   await wait(1200);
+  const performanceSamples = [await readPagePerformance(client)];
   const result = await client.send("Runtime.evaluate", { expression: `document.body.innerText.toLocaleLowerCase('ro').includes(${JSON.stringify(page.expected.toLocaleLowerCase("ro"))})`, returnByValue: true });
   if (result.result?.value !== true) {
     const snippet = await client.send("Runtime.evaluate", { expression: "document.body.innerText.slice(0, 800)", returnByValue: true });
@@ -124,6 +135,12 @@ async function capturePage(page, viewport, cookie) {
   const accessibility = await auditAccessibility(client);
   if (accessibility.critical.length) {
     throw new Error(`${page.name}/${viewport.name} are probleme critice de accesibilitate: ${accessibility.critical.join("; ")} ${JSON.stringify(accessibility.samples)}`);
+  }
+  for (let run = 1; run < performanceRuns; run += 1) {
+    await client.send("Page.navigate", { url: `${baseUrl}${page.route}` });
+    await waitForExpression(client, "document.readyState === 'complete'", 30000);
+    await wait(800);
+    performanceSamples.push(await readPagePerformance(client));
   }
   const screenshot = await client.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
   fs.writeFileSync(filePath, Buffer.from(screenshot.data, "base64"));
@@ -149,7 +166,40 @@ async function capturePage(page, viewport, cookie) {
   client.close();
   if (errors.length) console.error(JSON.stringify({ errors: errors.map((event) => ({ method: event.method, params: event.params })), requestDiagnostics, failedBodies }, null, 2));
   if (errors.length) throw new Error(`${page.name}/${viewport.name} are ${errors.length} erori console/runtime.`);
-  return { file: filePath, accessibility };
+  return { file: filePath, accessibility, performance: summarizePerformance(performanceSamples) };
+}
+
+async function readPagePerformance(client) {
+  const result = await client.send("Runtime.evaluate", {
+    expression: `(() => {
+      const navigation = performance.getEntriesByType('navigation')[0];
+      return {
+        ttfbMs: navigation ? Math.round(navigation.responseStart - navigation.requestStart) : null,
+        loadMs: navigation ? Math.round(navigation.loadEventEnd - navigation.startTime) : null,
+        lcpMs: Math.round(window.__focusLcpMs || 0)
+      };
+    })()`,
+    returnByValue: true
+  });
+  return result.result?.value || { ttfbMs: null, loadMs: null, lcpMs: null };
+}
+
+function summarizePerformance(samples) {
+  const summary = { samples: samples.length };
+  for (const key of ["ttfbMs", "loadMs", "lcpMs"]) {
+    const values = samples.map((sample) => sample[key]).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+    summary[key] = values.length ? {
+      p50: percentile(values, 0.5),
+      p95: percentile(values, 0.95),
+      min: values[0],
+      max: values[values.length - 1]
+    } : null;
+  }
+  return summary;
+}
+
+function percentile(values, quantile) {
+  return values[Math.min(values.length - 1, Math.ceil(values.length * quantile) - 1)];
 }
 
 async function auditAccessibility(client) {
@@ -203,7 +253,11 @@ async function auditAccessibility(client) {
           unnamedControls: unnamedControls.slice(0, 8).map((element) => element.outerHTML.slice(0, 180)),
           unnamedInteractive: unnamedInteractive.slice(0, 8).map((element) => element.outerHTML.slice(0, 180)),
           duplicateIds: duplicateIds.slice(0, 8),
-          headingJumps: headingJumps.slice(0, 8)
+          headingJumps: headingJumps.slice(0, 8),
+          tinyTargets: tinyTargets.slice(0, 8).map((element) => {
+            const rect = element.getBoundingClientRect();
+            return { html: element.outerHTML.slice(0, 180), width: Math.round(rect.width), height: Math.round(rect.height) };
+          })
         }
       };
     })()`,

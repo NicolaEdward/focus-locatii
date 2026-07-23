@@ -70,6 +70,16 @@ function performanceBudgetsOnlyFailSevereRegressions() {
   assert.equal(warning[0]?.severity, "warning");
   const severe = evaluatePerformanceBudget("public_locations_api", { durationMs: 1_501 });
   assert.equal(severe[0]?.severity, "severe");
+  assert.deepEqual(evaluatePerformanceBudget("executive_overview_api", {
+    durationMs: 900,
+    payloadBytes: 99_999,
+    queryCount: 15,
+    slowQueryCount: 0
+  }), []);
+  assert.equal(
+    evaluatePerformanceBudget("executive_overview_api", { payloadBytes: 100_001 })[0]?.severity,
+    "warning"
+  );
 }
 
 function auditFailuresEmitATestableSignal() {

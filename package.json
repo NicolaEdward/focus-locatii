@@ -65,6 +65,8 @@
     "test:dashboard-form-cleanup": "node scripts/test-dashboard-form-cleanup.cjs",
     "test:dashboard-noise-cleanup": "node scripts/test-dashboard-noise-cleanup.cjs",
     "test:dashboard-command-centers": "node scripts/test-dashboard-command-centers.cjs",
+    "test:executive-overview": "tsx scripts/test-executive-overview.ts",
+    "measure:executive-overview": "tsx scripts/measure-executive-overview.ts",
     "smoke:dashboard-command-centers": "tsx scripts/smoke-dashboard-command-centers.ts",
     "test:locations-panel-cleanup": "node scripts/test-locations-panel-cleanup.cjs",
     "test:inventory-reservations-scale": "node scripts/test-inventory-reservations-scale.cjs",

@@ -334,6 +334,25 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
         reservation: { select: { campaignId: true, locationId: true } }
       }
     });
+    const activeReceivables = await tx.financialReceivable.findMany({
+      where: {
+        companyCode: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.companyCode))) },
+        normalizedInvoiceNumber: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.normalizedInvoiceNumber).filter((value): value is string => Boolean(value)))) },
+        currency: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.currency).filter((value): value is string => Boolean(value)))) },
+        includedInReport: true
+      },
+      include: { payments: { where: { status: ACTIVE_PAYMENT_STATUS } } }
+    });
+    const activeReceivablesByIdentity = new Map<string, typeof activeReceivables>();
+    for (const receivable of activeReceivables) {
+      if (!receivable.companyCode || !receivable.normalizedInvoiceNumber || !receivable.currency) continue;
+      const identityKey = receivableCanonicalKey({
+        companyCode: receivable.companyCode,
+        normalizedInvoiceNumber: receivable.normalizedInvoiceNumber,
+        currency: receivable.currency
+      });
+      activeReceivablesByIdentity.set(identityKey, [...(activeReceivablesByIdentity.get(identityKey) || []), receivable]);
+    }
 
     const result = { alreadyConfirmed: false, created: 0, updated: 0, unchanged: 0, ignored: 0 };
     for (const row of upload.receivableImportRows) {
@@ -347,8 +366,7 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
       const canonicalKey = receivableCanonicalKey({
         companyCode: row.companyCode,
         normalizedInvoiceNumber: row.normalizedInvoiceNumber,
-        currency: row.currency,
-        clientId: row.clientId
+        currency: row.currency
       });
       const billingCandidates = billingItems.filter((item) =>
         item.normalizedInvoiceNumber === row.normalizedInvoiceNumber &&
@@ -362,23 +380,27 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
       const billingItem = billingCandidates[0] || null;
       const linkedCampaignId = row.campaignId || billingItem?.reservation?.campaignId || null;
       const linkedLocationId = row.locationId || billingItem?.reservation?.locationId || null;
+      const activeIdentityMatches = activeReceivablesByIdentity.get(canonicalKey) || [];
+      if (activeIdentityMatches.length > 1) {
+        throw new Error(`Factura ${row.rawInvoiceNumber || row.normalizedInvoiceNumber} există deja de mai multe ori și necesită reconciliere.`);
+      }
+      const activeIdentityMatch = activeIdentityMatches[0] || null;
+      if (row.receivableId && activeIdentityMatch && row.receivableId !== activeIdentityMatch.id) {
+        throw new Error(`Factura ${row.rawInvoiceNumber || row.normalizedInvoiceNumber} există deja într-o altă înregistrare.`);
+      }
       let receivable = row.receivableId
         ? await tx.financialReceivable.findUnique({
             where: { id: row.receivableId },
             include: { payments: { where: { status: ACTIVE_PAYMENT_STATUS } } }
           })
-        : await tx.financialReceivable.findFirst({
+        : activeIdentityMatch || await tx.financialReceivable.findFirst({
             where: {
-              OR: [
-                { canonicalKey },
-                {
-                  companyCode: row.companyCode,
-                  normalizedInvoiceNumber: row.normalizedInvoiceNumber,
-                  currency: row.currency,
-                  clientId: row.clientId
-                }
-              ]
+              companyCode: row.companyCode,
+              normalizedInvoiceNumber: row.normalizedInvoiceNumber,
+              currency: row.currency,
+              clientId: row.clientId
             },
+            orderBy: [{ includedInReport: "desc" }, { updatedAt: "desc" }],
             include: { payments: { where: { status: ACTIVE_PAYMENT_STATUS } } }
           });
       if (receivable?.clientId && receivable.clientId !== row.clientId) {
@@ -431,6 +453,7 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
           },
           include: { payments: { where: { status: ACTIVE_PAYMENT_STATUS } } }
         });
+        activeReceivablesByIdentity.set(canonicalKey, [receivable]);
         result.created += 1;
       } else {
         if (!receivable.canonicalKey) {
@@ -781,7 +804,7 @@ function classifyImportRow(input: {
   const { row } = input;
   if (row.rowState === "conflict") return classification(row, "conflict", "conflict", 0, "Neconcordanță critică în raport.", null, null, null);
   if (!row.normalizedInvoiceNumber || !row.currency || row.invoiceAmount == null) return classification(row, "manual", "unmatched", 0, "Factura, moneda sau valoarea lipsește.", null, null, null);
-  const invoiceKey = [row.companyCode, row.normalizedInvoiceNumber, row.currency, row.normalizedClientName].join("|");
+  const invoiceKey = [row.companyCode, row.normalizedInvoiceNumber, row.currency].join("|");
   if (input.duplicateInvoiceKeys.has(invoiceKey)) return classification(row, "conflict", "conflict", 0, "Factura apare de mai multe ori în același raport.", null, null, null);
 
   const clientMatch = matchClientCandidates({ clientName: row.clientNameRaw, companyCode: row.companyCode, clients: input.clients, aliases: input.aliases });
@@ -789,7 +812,52 @@ function classifyImportRow(input: {
   const invoiceCandidates = input.existingReceivables.filter((item) =>
     item.companyCode === row.companyCode && item.normalizedInvoiceNumber === row.normalizedInvoiceNumber && item.currency === row.currency
   );
-  const exactInvoice = clientId ? invoiceCandidates.filter((item) => item.clientId === clientId) : [];
+  const activeInvoiceCandidates = invoiceCandidates.filter((item) => item.includedInReport);
+  if (activeInvoiceCandidates.length > 1) {
+    return classification(row, "conflict", "conflict", 0, "Factura există deja de mai multe ori în registrul activ și necesită reconciliere.", clientId, null, null);
+  }
+  const activeInvoice = activeInvoiceCandidates[0] || null;
+  if (activeInvoice?.clientId && clientId && activeInvoice.clientId !== clientId) {
+    return classification(
+      row,
+      "conflict",
+      "conflict",
+      0,
+      "Numărul facturii există deja la alt client. Corectează alocarea existentă; nu se va crea o factură nouă.",
+      clientId,
+      activeInvoice.id,
+      "resolve_client_conflict"
+    );
+  }
+  if (activeInvoice?.clientId && clientMatch.level !== "safe") {
+    return classification(
+      row,
+      "needs_confirmation",
+      "probable",
+      95,
+      "Factura a fost identificată sigur după firmă emitentă, număr și monedă. Confirmă clientul deja asociat.",
+      activeInvoice.clientId,
+      activeInvoice.id,
+      "update_receivable"
+    );
+  }
+  if (activeInvoice && !activeInvoice.clientId && clientMatch.level === "safe") {
+    return classification(
+      row,
+      "needs_confirmation",
+      "probable",
+      90,
+      "Factura există fără client alocat; confirmă legarea clientului.",
+      clientId,
+      activeInvoice.id,
+      "update_receivable"
+    );
+  }
+  const exactInvoice = activeInvoice
+    ? [activeInvoice]
+    : clientId
+      ? invoiceCandidates.filter((item) => item.clientId === clientId)
+      : [];
   const consolidatedExact = consolidateHistoricalDuplicates(exactInvoice);
   if (exactInvoice.length > 1 && !consolidatedExact) {
     return classification(row, "conflict", "conflict", 0, "Mai multe creanțe diferite corespund facturii.", clientId, null, null);
@@ -833,7 +901,7 @@ function classification(row: ReceivablesImportRow, status: string, confidenceLev
 function duplicateKeys(rows: ReceivablesImportRow[]) {
   const counts = new Map<string, number>();
   for (const row of rows) {
-    const key = [row.companyCode, row.normalizedInvoiceNumber, row.currency, row.normalizedClientName].join("|");
+    const key = [row.companyCode, row.normalizedInvoiceNumber, row.currency].join("|");
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   return new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key));

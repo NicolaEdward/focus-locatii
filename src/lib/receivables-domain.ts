@@ -15,9 +15,8 @@ export function receivableCanonicalKey(input: {
   companyCode: string;
   normalizedInvoiceNumber: string;
   currency: string;
-  clientId: string;
 }) {
-  return [input.companyCode, input.normalizedInvoiceNumber, input.currency, input.clientId].map((value) => value.trim().toLowerCase()).join("|");
+  return [input.companyCode, input.normalizedInvoiceNumber, input.currency].map((value) => value.trim().toLowerCase()).join("|");
 }
 
 export function receivableRowHash(input: {

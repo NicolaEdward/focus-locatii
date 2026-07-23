@@ -66,7 +66,10 @@ assert.equal(bgOnly.rows.length, 3, "manual company selection must ignore other 
 assert.equal(bgOnly.issues.some((issue) => issue.type === "company_conflict"), false);
 
 assert.equal(normalizeReceivableInvoiceNumber("FSCM 1369"), "fcsm1369");
-assert.equal(receivableCanonicalKey({ companyCode: "FOCUS_MEDIA", normalizedInvoiceNumber: "fcsm1369", currency: "RON", clientId: "client-1" }), "focus_media|fcsm1369|ron|client-1");
+assert.equal(
+  receivableCanonicalKey({ companyCode: "FOCUS_MEDIA", normalizedInvoiceNumber: "fcsm1369", currency: "RON" }),
+  "focus_media|fcsm1369|ron"
+);
 
 const partial = reconcileReceivableAmounts({ invoiceAmount: "4000", ledgerCollectedAmount: "1000", reportCollectedAmount: "1500" });
 assert.equal(partial.state, "payment_delta");

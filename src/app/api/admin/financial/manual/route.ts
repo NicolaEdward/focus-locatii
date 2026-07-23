@@ -187,9 +187,25 @@ export async function POST(request: NextRequest) {
         const canonicalKey = receivableCanonicalKey({
           companyCode,
           normalizedInvoiceNumber,
-          currency: input.currency,
-          clientId: client!.id
+          currency: input.currency
         });
+        const existingInvoice = await tx.financialReceivable.findFirst({
+          where: {
+            OR: [
+              { canonicalKey },
+              {
+                companyCode,
+                normalizedInvoiceNumber,
+                currency: input.currency,
+                includedInReport: true
+              }
+            ]
+          },
+          select: { id: true }
+        });
+        if (existingInvoice) {
+          throw new Error("Factura există deja pentru această firmă emitentă, număr și monedă.");
+        }
         const receivable = await tx.financialReceivable.create({
           data: {
             uploadId: activeUpload.id,

@@ -92,13 +92,15 @@ export function LocationDetailDrawer({
   session,
   canEdit,
   onClose,
-  onEdit
+  onEdit,
+  onDataChanged
 }: {
   location: AdminLocationListItemDTO;
   session: AuthSession;
   canEdit: boolean;
   onClose: () => void;
   onEdit: () => void;
+  onDataChanged?: () => void;
 }) {
   const [data, setData] = useState<LocationTimelineResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -279,9 +281,10 @@ export function LocationDetailDrawer({
             </Panel>
 
             {canEdit && data?.admin.internal ? (
-              <Panel title="Blocaj comercial manual">
+              <Panel title="Status inventar si blocaj comercial">
                 <LocationAvailabilityControls
                   locationId={location.id}
+                  lifecycleStatus={displayLocation.lifecycleStatus}
                   activeOverride={data.timeline.availability.activeOverride}
                   legacyBlock={{
                     reason: data.admin.internal.blockedReason,
@@ -289,7 +292,10 @@ export function LocationDetailDrawer({
                     until: data.admin.internal.blockedUntil,
                     notes: data.admin.internal.blockedNotes
                   }}
-                  onChanged={() => setRefreshKey((current) => current + 1)}
+                  onChanged={() => {
+                    setRefreshKey((current) => current + 1);
+                    onDataChanged?.();
+                  }}
                 />
               </Panel>
             ) : null}

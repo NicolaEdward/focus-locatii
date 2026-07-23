@@ -24,6 +24,8 @@ import type {
 
 type SelectionState = {
   companyEntity: string;
+  clientName: string;
+  campaignName: string;
   periodStart: string;
   periodEnd: string;
   items: LocationSelectionItem[];
@@ -31,6 +33,8 @@ type SelectionState = {
 
 const emptySelection: SelectionState = {
   companyEntity: "Focus Media",
+  clientName: "",
+  campaignName: "",
   periodStart: "",
   periodEnd: "",
   items: []
@@ -308,11 +312,23 @@ export function AdminLocationSelectionPage({
   const exportHref = useMemo(
     () => buildAvailabilityExportHref({
       locationIds: selection.items.length ? selection.items.map((item) => item.locationId) : filteredLocations.map((location) => location.id),
+      clientName: selection.clientName,
+      campaignName: selection.campaignName,
       periodStart: !periodInvalid ? selection.periodStart : "",
       periodEnd: periodValid ? selection.periodEnd : "",
-      includeUnavailable: filters.availability === "CONFLICT" || filters.availability === "ALL"
+      includeUnavailable: filters.availability === "CONFLICT"
     }),
-    [filteredLocations, filters.availability, periodInvalid, periodValid, selection.items, selection.periodEnd, selection.periodStart]
+    [
+      filteredLocations,
+      filters.availability,
+      periodInvalid,
+      periodValid,
+      selection.campaignName,
+      selection.clientName,
+      selection.items,
+      selection.periodEnd,
+      selection.periodStart
+    ]
   );
 
   return (
@@ -333,7 +349,27 @@ export function AdminLocationSelectionPage({
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 rounded-lg border border-focus-line bg-focus-ink/60 p-4 lg:grid-cols-[1fr_1fr_1.4fr]">
+          <div className="mt-5 grid gap-3 rounded-lg border border-focus-line bg-focus-ink/60 p-4 md:grid-cols-2 xl:grid-cols-4">
+            <Field label="Client oferta">
+              <input
+                className="focus-input bg-focus-navy/80"
+                type="text"
+                maxLength={160}
+                value={selection.clientName}
+                onChange={(event) => setSelection((current) => ({ ...current, clientName: event.target.value }))}
+                placeholder="Optional"
+              />
+            </Field>
+            <Field label="Campanie">
+              <input
+                className="focus-input bg-focus-navy/80"
+                type="text"
+                maxLength={160}
+                value={selection.campaignName}
+                onChange={(event) => setSelection((current) => ({ ...current, campaignName: event.target.value }))}
+                placeholder="Optional"
+              />
+            </Field>
             <Field label="Start campanie">
               <input className="focus-input bg-focus-navy/80" type="date" value={selection.periodStart} onChange={(event) => updatePeriod({ periodStart: event.target.value })} />
             </Field>
@@ -347,7 +383,7 @@ export function AdminLocationSelectionPage({
                 onChange={(event) => updatePeriod({ periodEnd: event.target.value })}
               />
             </Field>
-            <div className="min-h-[66px] rounded-lg border border-focus-line bg-focus-navy/55 p-3 text-sm">
+            <div className="min-h-[66px] rounded-lg border border-focus-line bg-focus-navy/55 p-3 text-sm md:col-span-2 xl:col-span-4">
               <p className="font-black text-white">
                 {periodValid && !availabilityLoading ? <CheckCircle2 className="mr-2 inline h-4 w-4 text-emerald-300" /> : <AlertTriangle className="mr-2 inline h-4 w-4 text-focus-yellow" />}
                 {availabilityLoading ? "Verificare disponibilitate..." : periodValid ? "Afisam implicit doar locatiile propunibile." : selection.periodStart ? "Disponibilitate calculata din data de start." : "Disponibilitate generala incarcata."}
@@ -366,7 +402,7 @@ export function AdminLocationSelectionPage({
         </div>
       </section>
 
-      <div className="focus-container grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="focus-container grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_minmax(440px,480px)] 2xl:grid-cols-[minmax(0,1fr)_520px]">
         <section className="grid min-w-0 gap-4">
           <div className="grid gap-3 rounded-lg border border-focus-line bg-focus-navy/80 p-4">
             <div className="flex items-center gap-2 text-sm font-black uppercase text-focus-yellow">
@@ -537,10 +573,19 @@ function selectionStorageKey(userId: string) {
   return `focus-admin-location-selection:${userId}`;
 }
 
-function buildAvailabilityExportHref(input: { locationIds: string[]; periodStart?: string; periodEnd?: string; includeUnavailable?: boolean }) {
+function buildAvailabilityExportHref(input: {
+  locationIds: string[];
+  clientName?: string;
+  campaignName?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  includeUnavailable?: boolean;
+}) {
   const params = new URLSearchParams();
   params.set("scope", "ids");
   if (input.locationIds.length) params.set("ids", input.locationIds.join(","));
+  if (input.clientName?.trim()) params.set("client", input.clientName.trim());
+  if (input.campaignName?.trim()) params.set("campaign", input.campaignName.trim());
   if (input.periodStart) params.set("from", input.periodStart);
   if (input.periodEnd) params.set("to", input.periodEnd);
   if (input.includeUnavailable) params.set("includeUnavailable", "1");
@@ -557,6 +602,8 @@ function readSavedSelection(userId: string): SelectionState | null {
     if (!Array.isArray(parsed.items)) return null;
     return {
       companyEntity: parsed.companyEntity || "Focus Media",
+      clientName: parsed.clientName || "",
+      campaignName: parsed.campaignName || "",
       periodStart: parsed.periodStart || "",
       periodEnd: parsed.periodEnd || "",
       items: parsed.items

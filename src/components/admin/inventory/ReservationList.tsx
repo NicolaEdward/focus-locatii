@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CalendarDays, History, LoaderCircle, Search, Settings2 } from "lucide-react";
+import { CalendarDays, History, LoaderCircle, Pencil, Search, Settings2, Trash2 } from "lucide-react";
 import type { OccupancySummaryDTO, ReservationListItemDTO, ReservationPageDTO } from "@/types/location";
 import { OccupancySummary } from "@/components/admin/inventory/OccupancySummary";
 import { reservationBusinessStatusLabel } from "@/lib/reservation-lifecycle-domain";
@@ -11,6 +11,13 @@ type ReservationFilters = {
   status: string;
   scope: "active" | "history";
 };
+
+type OpenReservationWorkspace = (options?: {
+  reservationId?: string;
+  locationId?: string;
+  newReservation?: boolean;
+  action?: "edit" | "cancel";
+}) => void;
 
 export function ReservationList({
   initialPage,
@@ -25,7 +32,7 @@ export function ReservationList({
   initialFilters: ReservationFilters;
   canManage: boolean;
   refreshToken: number;
-  onOpenWorkspace: (options?: { reservationId?: string; newReservation?: boolean }) => void;
+  onOpenWorkspace: OpenReservationWorkspace;
 }) {
   const [result, setResult] = useState(initialPage);
   const [summary, setSummary] = useState(initialSummary);
@@ -98,13 +105,13 @@ export function ReservationList({
           </div>
         </div>
 
-        <div className="flex min-h-6 items-center justify-between gap-3 text-sm text-slate-400"><p>{result.total} rezultate · pagina {result.page} din {result.totalPages}</p>{loading ? <span className="inline-flex items-center gap-2"><LoaderCircle className="animate-spin" size={16} /> Se actualizeaza</span> : null}</div>
+        <div className="flex min-h-6 items-center justify-between gap-3 text-sm text-slate-400"><p>{result.total} rezultate | pagina {result.page} din {result.totalPages}</p>{loading ? <span className="inline-flex items-center gap-2"><LoaderCircle className="animate-spin" size={16} /> Se actualizeaza</span> : null}</div>
         {error ? <p className="rounded-lg border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-100">{error}</p> : null}
 
         <div className="hidden overflow-x-auto rounded-lg border border-focus-line lg:block">
-          <table className="w-full min-w-[900px] border-collapse bg-focus-ink/55 text-sm"><thead className="bg-focus-navy text-left text-xs uppercase text-focus-yellow"><tr><Th>Locatie</Th><Th>Client / campanie</Th><Th>Status</Th><Th>Perioada</Th><Th>Responsabil</Th><Th>Actiune</Th></tr></thead><tbody>{result.items.map((item) => <ReservationRow key={item.id} item={item} onOpen={() => onOpenWorkspace({ reservationId: item.id })} />)}</tbody></table>
+          <table className="w-full min-w-[980px] border-collapse bg-focus-ink/55 text-sm"><thead className="bg-focus-navy text-left text-xs uppercase text-focus-yellow"><tr><Th>Locatie</Th><Th>Client / campanie</Th><Th>Status</Th><Th>Perioada</Th><Th>Responsabil</Th><Th>Actiuni</Th></tr></thead><tbody>{result.items.map((item) => <ReservationRow key={item.id} item={item} canManage={canManage} onOpenWorkspace={onOpenWorkspace} />)}</tbody></table>
         </div>
-        <div className="grid gap-3 lg:hidden">{result.items.map((item) => <ReservationCard key={item.id} item={item} onOpen={() => onOpenWorkspace({ reservationId: item.id })} />)}</div>
+        <div className="grid gap-3 lg:hidden">{result.items.map((item) => <ReservationCard key={item.id} item={item} canManage={canManage} onOpenWorkspace={onOpenWorkspace} />)}</div>
         {!result.items.length && !loading ? <p className="rounded-lg border border-focus-line bg-focus-navy/35 p-6 text-center text-sm text-slate-400">{scope === "history" ? "Nu exista istoric pentru filtrele selectate." : "Nu exista rezervari active sau viitoare pentru filtrele selectate."}</p> : null}
         <div className="flex items-center justify-between gap-3"><button className="focus-button secondary" type="button" disabled={!result.hasPreviousPage || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>Inapoi</button><span className="text-sm font-bold text-slate-300">Pagina {result.page} / {result.totalPages}</span><button className="focus-button secondary" type="button" disabled={!result.hasNextPage || loading} onClick={() => setPage((current) => current + 1)}>Inainte</button></div>
       </div>
@@ -112,17 +119,75 @@ export function ReservationList({
   );
 }
 
-function ReservationRow({ item, onOpen }: { item: ReservationListItemDTO; onOpen: () => void }) {
-  return <tr className="border-t border-focus-line"><Td><strong className="text-white">{item.locationCode}</strong><p className="max-w-56 text-xs text-slate-400">{item.locationName || "-"}</p></Td><Td><strong className="text-slate-100">{item.clientName}</strong><p className="text-xs text-slate-400">{item.campaignName || item.contractNumber || "Fara campanie"}</p></Td><Td><ReservationStatus status={item.status} holdExpiresAt={item.holdExpiresAt} /></Td><Td>{formatDate(item.periodStart)} - {formatDate(item.periodEnd)}</Td><Td>{item.salesperson || "Nealocat"}</Td><Td><button className="focus-button secondary" type="button" onClick={onOpen}>Deschide</button></Td></tr>;
+function ReservationRow({
+  item,
+  canManage,
+  onOpenWorkspace
+}: {
+  item: ReservationListItemDTO;
+  canManage: boolean;
+  onOpenWorkspace: OpenReservationWorkspace;
+}) {
+  const hold = isActiveHold(item);
+  return (
+    <tr className="border-t border-focus-line">
+      <Td><strong className="text-white">{item.locationCode}</strong><p className="max-w-56 text-xs text-slate-400">{item.locationName || "-"}</p></Td>
+      <Td><strong className="text-slate-100">{item.clientName}</strong><p className="text-xs text-slate-400">{item.campaignName || item.contractNumber || "Fara campanie"}</p></Td>
+      <Td><ReservationStatus status={item.status} holdExpiresAt={item.holdExpiresAt} /></Td>
+      <Td>{formatDate(item.periodStart)} - {formatDate(item.periodEnd)}</Td>
+      <Td>{item.salesperson || "Nealocat"}</Td>
+      <Td>
+        <div className="flex flex-wrap gap-2">
+          {hold && canManage ? (
+            <>
+              <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => onOpenWorkspace({ reservationId: item.id, locationId: item.locationId, action: "edit" })}><Pencil size={15} /> Editeaza HOLD</button>
+              <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => onOpenWorkspace({ reservationId: item.id, locationId: item.locationId, action: "cancel" })}><Trash2 size={15} /> Anuleaza HOLD</button>
+            </>
+          ) : (
+            <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => onOpenWorkspace({ reservationId: item.id, locationId: item.locationId })}>Deschide</button>
+          )}
+        </div>
+      </Td>
+    </tr>
+  );
 }
 
-function ReservationCard({ item, onOpen }: { item: ReservationListItemDTO; onOpen: () => void }) {
-  return <article className="rounded-lg border border-focus-line bg-focus-ink/60 p-4"><div className="flex items-start justify-between gap-3"><div><strong className="text-white">{item.locationCode}</strong><p className="text-xs text-slate-400">{item.clientName}</p></div><ReservationStatus status={item.status} holdExpiresAt={item.holdExpiresAt} /></div><p className="mt-3 text-sm font-bold text-slate-200">{item.campaignName || item.contractNumber || "Fara campanie"}</p><p className="mt-1 text-xs text-slate-400">{formatDate(item.periodStart)} - {formatDate(item.periodEnd)} · {item.salesperson || "Nealocat"}</p><button className="focus-button secondary mt-4 w-full" type="button" onClick={onOpen}>Deschide rezervarea</button></article>;
+function ReservationCard({
+  item,
+  canManage,
+  onOpenWorkspace
+}: {
+  item: ReservationListItemDTO;
+  canManage: boolean;
+  onOpenWorkspace: OpenReservationWorkspace;
+}) {
+  const hold = isActiveHold(item);
+  return (
+    <article className="rounded-lg border border-focus-line bg-focus-ink/60 p-4">
+      <div className="flex items-start justify-between gap-3"><div><strong className="text-white">{item.locationCode}</strong><p className="text-xs text-slate-400">{item.clientName}</p></div><ReservationStatus status={item.status} holdExpiresAt={item.holdExpiresAt} /></div>
+      <p className="mt-3 text-sm font-bold text-slate-200">{item.campaignName || item.contractNumber || "Fara campanie"}</p>
+      <p className="mt-1 text-xs text-slate-400">{formatDate(item.periodStart)} - {formatDate(item.periodEnd)} | {item.salesperson || "Nealocat"}</p>
+      {hold && canManage ? (
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button className="focus-button secondary justify-center px-3" type="button" onClick={() => onOpenWorkspace({ reservationId: item.id, locationId: item.locationId, action: "edit" })}><Pencil size={16} /> Editeaza</button>
+          <button className="focus-button secondary justify-center px-3" type="button" onClick={() => onOpenWorkspace({ reservationId: item.id, locationId: item.locationId, action: "cancel" })}><Trash2 size={16} /> Anuleaza</button>
+        </div>
+      ) : (
+        <button className="focus-button secondary mt-4 w-full" type="button" onClick={() => onOpenWorkspace({ reservationId: item.id, locationId: item.locationId })}>Deschide rezervarea</button>
+      )}
+    </article>
+  );
 }
 
 function ReservationStatus({ status, holdExpiresAt }: { status: ReservationListItemDTO["status"]; holdExpiresAt: string | null }) {
   const tone = status === "BOOKED" ? "border-red-400/40 bg-red-400/10 text-red-100" : status === "HOLD" || status === "RESERVED" ? "border-amber-400/40 bg-amber-400/10 text-amber-100" : "border-slate-500/40 bg-slate-500/10 text-slate-200";
   return <div><span className={`inline-flex rounded-full border px-2 py-1 text-xs font-black ${tone}`}>{reservationBusinessStatusLabel(status)}</span>{holdExpiresAt && (status === "HOLD" || status === "RESERVED") ? <p className="mt-1 text-[11px] text-slate-400">Expira {formatDateTime(holdExpiresAt)}</p> : null}</div>;
+}
+
+function isActiveHold(item: ReservationListItemDTO) {
+  if (item.status !== "HOLD" && item.status !== "RESERVED") return false;
+  if (!item.holdExpiresAt) return true;
+  return new Date(item.holdExpiresAt).getTime() > Date.now();
 }
 
 function Th({ children }: { children: ReactNode }) { return <th className="px-4 py-3 font-black">{children}</th>; }

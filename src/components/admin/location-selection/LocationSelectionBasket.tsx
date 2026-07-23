@@ -45,7 +45,7 @@ export function LocationSelectionBasket({
   const conflictCount = items.filter((item) => (currentAvailability(item)?.state || item.availabilityState) === "CONFLICT").length;
 
   return (
-    <aside className="grid min-w-0 content-start overflow-hidden rounded-lg border border-focus-line bg-focus-navy/92 shadow-2xl xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)]">
+    <aside className="grid min-w-0 max-w-full content-start overflow-hidden rounded-lg border border-focus-line bg-focus-navy/92 shadow-2xl xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)]">
       <header className="border-b border-focus-line p-4">
         <p className="text-xs font-black uppercase text-focus-yellow">Selectia pentru oferta</p>
         <div className="mt-1 flex items-end justify-between gap-3">
@@ -67,7 +67,7 @@ export function LocationSelectionBasket({
         ) : null}
       </header>
 
-      <div className="min-h-0 overflow-auto p-3">
+      <div className="min-h-0 overflow-x-hidden overflow-y-auto p-3">
         {items.length ? (
           <div className="grid gap-2">
             {items.map((item, index) => (
@@ -162,20 +162,20 @@ function SelectedLocationRow({
   };
 
   return (
-    <article className="rounded-lg border border-focus-line bg-focus-ink/60 p-3">
+    <article className="min-w-0 max-w-full overflow-hidden rounded-lg border border-focus-line bg-focus-ink/60 p-3">
       <div className="flex gap-3">
         <img
           src={item.snapshot.mainImage || "/samples/location-placeholder.svg"}
           alt={item.snapshot.code}
-          className="h-16 w-20 rounded-md border border-focus-line object-cover"
+          className="h-16 w-20 shrink-0 rounded-md border border-focus-line object-cover"
           loading="lazy"
           decoding="async"
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="truncate font-black text-white">{item.snapshot.code}</p>
-              <p className="truncate text-xs font-bold text-slate-300">{item.snapshot.city || "-"} / {item.snapshot.area || "-"}</p>
+              <p className="break-words font-black text-white">{item.snapshot.code}</p>
+              <p className="line-clamp-2 break-words text-xs font-bold text-slate-300">{item.snapshot.city || "-"} / {item.snapshot.area || "-"}</p>
             </div>
             <button className="rounded-md p-1 text-slate-300 hover:bg-white/10 hover:text-white" type="button" onClick={() => onRemove(item.locationId)} aria-label={`Scoate ${item.snapshot.code}`}>
               <X size={16} />
@@ -199,7 +199,7 @@ function SelectedLocationRow({
             <AvailabilityBadge availability={availability} />
           </div>
           {availability.explanation ? <p className={`mt-1 line-clamp-2 text-xs ${availability.state === "CONFLICT" ? "text-red-100" : availability.tone === "yellow" ? "text-amber-100" : "text-slate-400"}`}>{availability.explanation}</p> : null}
-          <p className="mt-1 truncate text-xs text-slate-400">{item.snapshot.name || item.snapshot.address || "-"}</p>
+          <p className="mt-1 line-clamp-2 break-words text-xs text-slate-400">{item.snapshot.name || item.snapshot.address || "-"}</p>
         </div>
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">

@@ -39,7 +39,10 @@ export const XLSX_STYLES = {
   availabilityAvailable: 6,
   availabilityBooked: 7,
   availabilityReserved: 8,
-  centered: 9
+  centered: 9,
+  offerLabel: 10,
+  offerValue: 11,
+  offerNote: 12
 } as const;
 
 export function createStyledWorkbook(sheets: StyledSheet[]) {
@@ -165,13 +168,15 @@ function freezePaneXml(freezeRows: number) {
 
 function stylesXml() {
   return xmlDeclaration(`<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-    <fonts count="6">
+    <fonts count="8">
       <font><sz val="11"/><color rgb="FF111827"/><name val="Calibri"/></font>
       <font><b/><sz val="18"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>
       <font><b/><sz val="11"/><color rgb="FF07131F"/><name val="Calibri"/></font>
       <font><sz val="10"/><color rgb="FF111827"/><name val="Calibri"/></font>
       <font><u/><sz val="10"/><color rgb="FF0563C1"/><name val="Calibri"/></font>
       <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+      <font><b/><sz val="10"/><color rgb="FF07131F"/><name val="Calibri"/></font>
+      <font><sz val="10"/><color rgb="FF334155"/><name val="Calibri"/></font>
     </fonts>
     <fills count="9">
       <fill><patternFill patternType="none"/></fill>
@@ -195,7 +200,7 @@ function stylesXml() {
       </border>
     </borders>
     <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-    <cellXfs count="10">
+    <cellXfs count="13">
       <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
       <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center"/></xf>
       <xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
@@ -206,6 +211,9 @@ function stylesXml() {
       <xf numFmtId="0" fontId="3" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment vertical="top" wrapText="1"/></xf>
       <xf numFmtId="0" fontId="3" fillId="8" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment vertical="top" wrapText="1"/></xf>
       <xf numFmtId="0" fontId="3" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="top"/></xf>
+      <xf numFmtId="0" fontId="6" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment vertical="center"/></xf>
+      <xf numFmtId="0" fontId="7" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment vertical="center" wrapText="1"/></xf>
+      <xf numFmtId="0" fontId="7" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment vertical="top" wrapText="1"/></xf>
     </cellXfs>
     <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
     <dxfs count="0"/>

@@ -18,9 +18,10 @@ export async function GET(request: NextRequest) {
     const { session, response } = await requirePermission(request, "inventory.view");
     if (response || !session) return response;
     setObservabilityRole(session.role);
+    const locationIds = request.nextUrl.searchParams.getAll("locationId");
 
     return NextResponse.json(
-      { locations: await listAdminReservationLocations() },
+      { locations: await listAdminReservationLocations(locationIds) },
       { headers: noStoreHeaders }
     );
   });

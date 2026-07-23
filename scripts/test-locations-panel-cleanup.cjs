@@ -113,7 +113,8 @@ function manualAvailabilityActionsAreClear() {
   assert(editor.includes("controlul canonic dedicat"), "editor should point users to the canonical availability control");
   assert(!editor.includes('label="Motiv blocare"'), "editor should not expose a second legacy scalar block UI");
   assert(controls.includes("Marcheaza indisponibila"), "detail view should expose a clear manual unavailable action");
-  assert(controls.includes("Marcheaza disponibila / activa"), "detail view should expose a clear unblock action");
+  assert(controls.includes("Elimina blocajul comercial"), "detail view should expose a clear unblock action without changing lifecycle");
+  assert(controls.includes("Mentenanta") && controls.includes("lifecycleStatus"), "detail view should expose the canonical inventory lifecycle separately");
   assert(controls.includes("singurul control pentru blocajul comercial"), "manual unavailable action should use one canonical control");
 }
 

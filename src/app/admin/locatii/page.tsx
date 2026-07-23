@@ -26,6 +26,10 @@ export default async function AdminLocationsPage({ searchParams }: PageProps) {
   const focusedLocationId = scalar(params.locationId);
   const focusedReservationId = scalar(params.reservationId);
   const newReservation = scalar(params.newReservation) === "1";
+  const requestedReservationAction = scalar(params.reservationAction);
+  const reservationAction = requestedReservationAction === "edit" || requestedReservationAction === "cancel"
+    ? requestedReservationAction
+    : undefined;
 
   const [locations, categories, reservationResult, focusedLocation] = await Promise.all([
     listAdminLocationPage({ query, category, lifecycleStatus: status, page: scalar(params.page) }),
@@ -48,7 +52,9 @@ export default async function AdminLocationsPage({ searchParams }: PageProps) {
         initialReservations={reservationResult.page}
         initialOccupancySummary={reservationResult.summary}
         initialFocusedLocation={focusedLocation}
-        initialWorkspaceRequest={focusedReservationId || newReservation ? { reservationId: focusedReservationId || undefined, newReservation } : null}
+        initialWorkspaceRequest={focusedReservationId || newReservation
+          ? { reservationId: focusedReservationId || undefined, newReservation, action: reservationAction }
+          : null}
         initialFilters={{
           inventory: { query, category, status },
           reservations: { query: reservationQuery, status: reservationStatus, scope: reservationScope }

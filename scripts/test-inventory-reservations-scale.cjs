@@ -33,9 +33,12 @@ function main() {
   assert(dashboard.includes("LazyReservationWorkspace"), "legacy reservation editor must remain available behind a lazy boundary");
   assert(!dashboard.includes('import { AdminReservationsPanel }'), "the 3951-line workspace must not enter the initial dashboard chunk");
   assert(lazyWorkspace.includes("dynamic("), "legacy reservation workspace must be code-split");
-  assert(lazyWorkspace.includes('view=summary'), "lazy workspace should avoid nested reservation history until edit");
+  assert(lazyWorkspace.includes('view=workspace'), "lazy workspace should use the minimal reservation workspace DTO");
   assert(lazyWorkspace.includes("void loadAdminReservationsPanel()"), "workspace code and data should preload in parallel");
   assert(lazyWorkspace.includes("/api/admin/reservation-locations"), "workspace must use the compact reservation location DTO");
+  assert(lazyWorkspace.includes("request.action && request.reservationId"), "direct HOLD actions must load only the selected reservation");
+  assert(lazyWorkspace.includes("locationId="), "direct HOLD actions must load only the selected location");
+  assert(lazyWorkspace.includes("focusedReservationId={request.reservationId}"), "direct HOLD actions must pass focus without depending on URL timing");
 
   assert(locationsService.includes("adminLocationSummarySelect"), "inventory list must have an explicit minimal select");
   assert(locationsService.includes("take: pageSize"), "inventory list must have a bounded page size");
@@ -55,6 +58,8 @@ function main() {
   assert(reservationRoute.includes('requireAnyPermission(request, ["reservations.view", "reservations.view.own"])'), "reservation list API must enforce RBAC");
   assert(reservations.includes('value="HOLD_ACTIVE"'), "technical HOLD/RESERVED statuses must have one business filter");
   assert(reservations.includes('aria-label="Filtreaza rezervarile dupa status"'), "reservation status filter must have an accessible label");
+  assert(reservations.includes("Editeaza HOLD"), "active HOLD rows must expose a direct edit action");
+  assert(reservations.includes("Anuleaza HOLD"), "active HOLD rows must expose a direct cancellation action");
   assert(inventory.includes('aria-label="Filtreaza inventarul dupa categorie"'), "inventory category filter must have an accessible label");
   assert(inventory.includes('aria-label="Filtreaza inventarul dupa stare"'), "inventory lifecycle filter must have an accessible label");
   assert(reservationWorkspace.includes('id="rezervari-workspace"'), "lazy reservation workspace must use a unique anchor id");
@@ -74,6 +79,8 @@ function main() {
   assert(!editor.includes('label="Motiv blocare"'), "legacy scalar block editor must not remain as a second write UI");
   assert(overrideControls.includes("Marcheaza indisponibila"), "canonical override control must remain available");
   assert(overrideControls.includes("/block"), "canonical override control must use the shared compatibility route");
+  assert(overrideControls.includes("Mentenanta") && overrideControls.includes("lifecycleStatus"), "inventory drawer must expose the canonical lifecycle state");
+  assert(overrideControls.includes("Elimina blocajul comercial"), "commercial unblock must not pretend to reactivate lifecycle state");
 
   assert(reservationsService.includes("assertCanonicalReservationAvailabilityForWrite"), "reservation writes must keep the canonical conflict service");
   assert(reservationsService.includes("lockReservationLocationsForWrite"), "reservation writes must keep the row lock");

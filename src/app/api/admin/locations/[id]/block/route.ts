@@ -31,6 +31,20 @@ export async function PATCH(request: NextRequest, context: Context) {
 
   try {
     const input = bodySchema.parse(await request.json());
+    if (input.blocked && !input.blockedReason?.trim()) {
+      return NextResponse.json({ error: "Motivul blocajului comercial este obligatoriu." }, { status: 400, headers: noStoreHeaders });
+    }
+    const blockStart = parseDate(input.blockedFrom);
+    const blockEnd = parseDate(input.blockedUntil);
+    if (input.blockedFrom && !blockStart) {
+      return NextResponse.json({ error: "Data de start a blocajului nu este valida." }, { status: 400, headers: noStoreHeaders });
+    }
+    if (input.blockedUntil && !blockEnd) {
+      return NextResponse.json({ error: "Data de final a blocajului nu este valida." }, { status: 400, headers: noStoreHeaders });
+    }
+    if (blockStart && blockEnd && blockEnd < blockStart) {
+      return NextResponse.json({ error: "Data de final trebuie sa fie dupa data de start." }, { status: 400, headers: noStoreHeaders });
+    }
     const location = await prisma.$transaction(async (tx) => {
       const existing = await tx.location.findUnique({
         where: { id },
@@ -39,15 +53,18 @@ export async function PATCH(request: NextRequest, context: Context) {
       if (!existing) throw new Error("Locatia nu exista.");
 
       if (input.blocked) {
-        await createManualAvailabilityOverride({
+        const createdOverride = await createManualAvailabilityOverride({
           db: tx,
           locationId: id,
-          reason: input.blockedReason || "Blocat operational",
-          periodStart: parseDate(input.blockedFrom) || new Date(),
-          periodEnd: parseDate(input.blockedUntil),
+          reason: input.blockedReason!,
+          periodStart: blockStart || new Date(),
+          periodEnd: blockEnd,
           notes: input.blockedNotes || null,
           createdByUserId: session.id
         });
+        if (!createdOverride) {
+          throw new Error("Stocarea blocajelor comerciale nu este disponibila. Modificarea nu a fost salvata.");
+        }
       } else {
         await clearManualAvailabilityOverrides({
           db: tx,

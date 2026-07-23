@@ -529,9 +529,11 @@ export async function listAdminLocations() {
   ).sort(sortOperationalLocations);
 }
 
-export async function listAdminReservationLocations(): Promise<AdminLocationListItemDTO[]> {
+export async function listAdminReservationLocations(locationIds: string[] = []): Promise<AdminLocationListItemDTO[]> {
   const now = new Date();
+  const ids = [...new Set(locationIds.map((id) => id.trim()).filter(Boolean))].slice(0, 50);
   const rows = await prisma.location.findMany({
+    where: ids.length ? { id: { in: ids } } : undefined,
     select: adminLocationSummarySelect(now),
     orderBy: [{ updatedAt: "desc" }, { code: "asc" }]
   });

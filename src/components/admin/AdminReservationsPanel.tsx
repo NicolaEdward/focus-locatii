@@ -249,6 +249,9 @@ export function AdminReservationsPanel({
   initialOccupancySummary,
   initialOfferRequests,
   onLocationsUpdated,
+  focusedReservationId: focusedReservationIdProp,
+  focusedAction,
+  onQuickActionComplete,
   session,
   workspace = "locations"
 }: {
@@ -257,6 +260,9 @@ export function AdminReservationsPanel({
   initialOccupancySummary?: OccupancySummaryDTO;
   initialOfferRequests: OfferRequestDTO[];
   onLocationsUpdated?: (locations: AdminLocationListItemDTO[]) => void;
+  focusedReservationId?: string;
+  focusedAction?: "edit" | "cancel";
+  onQuickActionComplete?: () => void;
   session: AuthSession;
   workspace?: ReservationsWorkspace;
 }) {
@@ -264,7 +270,7 @@ export function AdminReservationsPanel({
   const searchParams = useSearchParams();
   const isOperationalWorkspace = workspace === "operational";
   const isFieldOperator = session.role === "FIELD_OPERATOR";
-  const focusedReservationId = searchParams.get("reservationId");
+  const focusedReservationId = focusedReservationIdProp || searchParams.get("reservationId");
   const requestedPanel = panelFromQuery(searchParams.get("panel"));
   const shouldFocusNewReservation = searchParams.get("newReservation") === "1";
   const initialForm = { ...emptyForm, salesperson: session.name, sellerUserId: session.id };
@@ -273,7 +279,7 @@ export function AdminReservationsPanel({
   const canUpdateOperationStatus = hasPermission(session.role, "campaigns.operate");
   const canManageLeads = hasAnyPermission(session.role, ["leads.manage", "leads.manage.own"]);
   const canEditReservations = hasAnyPermission(session.role, ["reservations.manage", "reservations.manage.own"]);
-  const shouldLoadReservationOptions = !isOperationalWorkspace && canEditReservations;
+  const shouldLoadReservationOptions = !isOperationalWorkspace && canEditReservations && focusedAction !== "cancel";
   const canCreateBookedReservation = canEditReservations || canApproveReservations;
   const canEditOperationTask = useCallback(
     (reservation: ReservationDTO) => canEditOperationalReservation(reservation, session),
@@ -314,6 +320,7 @@ export function AdminReservationsPanel({
   const [editForm, setEditForm] = useState<ReservationEditForm | null>(null);
   const [editing, setEditing] = useState(false);
   const reservationDetailRequestRef = useRef<string | null>(null);
+  const focusedActionHandledRef = useRef<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
@@ -408,8 +415,18 @@ export function AdminReservationsPanel({
     if (reservation.status === "BOOKED") {
       setSalesLogMonth(monthInputValueFromDate(reservation.bookedAt || reservation.createdAt || reservation.periodStart));
     }
+    const actionKey = focusedAction ? `${focusedReservationId}:${focusedAction}` : null;
+    if (actionKey && focusedActionHandledRef.current !== actionKey) {
+      focusedActionHandledRef.current = actionKey;
+      if (focusedAction === "cancel") {
+        setCancellationTarget(reservation);
+      } else {
+        void openReservationEditor(reservation, { preloaded: true });
+      }
+      return;
+    }
     setMessage(`Rezervarea ${reservation.locationCode || reservation.id} este filtrata in lista.`);
-  }, [focusedReservationId, isOperationalWorkspace, reservations]);
+  }, [focusedAction, focusedReservationId, isOperationalWorkspace, reservations]);
 
   useEffect(() => {
     if (!form.clientId) {
@@ -804,19 +821,22 @@ export function AdminReservationsPanel({
     }
   }
 
-  async function openReservationEditor(summary: ReservationDTO) {
+  async function openReservationEditor(summary: ReservationDTO, options?: { preloaded?: boolean }) {
     if (reservationDetailRequestRef.current) return;
     reservationDetailRequestRef.current = summary.id;
     setError(null);
-    setMessage("Se incarca detaliile rezervarii...");
+    setMessage(options?.preloaded ? null : "Se incarca detaliile rezervarii...");
 
     try {
-      const response = await fetch(`/api/reservations/${summary.id}`, { cache: "no-store" });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.reservation) {
-        throw new Error(payload?.error || "Rezervarea nu a putut fi incarcata.");
+      let reservation = summary;
+      if (!options?.preloaded) {
+        const response = await fetch(`/api/reservations/${summary.id}`, { cache: "no-store" });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.reservation) {
+          throw new Error(payload?.error || "Rezervarea nu a putut fi incarcata.");
+        }
+        reservation = payload.reservation as ReservationDTO;
       }
-      const reservation = payload.reservation as ReservationDTO;
       setMessage(null);
       setEditingReservation(reservation);
       setEditClientSearch(reservation.clientName || reservation.clientCompany || "");
@@ -964,7 +984,8 @@ export function AdminReservationsPanel({
       );
       setEditingReservation(null);
       setEditForm(null);
-      await refreshLocations();
+      if (onQuickActionComplete) onQuickActionComplete();
+      else await refreshLocations();
     } catch (editError) {
       setError(editError instanceof Error ? editError.message : "Inchirierea nu a putut fi actualizata.");
     } finally {
@@ -1163,7 +1184,8 @@ export function AdminReservationsPanel({
     );
     setReservations((current) => current.map((reservation) => updatesById.get(reservation.id) || reservation));
     setMessage(updatedReservations.length > 1 ? `Contractul a fost anulat pe ${updatedReservations.length} locatii.` : "Inchirierea a fost anulata.");
-    await refreshLocations();
+    if (onQuickActionComplete) onQuickActionComplete();
+    else await refreshLocations();
   }
 
   async function updateOfferRequest(id: string, status: OfferRequestStatus, salesperson?: string) {

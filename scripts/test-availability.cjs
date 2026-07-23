@@ -86,7 +86,7 @@ const cases = [
     from: "2026-06-01",
     to: "2026-06-30",
     expectedStatus: "UNAVAILABLE",
-    expectedLabelIncludes: "Ocupata"
+    expectedLabelIncludes: "indisponibila"
   },
   {
     name: "override manual blocheaza perioada",
@@ -102,8 +102,8 @@ const cases = [
     },
     from: "2026-06-01",
     to: "2026-06-30",
-    expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "Disponibila"
+    expectedStatus: "UNAVAILABLE",
+    expectedLabelIncludes: "indisponibila"
   },
   {
     name: "rezervare suprapusa cu perioada ceruta",
@@ -183,6 +183,16 @@ const canonicalCases = [
   {
     name: "override activ blocheaza",
     input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-01", periodEnd: "2026-08-10", now, availabilityOverrides: [{ id: "override", type: "COMMERCIAL_BLOCK", reason: "Blocaj", periodStart: "2026-08-01", periodEnd: "2026-08-10" }] },
+    expected: "BLOCKED"
+  },
+  {
+    name: "override partial in perioada ofertei ramane blocant",
+    input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-01", periodEnd: "2026-08-31", now, availabilityOverrides: [{ id: "partial-override", type: "COMMERCIAL_BLOCK", reason: "Blocaj", periodStart: "2026-08-10", periodEnd: "2026-08-12" }] },
+    expected: "BLOCKED"
+  },
+  {
+    name: "mentenanta nu poate fi inchiriata",
+    input: { lifecycleStatus: "MAINTENANCE", periodStart: "2026-08-01", periodEnd: "2026-08-31", now, reservations: [] },
     expected: "BLOCKED"
   },
   {

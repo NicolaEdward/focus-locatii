@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mapsHref } from "@/lib/gps";
 import { getLocationSelectionAvailability } from "@/lib/location-selection-availability";
-import { isManualAvailabilityStatus, manualAvailabilityStatusLabel } from "@/lib/location-availability-overrides";
 import { listAdminLocations } from "@/lib/locations";
 import { sortOperationalLocations } from "@/lib/location-order";
 import { requireAnyPermission } from "@/lib/auth";
@@ -28,6 +27,10 @@ const headers = [
   "Schita",
   "Availability"
 ];
+const OFFER_HEADER_ROWS = 8;
+const TABLE_HEADER_ROW = OFFER_HEADER_ROWS + 1;
+const OFFER_NOTE =
+  "Nota: Amplasamentele care fac obiectul ofertelor noastre sunt propuse si altor clienti. Prin urmare, ne rezervam dreptul de a modifica lista de amplasamente disponibile, pe masura ce acestea sunt contractate prin comenzi ferme. Preturile de chirie sunt pentru o perioada de o luna.";
 
 export async function GET(request: NextRequest) {
   const { session, response } = await requireAnyPermission(request, ["reports.view", "reports.view.own"]);
@@ -55,6 +58,8 @@ export async function GET(request: NextRequest) {
   const explicitIdScope = request.nextUrl.searchParams.get("scope") === "ids";
   const includeHidden = request.nextUrl.searchParams.get("includeHidden") === "1";
   const includeUnavailable = request.nextUrl.searchParams.get("includeUnavailable") === "1";
+  const clientName = cleanOfferText(request.nextUrl.searchParams.get("client"));
+  const campaignName = cleanOfferText(request.nextUrl.searchParams.get("campaign"));
 
   const periodStart = from || to;
   const periodEnd = to || from;
@@ -97,14 +102,25 @@ export async function GET(request: NextRequest) {
     sheets.push({
       name: categoryName,
       rows: [
-        titleRow(`Locatii ${categoryName}`),
+        ...offerHeaderRows({
+          categoryName,
+          clientName,
+          campaignName,
+          periodStart: from,
+          periodEnd: to
+        }),
         headers.map((header) => ({ value: header, style: XLSX_STYLES.header })),
         ...orderedLocations.map((location, index) => locationRow(request, location, index, availabilityById[location.id]))
       ],
-      merges: [{ startRow: 1, startCol: 1, endRow: 1, endCol: 14 }],
+      merges: offerHeaderMerges(),
       columns: defaultColumns().map((width) => ({ width })),
-      freezeRows: 2,
-      autoFilter: { startRow: 2, startCol: 1, endRow: Math.max(groupLocations.length + 2, 2), endCol: 14 }
+      freezeRows: TABLE_HEADER_ROW,
+      autoFilter: {
+        startRow: TABLE_HEADER_ROW,
+        startCol: 1,
+        endRow: Math.max(groupLocations.length + TABLE_HEADER_ROW, TABLE_HEADER_ROW),
+        endCol: 14
+      }
     });
   }
 
@@ -112,12 +128,18 @@ export async function GET(request: NextRequest) {
     sheets.push({
       name: "Disponibil",
       rows: [
-        titleRow("Nu exista locatii disponibile pentru filtrele selectate."),
+        ...offerHeaderRows({
+          categoryName: "Nu exista locatii disponibile pentru filtrele selectate",
+          clientName,
+          campaignName,
+          periodStart: from,
+          periodEnd: to
+        }),
         headers.map((header) => ({ value: header, style: XLSX_STYLES.header }))
       ],
-      merges: [{ startRow: 1, startCol: 1, endRow: 1, endCol: 14 }],
+      merges: offerHeaderMerges(),
       columns: defaultColumns().map((width) => ({ width })),
-      freezeRows: 2
+      freezeRows: TABLE_HEADER_ROW
     });
   }
 
@@ -138,6 +160,52 @@ function titleRow(title: string): StyledCell[] {
     value: index === 0 ? title : "",
     style: XLSX_STYLES.title
   }));
+}
+
+function offerHeaderRows(input: {
+  categoryName: string;
+  clientName: string;
+  campaignName: string;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+}): StyledCell[][] {
+  return [
+    titleRow("OFERTA SUPORTURI PUBLICITARE Focus Media Outdoor"),
+    metadataRow("Client:", input.clientName),
+    metadataRow("CAMPANIE:", input.campaignName),
+    metadataRow("DATA START:", input.periodStart ? formatDate(input.periodStart) : ""),
+    metadataRow("DATA STOP:", input.periodEnd ? formatDate(input.periodEnd) : ""),
+    wideOfferRow("Tarifele sunt exprimate in EURO si nu contin TVA si TLP", XLSX_STYLES.offerValue),
+    wideOfferRow(OFFER_NOTE, XLSX_STYLES.offerNote),
+    titleRow(`Locatii ${input.categoryName}`)
+  ];
+}
+
+function metadataRow(label: string, value: string): StyledCell[] {
+  return Array.from({ length: 14 }, (_, index) => ({
+    value: index === 0 ? label : index === 2 ? value : "",
+    style: index === 0 ? XLSX_STYLES.offerLabel : XLSX_STYLES.offerValue
+  }));
+}
+
+function wideOfferRow(value: string, style: number): StyledCell[] {
+  return Array.from({ length: 14 }, (_, index) => ({
+    value: index === 0 ? value : "",
+    style
+  }));
+}
+
+function offerHeaderMerges() {
+  return [
+    { startRow: 1, startCol: 1, endRow: 1, endCol: 14 },
+    ...[2, 3, 4, 5].flatMap((row) => [
+      { startRow: row, startCol: 1, endRow: row, endCol: 2 },
+      { startRow: row, startCol: 3, endRow: row, endCol: 14 }
+    ]),
+    { startRow: 6, startCol: 1, endRow: 6, endCol: 14 },
+    { startRow: 7, startCol: 1, endRow: 7, endCol: 14 },
+    { startRow: 8, startCol: 1, endRow: 8, endCol: 14 }
+  ];
 }
 
 function locationRow(
@@ -179,43 +247,28 @@ function availabilityStyle(availability?: LocationSelectionAvailability) {
 
 function availabilityLabelForExport(availability?: LocationSelectionAvailability) {
   if (!availability) return "Disponibilitate necunoscuta";
-  const includeIntervals =
-    availability.blockingIntervals.length > 1 ||
-    (availability.state === "AVAILABLE" && availability.blockingIntervals.length > 0);
-  const parts = [availability.label, availability.explanation, includeIntervals ? occupiedIntervalsLabel(availability) : ""]
+  if (availability.state === "PARTIAL") {
+    return `Disponibil partial | ${availability.explanation}`;
+  }
+  if (availability.state === "CONFLICT") {
+    return `Indisponibil | ${availability.explanation}`;
+  }
+  const parts = [availability.label, availability.explanation]
     .map((part) => part.trim())
     .filter(Boolean);
   return [...new Set(parts)].join(" | ");
 }
 
-function occupiedIntervalsLabel(availability: LocationSelectionAvailability) {
-  if (!availability.blockingIntervals.length) return "";
-  return availability.blockingIntervals
-    .slice(0, 3)
-    .map((interval) => {
-      const action = intervalActionLabel(interval.status);
-      const end = interval.openEnded ? "" : ` - ${formatDate(new Date(interval.end))}`;
-      return `${action}: ${formatDate(new Date(interval.start))}${end}${holdRemainingSuffix(interval)}`;
-    })
-    .join("; ");
-}
-
-function intervalActionLabel(status: string) {
-  if (isManualAvailabilityStatus(status)) return manualAvailabilityStatusLabel(status);
-  if (status === "HOLD" || status === "RESERVED") return "Rezervat";
-  return "Ocupat";
-}
-
-function holdRemainingSuffix(interval: { status: string; holdExpiresAt?: string | null }) {
-  if (interval.status !== "HOLD" && interval.status !== "RESERVED") return "";
-  if (!interval.holdExpiresAt) return "";
-  const days = Math.ceil((new Date(interval.holdExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
-  if (days <= 0) return " (expira astazi)";
-  return ` (mai are ${days} ${days === 1 ? "zi" : "zile"})`;
-}
-
 function formatDate(date: Date) {
   return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" }).format(date);
+}
+
+function cleanOfferText(value: string | null) {
+  return String(value || "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
 }
 
 function parseDateParam(value: string | null) {

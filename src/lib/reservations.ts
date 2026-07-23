@@ -73,6 +73,38 @@ const reservationSummaryInclude = {
   location: { select: { code: true, address: true, city: true, type: true } }
 };
 
+const reservationWorkspaceSelect = {
+  id: true,
+  locationId: true,
+  clientId: true,
+  campaignId: true,
+  status: true,
+  clientName: true,
+  clientCompany: true,
+  contractCompany: true,
+  campaignName: true,
+  contractNumber: true,
+  salesperson: true,
+  amount: true,
+  monthlyRentTotal: true,
+  monthlyRentShare: true,
+  contractGroupId: true,
+  periodStart: true,
+  periodEnd: true,
+  installationDate: true,
+  neutralizationDate: true,
+  bookedAt: true,
+  holdExpiresAt: true,
+  ownerId: true,
+  sellerUserId: true,
+  currency: true,
+  createdAt: true,
+  updatedAt: true,
+  location: { select: { code: true, address: true, city: true, type: true } }
+} satisfies Prisma.ReservationSelect;
+
+type ReservationWorkspaceRow = Prisma.ReservationGetPayload<{ select: typeof reservationWorkspaceSelect }>;
+
 const reservationOperationalInclude = {
   ...reservationSummaryInclude,
   documents: {
@@ -221,6 +253,26 @@ export async function listReservations(filters: {
   });
 
   return reservationsWithSegments.map(serializeReservation);
+}
+
+export async function listReservationWorkspace(
+  filters: {
+    status?: string | null;
+    client?: string | null;
+    locationId?: string | null;
+    from?: string | null;
+    to?: string | null;
+  } = {},
+  actor?: AuthSession | null
+) {
+  const rows = await prisma.reservation.findMany({
+    where: reservationListWhere(filters, actor),
+    select: reservationWorkspaceSelect,
+    orderBy: [{ bookedAt: "desc" }, { createdAt: "desc" }, { periodStart: "desc" }],
+    take: 500
+  });
+
+  return rows.map(serializeReservationWorkspaceRow);
 }
 
 export type ReservationPageFilters = {
@@ -403,6 +455,39 @@ function serializeReservationListItem(row: ReservationListItemRow): ReservationL
     currency: row.currency,
     updatedAt: row.updatedAt.toISOString()
   };
+}
+
+function serializeReservationWorkspaceRow(row: ReservationWorkspaceRow): ReservationDTO {
+  return {
+    id: row.id,
+    locationId: row.locationId,
+    clientId: row.clientId,
+    campaignId: row.campaignId,
+    locationCode: row.location.code,
+    locationName: row.location.address,
+    status: row.status as ReservationDTO["status"],
+    clientName: row.clientName,
+    clientCompany: row.clientCompany,
+    contractCompany: row.contractCompany,
+    campaignName: row.campaignName,
+    contractNumber: row.contractNumber,
+    salesperson: row.salesperson,
+    amount: row.amount,
+    monthlyRentTotal: row.monthlyRentTotal,
+    monthlyRentShare: row.monthlyRentShare,
+    contractGroupId: row.contractGroupId,
+    periodStart: row.periodStart.toISOString(),
+    periodEnd: row.periodEnd.toISOString(),
+    installationDate: row.installationDate?.toISOString() || null,
+    neutralizationDate: row.neutralizationDate?.toISOString() || null,
+    bookedAt: row.bookedAt?.toISOString() || null,
+    holdExpiresAt: row.holdExpiresAt?.toISOString() || null,
+    ownerId: row.ownerId,
+    sellerUserId: row.sellerUserId || row.ownerId,
+    currency: row.currency,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
+  } as ReservationDTO;
 }
 
 function normalizeReservationStatus(value?: string | null) {

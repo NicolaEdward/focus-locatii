@@ -187,6 +187,23 @@ export function decideAvailability(input: AvailabilityDecisionInput): Availabili
     });
   }
 
+  const hasManualBlock = conflictingIntervals.some((interval) =>
+    isManualBlockingStatus(interval.status)
+  );
+  if (hasManualBlock) {
+    return decision({
+      status: "BLOCKED",
+      isBookable: false,
+      reasons,
+      conflictingIntervals,
+      activeOverride,
+      effectiveHoldExpiry,
+      periodStart,
+      periodEnd,
+      availableWindows: []
+    });
+  }
+
   if (available.length) {
     return decision({
       status: "PARTIAL",
@@ -357,7 +374,7 @@ export function calculateAvailability(
     return {
       status: "UNAVAILABLE",
       publicStatus: first?.status === "RESERVED" || first?.status === "HOLD" ? "RESERVED" : "BOOKED",
-      label: "Ocupata in perioada selectata",
+      label: decisionValue.status === "BLOCKED" ? "Temporar indisponibila in perioada selectata" : "Ocupata in perioada selectata",
       detail: first ? bookingWindowLabel(first.status, first.from, first.to) : null,
       windows: []
     };

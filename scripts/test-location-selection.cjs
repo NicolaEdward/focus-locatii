@@ -56,6 +56,8 @@ assert(files.canonicalAvailability.includes("decideAvailability"), "selected-per
 assert(!files.availability.includes("selectedPeriodCoverage"), "selector adapter must not recalculate canonical partial coverage");
 assert(files.availability.includes('state: "PARTIAL"'), "selected-period partial overlaps must be marked as partial, not full conflict");
 assert(files.availability.includes("Disponibil partial"), "selected-period partial availability must have a clear label");
+assert(files.availability.includes('return `${blockedText}. Disponibil: ${availableText}.`'), "partial availability must list occupied/reserved and all available intervals clearly");
+assert(files.canonicalAvailability.includes("const hasManualBlock"), "manual blocks intersecting an offer period must never remain partial/proposable");
 assert(files.availability.includes("availableFrom: firstAvailable?.start.toISOString()"), "partial availability should expose the first available start date");
 assert(files.availability.includes("availableUntil: firstAvailable?.end.toISOString()"), "partial availability should expose the first available end date");
 assert(files.availability.includes("isGenericAvailableNote"), "generic available notes must be suppressed when they contradict conflicts");
@@ -103,6 +105,10 @@ assert(files.builder.includes("Selecteaza tot"), "bulk select action should be s
 assert(files.builder.includes("Vrei sa selectezi ${candidates.length} locatii?"), "bulk selecting more than 25 should ask for confirmation");
 assert(files.builder.includes("buildAvailabilityExportHref"), "selector should build an availability export URL");
 assert(files.builder.includes("includeUnavailable"), "selector export should explicitly include unavailable rows only when requested");
+assert(files.builder.includes('includeUnavailable: filters.availability === "CONFLICT"'), "normal/all selector exports must exclude blocked locations");
+assert(files.builder.includes('params.set("client", input.clientName.trim())'), "availability export should carry the optional client name");
+assert(files.builder.includes('params.set("campaign", input.campaignName.trim())'), "availability export should carry the optional campaign name");
+assert(files.builder.includes("minmax(440px,480px)") && files.builder.includes("520px"), "offer basket should use the available desktop width");
 assert(files.filters.includes("Disponibile / partiale"), "availability filter should support default proposable locations");
 assert(files.filters.includes("Disponibile partial"), "availability filter should support partial availability");
 assert(files.filters.includes("Indisponibile / cu conflict"), "availability filter should expose conflicts only explicitly");
@@ -129,6 +135,8 @@ assert(files.basket.includes("Exporta disponibil"), "basket should expose availa
 assert(files.basket.includes("Daca nu ai selectie, exportul foloseste rezultatele filtrate"), "export should explain empty basket behavior");
 assert(files.basket.includes("Mai multe") && files.basket.includes("Copiaza coduri selectate"), "copy codes should be secondary");
 assert(files.basket.includes("Schita"), "basket should show production sketch availability when present");
+assert(files.basket.includes("overflow-x-hidden overflow-y-auto"), "basket list must not create a horizontal scrollbar");
+assert(files.basket.includes("line-clamp-2 break-words"), "long location names must wrap inside the basket");
 
 assert(files.results.includes("Adauga") && files.results.includes("Scoate"), "result rows need add/remove actions");
 assert(files.results.includes("availability?.explanation"), "result rows must use normalized availability explanation");
@@ -145,9 +153,13 @@ assert(files.availabilityExport.includes("getLocationSelectionAvailability"), "a
 assert(files.availabilityExport.includes("availabilityLabelForExport"), "availability export should use normalized labels");
 assert(files.availabilityExport.includes('"Schita"'), "availability export should include production sketch column");
 assert(files.availabilityExport.includes("mapsHref(null, location.latDisplay, location.lngDisplay)"), "availability export should use display coordinates only");
-assert(files.availabilityExport.includes("availability.blockingIntervals.length > 1"), "availability export should list blocking intervals only when multiple intervals need explicit detail");
-assert(files.availabilityExport.includes('return "Rezervat"'), "availability export should label HOLD/RESERVED as reserved, not occupied");
-assert(files.availabilityExport.includes("mai are"), "availability export should show remaining hold days when expiry is available");
+assert(files.availabilityExport.includes("OFERTA SUPORTURI PUBLICITARE Focus Media Outdoor"), "availability export should include the commercial offer title");
+assert(files.availabilityExport.includes('metadataRow("Client:"'), "availability export should include the optional client field");
+assert(files.availabilityExport.includes('metadataRow("CAMPANIE:"'), "availability export should include the optional campaign field");
+assert(files.availabilityExport.includes("Tarifele sunt exprimate in EURO si nu contin TVA si TLP"), "availability export should include the pricing disclaimer");
+assert(files.availabilityExport.includes("Amplasamentele care fac obiectul ofertelor noastre"), "availability export should include the availability disclaimer");
+assert(files.availabilityExport.includes('return `Disponibil partial | ${availability.explanation}`'), "partial export wording should have one normalized explanation");
+assert(!files.availabilityExport.includes("occupiedIntervalsLabel"), "availability export must not append the same blocking intervals twice");
 assert(files.builder.includes('params.set("scope", "ids")'), "filtered export should preserve an explicit empty result set instead of exporting every location");
 assert(files.availabilityExport.includes('explicitIdScope'), "availability export should distinguish all inventory from an explicitly empty filtered scope");
 

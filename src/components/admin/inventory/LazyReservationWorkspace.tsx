@@ -15,7 +15,9 @@ const AdminReservationsPanel = dynamic(
 export type ReservationWorkspaceRequest = {
   key: number;
   reservationId?: string;
+  locationId?: string;
   newReservation?: boolean;
+  action?: "edit" | "cancel";
 };
 
 type WorkspacePayload = {
@@ -50,19 +52,10 @@ export function LazyReservationWorkspace({
     syncWorkspaceUrl(request);
     void loadAdminReservationsPanel();
 
-    Promise.all([
-      fetch("/api/admin/reservation-locations", { cache: "no-store", signal: controller.signal }).then(readPayload),
-      fetch("/api/reservations?view=summary", { cache: "no-store", signal: controller.signal }).then(readPayload),
-      fetch("/api/offer-requests", { cache: "no-store", signal: controller.signal }).then(async (response) => response.ok ? response.json() : { requests: [] })
-    ])
-      .then(([locationsPayload, reservationsPayload, requestsPayload]) => {
+    loadWorkspacePayload(request, controller.signal)
+      .then((workspacePayload) => {
         if (cancelled) return;
-        setPayload({
-          locations: locationsPayload.locations || [],
-          reservations: reservationsPayload.reservations || [],
-          occupancySummary: reservationsPayload.summary || { activeHolds: 0, occupiedNow: 0, upcoming: 0, activeOrUpcoming: 0 },
-          offerRequests: requestsPayload.requests || []
-        });
+        setPayload(workspacePayload);
       })
       .catch((requestError) => {
         if (!cancelled && !controller.signal.aborted) setError(requestError instanceof Error ? requestError.message : "Gestionarea rezervarilor nu a putut fi incarcata.");
@@ -101,6 +94,9 @@ export function LazyReservationWorkspace({
               initialReservations={payload.reservations}
               initialOccupancySummary={payload.occupancySummary}
               initialOfferRequests={payload.offerRequests}
+              focusedReservationId={request.reservationId}
+              focusedAction={request.action}
+              onQuickActionComplete={request.action ? close : undefined}
               onLocationsUpdated={(locations) => {
                 setPayload((current) => current ? { ...current, locations } : current);
                 onChanged();
@@ -118,6 +114,44 @@ function WorkspaceLoading() {
   return <div className="mx-auto mt-8 flex max-w-xl items-center justify-center gap-3 rounded-lg border border-focus-line bg-focus-ink/60 p-6 text-sm font-bold text-slate-200"><LoaderCircle className="animate-spin text-focus-yellow" size={20} /> Se incarca instrumentele complete numai pentru aceasta actiune...</div>;
 }
 
+async function loadWorkspacePayload(request: ReservationWorkspaceRequest, signal: AbortSignal): Promise<WorkspacePayload> {
+  if (request.action && request.reservationId) {
+    const reservationPayload = await fetch(`/api/reservations/${encodeURIComponent(request.reservationId)}`, {
+      cache: "no-store",
+      signal
+    }).then(readPayload);
+    const reservation = reservationPayload.reservation as ReservationDTO;
+    const locationId = request.locationId || reservation.locationId;
+    const locationQuery = locationId ? `?locationId=${encodeURIComponent(locationId)}` : "";
+    const [locationsPayload, summaryPayload] = await Promise.all([
+      fetch(`/api/admin/reservation-locations${locationQuery}`, { cache: "no-store", signal }).then(readPayload),
+      fetch("/api/reservations?view=occupancy-summary", { cache: "no-store", signal }).then(readPayload)
+    ]);
+    return {
+      locations: locationsPayload.locations || [],
+      reservations: [reservation],
+      occupancySummary: summaryPayload.summary || emptyOccupancySummary(),
+      offerRequests: []
+    };
+  }
+
+  const [locationsPayload, reservationsPayload, requestsPayload] = await Promise.all([
+    fetch("/api/admin/reservation-locations", { cache: "no-store", signal }).then(readPayload),
+    fetch("/api/reservations?view=workspace", { cache: "no-store", signal }).then(readPayload),
+    fetch("/api/offer-requests", { cache: "no-store", signal }).then(async (response) => response.ok ? response.json() : { requests: [] })
+  ]);
+  return {
+    locations: locationsPayload.locations || [],
+    reservations: reservationsPayload.reservations || [],
+    occupancySummary: reservationsPayload.summary || emptyOccupancySummary(),
+    offerRequests: requestsPayload.requests || []
+  };
+}
+
+function emptyOccupancySummary(): OccupancySummaryDTO {
+  return { activeHolds: 0, occupiedNow: 0, upcoming: 0, activeOrUpcoming: 0 };
+}
+
 async function readPayload(response: Response) {
   const payload = await response.json().catch(() => null);
   if (!response.ok) throw new Error(payload?.error || "Datele nu au putut fi incarcate.");
@@ -128,6 +162,7 @@ function syncWorkspaceUrl(request: ReservationWorkspaceRequest) {
   const params = new URLSearchParams(window.location.search);
   if (request.reservationId) params.set("reservationId", request.reservationId); else params.delete("reservationId");
   if (request.newReservation) params.set("newReservation", "1"); else params.delete("newReservation");
+  if (request.action) params.set("reservationAction", request.action); else params.delete("reservationAction");
   window.history.replaceState(window.history.state, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
 }
 
@@ -135,5 +170,6 @@ function clearWorkspaceUrl() {
   const params = new URLSearchParams(window.location.search);
   params.delete("reservationId");
   params.delete("newReservation");
+  params.delete("reservationAction");
   window.history.replaceState(window.history.state, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
 }

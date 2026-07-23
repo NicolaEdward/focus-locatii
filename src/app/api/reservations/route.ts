@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
-import { createReservation, getReservationOccupancySummary, listReservations } from "@/lib/reservations";
+import {
+  createReservation,
+  getReservationOccupancySummary,
+  listReservations,
+  listReservationWorkspace
+} from "@/lib/reservations";
 import { recordAudit } from "@/lib/audit";
 import { observeRoute, setObservabilityRole } from "@/lib/observability";
 
@@ -20,16 +25,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ summary: await getReservationOccupancySummary(session) }, { headers: noStoreHeaders });
   }
 
-  const summaryView = view === "summary";
-  const [reservations, summary] = await Promise.all([listReservations({
+  const compactView = view === "summary" || view === "workspace";
+  const filters = {
     status: request.nextUrl.searchParams.get("status"),
     client: request.nextUrl.searchParams.get("client"),
     locationId: request.nextUrl.searchParams.get("locationId"),
     from: request.nextUrl.searchParams.get("from"),
     to: request.nextUrl.searchParams.get("to")
-  }, session, {
-    includeDetails: !summaryView
-  }), summaryView ? getReservationOccupancySummary(session) : Promise.resolve(null)]);
+  };
+  const reservationsPromise = view === "workspace"
+    ? listReservationWorkspace(filters, session)
+    : listReservations(filters, session, { includeDetails: !compactView });
+  const [reservations, summary] = await Promise.all([
+    reservationsPromise,
+    compactView ? getReservationOccupancySummary(session) : Promise.resolve(null)
+  ]);
 
   return NextResponse.json({ reservations, ...(summary ? { summary } : {}) }, { headers: noStoreHeaders });
 }

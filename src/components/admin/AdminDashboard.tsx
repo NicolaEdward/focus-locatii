@@ -87,7 +87,7 @@ export function AdminDashboard({
     }
   }
 
-  function openReservationWorkspace(options: { reservationId?: string; newReservation?: boolean } = {}) {
+  function openReservationWorkspace(options: Omit<ReservationWorkspaceRequest, "key"> = {}) {
     setWorkspaceRequest((current) => ({ ...options, key: (current?.key || 0) + 1 }));
   }
 
@@ -170,6 +170,7 @@ export function AdminDashboard({
             syncFocusedLocation(null);
           }}
           onEdit={() => editLocation(detailLocation)}
+          onDataChanged={() => dataChanged("Disponibilitatea locatiei a fost actualizata.")}
         />
       ) : null}
 

@@ -321,22 +321,20 @@ function conflictExplanation(intervals: LocationSelectionBlockingInterval[]) {
 }
 
 function partialExplanation(coverage: SelectedPeriodCoverage) {
-  const firstBlocked = coverage.mergedIntervals[0];
-  const firstAvailable = coverage.availableSegments[0];
-  const blockedAction = firstBlocked && isManualAvailabilityStatus(firstBlocked.status) ? "Blocat" : firstBlocked ? reservationIntervalAction(firstBlocked.status) : "Ocupat";
-  const blockedLabel = firstBlocked && isManualAvailabilityStatus(firstBlocked.status) ? manualAvailabilityStatusLabel(firstBlocked.status) : null;
-  const remaining = firstBlocked ? reservationHoldRemainingSuffix(firstBlocked) : "";
-  const blockedText = firstBlocked
-    ? coverage.mergedIntervals.length > 1
-      ? `${blockedAction} in ${coverage.mergedIntervals.length} intervale; primul: ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}${remaining}.`
-      : `${blockedAction} ${formatDate(firstBlocked.start)} - ${formatDate(firstBlocked.end)}${blockedLabel ? ` (${blockedLabel})` : remaining}.`
-    : "Exista ocupare partiala.";
-  const availableText = firstAvailable
-    ? coverage.availableSegments.length > 1
-      ? `Primul interval disponibil: ${formatDate(firstAvailable.start)} - ${formatDate(firstAvailable.end)}.`
-      : `Disponibil ${formatDate(firstAvailable.start)} - ${formatDate(firstAvailable.end)}.`
-    : "Verifica intervalele disponibile.";
-  return `${blockedText} ${availableText}`;
+  const blockedText = coverage.mergedIntervals.length
+    ? coverage.mergedIntervals
+        .map((interval) => {
+          const action = reservationIntervalAction(interval.status);
+          return `${action}: ${formatDate(interval.start)} - ${formatDate(interval.end)}${reservationHoldRemainingSuffix(interval)}`;
+        })
+        .join("; ")
+    : "Ocuparea necesita verificare";
+  const availableText = coverage.availableSegments.length
+    ? coverage.availableSegments
+        .map((interval) => `${formatDate(interval.start)} - ${formatDate(interval.end)}`)
+        .join("; ")
+    : "fara interval disponibil";
+  return `${blockedText}. Disponibil: ${availableText}.`;
 }
 
 type SelectedPeriodCoverage = {

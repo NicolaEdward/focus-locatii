@@ -5,6 +5,7 @@ import { moneyNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
 import {
+  activeCampaignBookingWhere,
   campaignEffectiveStatusWhere,
   deriveCampaignEffectiveStatus,
   type CampaignEffectiveStatus
@@ -97,6 +98,9 @@ export type CampaignOverview = {
   accountOwnerName: string | null;
   startDate: string | null;
   endDate: string | null;
+  effectiveStartDate: string | null;
+  effectiveEndDate: string | null;
+  effectivePeriodSource: "CAMPAIGN" | "ACTIVE_BOOKING";
   currency: string;
   totalContractValue: number;
   paymentTermType: string | null;
@@ -206,6 +210,7 @@ export async function getClientsPage(session: AuthSession, input: PageInput = {}
 }
 
 export async function getCampaignsPage(session: AuthSession, input: CampaignPageInput = {}): Promise<WorkspacePage<CampaignListItem>> {
+  const now = new Date();
   const query = String(input.query || "").trim().slice(0, 120);
   const limit = safeLimit(input.limit);
   const where: Prisma.CampaignWhereInput = {
@@ -248,6 +253,11 @@ export async function getCampaignsPage(session: AuthSession, input: CampaignPage
         updatedAt: true,
         client: { select: { companyName: true, accountOwnerUserId: true } },
         sellerUser: { select: { name: true } },
+        reservations: {
+          where: activeCampaignBookingWhere(now),
+          select: { status: true, periodStart: true, periodEnd: true },
+          take: 20
+        },
         _count: { select: { reservations: true } }
       },
       orderBy: [{ startDate: "desc" }, { updatedAt: "desc" }, { id: "asc" }],
@@ -265,7 +275,7 @@ export async function getCampaignsPage(session: AuthSession, input: CampaignPage
       campaignName: row.campaignName,
       campaignCode: row.campaignCode,
       status: row.status,
-      effectiveStatus: deriveCampaignEffectiveStatus(row).effectiveStatus,
+      effectiveStatus: deriveCampaignEffectiveStatus({ ...row, bookedPeriods: row.reservations }, now).effectiveStatus,
       clientName: row.client.companyName,
       companyEntity: row.companyEntity,
       sellerUserId: row.sellerUserId,
@@ -364,6 +374,7 @@ export async function getClientPortfolioFinance(session: AuthSession): Promise<F
 }
 
 export async function getCampaignOverview(session: AuthSession, campaignId: string): Promise<CampaignOverview | null> {
+  const now = new Date();
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
     select: {
@@ -372,11 +383,17 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
       currency: true, totalContractValue: true, paymentTermType: true, paymentTermDays: true,
       billingRule: true, billingFrequency: true, notes: true,
       client: { select: { companyName: true, accountOwnerUserId: true } },
-      sellerUser: { select: { name: true } }, accountOwner: { select: { name: true } }
+      sellerUser: { select: { name: true } }, accountOwner: { select: { name: true } },
+      reservations: {
+        where: activeCampaignBookingWhere(now),
+        select: { status: true, periodStart: true, periodEnd: true },
+        take: 100
+      }
     }
   });
   if (!campaign || campaign.status === "archived") return null;
   assertCampaignReadAccess(session, campaign);
+  const effectiveStatus = deriveCampaignEffectiveStatus({ ...campaign, bookedPeriods: campaign.reservations }, now);
   return {
     id: campaign.id,
     clientId: campaign.clientId,
@@ -384,7 +401,7 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
     campaignName: campaign.campaignName,
     campaignCode: campaign.campaignCode,
     status: campaign.status,
-    effectiveStatus: deriveCampaignEffectiveStatus(campaign).effectiveStatus,
+    effectiveStatus: effectiveStatus.effectiveStatus,
     campaignType: campaign.campaignType,
     companyEntity: campaign.companyEntity,
     sellerUserId: campaign.sellerUserId,
@@ -393,6 +410,9 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
     accountOwnerName: campaign.accountOwner?.name || null,
     startDate: campaign.startDate?.toISOString() || null,
     endDate: campaign.endDate?.toISOString() || null,
+    effectiveStartDate: effectiveStatus.startDate,
+    effectiveEndDate: effectiveStatus.endDate,
+    effectivePeriodSource: effectiveStatus.periodSource,
     currency: campaign.currency || "EUR",
     totalContractValue: moneyNumber(campaign.totalContractValue),
     paymentTermType: campaign.paymentTermType,

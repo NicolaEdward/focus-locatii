@@ -17,13 +17,20 @@ export type CampaignEffectiveStatus = (typeof CAMPAIGN_EFFECTIVE_STATUSES)[numbe
 export type CampaignStatusDecision = {
   effectiveStatus: CampaignEffectiveStatus;
   lifecycleStatus: string;
-  reason: "ARCHIVED" | "CANCELLED" | "COMPLETED" | "DRAFT" | "MISSING_DATES" | "INVALID_DATES" | "BEFORE_START" | "IN_RANGE" | "AFTER_END";
+  reason: "ARCHIVED" | "CANCELLED" | "COMPLETED" | "DRAFT" | "MISSING_DATES" | "INVALID_DATES" | "BEFORE_START" | "IN_RANGE" | "ACTIVE_BOOKED_PERIOD" | "AFTER_END";
   label: string;
   startDate: string | null;
   endDate: string | null;
+  periodSource: "CAMPAIGN" | "ACTIVE_BOOKING";
   today: string;
   timeZone: typeof CAMPAIGN_TIME_ZONE;
   endDateInclusive: true;
+};
+
+type CampaignBookingPeriodInput = {
+  status?: string | null;
+  periodStart?: Date | string | null;
+  periodEnd?: Date | string | null;
 };
 
 type CampaignStatusInput = {
@@ -31,6 +38,7 @@ type CampaignStatusInput = {
   archivedAt?: Date | string | null;
   startDate?: Date | string | null;
   endDate?: Date | string | null;
+  bookedPeriods?: CampaignBookingPeriodInput[] | null;
 };
 
 const labels: Record<CampaignEffectiveStatus, string> = {
@@ -45,21 +53,37 @@ const labels: Record<CampaignEffectiveStatus, string> = {
 
 export function deriveCampaignEffectiveStatus(input: CampaignStatusInput, now = new Date()): CampaignStatusDecision {
   const lifecycleStatus = String(input.status || "draft").trim().toLowerCase();
-  const startDate = campaignDateKey(input.startDate);
-  const endDate = campaignDateKey(input.endDate);
+  const campaignStartDate = campaignDateKey(input.startDate);
+  const campaignEndDate = campaignDateKey(input.endDate);
   const today = bucharestDateKey(now);
+  const activeBookedPeriods = (input.bookedPeriods || [])
+    .filter((period) => String(period.status || "").toUpperCase() === "BOOKED")
+    .map((period) => ({ startDate: campaignDateKey(period.periodStart), endDate: campaignDateKey(period.periodEnd) }))
+    .filter((period): period is { startDate: string; endDate: string } => Boolean(period.startDate && period.endDate))
+    .filter((period) => period.startDate <= today && period.endDate >= today);
+  const activeBookedStart = minDateKey(activeBookedPeriods.map((period) => period.startDate));
+  const activeBookedEnd = maxDateKey(activeBookedPeriods.map((period) => period.endDate));
 
   if (input.archivedAt || lifecycleStatus === "archived") return decision("ARCHIVED", "ARCHIVED");
   if (lifecycleStatus === "cancelled") return decision("CANCELLED", "CANCELLED");
   if (lifecycleStatus === "completed") return decision("ENDED", "COMPLETED");
   if (lifecycleStatus === "draft") return decision("DRAFT", "DRAFT");
-  if (!startDate || !endDate) return decision("INCOMPLETE", "MISSING_DATES");
-  if (startDate > endDate) return decision("INCOMPLETE", "INVALID_DATES");
-  if (today < startDate) return decision("SCHEDULED", "BEFORE_START");
-  if (today > endDate) return decision("ENDED", "AFTER_END");
+  if (activeBookedStart && activeBookedEnd) {
+    return decision("ACTIVE", "ACTIVE_BOOKED_PERIOD", activeBookedStart, activeBookedEnd, "ACTIVE_BOOKING");
+  }
+  if (!campaignStartDate || !campaignEndDate) return decision("INCOMPLETE", "MISSING_DATES");
+  if (campaignStartDate > campaignEndDate) return decision("INCOMPLETE", "INVALID_DATES");
+  if (today < campaignStartDate) return decision("SCHEDULED", "BEFORE_START");
+  if (today > campaignEndDate) return decision("ENDED", "AFTER_END");
   return decision("ACTIVE", "IN_RANGE");
 
-  function decision(effectiveStatus: CampaignEffectiveStatus, reason: CampaignStatusDecision["reason"]): CampaignStatusDecision {
+  function decision(
+    effectiveStatus: CampaignEffectiveStatus,
+    reason: CampaignStatusDecision["reason"],
+    startDate = campaignStartDate,
+    endDate = campaignEndDate,
+    periodSource: CampaignStatusDecision["periodSource"] = "CAMPAIGN"
+  ): CampaignStatusDecision {
     return {
       effectiveStatus,
       lifecycleStatus,
@@ -67,6 +91,7 @@ export function deriveCampaignEffectiveStatus(input: CampaignStatusInput, now = 
       label: labels[effectiveStatus],
       startDate,
       endDate,
+      periodSource,
       today,
       timeZone: CAMPAIGN_TIME_ZONE,
       endDateInclusive: true
@@ -82,11 +107,27 @@ export function isCampaignActive(input: CampaignStatusInput, now = new Date()) {
   return deriveCampaignEffectiveStatus(input, now).effectiveStatus === "ACTIVE";
 }
 
+export function activeCampaignBookingWhere(now = new Date()): Prisma.ReservationWhereInput {
+  const today = dateKeyAsUtcDate(bucharestDateKey(now));
+  return {
+    status: "BOOKED",
+    periodStart: { lte: today },
+    periodEnd: { gte: today }
+  };
+}
+
 export function campaignEffectiveStatusWhere(status: CampaignEffectiveStatus, now = new Date()): Prisma.CampaignWhereInput {
   const today = dateKeyAsUtcDate(bucharestDateKey(now));
   const nonTerminal: Prisma.CampaignWhereInput = {
     archivedAt: null,
     status: { notIn: ["archived", "cancelled", "completed", "draft"] }
+  };
+  const activeBooking: Prisma.CampaignWhereInput = {
+    reservations: { some: activeCampaignBookingWhere(now) }
+  };
+  const campaignPeriodActive: Prisma.CampaignWhereInput = {
+    startDate: { lte: today },
+    endDate: { gte: today }
   };
 
   switch (status) {
@@ -97,21 +138,36 @@ export function campaignEffectiveStatusWhere(status: CampaignEffectiveStatus, no
     case "DRAFT":
       return { archivedAt: null, status: "draft" };
     case "SCHEDULED":
-      return { ...nonTerminal, startDate: { gt: today }, endDate: { not: null } };
+      return {
+        AND: [
+          nonTerminal,
+          { NOT: activeBooking },
+          { startDate: { gt: today }, endDate: { not: null } }
+        ]
+      };
     case "ACTIVE":
-      return { ...nonTerminal, startDate: { lte: today }, endDate: { gte: today } };
+      return { ...nonTerminal, OR: [campaignPeriodActive, activeBooking] };
     case "ENDED":
       return {
         archivedAt: null,
         OR: [
           { status: "completed" },
-          { status: { notIn: ["archived", "cancelled", "draft"] }, endDate: { lt: today } }
+          {
+            AND: [
+              { status: { notIn: ["archived", "cancelled", "draft"] } },
+              { NOT: activeBooking },
+              { endDate: { lt: today } }
+            ]
+          }
         ]
       };
     case "INCOMPLETE":
       return {
-        ...nonTerminal,
-        OR: [{ startDate: null }, { endDate: null }]
+        AND: [
+          nonTerminal,
+          { NOT: activeBooking },
+          { OR: [{ startDate: null }, { endDate: null }] }
+        ]
       };
   }
 }
@@ -139,4 +195,12 @@ function campaignDateKey(value?: Date | string | null) {
 
 function dateKeyAsUtcDate(key: string) {
   return new Date(`${key}T00:00:00.000Z`);
+}
+
+function minDateKey(values: string[]) {
+  return values.length ? values.reduce((minimum, value) => value < minimum ? value : minimum) : null;
+}
+
+function maxDateKey(values: string[]) {
+  return values.length ? values.reduce((maximum, value) => value > maximum ? value : maximum) : null;
 }

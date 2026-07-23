@@ -27,7 +27,9 @@ const clientListBlock = between(service, "export async function getClientsPage",
 assert(!clientListBlock.includes("storageUrl"), "Client list must never include document storage data.");
 assert(!clientListBlock.includes("billingAddress: true") && !clientListBlock.includes("generalEmail: true"), "Client list must not include sensitive detail fields.");
 const campaignListBlock = between(service, "export async function getCampaignsPage", "export async function getClientOverview");
-assert(!campaignListBlock.includes("reservations: {"), "Campaign list must not hydrate reservation rows.");
+assert(campaignListBlock.includes("activeCampaignBookingWhere(now)"), "Campaign list may load only active BOOKED periods as lifecycle evidence.");
+assert(campaignListBlock.includes("select: { status: true, periodStart: true, periodEnd: true }"), "Campaign lifecycle evidence must remain a minimal relation projection.");
+assert(!campaignListBlock.includes("clientName: true") && !campaignListBlock.includes("productionNotes: true"), "Campaign list must not hydrate reservation business details.");
 assert(campaignListBlock.includes("_count: { select: { reservations: true } }"), "Campaign list may return only a reservation count.");
 assert(service.includes("financialDocumentScope(session)"), "Finance document tabs must apply the financial-only access policy.");
 assert(service.includes("financialReceivableId: { not: null }"), "Finance document tabs must exclude unrelated document metadata.");

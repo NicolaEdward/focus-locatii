@@ -3,6 +3,12 @@ import type {
   ExecutiveEntityCode,
   ExecutiveScope
 } from "@/lib/dashboard/executive/contracts";
+import type {
+  OperationCutoverMediaClassification,
+  OperationCutoverPriority,
+  OperationCutoverReview,
+  OperationCutoverReviewGroup
+} from "@/lib/dashboard/executive/operation-task-cutover-contracts";
 
 export const OPERATION_TASK_RECONCILIATION_CONTRACT_VERSION = "operation-task-reconciliation-v1";
 export const OPERATION_TASK_RECONCILIATION_DEFAULT_LIMIT = 50;
@@ -59,7 +65,15 @@ export type OperationTaskReconciliationFilters = {
   batch: OperationTaskReconciliationBatch | "ALL";
   kind: string;
   status: string;
-  medium: OperationTaskMedium | "ALL";
+  medium: OperationCutoverMediaClassification | "ALL";
+  priority: OperationCutoverPriority | "ALL";
+  campaign: string;
+  location: string;
+  periodFrom: string;
+  periodTo: string;
+  anomalyCode: string;
+  reviewGroup: OperationCutoverReviewGroup | "ALL";
+  confidence: "ALL" | "HIGH" | "MEDIUM" | "LOW";
   cursor: string | null;
   limit: number;
 };
@@ -95,6 +109,7 @@ export type OperationTaskReconciliationResponse = {
     proposedTreatment: string;
     executionApproved: false;
   }>;
+  review: OperationCutoverReview;
   items: OperationTaskReconciliationFinding[];
   pagination: {
     limit: number;

@@ -50,9 +50,10 @@ assert.equal(
 );
 assert.equal(classifyDceoRequest("GET", "/api/admin/availability/excel"), "SAFE_READ");
 assert.equal(classifyDceoRequest("GET", "/api/admin/sales-report/excel"), "SAFE_READ");
+assert.equal(classifyDceoRequest("GET", "/api/admin/executive/operation-task-reconciliation/export"), "SAFE_READ");
 assert.equal(classifyDceoRequest("GET", "/api/admin/crm/export.xlsx"), "BUSINESS_MUTATION");
 assert.equal(classifyDceoRequest("GET", "/api/admin/billing/export"), "BUSINESS_MUTATION");
-assert.equal(D_CEO_READ_ONLY_GET_EXPORT_ALLOWLIST.size, 2);
+assert.equal(D_CEO_READ_ONLY_GET_EXPORT_ALLOWLIST.size, 3);
 
 console.log(JSON.stringify({
   ok: true,

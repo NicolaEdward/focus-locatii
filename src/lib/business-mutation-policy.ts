@@ -18,7 +18,8 @@ export const D_CEO_READ_ONLY_POST_ALLOWLIST = new Set([
 
 export const D_CEO_READ_ONLY_GET_EXPORT_ALLOWLIST = new Set([
   "/api/admin/availability/excel",
-  "/api/admin/sales-report/excel"
+  "/api/admin/sales-report/excel",
+  "/api/admin/executive/operation-task-reconciliation/export"
 ]);
 
 const D_CEO_ACCOUNT_SECURITY_PREFIXES = [

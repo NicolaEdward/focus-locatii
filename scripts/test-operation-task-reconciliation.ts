@@ -162,7 +162,8 @@ function campaign(
     endDate: new Date("2026-07-31T00:00:00.000Z"),
     archivedAt: null,
     createdAt: new Date("2026-06-01T00:00:00.000Z"),
-    updatedAt: new Date("2026-07-01T00:00:00.000Z")
+    updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+    client: { companyName: "Client test" }
   };
 }
 
@@ -181,13 +182,18 @@ function reservation(
   return {
     id,
     status,
+    clientId: "client-1",
+    clientName: "Client test",
+    clientCompany: "Client test",
     campaignId,
+    campaignName: "Campanie test",
     locationId,
     contractCompany: "Focus Media",
     periodStart: new Date(`${start}T00:00:00.000Z`),
     periodEnd: new Date(`${end}T00:00:00.000Z`),
     installationDate: null,
     neutralizationDate: null,
+    bookedAt: status === "BOOKED" ? new Date("2026-06-01T00:00:00.000Z") : null,
     productionNotes: null,
     createdAt: new Date("2026-06-01T00:00:00.000Z"),
     updatedAt: new Date("2026-07-01T00:00:00.000Z")
@@ -215,6 +221,7 @@ function task(
     scheduledFor: scheduledFor ? new Date(`${scheduledFor}T08:00:00.000Z`) : null,
     completedAt: null,
     assignedToUserId: null,
+    createdByUserId: null,
     createdAt: new Date("2026-06-01T00:00:00.000Z"),
     updatedAt: new Date("2026-07-01T00:00:00.000Z"),
     ...overrides

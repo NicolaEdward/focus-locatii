@@ -15,6 +15,16 @@ import {
   type OperationTaskReconciliationFinding,
   type OperationTaskReconciliationResponse
 } from "@/lib/dashboard/executive/operation-task-reconciliation-contracts";
+import {
+  buildOperationTaskCutoverReview,
+  defaultOperationCutoverFilters
+} from "@/lib/dashboard/executive/operation-task-cutover-review";
+import type {
+  OperationCutoverMediaClassification,
+  OperationCutoverPriority,
+  OperationCutoverReview,
+  OperationCutoverReviewGroup
+} from "@/lib/dashboard/executive/operation-task-cutover-contracts";
 import { operationalRequirementForBooked, proofContractForOperation } from "@/lib/dashboard/executive/operational-contract";
 import { EXECUTIVE_ENTITIES, entityLabelForCode, executiveScopeForSession } from "@/lib/dashboard/executive/scope";
 import { addDateKeyDays, bucharestBusinessDateKey } from "@/lib/dashboard/executive/time";
@@ -48,18 +58,25 @@ const batches = new Set<OperationTaskReconciliationBatch>([
   "DUPLICATES",
   "DATA_INSUFFICIENT"
 ]);
-const mediums = new Set<OperationTaskMedium>(["STATIC", "DIGITAL", "UNKNOWN"]);
+const mediums = new Set<OperationCutoverMediaClassification>(["STATIC", "DIGITAL", "MIXED", "UNKNOWN"]);
+const priorities = new Set<OperationCutoverPriority>(["CRITICAL_CURRENT", "RECENT_RELEVANT", "HISTORICAL_LEGACY"]);
+const reviewGroups = new Set<OperationCutoverReviewGroup>(["DETERMINISTIC", "HUMAN_REVIEW", "LEGACY_EXCLUDED"]);
 
 const reservationSelect = Prisma.validator<Prisma.ReservationSelect>()({
   id: true,
   status: true,
+  clientId: true,
+  clientName: true,
+  clientCompany: true,
   campaignId: true,
+  campaignName: true,
   locationId: true,
   contractCompany: true,
   periodStart: true,
   periodEnd: true,
   installationDate: true,
   neutralizationDate: true,
+  bookedAt: true,
   productionNotes: true,
   createdAt: true,
   updatedAt: true
@@ -77,6 +94,7 @@ const operationTaskSelect = Prisma.validator<Prisma.OperationTaskSelect>()({
   scheduledFor: true,
   completedAt: true,
   assignedToUserId: true,
+  createdByUserId: true,
   createdAt: true,
   updatedAt: true
 });
@@ -89,7 +107,12 @@ const campaignSelect = Prisma.validator<Prisma.CampaignSelect>()({
   endDate: true,
   archivedAt: true,
   createdAt: true,
-  updatedAt: true
+  updatedAt: true,
+  client: {
+    select: {
+      companyName: true
+    }
+  }
 });
 const locationSelect = Prisma.validator<Prisma.LocationSelect>()({
   id: true,
@@ -166,6 +189,32 @@ export async function getOperationTaskReconciliation(
   reconciliationCacheKey(context);
   const result = await cachedReconciliation(context);
   return { ...result, role: scope.role, scope, filters };
+}
+
+export async function getOperationTaskCutoverReviewForExport(
+  session: AuthSession,
+  input: Record<string, string | string[] | undefined> = {},
+  now = new Date()
+): Promise<OperationCutoverReview> {
+  const scope = executiveScopeForSession(session, input, now);
+  const filters = reconciliationFilters(input);
+  const context: CacheContext = {
+    contractVersion: OPERATION_TASK_RECONCILIATION_CONTRACT_VERSION,
+    role: scope.role,
+    permissionHash: stableHash([...permissionsForRole(scope.role)].sort()),
+    authorizedEntityHash: stableHash([...scope.authorizedEntityCodes].sort()),
+    selectedEntityHash: stableHash([...scope.selectedEntityCodes].sort()),
+    selectedEntityCodes: scope.selectedEntityCodes,
+    snapshotDate: scope.snapshotDate,
+    timezone: scope.timeZone,
+    filters: {
+      ...filters,
+      cursor: null,
+      limit: 10_000
+    }
+  };
+  const result = await queryOperationTaskReconciliation(context, now);
+  return result.review;
 }
 
 export async function queryOperationTaskReconciliation(
@@ -464,11 +513,34 @@ export function buildOperationTaskReconciliation(
     byStatus: countBy(tasks, (item) => item.status),
     byMedium: countBy(tasks, (item) => mediumByTaskId.get(item.id) || "UNKNOWN")
   };
+  const review = buildOperationTaskCutoverReview({
+    reservations,
+    tasks,
+    campaigns: input.campaigns,
+    locations: input.locations,
+    findings,
+    snapshotDate: input.snapshotDate,
+    filters: {
+      priority: filters.priority,
+      status: filters.status,
+      medium: filters.medium,
+      campaign: filters.campaign,
+      location: filters.location,
+      periodFrom: filters.periodFrom,
+      periodTo: filters.periodTo,
+      anomalyCode: filters.anomalyCode,
+      reviewGroup: filters.reviewGroup,
+      confidence: filters.confidence
+    },
+    cursor: filters.cursor,
+    limit: filters.limit
+  });
 
   return {
     kind: "operation-task-reconciliation",
     summary,
     batches: reconciliationBatches(summary.byBatch, findingOccurrencesByBatch),
+    review,
     items: page,
     pagination: {
       limit: filters.limit,
@@ -494,7 +566,10 @@ export function reconciliationFilters(
 ): OperationTaskReconciliationFilters {
   const category = scalar(input.category).toUpperCase() as OperationTaskReconciliationCategory;
   const batch = scalar(input.batch).toUpperCase() as OperationTaskReconciliationBatch;
-  const medium = scalar(input.medium).toUpperCase() as OperationTaskMedium;
+  const medium = scalar(input.medium).toUpperCase() as OperationCutoverMediaClassification;
+  const priority = scalar(input.priority).toUpperCase() as OperationCutoverPriority;
+  const reviewGroup = scalar(input.reviewGroup).toUpperCase() as OperationCutoverReviewGroup;
+  const confidence = scalar(input.confidence).toUpperCase();
   const limitText = scalar(input.limit).trim();
   const limit = Number(limitText);
   return {
@@ -503,6 +578,16 @@ export function reconciliationFilters(
     kind: scalar(input.kind).toUpperCase(),
     status: scalar(input.status).toUpperCase(),
     medium: mediums.has(medium) ? medium : "ALL",
+    priority: priorities.has(priority) ? priority : "ALL",
+    campaign: scalar(input.campaign).trim(),
+    location: scalar(input.location).trim(),
+    periodFrom: validDateKey(scalar(input.periodFrom)),
+    periodTo: validDateKey(scalar(input.periodTo)),
+    anomalyCode: scalar(input.anomalyCode).trim().toUpperCase(),
+    reviewGroup: reviewGroups.has(reviewGroup) ? reviewGroup : "ALL",
+    confidence: ["HIGH", "MEDIUM", "LOW"].includes(confidence)
+      ? confidence as OperationTaskReconciliationFilters["confidence"]
+      : "ALL",
     cursor: validCursor(scalar(input.cursor)),
     limit: limitText && Number.isFinite(limit)
       ? Math.min(50, Math.max(1, Math.trunc(limit)))
@@ -524,6 +609,14 @@ export function reconciliationCacheKey(context: CacheContext) {
     context.filters.kind || "ALL",
     context.filters.status || "ALL",
     context.filters.medium,
+    context.filters.priority,
+    context.filters.campaign || "ALL",
+    context.filters.location || "ALL",
+    context.filters.periodFrom || "OPEN",
+    context.filters.periodTo || "OPEN",
+    context.filters.anomalyCode || "ALL",
+    context.filters.reviewGroup,
+    context.filters.confidence,
     context.filters.cursor || "FIRST",
     context.filters.limit
   ].join("|");
@@ -806,15 +899,22 @@ function knownEntityCode(value: string) {
 }
 
 function defaultFilters(): OperationTaskReconciliationFilters {
+  const reviewFilters = defaultOperationCutoverFilters();
   return {
     category: "ALL",
     batch: "ALL",
     kind: "",
-    status: "",
-    medium: "ALL",
+    ...reviewFilters,
     cursor: null,
     limit: OPERATION_TASK_RECONCILIATION_DEFAULT_LIMIT
   };
+}
+
+function validDateKey(value: string) {
+  const normalized = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return "";
+  const date = new Date(`${normalized}T12:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? "" : normalized;
 }
 
 function groupBy<T>(rows: T[], key: (row: T) => string) {

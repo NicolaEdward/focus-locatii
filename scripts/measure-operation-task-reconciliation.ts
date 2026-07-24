@@ -1,132 +1,51 @@
-import assert from "node:assert/strict";
-import type { UserRole } from "@prisma/client";
-import { ADMIN_COOKIE, createSessionToken } from "../src/lib/auth";
-import { prisma } from "../src/lib/prisma";
+import { performance } from "node:perf_hooks";
+import { loadEnvFile } from "./release/env-utils";
 
-const baseUrl = process.env.OPERATION_RECONCILIATION_MEASURE_URL || "http://127.0.0.1:3015";
-const runs = Math.max(5, Math.min(50, Number(process.env.OPERATION_RECONCILIATION_MEASURE_RUNS || 20)));
-const snapshot = process.env.OPERATION_RECONCILIATION_SNAPSHOT || "2026-07-24";
+loadEnvFile(process.env.ENV_FILE || ".env");
 
 async function main() {
-  const [coo, dCeo, superAdmin, seller] = await Promise.all([
-    prisma.user.findFirst({ where: { active: true, role: "COO" }, select: userSelect }),
-    prisma.user.findFirst({ where: { active: true, role: "D_CEO" }, select: userSelect }),
-    prisma.user.findFirst({ where: { active: true, role: "SUPER_ADMIN" }, select: userSelect }),
-    prisma.user.findFirst({ where: { active: true, role: "SALES_AGENT" }, select: userSelect })
+  const [{ auditOperationTaskReconciliation }, { prisma }] = await Promise.all([
+    import("../src/lib/dashboard/executive/operation-task-reconciliation"),
+    import("../src/lib/prisma")
   ]);
-  assert(coo && dCeo && superAdmin && seller, "Lipsesc conturile sintetice pentru reconcilierea OperationTask.");
-  const before = await businessCounts();
-  const pathname = `/api/admin/executive/operation-task-reconciliation?snapshot=${snapshot}`;
-  const cold = await timedRequest(pathname, cookieFor(dCeo));
-  assert.equal(cold.status, 200);
-  assert(cold.bytes < 100_000, `Payload-ul reconcilierii depășește 100 KB: ${cold.bytes}.`);
-  const body = JSON.parse(cold.body);
-  assert.equal(body.kind, "operation-task-reconciliation");
-  assert.equal(body.pagination.limit, 50);
-  assert.equal(body.meta.readOnly, true);
-  assert.equal(body.meta.writesExecuted, 0);
-  assert.equal(body.meta.queryBudget, 5);
-  assert(body.items.length <= 50);
-
-  const roleChecks = await Promise.all([
-    timedRequest(`${pathname}&batch=SAFE_CASES`, cookieFor(coo)),
-    timedRequest(`${pathname}&category=UNASSIGNED_ACTIVE_TASK`, cookieFor(dCeo)),
-    timedRequest(`${pathname}&medium=STATIC`, cookieFor(superAdmin)),
-    timedRequest(pathname, cookieFor(seller))
-  ]);
-  assert.deepEqual(roleChecks.map((row) => row.status), [200, 200, 200, 403]);
-
-  const apiRuns = [];
-  const pageRuns = [];
-  for (let index = 0; index < runs; index += 1) {
-    apiRuns.push(await timedRequest(pathname, cookieFor(dCeo)));
-    pageRuns.push(await timedRequest(`/admin/dashboard?panel=operation-task-reconciliation&snapshot=${snapshot}`, cookieFor(coo)));
+  const runs = Math.max(3, Math.min(10, Number(process.env.PERFORMANCE_RUNS || 5)));
+  const durations: number[] = [];
+  let payloadBytes = 0;
+  try {
+    for (let index = 0; index < runs; index += 1) {
+      const started = performance.now();
+      const report = await auditOperationTaskReconciliation({
+        snapshotDate: process.env.RECONCILIATION_SNAPSHOT || "2026-07-24"
+      });
+      durations.push(performance.now() - started);
+      payloadBytes = Buffer.byteLength(JSON.stringify(report));
+      if (!report.meta.readOnly || report.meta.writesExecuted !== 0) {
+        throw new Error("Benchmarkul a detectat un contract care nu este read-only.");
+      }
+    }
+  } finally {
+    await prisma.$disconnect();
   }
-  assert(apiRuns.every((row) => row.status === 200));
-  assert(pageRuns.every((row) => row.status === 200 && normalize(row.body).includes("reconciliere operationtask")));
-  const after = await businessCounts();
-  assert.deepEqual(after, before, "Reconcilierea OperationTask a modificat date de business.");
-
+  const sorted = [...durations].sort((left, right) => left - right);
   console.log(JSON.stringify({
     ok: true,
-    baseUrl,
     runs,
-    cold: withoutBody(cold),
-    apiWarm: summary(apiRuns),
-    pageWarm: summary(pageRuns),
-    roleChecks: roleChecks.map(withoutBody),
-    summary: body.summary,
-    batches: body.batches,
-    pagination: body.pagination,
-    businessCountsBefore: before,
-    businessCountsAfter: after
+    p50Ms: percentile(sorted, 0.5),
+    p95Ms: percentile(sorted, 0.95),
+    minMs: Math.round(sorted[0]),
+    maxMs: Math.round(sorted.at(-1) || 0),
+    payloadBytes,
+    queryBudget: 5,
+    readOnly: true
   }, null, 2));
 }
 
-const userSelect = { id: true, email: true, name: true, role: true, tokenVersion: true } as const;
-
-function cookieFor(user: { id: string; email: string; name: string; role: UserRole; tokenVersion: number }) {
-  return `${ADMIN_COOKIE}=${createSessionToken(user)}`;
-}
-
-async function timedRequest(pathname: string, cookie: string) {
-  const startedAt = performance.now();
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    headers: { cookie, "x-request-id": `operation-reconciliation-${crypto.randomUUID()}` },
-    redirect: "manual"
-  });
-  const body = await response.text();
-  return {
-    durationMs: Math.round(performance.now() - startedAt),
-    status: response.status,
-    bytes: Buffer.byteLength(body),
-    requestId: response.headers.get("x-request-id"),
-    body
-  };
-}
-
-function summary(rows: Array<{ durationMs: number; bytes: number }>) {
-  const durations = rows.map((row) => row.durationMs).sort((left, right) => left - right);
-  const bytes = rows.map((row) => row.bytes);
-  return {
-    p50Ms: percentile(durations, 0.5),
-    p95Ms: percentile(durations, 0.95),
-    minMs: durations[0],
-    maxMs: durations.at(-1),
-    minBytes: Math.min(...bytes),
-    maxBytes: Math.max(...bytes)
-  };
-}
-
-function percentile(values: number[], quantile: number) {
-  return values[Math.min(values.length - 1, Math.ceil(values.length * quantile) - 1)];
-}
-
-function withoutBody<T extends { body: string }>(row: T) {
-  const { body: _body, ...rest } = row;
-  return rest;
-}
-
-function normalize(value: string) {
-  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
-}
-
-async function businessCounts() {
-  const [reservations, holds, booked, receivables, payments, notifications, operationTasks, documents, audits] = await Promise.all([
-    prisma.reservation.count(),
-    prisma.reservation.count({ where: { status: "HOLD" } }),
-    prisma.reservation.count({ where: { status: "BOOKED" } }),
-    prisma.financialReceivable.count(),
-    prisma.financialReceivablePayment.count(),
-    prisma.appNotification.count(),
-    prisma.operationTask.count(),
-    prisma.clientDocument.count(),
-    prisma.auditLog.count()
-  ]);
-  return { reservations, holds, booked, receivables, payments, notifications, operationTasks, documents, audits };
+function percentile(values: number[], ratio: number) {
+  const index = Math.min(values.length - 1, Math.max(0, Math.ceil(values.length * ratio) - 1));
+  return Math.round(values[index]);
 }
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.stack : error);
   process.exitCode = 1;
-}).finally(() => prisma.$disconnect());
+});

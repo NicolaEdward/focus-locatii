@@ -1,4 +1,5 @@
 [
+  { "role": "SUPER_ADMIN", "email": "super-admin.preview@focusmedia.test", "name": "Super Admin Preview" },
   { "role": "COO", "email": "coo.preview@focusmedia.test", "name": "COO Preview" },
   { "role": "D_CEO", "email": "d-ceo.preview@focusmedia.test", "name": "D-CEO Preview" },
   { "role": "SALES_DIRECTOR", "email": "director.preview@focusmedia.test", "name": "Director Sales Preview" },

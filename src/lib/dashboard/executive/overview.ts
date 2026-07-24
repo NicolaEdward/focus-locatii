@@ -15,6 +15,7 @@ import {
   type ExecutiveScope
 } from "@/lib/dashboard/executive/contracts";
 import { buildExecutivePulse, EXECUTIVE_PULSE_WEIGHTS } from "@/lib/dashboard/executive/pulse";
+import { executiveAlertPreview, getExecutiveAlerts } from "@/lib/dashboard/executive/alerts";
 import {
   entityLabelForCode,
   entityValueForCode,
@@ -47,7 +48,24 @@ export async function getExecutiveOverview(
   const scope = executiveScopeForSession(session, input);
   // The explicit cache key documents and tests every authorization and business-time dimension.
   executiveCacheKey(scope);
-  return cachedOverview(scope);
+  const alertInput = scope.panel === "alerts"
+    ? input
+    : {
+        entity: scope.entitySelection,
+        snapshot: scope.snapshotDate,
+        periodStart: scope.periodStart,
+        periodEnd: scope.periodEnd,
+        limit: "6"
+      };
+  const [overview, alerts] = await Promise.all([
+    cachedOverview(scope),
+    getExecutiveAlerts(session, alertInput)
+  ]);
+  return {
+    ...overview,
+    alertPreview: executiveAlertPreview(alerts),
+    ...(scope.panel === "alerts" ? { alerts } : {})
+  };
 }
 
 export async function queryExecutiveOverview(scope: ExecutiveScope, now = new Date()): Promise<ExecutiveOverview> {
@@ -259,7 +277,7 @@ export async function queryExecutiveOverview(scope: ExecutiveScope, now = new Da
       stale: false,
       timeZone: scope.timeZone,
       contractVersion: scope.contractVersion,
-      queryBudget: 13,
+      queryBudget: 15,
       source: "CANONICAL_LIVE"
     },
     entities: EXECUTIVE_ENTITIES.map(({ code, label }) => ({ code, label })),
@@ -273,13 +291,7 @@ export async function queryExecutiveOverview(scope: ExecutiveScope, now = new Da
       operationsToday
     },
     campaignRisks: scope.panel === "campaign-risks" ? campaignRisks : campaignRisks.slice(0, 6),
-    alertPreview: alertPreview({
-      campaignRisks,
-      overdueInvoices,
-      unassignedTasks,
-      assignmentCompleteness,
-      inventory
-    }),
+    alertPreview: [],
     bottleneckPreview: bottleneckPreview({
       campaignRisks,
       overdueInvoices,

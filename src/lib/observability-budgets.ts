@@ -1,5 +1,6 @@
 export type ObservabilityBudgetKey =
   | "executive_overview_api"
+  | "executive_alerts_api"
   | "admin_locations_html"
   | "admin_clients_html"
   | "admin_receivables_html"
@@ -41,6 +42,13 @@ export const OBSERVABILITY_BUDGETS: Record<ObservabilityBudgetKey, PerformanceBu
     durationMs: { warning: 1_000, severe: 2_000 },
     payloadBytes: { warning: 100_000, severe: 200_000 },
     queryCount: { warning: 15, severe: 30 },
+    slowQueryCount: { warning: 1, severe: 3 }
+  },
+  executive_alerts_api: {
+    route: "/api/admin/executive/alerts",
+    durationMs: { warning: 500, severe: 1_000 },
+    payloadBytes: { warning: 100_000, severe: 200_000 },
+    queryCount: { warning: 6, severe: 12 },
     slowQueryCount: { warning: 1, severe: 3 }
   },
   admin_locations_html: {

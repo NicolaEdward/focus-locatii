@@ -68,7 +68,7 @@ const component = read("src/components/admin/ExecutiveCommandCenter.tsx");
 const route = read("src/app/api/admin/executive/overview/route.ts");
 assert(!/prisma\.[a-zA-Z]+\.create\s*\(/.test(service) && !/prisma\.[a-zA-Z]+\.update\s*\(/.test(service) && !/prisma\.[a-zA-Z]+\.delete\s*\(/.test(service), "Executive load must not write.");
 assert(!service.includes("prisma.mediaPlan"), "Executive overview must not activate Media Plan.");
-assert(service.includes("queryBudget: 13"), "Executive overview must declare a query budget below 15.");
+assert(service.includes("queryBudget: 15"), "Executive overview and alert preview must stay within the 15-query first-viewport budget.");
 assert(
   service.includes('scope.panel === "campaign-risks" ? campaignRisks : campaignRisks.slice(0, 6)'),
   "Campaign risk drill-down must return the complete result behind the KPI count."

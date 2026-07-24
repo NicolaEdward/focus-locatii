@@ -24,6 +24,7 @@ import type {
   ExecutiveOverview,
   ExecutivePulse
 } from "@/lib/dashboard/executive/contracts";
+import { ExecutiveAlertsPanel } from "@/components/admin/ExecutiveAlertsPanel";
 
 export function ExecutiveCommandCenter({ data }: { data: ExecutiveOverview }) {
   const scope = data.scope;
@@ -125,6 +126,14 @@ export function ExecutiveCommandCenter({ data }: { data: ExecutiveOverview }) {
             asOf={data.meta.asOf}
           />
         </div>
+
+        {data.alerts ? <ExecutiveAlertsPanel data={data.alerts} /> : (
+          <div className="flex justify-end">
+            <Link className="focus-button secondary min-h-11" href="/admin/dashboard?panel=alerts#executive-alerts" prefetch={false}>
+              <ShieldAlert size={17} /> Vezi toate alertele
+            </Link>
+          </div>
+        )}
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-labelledby="operational-snapshot-title">
           <h2 className="sr-only" id="operational-snapshot-title">Snapshot operațional</h2>

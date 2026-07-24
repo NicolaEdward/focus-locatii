@@ -26,6 +26,10 @@ const pages = [
   { name: "public-home", route: "/", expected: "loca" },
   { name: "coo-dashboard", route: "/admin/dashboard", role: "COO", expected: "Control executiv" },
   { name: "d-ceo-dashboard", route: "/admin/dashboard", role: "D_CEO", expected: "Company Pulse" },
+  { name: "executive-stage3a-coo-alerts", route: "/admin/dashboard?panel=alerts#executive-alerts", role: "COO", expected: "Executive Alerts" },
+  { name: "executive-stage3a-dceo-alerts", route: "/admin/dashboard?panel=alerts#executive-alerts", role: "D_CEO", expected: "Motor determinist" },
+  { name: "executive-stage3a-coo-operation-reconciliation", route: "/admin/dashboard?panel=operation-task-reconciliation#operation-task-reconciliation", role: "COO", expected: "Reconciliere OperationTask" },
+  { name: "executive-stage3a-dceo-operation-reconciliation", route: "/admin/dashboard?panel=operation-task-reconciliation#operation-task-reconciliation", role: "D_CEO", expected: "0 scrieri" },
   { name: "sales-director-dashboard", route: "/admin/dashboard", role: "SALES_DIRECTOR", expected: "Agenda mea" },
   { name: "sales-agent-dashboard", route: "/admin/dashboard", role: "SALES_AGENT", expected: "Agenda mea" },
   { name: "finance-invoices", route: "/admin/financiar/incasari", role: "FINANCE_OPERATOR", expected: "Facturi clien" },
@@ -123,6 +127,10 @@ async function capturePage(page, viewport, cookie) {
   await client.send("Page.navigate", { url: `${baseUrl}${page.route}` });
   await waitForExpression(client, "document.readyState === 'complete'", 30000);
   await wait(1200);
+  await client.send("Runtime.evaluate", {
+    expression: "location.hash && document.querySelector(location.hash)?.scrollIntoView({ block: 'start' })"
+  });
+  await wait(300);
   const performanceSamples = [await readPagePerformance(client)];
   const result = await client.send("Runtime.evaluate", { expression: `document.body.innerText.toLocaleLowerCase('ro').includes(${JSON.stringify(page.expected.toLocaleLowerCase("ro"))})`, returnByValue: true });
   if (result.result?.value !== true) {
@@ -140,8 +148,16 @@ async function capturePage(page, viewport, cookie) {
     await client.send("Page.navigate", { url: `${baseUrl}${page.route}` });
     await waitForExpression(client, "document.readyState === 'complete'", 30000);
     await wait(800);
+    await client.send("Runtime.evaluate", {
+      expression: "location.hash && document.querySelector(location.hash)?.scrollIntoView({ block: 'start' })"
+    });
+    await wait(200);
     performanceSamples.push(await readPagePerformance(client));
   }
+  await client.send("Runtime.evaluate", {
+    expression: "location.hash && document.querySelector(location.hash)?.scrollIntoView({ block: 'start' })"
+  });
+  await wait(200);
   const screenshot = await client.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
   fs.writeFileSync(filePath, Buffer.from(screenshot.data, "base64"));
   const errors = client.events.filter((event) => {

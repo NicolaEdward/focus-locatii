@@ -131,6 +131,7 @@ function validCursor(value: string) {
 }
 
 function boundedLimit(value: string) {
+  if (!value.trim()) return EXECUTIVE_ALERTS_DEFAULT_LIMIT;
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return EXECUTIVE_ALERTS_DEFAULT_LIMIT;
   return Math.min(50, Math.max(1, Math.trunc(parsed)));
@@ -139,4 +140,3 @@ function boundedLimit(value: string) {
 function scalar(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] || "" : value || "";
 }
-

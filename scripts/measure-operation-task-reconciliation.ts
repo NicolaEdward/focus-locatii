@@ -3,9 +3,9 @@ import type { UserRole } from "@prisma/client";
 import { ADMIN_COOKIE, createSessionToken } from "../src/lib/auth";
 import { prisma } from "../src/lib/prisma";
 
-const baseUrl = process.env.EXECUTIVE_ALERTS_MEASURE_URL || "http://127.0.0.1:3015";
-const runs = Math.max(5, Math.min(50, Number(process.env.EXECUTIVE_ALERTS_MEASURE_RUNS || 20)));
-const snapshot = process.env.EXECUTIVE_ALERTS_SNAPSHOT || "2026-07-24";
+const baseUrl = process.env.OPERATION_RECONCILIATION_MEASURE_URL || "http://127.0.0.1:3015";
+const runs = Math.max(5, Math.min(50, Number(process.env.OPERATION_RECONCILIATION_MEASURE_RUNS || 20)));
+const snapshot = process.env.OPERATION_RECONCILIATION_SNAPSHOT || "2026-07-24";
 
 async function main() {
   const [coo, dCeo, superAdmin, seller] = await Promise.all([
@@ -14,48 +14,49 @@ async function main() {
     prisma.user.findFirst({ where: { active: true, role: "SUPER_ADMIN" }, select: userSelect }),
     prisma.user.findFirst({ where: { active: true, role: "SALES_AGENT" }, select: userSelect })
   ]);
-  assert(coo && dCeo && superAdmin && seller, "Lipsesc conturile sintetice pentru matricea Executive Alerts.");
+  assert(coo && dCeo && superAdmin && seller, "Lipsesc conturile sintetice pentru reconcilierea OperationTask.");
   const before = await businessCounts();
-  const pathname = `/api/admin/executive/alerts?snapshot=${snapshot}`;
+  const pathname = `/api/admin/executive/operation-task-reconciliation?snapshot=${snapshot}`;
   const cold = await timedRequest(pathname, cookieFor(dCeo));
   assert.equal(cold.status, 200);
-  assert(cold.bytes < 100_000, `Payload-ul Executive Alerts depășește 100 KB: ${cold.bytes}.`);
+  assert(cold.bytes < 100_000, `Payload-ul reconcilierii depășește 100 KB: ${cold.bytes}.`);
   const body = JSON.parse(cold.body);
-  assert.equal(body.kind, "executive-alerts");
+  assert.equal(body.kind, "operation-task-reconciliation");
   assert.equal(body.pagination.limit, 50);
+  assert.equal(body.meta.readOnly, true);
+  assert.equal(body.meta.writesExecuted, 0);
+  assert.equal(body.meta.queryBudget, 5);
   assert(body.items.length <= 50);
-  assert.equal(body.summary.total >= body.items.length, true);
-  assert.equal(body.meta.queryBudget, 6);
 
   const roleChecks = await Promise.all([
-    timedRequest(`${pathname}&severity=P1`, cookieFor(coo)),
-    timedRequest(`${pathname}&domain=FINANCE`, cookieFor(dCeo)),
-    timedRequest(`${pathname}&dataQuality=LOW`, cookieFor(superAdmin)),
+    timedRequest(`${pathname}&batch=SAFE_CASES`, cookieFor(coo)),
+    timedRequest(`${pathname}&category=UNASSIGNED_ACTIVE_TASK`, cookieFor(dCeo)),
+    timedRequest(`${pathname}&medium=STATIC`, cookieFor(superAdmin)),
     timedRequest(pathname, cookieFor(seller))
   ]);
   assert.deepEqual(roleChecks.map((row) => row.status), [200, 200, 200, 403]);
 
-  const warmRuns = [];
+  const apiRuns = [];
   const pageRuns = [];
   for (let index = 0; index < runs; index += 1) {
-    warmRuns.push(await timedRequest(pathname, cookieFor(dCeo)));
-    pageRuns.push(await timedRequest(`/admin/dashboard?panel=alerts&snapshot=${snapshot}`, cookieFor(coo)));
+    apiRuns.push(await timedRequest(pathname, cookieFor(dCeo)));
+    pageRuns.push(await timedRequest(`/admin/dashboard?panel=operation-task-reconciliation&snapshot=${snapshot}`, cookieFor(coo)));
   }
-  assert(warmRuns.every((row) => row.status === 200));
-  assert(pageRuns.every((row) => row.status === 200 && normalize(row.body).includes("executive alerts")));
+  assert(apiRuns.every((row) => row.status === 200));
+  assert(pageRuns.every((row) => row.status === 200 && normalize(row.body).includes("reconciliere operationtask")));
   const after = await businessCounts();
-  assert.deepEqual(after, before, "Executive Alerts a modificat date de business.");
+  assert.deepEqual(after, before, "Reconcilierea OperationTask a modificat date de business.");
 
   console.log(JSON.stringify({
     ok: true,
     baseUrl,
     runs,
     cold: withoutBody(cold),
-    apiWarm: summary(warmRuns),
+    apiWarm: summary(apiRuns),
     pageWarm: summary(pageRuns),
     roleChecks: roleChecks.map(withoutBody),
-    alertCounts: body.summary,
-    returned: body.items.length,
+    summary: body.summary,
+    batches: body.batches,
     pagination: body.pagination,
     businessCountsBefore: before,
     businessCountsAfter: after
@@ -71,7 +72,7 @@ function cookieFor(user: { id: string; email: string; name: string; role: UserRo
 async function timedRequest(pathname: string, cookie: string) {
   const startedAt = performance.now();
   const response = await fetch(`${baseUrl}${pathname}`, {
-    headers: { cookie, "x-request-id": `exec-alerts-${crypto.randomUUID()}` },
+    headers: { cookie, "x-request-id": `operation-reconciliation-${crypto.randomUUID()}` },
     redirect: "manual"
   });
   const body = await response.text();

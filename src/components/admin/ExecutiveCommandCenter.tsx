@@ -25,6 +25,7 @@ import type {
   ExecutivePulse
 } from "@/lib/dashboard/executive/contracts";
 import { ExecutiveAlertsPanel } from "@/components/admin/ExecutiveAlertsPanel";
+import { OperationTaskReconciliationPanel } from "@/components/admin/OperationTaskReconciliationPanel";
 
 export function ExecutiveCommandCenter({ data }: { data: ExecutiveOverview }) {
   const scope = data.scope;
@@ -134,6 +135,10 @@ export function ExecutiveCommandCenter({ data }: { data: ExecutiveOverview }) {
             </Link>
           </div>
         )}
+
+        {data.operationTaskReconciliation
+          ? <OperationTaskReconciliationPanel data={data.operationTaskReconciliation} />
+          : null}
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-labelledby="operational-snapshot-title">
           <h2 className="sr-only" id="operational-snapshot-title">Snapshot operațional</h2>

@@ -1,5 +1,6 @@
 import type { UserRole } from "@/lib/rbac";
 import type { ExecutiveAlertsResponse } from "@/lib/dashboard/executive/alerts-contracts";
+import type { OperationTaskReconciliationResponse } from "@/lib/dashboard/executive/operation-task-reconciliation-contracts";
 
 export const EXECUTIVE_CONTRACT_VERSION = "executive-overview-v1";
 export const EXECUTIVE_TIME_ZONE = "Europe/Bucharest";
@@ -128,4 +129,5 @@ export type ExecutiveOverview = {
   alertPreview: ExecutiveFactItem[];
   bottleneckPreview: ExecutiveFactItem[];
   alerts?: ExecutiveAlertsResponse;
+  operationTaskReconciliation?: OperationTaskReconciliationResponse;
 };

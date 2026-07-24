@@ -16,6 +16,7 @@ import {
 } from "@/lib/dashboard/executive/contracts";
 import { buildExecutivePulse, EXECUTIVE_PULSE_WEIGHTS } from "@/lib/dashboard/executive/pulse";
 import { executiveAlertPreview, getExecutiveAlerts } from "@/lib/dashboard/executive/alerts";
+import { getOperationTaskReconciliation } from "@/lib/dashboard/executive/operation-task-reconciliation";
 import {
   entityLabelForCode,
   entityValueForCode,
@@ -57,14 +58,19 @@ export async function getExecutiveOverview(
         periodEnd: scope.periodEnd,
         limit: "6"
       };
-  const [overview, alerts] = await Promise.all([
+  const reconciliationPromise = scope.panel === "operation-task-reconciliation"
+    ? getOperationTaskReconciliation(session, input)
+    : Promise.resolve(null);
+  const [overview, alerts, operationTaskReconciliation] = await Promise.all([
     cachedOverview(scope),
-    getExecutiveAlerts(session, alertInput)
+    getExecutiveAlerts(session, alertInput),
+    reconciliationPromise
   ]);
   return {
     ...overview,
     alertPreview: executiveAlertPreview(alerts),
-    ...(scope.panel === "alerts" ? { alerts } : {})
+    ...(scope.panel === "alerts" ? { alerts } : {}),
+    ...(operationTaskReconciliation ? { operationTaskReconciliation } : {})
   };
 }
 

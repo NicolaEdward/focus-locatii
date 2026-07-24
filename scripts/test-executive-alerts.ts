@@ -101,6 +101,7 @@ assert.equal(filterAlerts(deduped, {
 assert.deepEqual(summarizeAlerts(deduped).bySeverity, { P0: 0, P1: 0, P2: 2, DATA_QUALITY: 0 });
 
 const dceo = session("D_CEO");
+assert.equal(executiveAlertFilters({}).limit, 50, "Lipsa parametrului limit trebuie să folosească valoarea implicită 50.");
 const scope = executiveScopeForSession(dceo, { entity: "FOCUS_MEDIA", snapshot: "2026-07-24" });
 const defaultFilters = executiveAlertFilters({});
 const financeFilters = executiveAlertFilters({ severity: "P1", domain: "FINANCE", owner: "owner-1", dataQuality: "HIGH", cursor: "b2Zmc2V0OjUw", limit: "50" });
@@ -191,4 +192,3 @@ function session(role: "D_CEO" | "COO"): AuthSession {
 function read(file: string) {
   return fs.readFileSync(file, "utf8");
 }
-

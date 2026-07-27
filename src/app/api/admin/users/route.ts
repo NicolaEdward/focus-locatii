@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermission } from "@/lib/auth";
+import { requireAnyPermission, requirePermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { createUser, listUsers } from "@/lib/users";
 import { rateLimitIdentity } from "@/lib/request-security";
 import { consumeRateLimit } from "@/lib/security-rate-limit";
 
 export async function GET(request: NextRequest) {
-  const { response } = await requirePermission(request, "users.manage");
+  const { response } = await requireAnyPermission(request, ["users.view", "users.manage"]);
   if (response) return response;
   return NextResponse.json({ users: await listUsers() });
 }

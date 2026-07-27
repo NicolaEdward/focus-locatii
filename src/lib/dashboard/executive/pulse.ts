@@ -48,6 +48,21 @@ export function buildExecutivePulse(dimensions: ExecutivePulseDimension[], entit
         ? "Scor general calculat din sursele canonice disponibile."
         : "Date insuficiente pentru un scor general",
     missingData: [...new Set(missingData)],
-    dimensions
+    dimensions,
+    trend: {
+      direction: "UNAVAILABLE",
+      delta: null,
+      confidence: 0,
+      label: "Istoricul canonic nu permite încă reconstruirea aceluiași scor pentru perioada anterioară."
+    },
+    mainFactors: dimensions
+      .flatMap((dimension) => dimension.negativeReasons.map((reason) => ({
+        id: `${dimension.id}:${reason}`,
+        label: `${dimension.label}: ${reason}`,
+        count: 1,
+        tone: "warning" as const,
+        href: dimension.href
+      })))
+      .slice(0, 4)
   };
 }

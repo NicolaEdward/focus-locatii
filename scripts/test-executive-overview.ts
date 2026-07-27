@@ -30,6 +30,8 @@ assert.match(insufficient.message, /Date insuficiente/);
 const complete = buildExecutivePulse(dimensions.map((dimension) => ({ ...dimension, score: 90, confidence: 90, dataCompleteness: 90, reasonCodes: [] })));
 assert.equal(complete.overallScore, 90);
 assert.equal(complete.totalConfidence, 90);
+assert.equal(insufficient.trend.direction, "UNAVAILABLE", "Trend must remain unavailable when the previous score cannot be reconstructed canonically.");
+assert(insufficient.mainFactors.length > 0, "Pulse must explain its main confidence factors.");
 
 assert.deepEqual(operationalRequirementForBooked({ reservationStatus: "HOLD", locationType: "Mesh" }).requiredKinds, []);
 assert.deepEqual(operationalRequirementForBooked({ reservationStatus: "BOOKED", locationType: "Mesh" }).requiredKinds, ["DECORATION", "NEUTRALIZATION"]);
@@ -75,6 +77,8 @@ assert(
 );
 assert(component.includes("RON și EUR nu sunt însumate"), "UI must explain currency separation.");
 assert(component.includes("pulse.overallScore == null") && component.includes("pulse.message"), "Pulse must render the explicit insufficient-data contract instead of inventing a score.");
+assert(component.includes("pulse.mainFactors") && component.includes("pulse.trend"), "Pulse must expose factors and trend confidence.");
+assert(component.indexOf("Executive Alerts") < component.indexOf("Company Pulse"), "Alerts must precede the KPI overview in the first viewport.");
 assert(route.includes('requirePermission(request, "dashboard.executive.view")'));
 assert(route.includes('"cache-control": "private, no-store"'));
 assert(component.includes("/admin/dashboard?panel=campaign-risks#campaign-risks"), "Campaign risk card and drill-down must share the same filtered scope.");

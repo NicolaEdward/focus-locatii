@@ -3,6 +3,7 @@ import { unstable_cache } from "next/cache";
 import type { AuthSession } from "@/lib/auth";
 import { decideAvailability } from "@/lib/availability";
 import { deriveCampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
+import type { ExecutiveAlert } from "@/lib/dashboard/executive/alerts-contracts";
 import {
   EXECUTIVE_REVALIDATE_SECONDS,
   type ExecutiveCampaignRisk,
@@ -15,7 +16,11 @@ import {
   type ExecutiveScope
 } from "@/lib/dashboard/executive/contracts";
 import { buildExecutivePulse, EXECUTIVE_PULSE_WEIGHTS } from "@/lib/dashboard/executive/pulse";
-import { executiveAlertPreview, getExecutiveAlerts } from "@/lib/dashboard/executive/alerts";
+import {
+  executiveAlertPreview,
+  executiveAttentionPreview,
+  getExecutiveAlerts
+} from "@/lib/dashboard/executive/alerts";
 import { getOperationTaskReconciliation } from "@/lib/dashboard/executive/operation-task-reconciliation";
 import {
   entityLabelForCode,
@@ -25,6 +30,7 @@ import {
   EXECUTIVE_ENTITIES
 } from "@/lib/dashboard/executive/scope";
 import {
+  addDateKeyDays,
   bucharestDayBounds,
   dateKeyAsStorageDate,
   daysBetween
@@ -38,7 +44,7 @@ const activeTaskStatuses = ["NEW", "IN_PROGRESS"] as const;
 
 const cachedOverview = unstable_cache(
   async (scope: ExecutiveScope) => queryExecutiveOverview(scope),
-  ["executive-overview-v1"],
+  ["executive-overview-v2"],
   { revalidate: EXECUTIVE_REVALIDATE_SECONDS, tags: ["executive-overview"] }
 );
 
@@ -56,7 +62,7 @@ export async function getExecutiveOverview(
         snapshot: scope.snapshotDate,
         periodStart: scope.periodStart,
         periodEnd: scope.periodEnd,
-        limit: "6"
+        limit: "50"
       };
   const reconciliationPromise = scope.panel === "operation-task-reconciliation"
     ? getOperationTaskReconciliation(session, input)
@@ -68,13 +74,28 @@ export async function getExecutiveOverview(
   ]);
   return {
     ...overview,
+    viewer: {
+      id: session.id,
+      canUseQuickActions: session.role === "COO" || session.role === "SUPER_ADMIN"
+    },
+    pulseByEntity: overview.pulseByEntity.map((row) => ({
+      ...row,
+      pulse: {
+        ...row.pulse,
+        mainFactors: pulseFactorsForEntity(alerts.items, row.entityCode, row.pulse.mainFactors)
+      }
+    })),
     alertPreview: executiveAlertPreview(alerts),
+    attentionPreview: executiveAttentionPreview(alerts),
     ...(scope.panel === "alerts" ? { alerts } : {}),
     ...(operationTaskReconciliation ? { operationTaskReconciliation } : {})
   };
 }
 
-export async function queryExecutiveOverview(scope: ExecutiveScope, now = new Date()): Promise<ExecutiveOverview> {
+export async function queryExecutiveOverview(
+  scope: ExecutiveScope,
+  now = new Date()
+): Promise<Omit<ExecutiveOverview, "viewer">> {
   const asOf = now;
   const staleAt = new Date(asOf.getTime() + EXECUTIVE_REVALIDATE_SECONDS * 1000);
   const snapshotStorageDate = dateKeyAsStorageDate(scope.snapshotDate);
@@ -138,7 +159,7 @@ export async function queryExecutiveOverview(scope: ExecutiveScope, now = new Da
         totalContractValue: true,
         accountOwnerUserId: true,
         sellerUserId: true,
-        client: { select: { companyName: true, accountOwnerUserId: true } },
+        client: { select: { id: true, companyName: true, accountOwnerUserId: true } },
         documents: {
           where: { documentType: "contract", status: "active" },
           select: { id: true },
@@ -240,6 +261,12 @@ export async function queryExecutiveOverview(scope: ExecutiveScope, now = new Da
   const inventory = buildInventoryPartition(locations, snapshotStorageDate, snapshotBounds.start);
   const collectionsThisMonth = groupPayments(periodPayments, scope);
   const overdueInvoices = groupOverdue(openReceivables, snapshotStorageDate, scope);
+  const dueWithinSevenDays = groupDueWithin(
+    openReceivables,
+    snapshotStorageDate,
+    dateKeyAsStorageDate(addDateKeyDays(scope.snapshotDate, 8)),
+    scope
+  );
   const unassignedTasks = assignmentGroups.find((row) => row.assignedToUserId === null)?._count._all || 0;
   const activeTasks = assignmentGroups.reduce((sum, row) => sum + row._count._all, 0);
   const assignmentCompleteness = activeTasks ? Math.round(((activeTasks - unassignedTasks) / activeTasks) * 100) : 0;
@@ -290,14 +317,22 @@ export async function queryExecutiveOverview(scope: ExecutiveScope, now = new Da
     pulseByEntity,
     summary: {
       activeCampaigns: campaignDecisions.filter((row) => row.decision.effectiveStatus === "ACTIVE").length,
+      campaignsStartingToday: campaignDecisions.filter((row) => row.decision.startDate === scope.snapshotDate).length,
+      campaignsEndingToday: campaignDecisions.filter((row) => row.decision.endDate === scope.snapshotDate).length,
       campaignRisks: campaignRisks.length,
       inventory,
       collectionsThisMonth,
       overdueInvoices,
+      dueWithinSevenDays,
+      activeClients: new Set(campaignDecisions
+        .filter((row) => row.decision.effectiveStatus === "ACTIVE")
+        .map((row) => row.campaign.client.id)).size,
+      openOperationTasks: activeTasks,
       operationsToday
     },
     campaignRisks: scope.panel === "campaign-risks" ? campaignRisks : campaignRisks.slice(0, 6),
     alertPreview: [],
+    attentionPreview: [],
     bottleneckPreview: bottleneckPreview({
       campaignRisks,
       overdueInvoices,
@@ -320,7 +355,7 @@ type CampaignRow = Awaited<ReturnType<typeof prisma.campaign.findMany<{
     totalContractValue: true;
     accountOwnerUserId: true;
     sellerUserId: true;
-    client: { select: { companyName: true; accountOwnerUserId: true } };
+    client: { select: { id: true; companyName: true; accountOwnerUserId: true } };
     documents: { select: { id: true } };
     reservations: { select: { id: true; status: true; periodStart: true; periodEnd: true; location: { select: { type: true } } } };
   };
@@ -470,10 +505,25 @@ function groupOverdue(
     })), scope, "overdue");
 }
 
+function groupDueWithin(
+  rows: Array<{ companyCode: string | null; currency: string | null; remainingAmount: Prisma.Decimal | null; dueDate: Date | null }>,
+  start: Date,
+  endExclusive: Date,
+  scope: ExecutiveScope
+) {
+  return moneyGroups(rows
+    .filter((row) => row.dueDate && row.dueDate >= start && row.dueDate < endExclusive)
+    .map((row) => ({
+      entityCode: row.companyCode,
+      currency: row.currency,
+      amount: row.remainingAmount
+    })), scope, "dueSoon");
+}
+
 function moneyGroups(
   rows: Array<{ entityCode: string | null; currency: string | null; amount: Prisma.Decimal | null }>,
   scope: ExecutiveScope,
-  status: "period" | "overdue"
+  status: "period" | "overdue" | "dueSoon"
 ): ExecutiveMoney[] {
   const groups = new Map<string, { entityCode: ExecutiveEntityCode; currency: string; amount: Prisma.Decimal; count: number }>();
   for (const row of rows) {
@@ -496,7 +546,9 @@ function moneyGroups(
       count: group.count,
       href: status === "overdue"
         ? `/admin/financiar/incasari?status=overdue&companyCode=${group.entityCode}&currency=${group.currency}`
-        : `/admin/financiar/incasari?companyCode=${group.entityCode}&currency=${group.currency}`
+        : status === "dueSoon"
+          ? `/admin/financiar/incasari?status=due_soon&companyCode=${group.entityCode}&currency=${group.currency}`
+          : `/admin/financiar/incasari?companyCode=${group.entityCode}&currency=${group.currency}`
     }));
 }
 
@@ -632,4 +684,26 @@ function riskSort(a: ExecutiveCampaignRisk, b: ExecutiveCampaignRisk) {
 
 function roundOne(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function pulseFactorsForEntity(
+  alerts: ExecutiveAlert[],
+  entityCode: ExecutiveEntityCode,
+  fallback: ExecutiveOverview["pulseByEntity"][number]["pulse"]["mainFactors"]
+) {
+  const factors = alerts
+    .filter((alert) => alert.companyEntity === entityCode)
+    .slice(0, 4)
+    .map((alert) => ({
+      id: alert.id,
+      label: alert.title,
+      count: alert.occurrenceCount,
+      tone: alert.severity === "P0"
+        ? "critical" as const
+        : alert.severity === "DATA_QUALITY"
+          ? "neutral" as const
+          : "warning" as const,
+      href: alert.deepLink
+    }));
+  return factors.length ? factors : fallback;
 }

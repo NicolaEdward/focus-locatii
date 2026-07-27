@@ -38,6 +38,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
   const canViewInventory = hasPermission(session.role, "inventory.view");
   const canManageInventory = hasPermission(session.role, "inventory.manage");
   const canExportSales = hasPermission(session.role, "reports.view");
+  const canViewUsers = hasAnyPermission(session.role, ["users.view", "users.manage"]);
   const canManageUsers = hasPermission(session.role, "users.manage");
   const canViewCrm = hasAnyPermission(session.role, ["leads.view", "leads.view.own"]);
   const canViewClients = hasAnyPermission(session.role, ["clients.view", "clients.view.own", "campaigns.view", "campaigns.view.own", "finance.view"]);
@@ -47,7 +48,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
   const canViewOperational = hasAnyPermission(session.role, ["dashboard.operations.view", "campaigns.operate", "reservations.view", "reservations.view.own", "inventory.view"]);
   const hasCommercialMenu = canViewInventory || canViewCrm || canViewClients || canViewCampaigns;
   const hasFinanceMenu = canViewFinance || canExportSales;
-  const hasSettingsMenu = canManageInventory || canManageUsers || canViewSaga;
+  const hasSettingsMenu = canManageInventory || canViewUsers || canViewSaga;
 
   return (
     <header className="sticky top-0 z-40 border-b border-focus-line bg-focus-navy/95 backdrop-blur">
@@ -94,7 +95,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
             >
               {canManageInventory ? <AdminMenuLink href="/admin/locatii/import" active={isActiveAdminPath(pathname, "/admin/locatii/import")} icon={<FileSpreadsheet size={17} />} label="Import / actualizare" /> : null}
               {canManageInventory ? <AdminMenuLink href="/admin/locatii/gps" active={isActiveAdminPath(pathname, "/admin/locatii/gps")} icon={<Map size={17} />} label="Audit GPS" /> : null}
-              {canManageUsers ? <AdminMenuLink href="/admin/utilizatori" active={isActiveAdminPath(pathname, "/admin/utilizatori")} icon={<Users size={17} />} label="Utilizatori" /> : null}
+              {canViewUsers ? <AdminMenuLink href="/admin/utilizatori" active={isActiveAdminPath(pathname, "/admin/utilizatori")} icon={<Users size={17} />} label="Utilizatori" /> : null}
               {canManageUsers && ["COO", "SUPER_ADMIN"].includes(session.role) ? <AdminMenuLink href="/admin/integritate-date" active={isActiveAdminPath(pathname, "/admin/integritate-date")} icon={<ShieldCheck size={17} />} label="Integritate date" /> : null}
               {canViewSaga ? <AdminMenuLink href="/admin/integrari/saga" active={isActiveAdminPath(pathname, "/admin/integrari/saga")} icon={<Cable size={17} />} label="Integrari / SAGA" /> : null}
             </AdminNavMenu>

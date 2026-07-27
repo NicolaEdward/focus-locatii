@@ -7,7 +7,7 @@ import { ROLE_LABELS, USER_ROLES, type UserRole } from "@/lib/rbac";
 
 const emptyForm = { name: "", email: "", role: "SALES_AGENT" as UserRole };
 
-export function UserManagement({ initialUsers, currentUserId, invitesAvailable }: { initialUsers: UserDTO[]; currentUserId: string; invitesAvailable: boolean }) {
+export function UserManagement({ initialUsers, currentUserId, invitesAvailable, readOnly = false }: { initialUsers: UserDTO[]; currentUserId: string; invitesAvailable: boolean; readOnly?: boolean }) {
   const [users, setUsers] = useState(initialUsers);
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -94,8 +94,8 @@ export function UserManagement({ initialUsers, currentUserId, invitesAvailable }
   return <main className="focus-shell py-8"><div className="focus-container grid gap-6">
     <section className="border-b border-focus-line pb-5"><p className="text-xs font-black uppercase text-focus-yellow">Administrare acces</p><h1 className="font-display text-4xl font-black uppercase">Utilizatori si roluri</h1><p className="mt-2 text-sm text-slate-400">Conturi individuale, permisiuni centralizate si sesiuni revocabile.</p></section>
     {message ? <p className={`rounded-lg border p-3 text-sm ${message.tone === "ok" ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-100" : "border-red-400/40 bg-red-400/10 text-red-100"}`}>{message.text}</p> : null}
-    <section className="grid gap-5 xl:grid-cols-[360px_1fr]">
-      <form className="grid content-start gap-4 rounded-lg border border-focus-line bg-focus-ink/70 p-5" onSubmit={invite}>
+    <section className={`grid gap-5 ${readOnly ? "" : "xl:grid-cols-[360px_1fr]"}`}>
+      {!readOnly ? <form className="grid content-start gap-4 rounded-lg border border-focus-line bg-focus-ink/70 p-5" onSubmit={invite}>
         <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-lg bg-focus-yellow text-focus-navy"><MailPlus size={20} /></span><div><h2 className="font-black uppercase">Invita utilizator</h2><p className="text-xs text-slate-400">Utilizatorul isi seteaza singur parola. Linkul expira in 72 de ore.</p></div></div>
         {!invitesAvailable ? <p className="rounded-lg border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">Invitatiile sunt dezactivate pana la configurarea serviciului de email. Resetarea administrativa a parolei ramane disponibila.</p> : null}
         <Field label="Nume"><input className="focus-input" disabled={!invitesAvailable} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></Field>
@@ -103,34 +103,34 @@ export function UserManagement({ initialUsers, currentUserId, invitesAvailable }
         <Field label="Rol"><select className="focus-input" disabled={!invitesAvailable} value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as UserRole })}>{USER_ROLES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></Field>
         <button className="focus-button" disabled={saving || !invitesAvailable} type="submit"><MailPlus size={18} />{saving ? "Se trimite..." : "Trimite invitatia"}</button>
         {testInviteLink ? <a className="break-all text-xs text-focus-yellow underline" href={testInviteLink}>Deschide linkul sintetic de Preview</a> : null}
-      </form>
+      </form> : null}
       <section className="overflow-hidden rounded-lg border border-focus-line bg-focus-ink/70">
         <div className="border-b border-focus-line px-5 py-4">
           <h2 className="text-sm font-black uppercase text-focus-yellow">Conturi ({users.length})</h2>
-          <p className="mt-1 text-xs text-slate-400">Conturile cu istoric se dezactiveaza, nu se sterg. Astfel, rezervarile si auditul raman corecte.</p>
+          <p className="mt-1 text-xs text-slate-400">{readOnly ? "Vizualizare executivă read-only. Datele de autentificare și acțiunile administrative nu pot fi modificate." : "Conturile cu istoric se dezactiveaza, nu se sterg. Astfel, rezervarile si auditul raman corecte."}</p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1020px] text-sm">
+          <table className={`w-full ${readOnly ? "min-w-[720px]" : "min-w-[1020px]"} text-sm`}>
             <thead className="bg-focus-navy/70 text-left text-xs uppercase text-slate-400">
-              <tr><th className="px-4 py-3">Utilizator</th><th className="px-4 py-3">Rol</th><th className="px-4 py-3">Ultima autentificare</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Actiuni</th></tr>
+              <tr><th className="px-4 py-3">Utilizator</th><th className="px-4 py-3">Rol</th><th className="px-4 py-3">Ultima autentificare</th><th className="px-4 py-3">Status</th>{!readOnly ? <th className="px-4 py-3">Actiuni</th> : null}</tr>
             </thead>
             <tbody>
               {users.map((user) => (
                 <Fragment key={user.id}>
                   <tr className="border-t border-focus-line">
                     <td className="px-4 py-3"><strong>{user.name}</strong><span className="block text-xs text-slate-400">{user.email}{user.id === currentUserId ? " / contul tau" : ""}</span></td>
-                    <td className="w-[200px] px-4 py-3"><select aria-label={`Rol pentru ${user.name}`} className="focus-input w-[190px] min-w-[190px]" value={user.role} onChange={(event) => update(user.id, { role: event.target.value as UserRole })}>{USER_ROLES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></td>
+                    <td className="w-[200px] px-4 py-3">{readOnly ? <span className="font-bold text-slate-200">{ROLE_LABELS[user.role]}</span> : <select aria-label={`Rol pentru ${user.name}`} className="focus-input w-[190px] min-w-[190px]" value={user.role} onChange={(event) => update(user.id, { role: event.target.value as UserRole })}>{USER_ROLES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select>}</td>
                     <td className="px-4 py-3 text-slate-400">{user.lastLoginAt ? formatDate(user.lastLoginAt) : "Niciodata"}</td>
                     <td className="px-4 py-3"><span className={`inline-flex items-center gap-2 font-bold ${user.active ? "text-emerald-300" : "text-slate-500"}`}>{user.active ? <Check size={16} /> : <UserRoundX size={16} />}{user.active ? "Activ" : "Inactiv"}</span></td>
-                    <td className="px-4 py-3">
+                    {!readOnly ? <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
                         <button className="focus-button secondary" disabled={user.id === currentUserId} type="button" onClick={() => openPasswordReset(user.id)}><KeyRound size={16} />Reseteaza parola</button>
                         <button className="focus-button secondary" disabled={user.id === currentUserId} type="button" onClick={() => resetMfa(user.id)}><ShieldCheck size={16} />Reseteaza MFA</button>
                         <button className="focus-button secondary" disabled={user.id === currentUserId} type="button" onClick={() => update(user.id, { active: !user.active })}><ShieldCheck size={16} />{user.active ? "Dezactiveaza" : "Activeaza"}</button>
                       </div>
-                    </td>
+                    </td> : null}
                   </tr>
-                  {resettingUserId === user.id ? (
+                  {!readOnly && resettingUserId === user.id ? (
                     <tr className="border-t border-focus-line bg-focus-navy/45">
                       <td className="px-4 py-4" colSpan={5}>
                         <form className="grid gap-3 lg:grid-cols-[1fr_1fr_auto] lg:items-end" onSubmit={(event) => submitPasswordReset(event, user.id)}>

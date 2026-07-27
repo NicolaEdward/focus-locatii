@@ -16,7 +16,7 @@ async function main() {
   const before = await businessCounts();
 
   const cold = await timedRequest(
-    "/api/admin/executive/overview?entity=BULGARIA&snapshot=2026-07-22&periodStart=2026-07-01&periodEnd=2026-07-22",
+    "/api/admin/executive/overview?entity=FOCUS_BG&snapshot=2026-07-22&period=MONTH",
     cookieFor(dCeo)
   );
   assert.equal(cold.status, 200);
@@ -25,8 +25,8 @@ async function main() {
   const apiRuns = [];
   const pageRuns = [];
   for (let index = 0; index < runs; index += 1) {
-    apiRuns.push(await timedRequest("/api/admin/executive/overview?entity=BULGARIA&snapshot=2026-07-22&periodStart=2026-07-01&periodEnd=2026-07-22", cookieFor(dCeo)));
-    pageRuns.push(await timedRequest("/admin/dashboard?entity=BULGARIA&snapshot=2026-07-22&periodStart=2026-07-01&periodEnd=2026-07-22", cookieFor(coo)));
+    apiRuns.push(await timedRequest("/api/admin/executive/overview?entity=FOCUS_BG&snapshot=2026-07-22&period=MONTH", cookieFor(dCeo)));
+    pageRuns.push(await timedRequest("/admin/dashboard?entity=FOCUS_BG&snapshot=2026-07-22&period=MONTH", cookieFor(coo)));
   }
   assert(apiRuns.every((run) => run.status === 200), "Executive API a avut raspuns non-200.");
   assert(pageRuns.every((run) => run.status === 200), "Executive dashboard a avut raspuns non-200.");

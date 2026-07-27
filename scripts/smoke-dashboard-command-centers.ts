@@ -25,7 +25,7 @@ async function main() {
 
   await waitForServer();
   await timedPage("COO warm-up", "/admin/dashboard", cookieFor(coo), ["Control executiv", "Company Pulse"]);
-  const cooResult = await timedPage("COO dashboard", "/admin/dashboard", cookieFor(coo), ["Control executiv", "Executive Alerts preview", "Business Bottlenecks preview"]);
+  const cooResult = await timedPage("COO dashboard", "/admin/dashboard", cookieFor(coo), ["Control executiv", "Executive Alerts", "Necesită atenția mea"]);
   const dCeoResult = dCeo
     ? await timedPage("D-CEO dashboard", "/admin/dashboard", cookieFor(dCeo), ["D-CEO", "READ-ONLY", "Company Pulse"])
     : null;
@@ -34,6 +34,11 @@ async function main() {
   const invoicesResult = await timedPage("Facturi clienti", "/admin/financiar/incasari?status=overdue", cookieFor(coo), ["Facturi clienti", "Scadente"]);
   const filterResult = await timedJson("Filtru financiar", "/api/admin/receivables-workspace?status=overdue&take=10", cookieFor(coo), 200);
   const sellerFinance = await timedJson("Blocare API financiar Sales", "/api/admin/receivables-workspace?status=overdue&take=10", cookieFor(seller), 403);
+  const executivePeople = await timedJson("Oameni executiv", "/api/admin/executive/people?entity=FOCUS_BG&snapshot=2026-07-22&period=MONTH", cookieFor(coo), 200);
+  const executiveCustomers = await timedJson("Clienți executiv", "/api/admin/executive/customers?entity=FOCUS_BG&snapshot=2026-07-22&period=MONTH", cookieFor(dCeo || coo), 200);
+  const executiveActivity = await timedJson("Activitate executivă", "/api/admin/executive/activity?entity=FOCUS_BG&snapshot=2026-07-22&period=MONTH", cookieFor(coo), 200);
+  const executiveSearch = await timedJson("Căutare executivă", "/api/admin/executive/search?q=Preview", cookieFor(dCeo || coo), 200);
+  const sellerExecutiveSearch = await timedJson("Blocare căutare executivă Sales", "/api/admin/executive/search?q=Preview", cookieFor(seller), 403);
   const bookedPeriod = {
     periodStart: dateInput(bookedReservation.periodStart),
     periodEnd: dateInput(bookedReservation.periodEnd)
@@ -78,7 +83,21 @@ async function main() {
     ok: true,
     baseUrl,
     roles: { coo: coo.role, dCeo: dCeo?.role || "missing", sales: seller.role, finance: finance?.role || "missing" },
-    timings: [cooResult, dCeoResult, salesResult, invoicesResult, filterResult, availabilityResult, conflictResult, sellerFinance].filter(Boolean),
+    timings: [
+      cooResult,
+      dCeoResult,
+      salesResult,
+      invoicesResult,
+      filterResult,
+      executivePeople,
+      executiveCustomers,
+      executiveActivity,
+      executiveSearch,
+      availabilityResult,
+      conflictResult,
+      sellerFinance,
+      sellerExecutiveSearch
+    ].filter(Boolean),
     financeRedirect,
     databaseBefore: before,
     databaseAfter: after

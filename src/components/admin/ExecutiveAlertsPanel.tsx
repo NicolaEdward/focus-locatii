@@ -172,6 +172,7 @@ function AlertCard({ alert, readOnly }: { alert: ExecutiveAlert; readOnly: boole
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
             <span>Entitate: <strong className="text-slate-200">{alert.entityLabel}</strong></span>
             <span>Responsabil: <strong className="text-slate-200">{alert.responsibleLabel}</strong></span>
+            <span>Termen: <strong className="text-slate-200">{alert.dueAt ? dateTimeLabel(alert.dueAt) : "Fără termen canonic"}</strong></span>
             <span>Vechime: <strong className="text-slate-200">{alert.age.label}</strong></span>
             <span>Apariții: <strong className="text-slate-200">{alert.occurrenceCount}</strong></span>
           </div>
@@ -291,4 +292,3 @@ function severityTone(severity: ExecutiveAlertSeverity) {
   if (severity === "P2") return "bg-amber-300/20 text-amber-100";
   return "bg-sky-300/15 text-sky-100";
 }
-

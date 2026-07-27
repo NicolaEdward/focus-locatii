@@ -3,6 +3,7 @@ export const USER_ROLES = ["SUPER_ADMIN", "COO", "D_CEO", "SALES_DIRECTOR", "SAL
 export type UserRole = (typeof USER_ROLES)[number];
 
 export const PERMISSIONS = [
+  "users.view",
   "users.manage",
   "roles.manage",
   "settings.manage",
@@ -60,6 +61,7 @@ export type Permission = (typeof PERMISSIONS)[number];
 const rolePermissions: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: PERMISSIONS,
   COO: [
+    "users.view",
     "users.manage",
     "dashboard.executive.view",
     "dashboard.operations.view",
@@ -92,6 +94,7 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "finance.integrations.saga.reconcile"
   ],
   D_CEO: [
+    "users.view",
     "dashboard.executive.view",
     "dashboard.operations.view",
     "dashboard.sales.view",

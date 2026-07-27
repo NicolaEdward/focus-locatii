@@ -2,13 +2,14 @@ import type { UserRole } from "@/lib/rbac";
 import type { ExecutiveAlertsResponse } from "@/lib/dashboard/executive/alerts-contracts";
 import type { OperationTaskReconciliationResponse } from "@/lib/dashboard/executive/operation-task-reconciliation-contracts";
 
-export const EXECUTIVE_CONTRACT_VERSION = "executive-overview-v1";
+export const EXECUTIVE_CONTRACT_VERSION = "executive-overview-v2";
 export const EXECUTIVE_TIME_ZONE = "Europe/Bucharest";
 export const EXECUTIVE_REVALIDATE_SECONDS = 30;
 
 export type ExecutiveEntityCode = "FOCUS_MEDIA" | "EXCELLENCE_MEDIA" | "FOCUS_BG";
 export type ExecutiveEntitySelection = ExecutiveEntityCode | "ALL";
 export type ExecutiveDataQuality = "HIGH" | "MEDIUM" | "LOW" | "DATA_INSUFFICIENT";
+export type ExecutivePeriodPreset = "TODAY" | "WEEK" | "MONTH" | "CUSTOM";
 
 export type ExecutiveScope = {
   role: Extract<UserRole, "SUPER_ADMIN" | "COO" | "D_CEO">;
@@ -16,6 +17,7 @@ export type ExecutiveScope = {
   authorizedEntityCodes: ExecutiveEntityCode[];
   selectedEntityCodes: ExecutiveEntityCode[];
   snapshotDate: string;
+  periodPreset: ExecutivePeriodPreset;
   periodStart: string;
   periodEnd: string;
   comparisonStart: string;
@@ -54,6 +56,19 @@ export type ExecutivePulse = {
   message: string;
   missingData: string[];
   dimensions: ExecutivePulseDimension[];
+  trend: {
+    direction: "UP" | "DOWN" | "FLAT" | "UNAVAILABLE";
+    delta: number | null;
+    confidence: number;
+    label: string;
+  };
+  mainFactors: Array<{
+    id: string;
+    label: string;
+    count: number;
+    tone: "positive" | "warning" | "critical" | "neutral";
+    href: string;
+  }>;
 };
 
 export type ExecutiveInventoryPartition = {
@@ -96,9 +111,28 @@ export type ExecutiveFactItem = {
   href: string;
 };
 
+export type ExecutiveAttentionItem = {
+  id: string;
+  title: string;
+  summary: string;
+  severity: "P0" | "P1" | "P2" | "DATA_QUALITY";
+  domain: string;
+  impactLabel: string;
+  responsibleLabel: string;
+  deadline: string | null;
+  confidence: number;
+  occurrenceCount: number;
+  why: string;
+  href: string;
+};
+
 export type ExecutiveOverview = {
   kind: "executive";
   role: ExecutiveScope["role"];
+  viewer: {
+    id: string;
+    canUseQuickActions: boolean;
+  };
   scope: ExecutiveScope;
   meta: {
     asOf: string;
@@ -113,10 +147,15 @@ export type ExecutiveOverview = {
   pulseByEntity: Array<{ entityCode: ExecutiveEntityCode; entityLabel: string; pulse: ExecutivePulse }>;
   summary: {
     activeCampaigns: number;
+    campaignsStartingToday: number;
+    campaignsEndingToday: number;
     campaignRisks: number;
     inventory: ExecutiveInventoryPartition;
     collectionsThisMonth: ExecutiveMoney[];
     overdueInvoices: ExecutiveMoney[];
+    dueWithinSevenDays: ExecutiveMoney[];
+    activeClients: number;
+    openOperationTasks: number;
     operationsToday: {
       decorations: number;
       neutralizations: number;
@@ -127,6 +166,7 @@ export type ExecutiveOverview = {
   };
   campaignRisks: ExecutiveCampaignRisk[];
   alertPreview: ExecutiveFactItem[];
+  attentionPreview: ExecutiveAttentionItem[];
   bottleneckPreview: ExecutiveFactItem[];
   alerts?: ExecutiveAlertsResponse;
   operationTaskReconciliation?: OperationTaskReconciliationResponse;

@@ -5,6 +5,7 @@ import {
   EXECUTIVE_TIME_ZONE,
   type ExecutiveEntityCode,
   type ExecutiveEntitySelection,
+  type ExecutivePeriodPreset,
   type ExecutiveScope
 } from "@/lib/dashboard/executive/contracts";
 import {
@@ -36,9 +37,14 @@ export function executiveScopeForSession(
   const selectedEntityCodes = entitySelection === "ALL" ? authorizedEntityCodes : [entitySelection];
   const today = bucharestBusinessDateKey(now);
   const snapshotDate = validDateKey(scalar(input.snapshot), today);
-  const defaultPeriod = currentMonthPeriod(snapshotDate);
-  const periodStart = validDateKey(scalar(input.periodStart), defaultPeriod.start);
-  const periodEndCandidate = validDateKey(scalar(input.periodEnd), defaultPeriod.end);
+  const periodPreset = periodPresetValue(input.period);
+  const defaultPeriod = periodForPreset(periodPreset, snapshotDate);
+  const periodStart = periodPreset === "CUSTOM"
+    ? validDateKey(scalar(input.periodStart), defaultPeriod.start)
+    : defaultPeriod.start;
+  const periodEndCandidate = periodPreset === "CUSTOM"
+    ? validDateKey(scalar(input.periodEnd), defaultPeriod.end)
+    : defaultPeriod.end;
   const periodEnd = periodEndCandidate < periodStart ? periodStart : periodEndCandidate;
   const comparison = previousEquivalentPeriod(periodStart, periodEnd);
 
@@ -48,6 +54,7 @@ export function executiveScopeForSession(
     authorizedEntityCodes,
     selectedEntityCodes,
     snapshotDate,
+    periodPreset,
     periodStart,
     periodEnd,
     comparisonStart: comparison.start,
@@ -65,6 +72,7 @@ export function executiveCacheKey(scope: ExecutiveScope) {
     scope.authorizedEntityCodes.join(","),
     scope.selectedEntityCodes.join(","),
     scope.snapshotDate,
+    scope.periodPreset,
     scope.periodStart,
     scope.periodEnd,
     scope.comparisonStart,
@@ -84,4 +92,25 @@ export function entityLabelForCode(code: ExecutiveEntityCode) {
 
 function scalar(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] || "" : value || "";
+}
+
+function periodPresetValue(value: string | string[] | undefined): ExecutivePeriodPreset {
+  const candidate = scalar(value).toUpperCase();
+  return ["TODAY", "WEEK", "MONTH", "CUSTOM"].includes(candidate)
+    ? candidate as ExecutivePeriodPreset
+    : "MONTH";
+}
+
+function periodForPreset(preset: ExecutivePeriodPreset, snapshotDate: string) {
+  if (preset === "TODAY") return { start: snapshotDate, end: snapshotDate };
+  if (preset === "WEEK") {
+    const date = new Date(`${snapshotDate}T00:00:00.000Z`);
+    const day = date.getUTCDay() || 7;
+    const monday = new Date(date);
+    monday.setUTCDate(date.getUTCDate() - (day - 1));
+    const sunday = new Date(monday);
+    sunday.setUTCDate(monday.getUTCDate() + 6);
+    return { start: monday.toISOString().slice(0, 10), end: sunday.toISOString().slice(0, 10) };
+  }
+  return currentMonthPeriod(snapshotDate);
 }

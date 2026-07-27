@@ -67,6 +67,7 @@
     "test:dashboard-noise-cleanup": "node scripts/test-dashboard-noise-cleanup.cjs",
     "test:dashboard-command-centers": "node scripts/test-dashboard-command-centers.cjs",
     "test:executive-overview": "tsx scripts/test-executive-overview.ts",
+    "test:executive-refinement": "tsx scripts/test-executive-refinement.ts",
     "test:executive-alerts": "tsx scripts/test-executive-alerts.ts",
     "test:operation-task-reconciliation": "tsx scripts/test-operation-task-reconciliation.ts",
     "test:operation-task-cutover": "tsx scripts/test-operation-task-cutover-review.ts",

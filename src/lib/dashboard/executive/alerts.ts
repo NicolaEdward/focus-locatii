@@ -22,7 +22,12 @@ import {
   executiveAlertsCacheKey,
   nextCursor
 } from "@/lib/dashboard/executive/alerts-scope";
-import type { ExecutiveDataQuality, ExecutiveEntityCode, ExecutiveScope } from "@/lib/dashboard/executive/contracts";
+import type {
+  ExecutiveAttentionItem,
+  ExecutiveDataQuality,
+  ExecutiveEntityCode,
+  ExecutiveScope
+} from "@/lib/dashboard/executive/contracts";
 import { operationalRequirementForBooked, proofContractForOperation } from "@/lib/dashboard/executive/operational-contract";
 import { entityLabelForCode, entityValueForCode } from "@/lib/dashboard/executive/scope";
 import {
@@ -1219,6 +1224,27 @@ function makeAlertPreview(alert: ExecutiveAlert) {
 
 export function executiveAlertPreview(response: ExecutiveAlertsResponse) {
   return response.items.slice(0, 6).map(makeAlertPreview);
+}
+
+export function executiveAttentionPreview(response: ExecutiveAlertsResponse): ExecutiveAttentionItem[] {
+  return response.items.slice(0, 10).map((alert) => ({
+    id: alert.id,
+    title: alert.title,
+    summary: alert.summary,
+    severity: alert.severity,
+    domain: alert.domain,
+    impactLabel: alert.impact.amount
+      ? `${alert.impact.amount} ${alert.impact.currency || ""}`.trim()
+      : alert.impact.count != null
+        ? `${alert.impact.count} cazuri`
+        : alert.impact.label,
+    responsibleLabel: alert.responsibleLabel,
+    deadline: alert.dueAt,
+    confidence: alert.confidence,
+    occurrenceCount: alert.occurrenceCount,
+    why: alert.reasonCodes.join(" · "),
+    href: alert.deepLink
+  }));
 }
 
 export function campaignRiskSeverity(status: string, daysUntilStart: number): ExecutiveAlertSeverity {

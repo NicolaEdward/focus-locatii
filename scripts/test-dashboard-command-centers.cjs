@@ -40,7 +40,9 @@ assert(executiveService.includes("decideAvailability"), "executive inventory mus
 assert(executiveService.includes("sum !== partition.total"), "inventory categories must be disjoint and exhaustive");
 assert(!executiveService.includes("prisma.mediaPlan"), "executive dashboard must not query inactive Media Plan");
 assert(!executiveService.includes(".create(") && !executiveService.includes(".update(") && !executiveService.includes(".delete("), "Executive Overview load must remain read-only");
-assert(executive.includes("Company Pulse") && executive.includes("Executive Alerts preview") && executive.includes("Business Bottlenecks preview"), "the approved Executive Overview hierarchy must be present");
+assert(executive.includes("Company Pulse") && executive.includes("Executive Alerts") && executive.includes("Necesită atenția mea"), "the refined Executive Overview hierarchy must prioritize alerts and intervention");
+assert(executive.includes("ExecutiveControlTabs") && executive.includes("ExecutiveActivityFeed"), "secondary executive context must be tabbed and lazy");
+assert(executive.includes("ExecutiveGlobalSearch"), "the command center must expose global executive search");
 assert(executive.includes("HOLD-uri active") && executive.includes("BOOKED-uri active"), "the operational snapshot must remain directly below the first viewport");
 assert(executive.includes("Decor") && executive.includes("Neutraliz"), "today operational KPIs must be present");
 assert(executive.includes("asOf") && executive.includes("stale"), "executive widgets must expose freshness");

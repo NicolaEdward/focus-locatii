@@ -13,7 +13,9 @@ const {
   "@/lib/prisma": { prisma: {} }
 });
 
-const futureDueDate = new Date("2026-08-01T00:00:00.000Z");
+const futureDueDate = new Date();
+futureDueDate.setUTCDate(futureDueDate.getUTCDate() + 30);
+futureDueDate.setUTCHours(0, 0, 0, 0);
 
 const excludedPreserved = resolveFinancialRowEdit({
   kind: "receivable",

@@ -2,10 +2,11 @@ import { redirect } from "next/navigation";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { CampaignsWorkspace } from "@/components/admin/client-campaigns/CampaignsWorkspace";
 import { getAuthSession } from "@/lib/auth";
-import { getCampaignsPage } from "@/lib/client-campaign-workspaces";
+import { getCampaignsPage, type CampaignDateFilter } from "@/lib/client-campaign-workspaces";
 import { validAccountOwners } from "@/lib/clients";
 import { hasAnyPermission } from "@/lib/rbac";
 import { CAMPAIGN_EFFECTIVE_STATUSES, type CampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
+import { companyEntities } from "@/lib/company-entities";
 
 export const dynamic = "force-dynamic";
 
@@ -25,13 +26,45 @@ export default async function CampaniiPage({ searchParams }: { searchParams: Pro
   const effectiveStatus = CAMPAIGN_EFFECTIVE_STATUSES.includes(requestedStatus as CampaignEffectiveStatus)
     ? requestedStatus as CampaignEffectiveStatus
     : null;
-  const [page, accountOwners] = await Promise.all([getCampaignsPage(session, { query, effectiveStatus }), validAccountOwners()]);
+  const snapshotDate = validDate(first(params.snapshot));
+  const entityCode = first(params.entity);
+  const companyEntityValues = companyEntities
+    .filter((entity) => entity.code === entityCode)
+    .map((entity) => entity.value);
+  const requestedDateFilter = first(params.dateFilter);
+  const dateFilter = ["STARTS_ON", "ENDS_ON"].includes(requestedDateFilter || "")
+    ? requestedDateFilter as CampaignDateFilter
+    : null;
+  const [page, accountOwners] = await Promise.all([
+    getCampaignsPage(session, {
+      query,
+      effectiveStatus,
+      snapshotDate,
+      companyEntityValues,
+      dateFilter
+    }),
+    validAccountOwners()
+  ]);
   return <>
     <AdminHeader session={session} />
-    <CampaignsWorkspace initialPage={page} initialEffectiveStatus={effectiveStatus} initialCampaignId={campaignId} initialClientId={clientId} handoffOpportunityId={handoffOpportunityId} openCreate={openCreate} session={session} accountOwners={accountOwners} />
+    <CampaignsWorkspace
+      initialPage={page}
+      initialEffectiveStatus={effectiveStatus}
+      initialCampaignId={campaignId}
+      initialClientId={clientId}
+      handoffOpportunityId={handoffOpportunityId}
+      openCreate={openCreate}
+      session={session}
+      accountOwners={accountOwners}
+      executiveContext={{ entityCode: companyEntityValues.length ? entityCode || null : null, snapshotDate, dateFilter }}
+    />
   </>;
 }
 
 function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function validDate(value?: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value || "") ? value! : null;
 }

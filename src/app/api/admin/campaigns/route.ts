@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { createCampaign } from "@/lib/campaigns";
-import { getCampaignsPage } from "@/lib/client-campaign-workspaces";
+import { getCampaignsPage, type CampaignDateFilter } from "@/lib/client-campaign-workspaces";
 import { observeRoute, setObservabilityRole } from "@/lib/observability";
 import { CAMPAIGN_EFFECTIVE_STATUSES, type CampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
+import { companyEntities } from "@/lib/company-entities";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,10 +26,32 @@ export async function GET(request: NextRequest) {
     const effectiveStatus = CAMPAIGN_EFFECTIVE_STATUSES.includes(requestedStatus as CampaignEffectiveStatus)
       ? requestedStatus as CampaignEffectiveStatus
       : null;
+    const snapshotDate = validDate(request.nextUrl.searchParams.get("snapshot"));
+    const entityCode = request.nextUrl.searchParams.get("entity");
+    const companyEntityValues = companyEntities
+      .filter((entity) => entity.code === entityCode)
+      .map((entity) => entity.value);
+    const requestedDateFilter = request.nextUrl.searchParams.get("dateFilter");
+    const dateFilter = ["STARTS_ON", "ENDS_ON"].includes(requestedDateFilter || "")
+      ? requestedDateFilter as CampaignDateFilter
+      : null;
     const limit = Number(request.nextUrl.searchParams.get("limit") || (clientId ? 50 : 30));
-    const page = await getCampaignsPage(session, { clientId, query, cursor, limit, effectiveStatus });
+    const page = await getCampaignsPage(session, {
+      clientId,
+      query,
+      cursor,
+      limit,
+      effectiveStatus,
+      snapshotDate,
+      companyEntityValues,
+      dateFilter
+    });
     return NextResponse.json({ campaigns: page.items, page }, { headers: noStoreHeaders });
   });
+}
+
+function validDate(value: string | null) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value || "") ? value : null;
 }
 
 export async function POST(request: NextRequest) {

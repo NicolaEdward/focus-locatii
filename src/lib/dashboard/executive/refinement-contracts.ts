@@ -2,10 +2,11 @@ import type { UserRole } from "@/lib/rbac";
 import type {
   ExecutiveDataQuality,
   ExecutiveEntityCode,
+  ExecutiveFilterApplicability,
   ExecutiveScope
 } from "@/lib/dashboard/executive/contracts";
 
-export const EXECUTIVE_REFINEMENT_CONTRACT_VERSION = "executive-refinement-v1";
+export const EXECUTIVE_REFINEMENT_CONTRACT_VERSION = "executive-refinement-v3";
 
 export type ExecutiveAmount = {
   entityCode: ExecutiveEntityCode | "UNKNOWN";
@@ -29,6 +30,10 @@ export type ExecutivePerson = {
   openOpportunities: number;
   pipeline: ExecutiveAmount[];
   lastBusinessActivityAt: string | null;
+  workload: {
+    level: "NORMAL" | "HIGH" | "UNDETERMINED";
+    explanation: string[];
+  };
   issues: Array<{
     code: string;
     label: string;
@@ -42,6 +47,8 @@ export type ExecutivePeopleResponse = {
   kind: "executive-people";
   scope: ExecutiveScope;
   people: ExecutivePerson[];
+  filterApplicability: ExecutiveFilterApplicability;
+  notes: string[];
   meta: ExecutiveRefinementMeta;
 };
 
@@ -58,6 +65,7 @@ export type ExecutiveCustomer = {
   riskIssues: string[];
   contractDocumentState: "AVAILABLE" | "MISSING" | "NOT_APPLICABLE";
   crmActivityState: "DATA_INSUFFICIENT";
+  businessReasons: string[];
   href: string;
 };
 

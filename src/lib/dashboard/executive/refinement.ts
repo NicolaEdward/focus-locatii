@@ -36,19 +36,19 @@ const recentCrmThresholdDays = 14;
 
 const cachedPeople = unstable_cache(
   async (scope: ExecutiveScope) => queryExecutivePeople(scope),
-  ["executive-people-v1"],
+  ["executive-people-v3"],
   { revalidate: EXECUTIVE_REVALIDATE_SECONDS, tags: ["executive-people"] }
 );
 
 const cachedCustomers = unstable_cache(
   async (scope: ExecutiveScope) => queryExecutiveCustomers(scope),
-  ["executive-customers-v1"],
+  ["executive-customers-v3"],
   { revalidate: EXECUTIVE_REVALIDATE_SECONDS, tags: ["executive-customers"] }
 );
 
 const cachedActivity = unstable_cache(
   async (scope: ExecutiveScope) => queryExecutiveActivity(scope),
-  ["executive-activity-v1"],
+  ["executive-activity-v3"],
   { revalidate: EXECUTIVE_REVALIDATE_SECONDS, tags: ["executive-activity"] }
 );
 
@@ -85,6 +85,18 @@ export async function queryExecutivePeople(
 ): Promise<ExecutivePeopleResponse> {
   const snapshot = bucharestDayBounds(scope.snapshotDate).endExclusive;
   const recentCrmThreshold = new Date(snapshot.getTime() - recentCrmThresholdDays * 86_400_000);
+  const entityScoped = scope.entitySelection !== "ALL";
+  const selectedEntityValues = scope.selectedEntityCodes
+    .map(entityValueForCode)
+    .filter((value): value is NonNullable<typeof value> => Boolean(value));
+  const taskEntityWhere: Prisma.OperationTaskWhereInput = entityScoped
+    ? {
+        OR: [
+          { campaign: { is: { companyEntity: { in: selectedEntityValues } } } },
+          { reservation: { is: { campaign: { is: { companyEntity: { in: selectedEntityValues } } } } } }
+        ]
+      }
+    : {};
   const [
     users,
     clients,
@@ -102,11 +114,23 @@ export async function queryExecutivePeople(
       orderBy: [{ role: "asc" }, { name: "asc" }]
     }),
     prisma.clientAccount.findMany({
-      where: { mergedIntoClientId: null, accountOwnerUserId: { not: null } },
+      where: {
+        mergedIntoClientId: null,
+        accountOwnerUserId: { not: null },
+        ...(entityScoped ? {
+          OR: [
+            { campaigns: { some: { companyEntity: { in: selectedEntityValues } } } },
+            { financialReceivables: { some: { companyCode: { in: scope.selectedEntityCodes } } } }
+          ]
+        } : {})
+      },
       select: { id: true, accountOwnerUserId: true }
     }),
     prisma.campaign.findMany({
-      where: { archivedAt: null },
+      where: {
+        archivedAt: null,
+        ...(entityScoped ? { companyEntity: { in: selectedEntityValues } } : {})
+      },
       select: {
         id: true,
         status: true,
@@ -121,6 +145,7 @@ export async function queryExecutivePeople(
       }
     }),
     prisma.operationTask.findMany({
+      where: taskEntityWhere,
       select: {
         id: true,
         assignedToUserId: true,
@@ -129,35 +154,43 @@ export async function queryExecutivePeople(
         updatedAt: true
       }
     }),
-    prisma.crmNextAction.findMany({
-      where: { status: "open" },
-      select: { id: true, ownerId: true, dueAt: true }
-    }),
-    prisma.crmOpportunity.findMany({
-      where: { stage: { in: activeOpportunityStages } },
-      select: {
-        id: true,
-        ownerId: true,
-        stage: true,
-        currency: true,
-        quotedValue: true,
-        revisedValue: true,
-        agreedValue: true
-      }
-    }),
-    prisma.crmEvent.groupBy({
-      by: ["actorUserId"],
-      where: { actorUserId: { not: null } },
-      _max: { occurredAt: true }
-    }),
-    prisma.auditLog.groupBy({
-      by: ["userId"],
-      where: {
-        userId: { not: null },
-        entityType: { notIn: ["auth_session", "auth_action_token"] }
-      },
-      _max: { createdAt: true }
-    }),
+    entityScoped
+      ? Promise.resolve([])
+      : prisma.crmNextAction.findMany({
+          where: { status: "open" },
+          select: { id: true, ownerId: true, dueAt: true }
+        }),
+    entityScoped
+      ? Promise.resolve([])
+      : prisma.crmOpportunity.findMany({
+          where: { stage: { in: activeOpportunityStages } },
+          select: {
+            id: true,
+            ownerId: true,
+            stage: true,
+            currency: true,
+            quotedValue: true,
+            revisedValue: true,
+            agreedValue: true
+          }
+        }),
+    entityScoped
+      ? Promise.resolve([])
+      : prisma.crmEvent.groupBy({
+          by: ["actorUserId"],
+          where: { actorUserId: { not: null } },
+          _max: { occurredAt: true }
+        }),
+    entityScoped
+      ? Promise.resolve([])
+      : prisma.auditLog.groupBy({
+          by: ["userId"],
+          where: {
+            userId: { not: null },
+            entityType: { notIn: ["auth_session", "auth_action_token"] }
+          },
+          _max: { createdAt: true }
+        }),
     prisma.financialReceivable.findMany({
       where: {
         includedInReport: true,
@@ -211,11 +244,22 @@ export async function queryExecutivePeople(
     addIssue(issues, "OVERDUE_CRM_ACTIONS", "Follow-up-uri restante", overdueActionsByUser.get(user.id) || 0, `/admin/crm?view=today&owner=${user.id}&due=overdue`);
     addIssue(issues, "OVERDUE_RECEIVABLES", "Facturi restante în portofoliu", overdueInvoicesByUser.get(user.id) || 0, `/admin/financiar/incasari?status=overdue&owner=${user.id}`);
     if (
+      !entityScoped &&
       ["SALES_AGENT", "SALES_DIRECTOR"].includes(user.role) &&
       (!lastCrmActivity || lastCrmActivity < recentCrmThreshold)
     ) {
       addIssue(issues, "CRM_ACTIVITY_MISSING", `Nicio activitate CRM în ultimele ${recentCrmThresholdDays} zile`, 1, `/admin/crm?owner=${user.id}`);
     }
+    const openTasks = openTasksByUser.get(user.id) || 0;
+    const campaignsManaged = campaignCounts.get(user.id) || 0;
+    const workload = factualWorkload({
+      openTasks,
+      campaignsManaged,
+      overdueTasks: overdueTasksByUser.get(user.id) || 0,
+      overdueInvoices: overdueInvoicesByUser.get(user.id) || 0,
+      overdueActions: overdueActionsByUser.get(user.id) || 0,
+      entityScoped
+    });
     return {
       id: user.id,
       name: user.name,
@@ -224,22 +268,38 @@ export async function queryExecutivePeople(
       department: departmentForRole(user.role as UserRole),
       departmentSource: "ROLE_DERIVED" as const,
       clientsManaged: clientsByUser.get(user.id) || 0,
-      campaignsManaged: campaignCounts.get(user.id) || 0,
-      openTasks: openTasksByUser.get(user.id) || 0,
+      campaignsManaged,
+      openTasks,
       completedTasks: completedTasksByUser.get(user.id) || 0,
       openCrmActions: openActionsByUser.get(user.id) || 0,
       openOpportunities: opportunitiesByUser.get(user.id) || 0,
       pipeline: opportunityAmounts(opportunities.filter((row) => row.ownerId === user.id)),
       lastBusinessActivityAt: lastBusinessActivityAt?.toISOString() || null,
+      workload,
       issues,
       dataQuality: user.role === "FIELD_OPERATOR" && !userTasks.length ? "LOW" as const : "MEDIUM" as const
     };
-  }).sort((left, right) => right.issues.length - left.issues.length || left.name.localeCompare(right.name, "ro"));
+  })
+    .filter((person) => !entityScoped ||
+      person.clientsManaged > 0 ||
+      person.campaignsManaged > 0 ||
+      person.openTasks > 0 ||
+      person.completedTasks > 0 ||
+      person.issues.length > 0
+    )
+    .sort((left, right) => right.issues.length - left.issues.length || left.name.localeCompare(right.name, "ro"));
 
   return {
     kind: "executive-people",
     scope,
     people,
+    filterApplicability: entityScoped ? "APPLIED_WITH_LIMITATIONS" : "APPLIED",
+    notes: entityScoped
+      ? [
+          "Campaniile, taskurile și facturile sunt filtrate după entitatea selectată.",
+          "CRM și activitatea generală de audit nu au asociere juridică și sunt excluse din această vedere."
+        ]
+      : [],
     meta: refinementMeta(now)
   };
 }
@@ -320,7 +380,7 @@ export async function queryExecutiveCustomers(
     const clientReceivables = receivables.filter((row) => row.clientId === client.id);
     const overdue = clientReceivables.filter((row) => row.dueDate && row.dueDate < snapshot);
     const riskIssues: string[] = [];
-    if (overdue.length) riskIssues.push(`${overdue.length} facturi restante`);
+    if (overdue.length) riskIssues.push(countLabel(overdue.length, "factură restantă", "facturi restante"));
     if (commercial.some((row) => row.campaign.reservations.length === 0)) riskIssues.push("Campanie fără BOOKED");
     if (commercial.some((row) => row.campaign.documents.length === 0)) riskIssues.push("Document contractual lipsă");
     if (!client.accountOwnerUserId) riskIssues.push("Account manager nealocat");
@@ -339,6 +399,16 @@ export async function queryExecutiveCustomers(
         ? commercial.every((row) => row.campaign.documents.length > 0) ? "AVAILABLE" : "MISSING"
         : "NOT_APPLICABLE",
       crmActivityState: "DATA_INSUFFICIENT",
+      businessReasons: [
+        ...(active.length ? [countLabel(active.length, "campanie activă", "campanii active")] : []),
+        ...(upcoming.length ? [countLabel(upcoming.length, "campanie viitoare", "campanii viitoare")] : []),
+        ...(commercial.reduce((sum, row) => sum + row.campaign.reservations.length, 0)
+          ? [countLabel(commercial.reduce((sum, row) => sum + row.campaign.reservations.length, 0), "rezervare BOOKED", "rezervări BOOKED")]
+          : []),
+        ...(campaignAmounts(commercial.map((row) => row.campaign)).length
+          ? ["Valoare contractuală disponibilă separat pe entitate și monedă"]
+          : [])
+      ],
       href: `/admin/clienti?clientId=${encodeURIComponent(client.id)}`
     };
   });
@@ -560,10 +630,16 @@ export async function queryExecutiveActivity(
 
 export async function searchExecutive(
   session: AuthSession,
-  rawQuery: string
+  rawQuery: string,
+  input: Record<string, string | string[] | undefined> = {}
 ): Promise<ExecutiveSearchResponse> {
   const query = rawQuery.trim().slice(0, 80);
   if (query.length < 2) return { kind: "executive-search", query, items: [], truncated: false };
+  const scope = executiveScopeForSession(session, input);
+  const entityScoped = scope.entitySelection !== "ALL";
+  const selectedEntityValues = scope.selectedEntityCodes
+    .map(entityValueForCode)
+    .filter((value): value is NonNullable<typeof value> => Boolean(value));
   const contains = { contains: query };
   const [
     clients,
@@ -579,67 +655,110 @@ export async function searchExecutive(
     documents
   ] = await Promise.all([
     prisma.clientAccount.findMany({
-      where: { mergedIntoClientId: null, OR: [{ companyName: contains }, { taxId: contains }] },
+      where: {
+        mergedIntoClientId: null,
+        AND: [
+          { OR: [{ companyName: contains }, { taxId: contains }] },
+          ...(entityScoped ? [{
+            OR: [
+              { campaigns: { some: { companyEntity: { in: selectedEntityValues } } } },
+              { financialReceivables: { some: { companyCode: { in: scope.selectedEntityCodes } } } }
+            ]
+          }] : [])
+        ]
+      },
       select: { id: true, companyName: true, taxId: true },
       take: 4
     }),
     prisma.campaign.findMany({
-      where: { OR: [{ campaignName: contains }, { campaignCode: contains }, { client: { companyName: contains } }] },
+      where: {
+        ...(entityScoped ? { companyEntity: { in: selectedEntityValues } } : {}),
+        OR: [{ campaignName: contains }, { campaignCode: contains }, { client: { companyName: contains } }]
+      },
       select: { id: true, campaignName: true, campaignCode: true, client: { select: { companyName: true } } },
       take: 4
     }),
     prisma.reservation.findMany({
-      where: { OR: [{ id: contains }, { clientName: contains }, { campaignName: contains }, { location: { code: contains } }] },
+      where: {
+        ...(entityScoped ? { campaign: { is: { companyEntity: { in: selectedEntityValues } } } } : {}),
+        OR: [{ id: contains }, { clientName: contains }, { campaignName: contains }, { location: { code: contains } }]
+      },
       select: { id: true, status: true, clientName: true, campaignName: true, location: { select: { code: true } } },
       take: 4
     }),
-    prisma.location.findMany({
-      where: { OR: [{ code: contains }, { address: contains }, { city: contains }] },
-      select: { id: true, code: true, city: true, address: true },
-      take: 4
-    }),
+    entityScoped
+      ? Promise.resolve([])
+      : prisma.location.findMany({
+          where: { OR: [{ code: contains }, { address: contains }, { city: contains }] },
+          select: { id: true, code: true, city: true, address: true },
+          take: 4
+        }),
     prisma.financialReceivable.findMany({
-      where: { OR: [{ invoiceNumber: contains }, { clientName: contains }, { companyName: contains }] },
+      where: {
+        ...(entityScoped ? { companyCode: { in: scope.selectedEntityCodes } } : {}),
+        OR: [{ invoiceNumber: contains }, { clientName: contains }, { companyName: contains }]
+      },
       select: { id: true, invoiceNumber: true, clientName: true, currency: true },
       take: 4
     }),
     prisma.financialReceivablePayment.findMany({
-      where: { OR: [{ paymentReference: contains }, { receivable: { invoiceNumber: contains } }] },
+      where: {
+        ...(entityScoped ? { receivable: { is: { companyCode: { in: scope.selectedEntityCodes } } } } : {}),
+        OR: [{ paymentReference: contains }, { receivable: { invoiceNumber: contains } }]
+      },
       select: { id: true, paymentReference: true, receivable: { select: { id: true, invoiceNumber: true, clientName: true } } },
       take: 4
     }),
-    prisma.crmCompany.findMany({
-      where: { OR: [{ name: contains }, { taxId: contains }] },
-      select: { id: true, name: true, taxId: true },
-      take: 4
-    }),
-    prisma.crmOpportunity.findMany({
-      where: { OR: [{ name: contains }, { company: { name: contains } }] },
-      select: { id: true, name: true, stage: true, company: { select: { name: true } } },
-      take: 4
-    }),
-    prisma.user.findMany({
-      where: { active: true, OR: [{ name: contains }, { email: contains }] },
-      select: { id: true, name: true, role: true },
-      take: 4
-    }),
+    entityScoped
+      ? Promise.resolve([])
+      : prisma.crmCompany.findMany({
+          where: { OR: [{ name: contains }, { taxId: contains }] },
+          select: { id: true, name: true, taxId: true },
+          take: 4
+        }),
+    entityScoped
+      ? Promise.resolve([])
+      : prisma.crmOpportunity.findMany({
+          where: { OR: [{ name: contains }, { company: { name: contains } }] },
+          select: { id: true, name: true, stage: true, company: { select: { name: true } } },
+          take: 4
+        }),
+    entityScoped
+      ? Promise.resolve([])
+      : prisma.user.findMany({
+          where: { active: true, OR: [{ name: contains }, { email: contains }] },
+          select: { id: true, name: true, role: true },
+          take: 4
+        }),
     prisma.operationTask.findMany({
-      where: { OR: [{ id: contains }, { notes: contains }, { location: { code: contains } }, { campaign: { campaignName: contains } }] },
+      where: {
+        ...(entityScoped ? {
+          OR: [
+            { campaign: { is: { companyEntity: { in: selectedEntityValues } } } },
+            { reservation: { is: { campaign: { is: { companyEntity: { in: selectedEntityValues } } } } } }
+          ],
+          AND: [{ OR: [{ id: contains }, { notes: contains }, { location: { code: contains } }, { campaign: { campaignName: contains } }] }]
+        } : {
+          OR: [{ id: contains }, { notes: contains }, { location: { code: contains } }, { campaign: { campaignName: contains } }]
+        })
+      },
       select: { id: true, kind: true, status: true, location: { select: { code: true } } },
       take: 4
     }),
-    prisma.clientDocument.findMany({
-      where: { status: "active", OR: [{ fileName: contains }, { documentType: contains }] },
-      select: {
-        id: true,
-        fileName: true,
-        documentType: true,
-        clientId: true,
-        campaignId: true,
-        reservationId: true
-      },
-      take: 4
-    })
+    entityScoped
+      ? Promise.resolve([])
+      : prisma.clientDocument.findMany({
+          where: { status: "active", OR: [{ fileName: contains }, { documentType: contains }] },
+          select: {
+            id: true,
+            fileName: true,
+            documentType: true,
+            clientId: true,
+            campaignId: true,
+            reservationId: true
+          },
+          take: 4
+        })
   ]);
 
   const items: ExecutiveSearchResult[] = [
@@ -765,6 +884,42 @@ function latestDate(values: Date[]) {
 
 function addIssue(issues: ExecutivePerson["issues"], code: string, label: string, count: number, href: string) {
   if (count > 0) issues.push({ code, label, count, href });
+}
+
+function factualWorkload(input: {
+  openTasks: number;
+  campaignsManaged: number;
+  overdueTasks: number;
+  overdueInvoices: number;
+  overdueActions: number;
+  entityScoped: boolean;
+}): ExecutivePerson["workload"] {
+  const explanation = [
+    countLabel(input.campaignsManaged, "campanie gestionată", "campanii gestionate"),
+    countLabel(input.openTasks, "task deschis", "taskuri deschise"),
+    countLabel(input.overdueTasks, "task restant", "taskuri restante"),
+    countLabel(input.overdueInvoices, "factură restantă", "facturi restante"),
+    ...(input.entityScoped ? [] : [countLabel(input.overdueActions, "follow-up restant", "follow-up-uri restante")])
+  ];
+  const high = input.overdueTasks > 0 ||
+    input.overdueInvoices > 2 ||
+    input.overdueActions > 3 ||
+    input.openTasks >= 10 ||
+    input.campaignsManaged >= 10;
+  const hasEvidence = input.openTasks > 0 ||
+    input.campaignsManaged > 0 ||
+    input.overdueTasks > 0 ||
+    input.overdueInvoices > 0 ||
+    (!input.entityScoped && input.overdueActions > 0);
+
+  return {
+    level: high ? "HIGH" : hasEvidence ? "NORMAL" : "UNDETERMINED",
+    explanation
+  };
+}
+
+function countLabel(count: number, singular: string, plural: string) {
+  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function departmentForRole(role: UserRole) {

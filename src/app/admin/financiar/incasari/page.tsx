@@ -17,13 +17,17 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
     query: firstParam(params.q),
     status: firstParam(params.status),
     companyCode: firstParam(params.companyCode),
-    currency: firstParam(params.currency)
+    currency: firstParam(params.currency),
+    asOf: firstParam(params.snapshot),
+    validatedOnly: firstParam(params.validated) === "1"
   };
   const registry = await listReceivableRegistry({
     query: filters.query,
     status: filters.status,
     companyCode: filters.companyCode,
     currency: filters.currency,
+    asOf: filters.asOf,
+    validatedOnly: filters.validatedOnly,
     view: "open",
     page: Number(firstParam(params.page) || 1),
     take: 40

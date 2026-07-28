@@ -12,6 +12,24 @@ export const EXECUTIVE_PULSE_WEIGHTS = {
   crm: 5
 } as const;
 
+const PULSE_REASON_LABELS: Record<string, string> = {
+  CURRENCY_CONSOLIDATION_NOT_APPROVED: "monedele nu pot fi consolidate fără un curs aprobat",
+  FINANCE_DATA_MISSING: "nu există date financiare canonice pentru perioada selectată",
+  OPERATION_ENTITY_ATTRIBUTION_INCOMPLETE: "taskurile operaționale nu sunt atribuite complet entității juridice",
+  OPERATIONTASK_CUTOVER_PENDING: "registrul operațional nu a finalizat procesul de validare",
+  CONTRACT_SIGNATURE_STATUS_NOT_CANONICAL: "statusul semnării contractului nu este disponibil canonic",
+  PARTIAL_BOOKED_COVERAGE_SOURCE_MISSING: "nu există o sursă canonică pentru acoperirea BOOKED parțială",
+  CAMPAIGN_DATA_MISSING: "nu există campanii eligibile în perioada selectată",
+  SALES_TARGET_SOURCE_MISSING: "nu există o sursă canonică pentru targetul comercial",
+  DISCOUNT_AND_PROFITABILITY_NOT_CANONICAL: "discountul și profitabilitatea nu au o sursă canonică",
+  INVENTORY_IS_SHARED_ACROSS_LEGAL_ENTITIES: "inventarul comun nu poate fi atribuit acestei entități juridice",
+  CRM_LEGAL_ENTITY_RELATIONSHIP_MISSING: "CRM nu are o relație canonică cu entitatea juridică"
+};
+
+export function executivePulseReasonLabel(reason: string) {
+  return PULSE_REASON_LABELS[reason] || "sursa canonică este incompletă";
+}
+
 export function buildExecutivePulse(dimensions: ExecutivePulseDimension[], entitySplitRequired = false): ExecutivePulse {
   const totalConfidence = Math.round(
     dimensions.reduce((sum, dimension) => sum + dimension.weight * dimension.confidence, 0) / 100
@@ -22,7 +40,7 @@ export function buildExecutivePulse(dimensions: ExecutivePulseDimension[], entit
   );
   const missingData = dimensions.flatMap((dimension) =>
     dimension.score == null || dimension.confidence < 80
-      ? dimension.reasonCodes.map((reason) => `${dimension.label}: ${reason}`)
+      ? dimension.reasonCodes.map((reason) => `${dimension.label}: ${executivePulseReasonLabel(reason)}`)
       : []
   );
   const allScored = dimensions.every((dimension) => dimension.score != null);
@@ -58,7 +76,7 @@ export function buildExecutivePulse(dimensions: ExecutivePulseDimension[], entit
     mainFactors: dimensions
       .flatMap((dimension) => dimension.negativeReasons.map((reason) => ({
         id: `${dimension.id}:${reason}`,
-        label: `${dimension.label}: ${reason}`,
+        label: `${dimension.label}: ${executivePulseReasonLabel(reason)}`,
         count: 1,
         tone: "warning" as const,
         href: dimension.href

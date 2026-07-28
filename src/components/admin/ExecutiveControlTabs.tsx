@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -27,7 +28,7 @@ import type {
 } from "@/lib/dashboard/executive/refinement-contracts";
 
 type TabId = "people" | "customers" | "sales" | "operations" | "finance" | "campaigns" | "inventory";
-type ActivityFilter = "ALL" | "POSITIVE" | "PROBLEM";
+type ActivityFilter = "ALL" | "HISTORICAL" | "CURRENT" | "POSITIVE" | "PROBLEM";
 type Preferences = {
   tabOrder: TabId[];
   defaultTab: TabId;
@@ -53,8 +54,11 @@ const defaultPreferences: Preferences = {
 };
 
 export function ExecutiveControlTabs({ data }: { data: ExecutiveOverview }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const storageKey = `focus-ecc-preferences:${data.viewer.id}`;
   const [preferences, setPreferences] = useState(defaultPreferences);
+  const [preferencesReady, setPreferencesReady] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("people");
   const [customizing, setCustomizing] = useState(false);
   const [people, setPeople] = useState<ExecutivePeopleResponse | null>(null);
@@ -66,14 +70,26 @@ export function ExecutiveControlTabs({ data }: { data: ExecutiveOverview }) {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(storageKey);
-      if (!raw) return;
-      const stored = normalizePreferences(JSON.parse(raw));
-      setPreferences(stored);
-      setActiveTab(stored.defaultTab);
+      if (raw) {
+        const stored = normalizePreferences(JSON.parse(raw));
+        setPreferences(stored);
+        setActiveTab(stored.defaultTab);
+      }
     } catch {
       // Invalid local preferences fall back to the stable product defaults.
+    } finally {
+      setPreferencesReady(true);
     }
   }, [storageKey]);
+
+  useEffect(() => {
+    if (!preferencesReady || searchParams.has("period") || data.scope.periodPreset === preferences.preferredPeriod) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("period", preferences.preferredPeriod);
+    params.set("entity", data.scope.entitySelection);
+    params.set("snapshot", data.scope.snapshotDate);
+    router.replace(`/admin/dashboard?${params}`, { scroll: false });
+  }, [data.scope.entitySelection, data.scope.periodPreset, data.scope.snapshotDate, preferences.preferredPeriod, preferencesReady, router, searchParams]);
 
   useEffect(() => {
     if (preferences.collapsed) return;
@@ -84,6 +100,11 @@ export function ExecutiveControlTabs({ data }: { data: ExecutiveOverview }) {
   function savePreferences(next: Preferences) {
     setPreferences(next);
     window.localStorage.setItem(storageKey, JSON.stringify(next));
+  }
+
+  function selectTab(tab: TabId) {
+    setActiveTab(tab);
+    savePreferences({ ...preferences, defaultTab: tab });
   }
 
   async function loadPeople() {
@@ -155,7 +176,7 @@ export function ExecutiveControlTabs({ data }: { data: ExecutiveOverview }) {
       {customizing ? (
         <div className="grid gap-4 border-b border-focus-line bg-focus-ink/45 p-4 lg:grid-cols-[1fr_260px]">
           <div>
-            <p className="text-xs font-black uppercase text-slate-400">Ordinea taburilor</p>
+            <p className="text-xs font-black uppercase text-slate-400">Ordinea widgeturilor de domeniu</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {preferences.tabOrder.map((tab, index) => (
                 <span className="inline-flex min-h-10 items-center gap-1 rounded border border-white/10 px-2 text-xs font-bold text-white" key={tab}>
@@ -165,7 +186,7 @@ export function ExecutiveControlTabs({ data }: { data: ExecutiveOverview }) {
                 </span>
               ))}
             </div>
-            <p className="mt-2 text-xs text-slate-500">Widgeturile nu pot fi eliminate. Preferințele sunt păstrate local pentru contul curent.</p>
+            <p className="mt-2 text-xs text-slate-500">Widgeturile nu pot fi eliminate. Ordinea, secțiunea restrânsă, tabul și perioada implicită sunt păstrate pentru contul curent.</p>
           </div>
           <div className="grid gap-2">
             <label className="grid gap-1 text-xs font-black uppercase text-slate-300">Tab implicit
@@ -193,7 +214,7 @@ export function ExecutiveControlTabs({ data }: { data: ExecutiveOverview }) {
                 aria-selected={activeTab === tab}
                 className={`min-h-11 shrink-0 rounded px-4 text-sm font-black ${activeTab === tab ? "bg-focus-yellow text-focus-navy" : "text-slate-300 hover:bg-white/[0.05] hover:text-white"}`}
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => selectTab(tab)}
                 role="tab"
                 type="button"
               >
@@ -241,20 +262,15 @@ export function ExecutiveActivityFeed({ data }: { data: ExecutiveOverview }) {
     if (next && !activity) void loadActivity();
   }
 
-  const problemItems: ExecutiveActivityItem[] = data.attentionPreview.map((item) => ({
-    id: `alert:${item.id}`,
-    tone: "PROBLEM",
-    type: "CAMPAIGN",
-    title: item.title,
-    detail: item.summary,
-    occurredAt: item.deadline || data.meta.asOf,
-    entityCode: "SHARED",
-    href: item.href
-  }));
-  const items = [...(activity?.items || []), ...problemItems]
-    .filter((item) => filter === "ALL" || item.tone === filter)
+  const historicalItems = (activity?.items || [])
+    .filter((item) => filter !== "POSITIVE" || item.tone === "POSITIVE")
     .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
     .slice(0, 50);
+  const showCurrent = ["ALL", "CURRENT", "PROBLEM"].includes(filter);
+  const showHistorical = ["ALL", "HISTORICAL", "POSITIVE"].includes(filter);
+  const attentionIds = new Set(data.attentionPreview.map((item) => item.id));
+  const currentAlerts = data.alertPreview.filter((item) => !attentionIds.has(item.id));
+  const hasCurrentSituations = data.attentionPreview.length > 0 || currentAlerts.length > 0;
 
   return (
     <section className="rounded-lg border border-focus-line bg-focus-navy/45">
@@ -265,15 +281,39 @@ export function ExecutiveActivityFeed({ data }: { data: ExecutiveOverview }) {
       {open ? (
         <div className="border-t border-focus-line p-4">
           <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filtru activitate">
-            {(["ALL", "POSITIVE", "PROBLEM"] as ActivityFilter[]).map((value) => (
+            {(["ALL", "CURRENT", "HISTORICAL", "POSITIVE", "PROBLEM"] as ActivityFilter[]).map((value) => (
               <button className={`focus-button secondary min-h-10 ${filter === value ? "border-focus-yellow text-focus-yellow" : ""}`} key={value} onClick={() => setFilter(value)} type="button">
-                <Filter size={15} /> {value === "ALL" ? "Toate" : value === "POSITIVE" ? "Pozitive" : "Probleme"}
+                <Filter size={15} /> {activityFilterLabel(value)}
               </button>
             ))}
           </div>
           {loading ? <LoadingState /> : error ? <ErrorState text={error} onRetry={loadActivity} /> : (
-            <div className="grid gap-2">
-              {items.length ? items.map((item) => <ActivityRow item={item} key={item.id} />) : <EmptyState text="Nu există evenimente pentru filtrul selectat." />}
+            <div className="grid gap-5">
+              {showCurrent ? (
+                <section>
+                  <h3 className="text-xs font-black uppercase text-amber-200">Situații curente</h3>
+                  <p className="mt-1 text-xs text-slate-500">Stări active acum; nu sunt prezentate ca evenimente istorice.</p>
+                  <div className="mt-2 grid gap-2">
+                    {hasCurrentSituations
+                      ? <>
+                          {data.attentionPreview.map((item) => <CurrentSituationRow item={item} key={item.id} />)}
+                          {currentAlerts.map((item) => <CurrentAlertRow item={item} key={item.id} />)}
+                        </>
+                      : <EmptyState text="Nu există situații curente care necesită atenție." />}
+                  </div>
+                </section>
+              ) : null}
+              {showHistorical ? (
+                <section>
+                  <h3 className="text-xs font-black uppercase text-emerald-200">Evenimente istorice</h3>
+                  <p className="mt-1 text-xs text-slate-500">Evenimente datate din ultimele 30 de zile, inclusiv ce s-a întâmplat ieri.</p>
+                  <div className="mt-2 grid gap-2">
+                    {historicalItems.length
+                      ? historicalItems.map((item) => <ActivityRow item={item} key={item.id} />)
+                      : <EmptyState text="Nu există evenimente istorice pentru filtrul selectat." />}
+                  </div>
+                </section>
+              ) : null}
             </div>
           )}
           {activity?.unavailableSources.length ? (
@@ -294,8 +334,8 @@ function renderTab(
   people: ExecutivePeopleResponse | null,
   customers: ExecutiveCustomersResponse | null
 ) {
-  if (tab === "people") return people ? <PeopleGrid people={people.people} /> : <EmptyState text="Deschide din nou tabul pentru încărcare." />;
-  if (tab === "sales") return people ? <PeopleGrid people={people.people.filter((person) => ["SALES_AGENT", "SALES_DIRECTOR"].includes(person.role))} sales /> : <EmptyState text="Datele Sales se încarcă la cerere." />;
+  if (tab === "people") return people ? <PeopleGrid people={people.people} notes={people.notes} /> : <EmptyState text="Deschide din nou tabul pentru încărcare." />;
+  if (tab === "sales") return people ? <PeopleGrid people={people.people.filter((person) => ["SALES_AGENT", "SALES_DIRECTOR"].includes(person.role))} notes={people.notes} sales /> : <EmptyState text="Datele Sales se încarcă la cerere." />;
   if (tab === "customers") return customers ? <CustomerViews data={customers} /> : <EmptyState text="Clienții se încarcă la cerere." />;
   if (tab === "operations") return <OperationsView data={data} />;
   if (tab === "finance") return <FinanceView data={data} />;
@@ -303,14 +343,25 @@ function renderTab(
   return <InventoryView data={data} />;
 }
 
-function PeopleGrid({ people, sales = false }: { people: ExecutivePerson[]; sales?: boolean }) {
+function PeopleGrid({ people, notes, sales = false }: { people: ExecutivePerson[]; notes: string[]; sales?: boolean }) {
   return (
-    <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+    <div>
+      {notes.length ? <div className="mb-3 rounded border border-amber-300/20 bg-amber-300/[0.05] p-3 text-xs text-amber-100">{notes.map((note) => <p key={note}>• {note}</p>)}</div> : null}
+      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
       {people.length ? people.map((person) => (
         <article className="rounded-md border border-white/10 bg-focus-ink/50 p-4" key={person.id}>
           <div className="flex items-start justify-between gap-3">
             <span className="min-w-0"><strong className="block truncate text-white">{person.name}</strong><small className="text-slate-400">{person.roleLabel} · {person.department}</small></span>
             <span className={`rounded px-2 py-1 text-[10px] font-black ${person.issues.length ? "bg-amber-300/10 text-amber-100" : "bg-emerald-300/10 text-emerald-100"}`}>{person.issues.length ? `${person.issues.length} semnale` : "Fără semnale"}</span>
+          </div>
+          <div className="mt-3 rounded border border-white/10 bg-white/[0.025] p-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-black uppercase text-slate-400">Încărcare factuală</span>
+              <strong className={person.workload.level === "HIGH" ? "text-amber-200" : person.workload.level === "NORMAL" ? "text-emerald-200" : "text-slate-300"}>
+                {person.workload.level === "HIGH" ? "Ridicată" : person.workload.level === "NORMAL" ? "Normală" : "Nedeterminată"}
+              </strong>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-400">{person.workload.explanation.join(" · ")}</p>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
             <SmallMetric label="Clienți" value={person.clientsManaged} />
@@ -323,7 +374,8 @@ function PeopleGrid({ people, sales = false }: { people: ExecutivePerson[]; sale
           {person.issues.length ? <div className="mt-3 grid gap-1">{person.issues.map((issue) => <Link className="flex min-h-9 items-center justify-between rounded border border-amber-300/15 px-2 text-xs text-amber-100 hover:border-focus-yellow" href={issue.href} key={issue.code}><span>{issue.label}</span><strong>{issue.count}</strong></Link>)}</div> : null}
           <p className="mt-3 text-[10px] uppercase text-slate-500">Departament derivat din rol · calitate {person.dataQuality}</p>
         </article>
-      )) : <EmptyState text="Nu există persoane eligibile pentru această vedere." />}
+      )) : <EmptyState text="Nu există persoane cu responsabilități legate canonic de scope-ul selectat." />}
+      </div>
     </div>
   );
 }
@@ -346,8 +398,9 @@ function CustomerColumn({ title, subtitle, rows, tone }: { title: string; subtit
       <div className="mt-3 grid gap-2">
         {rows.length ? rows.map((row) => (
           <Link className="rounded-md border border-white/10 bg-focus-ink/50 p-3 hover:border-focus-yellow" href={row.href} key={row.id}>
-            <div className="flex items-start justify-between gap-3"><span className="min-w-0"><strong className="block truncate text-white">{row.companyName}</strong><small className="text-slate-400">{row.ownerLabel}</small></span><span className={`text-xs font-black ${tone === "risk" ? "text-red-200" : "text-emerald-200"}`}>{tone === "risk" ? `${row.riskIssues.length} riscuri` : `${row.activeCampaigns} active`}</span></div>
-            <p className="mt-2 text-xs text-slate-300">{row.activeCampaigns} campanii active · {row.upcomingCampaigns} viitoare · {row.bookedReservations} BOOKED</p>
+            <div className="flex items-start justify-between gap-3"><span className="min-w-0"><strong className="block truncate text-white">{row.companyName}</strong><small className="text-slate-400">{row.ownerLabel}</small></span><span className={`text-xs font-black ${tone === "risk" ? "text-red-200" : "text-emerald-200"}`}>{tone === "risk" ? countLabel(row.riskIssues.length, "risc", "riscuri") : countLabel(row.activeCampaigns, "activă", "active")}</span></div>
+            <p className="mt-2 text-xs text-slate-300">{countLabel(row.activeCampaigns, "campanie activă", "campanii active")} · {countLabel(row.upcomingCampaigns, "campanie viitoare", "campanii viitoare")} · {countLabel(row.bookedReservations, "rezervare BOOKED", "rezervări BOOKED")}</p>
+            <p className="mt-2 text-xs text-slate-400"><strong className="text-slate-200">De ce apare aici:</strong> {tone === "risk" ? row.riskIssues.join(" · ") : row.businessReasons.join(" · ") || "Activitate comercială demonstrabilă"}</p>
             {tone === "risk" ? <p className="mt-2 text-xs text-amber-100">{row.riskIssues.join(" · ")}</p> : <AmountList label="Valoare contractuală" rows={row.businessValue} />}
             {row.overdue.length ? <AmountList label="Restant" rows={row.overdue} warning /> : null}
           </Link>
@@ -367,10 +420,13 @@ function FinanceView({ data }: { data: ExecutiveOverview }) {
 }
 
 function CampaignView({ data }: { data: ExecutiveOverview }) {
-  return <div><div className="grid gap-3 sm:grid-cols-3"><SmallMetric label="Active" value={data.summary.activeCampaigns} /><SmallMetric label="Încep astăzi" value={data.summary.campaignsStartingToday} /><SmallMetric label="În risc" value={data.summary.campaignRisks} /></div><div className="mt-4 grid gap-2">{data.campaignRisks.length ? data.campaignRisks.map((risk) => <Link className="flex min-h-12 items-center justify-between gap-3 rounded border border-white/10 px-3 hover:border-focus-yellow" href={risk.href} key={risk.id}><span className="min-w-0"><strong className="block truncate text-white">{risk.campaignName}</strong><small className="block truncate text-slate-400">{risk.clientName} · {risk.reasonCodes.join(" · ")}</small></span><strong className="text-amber-200">{risk.severity}</strong></Link>) : <EmptyState text="Nu există campanii în risc pentru scope-ul curent." />}</div></div>;
+  return <div><div className="grid gap-3 sm:grid-cols-4"><SmallMetric label="Active" value={data.summary.activeCampaigns} href={campaignHref(data, "effectiveStatus", "ACTIVE")} /><SmallMetric label="Încep astăzi" value={data.summary.campaignsStartingToday} href={campaignHref(data, "dateFilter", "STARTS_ON")} /><SmallMetric label="Se încheie astăzi" value={data.summary.campaignsEndingToday} href={campaignHref(data, "dateFilter", "ENDS_ON")} /><SmallMetric label="În risc" value={data.summary.campaignRisks} href={dashboardHref(data, "campaign-risks", "campaign-risks")} /></div><div className="mt-4 grid gap-2">{data.campaignRisks.length ? data.campaignRisks.map((risk) => <Link className="flex min-h-12 items-center justify-between gap-3 rounded border border-white/10 px-3 hover:border-focus-yellow" href={risk.href} key={risk.id}><span className="min-w-0"><strong className="block truncate text-white">{risk.campaignName}</strong><small className="block truncate text-slate-400">{risk.clientName} · {risk.reasonCodes.join(" · ")}</small></span><strong className="text-amber-200">{risk.severity}</strong></Link>) : <EmptyState text="Nu există campanii în risc pentru scope-ul curent." />}</div></div>;
 }
 
 function InventoryView({ data }: { data: ExecutiveOverview }) {
+  if (data.summary.filterApplicability.inventory === "FILTER_NOT_APPLICABLE") {
+    return <EmptyState text="Filtrul juridic nu se aplică inventarului comun. Selectează toate entitățile pentru datele de inventar." />;
+  }
   const inventory = data.summary.inventory;
   const rows = [["Disponibile", inventory.available], ["BOOKED", inventory.booked], ["HOLD", inventory.hold], ["Mentenanță", inventory.maintenance], ["Blocate", inventory.manualUnavailable], ["Necunoscute", inventory.unknown]];
   return <div><div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">{rows.map(([label, value]) => <SmallMetric key={label} label={String(label)} value={value} />)}</div><p className="mt-4 text-sm text-slate-300">Ocupare: <strong className="text-white">{inventory.occupancyRate == null ? "Date insuficiente" : `${inventory.occupancyRate}%`}</strong> · {inventory.booked} suporturi BOOKED din {inventory.eligible} eligibile.</p></div>;
@@ -386,8 +442,25 @@ function ActivityRow({ item }: { item: ExecutiveActivityItem }) {
   return <Link className="grid min-h-14 grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2 rounded border border-white/10 px-3 hover:border-focus-yellow" href={item.href}><span className={tone}>{icon}</span><span className="min-w-0"><strong className="block truncate text-white">{item.title}</strong><small className="block truncate text-slate-400">{item.detail}</small></span><time className="text-xs text-slate-500">{dateTime(item.occurredAt)}</time></Link>;
 }
 
-function SmallMetric({ label, value }: { label: string; value: string | number }) {
-  return <div className="rounded-md border border-white/10 bg-focus-ink/50 p-3"><span className="text-[10px] font-black uppercase text-slate-400">{label}</span><strong className="mt-2 block text-xl text-white">{value}</strong></div>;
+function CurrentSituationRow({ item }: { item: ExecutiveOverview["attentionPreview"][number] }) {
+  return <Link className="grid min-h-14 grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2 rounded border border-amber-300/20 bg-amber-300/[0.04] px-3 hover:border-focus-yellow" href={item.href}><span className="text-amber-200"><ShieldAlert size={17} /></span><span className="min-w-0"><strong className="block truncate text-white">{item.title}</strong><small className="block truncate text-slate-400">{item.summary}</small></span><span className="text-xs font-black text-amber-100">{item.severity}</span></Link>;
+}
+
+function CurrentAlertRow({ item }: { item: ExecutiveOverview["alertPreview"][number] }) {
+  const severity = item.severityCode === "DATA_QUALITY" ? "Calitatea datelor" : item.severityCode || "Informativ";
+  return (
+    <Link className="grid min-h-12 gap-1 rounded border border-amber-300/20 bg-amber-300/[0.04] px-3 py-2 text-xs hover:border-focus-yellow sm:grid-cols-[minmax(0,1fr)_auto]" href={item.href}>
+      <span className="min-w-0"><strong className="block truncate text-white">{item.label}</strong><span className="text-slate-400">{item.detail}</span></span>
+      <span className="self-center font-black text-amber-100">{severity} · {item.count}</span>
+    </Link>
+  );
+}
+
+function SmallMetric({ label, value, href }: { label: string; value: string | number; href?: string }) {
+  const content = <><span className="text-[10px] font-black uppercase text-slate-400">{label}</span><strong className="mt-2 block text-xl text-white">{value}</strong></>;
+  return href
+    ? <Link className="rounded-md border border-white/10 bg-focus-ink/50 p-3 hover:border-focus-yellow" href={href}>{content}</Link>
+    : <div className="rounded-md border border-white/10 bg-focus-ink/50 p-3">{content}</div>;
 }
 
 function AmountList({ label, rows, warning = false }: { label: string; rows: ExecutiveAmount[] | ExecutiveOverview["summary"]["collectionsThisMonth"]; warning?: boolean }) {
@@ -428,10 +501,42 @@ function normalizePreferences(input: Partial<Preferences>): Preferences {
   return { tabOrder, defaultTab, preferredPeriod, collapsed: Boolean(input.collapsed) };
 }
 
+function activityFilterLabel(value: ActivityFilter) {
+  return {
+    ALL: "Toate",
+    CURRENT: "Situații curente",
+    HISTORICAL: "Istoric",
+    POSITIVE: "Pozitive",
+    PROBLEM: "Probleme"
+  }[value];
+}
+
+function campaignHref(data: ExecutiveOverview, key: "effectiveStatus" | "dateFilter", value: string) {
+  const params = new URLSearchParams({ snapshot: data.scope.snapshotDate, [key]: value });
+  if (data.scope.entitySelection !== "ALL") params.set("entity", data.scope.entitySelection);
+  return `/admin/campanii?${params}`;
+}
+
+function dashboardHref(data: ExecutiveOverview, panel: string, hash: string) {
+  const params = new URLSearchParams({
+    entity: data.scope.entitySelection,
+    snapshot: data.scope.snapshotDate,
+    period: data.scope.periodPreset,
+    periodStart: data.scope.periodStart,
+    periodEnd: data.scope.periodEnd,
+    panel
+  });
+  return `/admin/dashboard?${params}#${hash}`;
+}
+
 function dateTime(value: string) {
   return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Bucharest" }).format(new Date(value));
 }
 
 function amountLabel(value: string, currency: string) {
   return `${new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 }).format(Number(value))} ${currency}`;
+}
+
+function countLabel(count: number, singular: string, plural: string) {
+  return `${count} ${count === 1 ? singular : plural}`;
 }

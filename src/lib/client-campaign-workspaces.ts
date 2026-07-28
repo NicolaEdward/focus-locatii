@@ -151,7 +151,15 @@ type PageInput = {
   limit?: number;
 };
 
-type CampaignPageInput = PageInput & { clientId?: string | null; effectiveStatus?: CampaignEffectiveStatus | null };
+export type CampaignDateFilter = "STARTS_ON" | "ENDS_ON";
+
+type CampaignPageInput = PageInput & {
+  clientId?: string | null;
+  effectiveStatus?: CampaignEffectiveStatus | null;
+  snapshotDate?: string | null;
+  companyEntityValues?: string[];
+  dateFilter?: CampaignDateFilter | null;
+};
 
 export async function getClientsPage(session: AuthSession, input: PageInput = {}): Promise<WorkspacePage<ClientListItem>> {
   const query = String(input.query || "").trim().slice(0, 120);
@@ -210,14 +218,18 @@ export async function getClientsPage(session: AuthSession, input: PageInput = {}
 }
 
 export async function getCampaignsPage(session: AuthSession, input: CampaignPageInput = {}): Promise<WorkspacePage<CampaignListItem>> {
-  const now = new Date();
+  const now = campaignSnapshotNow(input.snapshotDate);
   const query = String(input.query || "").trim().slice(0, 120);
   const limit = safeLimit(input.limit);
+  const snapshotRange = campaignSnapshotRange(input.snapshotDate);
   const where: Prisma.CampaignWhereInput = {
     archivedAt: null,
     status: { not: "archived" },
     ...(input.clientId ? { clientId: input.clientId } : {}),
-    ...(input.effectiveStatus ? campaignEffectiveStatusWhere(input.effectiveStatus) : {}),
+    ...(input.effectiveStatus ? campaignEffectiveStatusWhere(input.effectiveStatus, now) : {}),
+    ...(input.companyEntityValues?.length ? { companyEntity: { in: input.companyEntityValues } } : {}),
+    ...(input.dateFilter === "STARTS_ON" && snapshotRange ? { startDate: snapshotRange } : {}),
+    ...(input.dateFilter === "ENDS_ON" && snapshotRange ? { endDate: snapshotRange } : {}),
     ...campaignReadScope(session),
     ...(query ? {
       AND: [{
@@ -297,6 +309,18 @@ export async function getCampaignsPage(session: AuthSession, input: CampaignPage
     total,
     query
   };
+}
+
+function campaignSnapshotNow(snapshotDate?: string | null) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(snapshotDate || "")
+    ? new Date(`${snapshotDate}T12:00:00.000Z`)
+    : new Date();
+}
+
+function campaignSnapshotRange(snapshotDate?: string | null) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate || "")) return null;
+  const start = new Date(`${snapshotDate}T00:00:00.000Z`);
+  return { gte: start, lt: new Date(start.getTime() + 86_400_000) };
 }
 
 export async function getClientOverview(session: AuthSession, clientId: string): Promise<ClientOverview | null> {

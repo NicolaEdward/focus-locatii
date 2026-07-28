@@ -81,7 +81,7 @@ export function ReceivablesWorkspace({
   canManage
 }: {
   initialRegistry: Registry;
-  initialFilters?: { query?: string; status?: string; companyCode?: string; currency?: string };
+  initialFilters?: { query?: string; status?: string; companyCode?: string; currency?: string; asOf?: string; validatedOnly?: boolean };
   canImport: boolean;
   canValidate: boolean;
   canConfirm: boolean;
@@ -98,6 +98,8 @@ export function ReceivablesWorkspace({
   const [status, setStatus] = useState(initialFilters?.status || "");
   const [companyCode, setCompanyCode] = useState(initialFilters?.companyCode || "");
   const [currency, setCurrency] = useState(initialFilters?.currency || "");
+  const registryAsOf = initialFilters?.asOf || "";
+  const validatedOnly = Boolean(initialFilters?.validatedOnly);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -130,6 +132,8 @@ export function ReceivablesWorkspace({
       take: "40",
       view: "open"
     });
+    if (registryAsOf) params.set("snapshot", registryAsOf);
+    if (validatedOnly) params.set("validated", "1");
     const payload = await api(`/api/admin/receivables-workspace/registry?${params}`);
     setRegistry(payload.registry);
   }
@@ -138,6 +142,8 @@ export function ReceivablesWorkspace({
     setBusy(true); setError(null);
     try {
       const params = new URLSearchParams({ q: query, companyCode, currency, page: String(page), take: "40", view: "history" });
+      if (registryAsOf) params.set("snapshot", registryAsOf);
+      if (validatedOnly) params.set("validated", "1");
       const payload = await api(`/api/admin/receivables-workspace/registry?${params}`);
       setSettled(payload.registry);
     } catch (loadError) {

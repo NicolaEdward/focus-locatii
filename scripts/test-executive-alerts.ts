@@ -129,11 +129,22 @@ assert.match(component, /name="owner"/);
 assert.match(component, /name="dataQuality"/);
 assert.match(component, /Informativ pentru D-CEO/);
 assert.match(component, /URLSearchParams/);
+assert.match(component, /Entitate juridică/);
+assert.match(component, /Client/);
+assert.match(component, /Campanie/);
+assert.match(component, /Account Manager/);
+assert.match(component, /Responsabil operațional/);
+assert.match(component, /Dovezi/);
+assert.match(component, /P0 · Critic/);
+assert.match(component, /calitatea datelor/);
+assert.match(service, /operationKindLabel/);
+assert.match(service, /alertPreviewIds/);
+assert.match(service, /!alertPreviewIds\.has\(alert\.id\)/);
 assert.match(overview, /getExecutiveAlerts/);
 
 console.log(JSON.stringify({
   ok: true,
-  checks: 48,
+  checks: 51,
   fingerprint,
   deduplicated: deduped.length,
   cacheIsolation: true,

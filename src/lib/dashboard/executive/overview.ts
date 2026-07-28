@@ -2,7 +2,10 @@ import { Prisma } from "@prisma/client";
 import { unstable_cache } from "next/cache";
 import type { AuthSession } from "@/lib/auth";
 import { decideAvailability } from "@/lib/availability";
-import { deriveCampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
+import {
+  campaignEffectiveStatusWhere,
+  deriveCampaignEffectiveStatus
+} from "@/lib/campaigns/campaign-effective-status";
 import type { ExecutiveAlert } from "@/lib/dashboard/executive/alerts-contracts";
 import {
   EXECUTIVE_REVALIDATE_SECONDS,
@@ -44,7 +47,7 @@ const activeTaskStatuses = ["NEW", "IN_PROGRESS"] as const;
 
 const cachedOverview = unstable_cache(
   async (scope: ExecutiveScope) => queryExecutiveOverview(scope),
-  ["executive-overview-v2"],
+  ["executive-overview-v4"],
   { revalidate: EXECUTIVE_REVALIDATE_SECONDS, tags: ["executive-overview"] }
 );
 
@@ -109,6 +112,14 @@ export async function queryExecutiveOverview(
     .filter((value): value is NonNullable<typeof value> => Boolean(value));
   const financeEntityWhere: Prisma.FinancialReceivableWhereInput = { companyCode: { in: scope.selectedEntityCodes } };
   const campaignEntityWhere: Prisma.CampaignWhereInput = { companyEntity: { in: selectedEntityValues } };
+  const operationEntityWhere: Prisma.OperationTaskWhereInput = scope.entitySelection === "ALL"
+    ? {}
+    : {
+        OR: [
+          { campaign: { is: { companyEntity: { in: selectedEntityValues } } } },
+          { reservation: { is: { campaign: { is: { companyEntity: { in: selectedEntityValues } } } } } }
+        ]
+      };
   const holdWhere = effectiveHoldWhere(snapshotBounds.start);
 
   const [
@@ -119,14 +130,15 @@ export async function queryExecutiveOverview(
     todayTaskGroups,
     assignmentGroups,
     crmOpportunities,
-    crmOpenActions
+    crmOpenActions,
+    todayTaskDetails
   ] = await Promise.all([
     prisma.financialReceivable.findMany({
       where: {
         ...financeEntityWhere,
         includedInReport: true,
         needsReview: false,
-        remainingAmount: { gt: 0 }
+        remainingAmount: { gt: new Prisma.Decimal("0.01") }
       },
       select: { companyCode: true, currency: true, remainingAmount: true, dueDate: true }
     }),
@@ -144,9 +156,15 @@ export async function queryExecutiveOverview(
     }),
     prisma.campaign.findMany({
       where: {
-        ...campaignEntityWhere,
-        archivedAt: null,
-        status: { notIn: ["archived", "cancelled", "completed", "draft"] }
+        AND: [
+          campaignEntityWhere,
+          {
+            OR: [
+              campaignEffectiveStatusWhere("ACTIVE", snapshotBounds.start),
+              campaignEffectiveStatusWhere("SCHEDULED", snapshotBounds.start)
+            ]
+          }
+        ]
       },
       select: {
         id: true,
@@ -214,6 +232,7 @@ export async function queryExecutiveOverview(
     prisma.operationTask.groupBy({
       by: ["kind", "status"],
       where: {
+        ...operationEntityWhere,
         kind: { in: ["DECORATION", "NEUTRALIZATION"] },
         scheduledFor: { gte: snapshotBounds.start, lt: snapshotBounds.endExclusive },
         status: { notIn: ["ARCHIVED", "CANCELLED"] }
@@ -222,24 +241,54 @@ export async function queryExecutiveOverview(
     }),
     prisma.operationTask.groupBy({
       by: ["assignedToUserId"],
-      where: { status: { in: [...activeTaskStatuses] } },
+      where: { ...operationEntityWhere, status: { in: [...activeTaskStatuses] } },
       _count: { _all: true }
     }),
-    prisma.crmOpportunity.findMany({
-      where: { stage: { in: activeOpportunityStages } },
-      select: {
-        id: true,
-        ownerId: true,
-        nextActions: {
-          where: { status: "open" },
-          select: { id: true },
-          take: 1
-        }
-      }
-    }),
-    prisma.crmNextAction.count({
-      where: { status: "open", dueAt: { lt: snapshotBounds.start } }
-    })
+    scope.entitySelection === "ALL"
+      ? prisma.crmOpportunity.findMany({
+          where: { stage: { in: activeOpportunityStages } },
+          select: {
+            id: true,
+            ownerId: true,
+            nextActions: {
+              where: { status: "open" },
+              select: { id: true },
+              take: 1
+            }
+          }
+        })
+      : Promise.resolve([]),
+    scope.entitySelection === "ALL"
+      ? prisma.crmNextAction.count({
+          where: { status: "open", dueAt: { lt: snapshotBounds.start } }
+        })
+      : Promise.resolve(0),
+    scope.panel?.startsWith("operations-today")
+      ? prisma.operationTask.findMany({
+          where: {
+            ...operationEntityWhere,
+            kind: { in: ["DECORATION", "NEUTRALIZATION"] },
+            scheduledFor: { gte: snapshotBounds.start, lt: snapshotBounds.endExclusive },
+            status: { notIn: ["ARCHIVED", "CANCELLED"] }
+          },
+          select: {
+            id: true,
+            kind: true,
+            status: true,
+            scheduledFor: true,
+            assignedTo: { select: { name: true } },
+            location: { select: { code: true } },
+            campaign: { select: { campaignName: true } },
+            reservation: {
+              select: {
+                location: { select: { code: true } },
+                campaign: { select: { campaignName: true } }
+              }
+            }
+          },
+          orderBy: [{ scheduledFor: "asc" }, { id: "asc" }]
+        })
+      : Promise.resolve([])
   ]);
 
   const campaignDecisions = campaigns.map((campaign) => ({
@@ -258,7 +307,9 @@ export async function queryExecutiveOverview(
     .filter((risk): risk is ExecutiveCampaignRisk => Boolean(risk))
     .sort(riskSort);
 
-  const inventory = buildInventoryPartition(locations, snapshotStorageDate, snapshotBounds.start);
+  const sharedInventory = buildInventoryPartition(locations, snapshotStorageDate, snapshotBounds.start);
+  const inventoryFilterApplies = scope.entitySelection === "ALL";
+  const inventory = inventoryFilterApplies ? sharedInventory : emptyInventoryPartition();
   const collectionsThisMonth = groupPayments(periodPayments, scope);
   const overdueInvoices = groupOverdue(openReceivables, snapshotStorageDate, scope);
   const dueWithinSevenDays = groupDueWithin(
@@ -277,8 +328,8 @@ export async function queryExecutiveOverview(
     confidence: operationsConfidence,
     dataQuality: operationsConfidence >= 60 ? "MEDIUM" as const : activeTasks ? "LOW" as const : "DATA_INSUFFICIENT" as const,
     note: activeTasks
-      ? `${unassignedTasks} din ${activeTasks} taskuri active sunt nealocate. Valorile reprezintă doar taskurile înregistrate.`
-      : "Nu există suficiente taskuri operaționale canonice pentru acoperire completă."
+      ? `${unassignedTasks} din ${activeTasks} taskuri active sunt nealocate. Valorile reprezintă doar taskurile înregistrate și legate de scope.`
+      : "Nu există suficiente taskuri operaționale canonice pentru scope-ul selectat."
   };
 
   const pulseByEntity = scope.selectedEntityCodes.map((entityCode) => ({
@@ -317,8 +368,12 @@ export async function queryExecutiveOverview(
     pulseByEntity,
     summary: {
       activeCampaigns: campaignDecisions.filter((row) => row.decision.effectiveStatus === "ACTIVE").length,
-      campaignsStartingToday: campaignDecisions.filter((row) => row.decision.startDate === scope.snapshotDate).length,
-      campaignsEndingToday: campaignDecisions.filter((row) => row.decision.endDate === scope.snapshotDate).length,
+      campaignsStartingToday: campaignDecisions.filter((row) =>
+        row.campaign.startDate?.toISOString().slice(0, 10) === scope.snapshotDate
+      ).length,
+      campaignsEndingToday: campaignDecisions.filter((row) =>
+        row.campaign.endDate?.toISOString().slice(0, 10) === scope.snapshotDate
+      ).length,
       campaignRisks: campaignRisks.length,
       inventory,
       collectionsThisMonth,
@@ -328,8 +383,23 @@ export async function queryExecutiveOverview(
         .filter((row) => row.decision.effectiveStatus === "ACTIVE")
         .map((row) => row.campaign.client.id)).size,
       openOperationTasks: activeTasks,
-      operationsToday
+      operationsToday,
+      filterApplicability: {
+        inventory: inventoryFilterApplies ? "APPLIED" : "FILTER_NOT_APPLICABLE",
+        operations: scope.entitySelection === "ALL" ? "APPLIED" : "APPLIED_WITH_LIMITATIONS",
+        crm: scope.entitySelection === "ALL" ? "APPLIED" : "FILTER_NOT_APPLICABLE"
+      }
     },
+    operationsTodayDetails: todayTaskDetails.map((task) => ({
+      id: task.id,
+      kind: task.kind as "DECORATION" | "NEUTRALIZATION",
+      status: task.status,
+      scheduledFor: task.scheduledFor!.toISOString(),
+      locationLabel: task.location?.code || task.reservation?.location.code || "Locație nealocată",
+      campaignLabel: task.campaign?.campaignName || task.reservation?.campaign?.campaignName || "Fără campanie",
+      responsibleLabel: task.assignedTo?.name || "Nealocat",
+      href: `/admin/operational?taskId=${encodeURIComponent(task.id)}`
+    })),
     campaignRisks: scope.panel === "campaign-risks" ? campaignRisks : campaignRisks.slice(0, 6),
     alertPreview: [],
     attentionPreview: [],
@@ -480,6 +550,26 @@ export function buildInventoryPartition(
   return partition;
 }
 
+function emptyInventoryPartition(): ExecutiveInventoryPartition {
+  return {
+    total: 0,
+    inactive: 0,
+    archived: 0,
+    maintenance: 0,
+    lifecycleBlocked: 0,
+    booked: 0,
+    hold: 0,
+    manualUnavailable: 0,
+    available: 0,
+    unknown: 0,
+    eligible: 0,
+    occupancyRate: null,
+    activeBookedReservations: 0,
+    activeHoldReservations: 0,
+    lifecycleBookingConflicts: 0
+  };
+}
+
 function groupPayments(
   rows: Array<{ amount: Prisma.Decimal; currency: string; receivable: { companyCode: string | null } }>,
   scope: ExecutiveScope
@@ -545,10 +635,10 @@ function moneyGroups(
       amount: group.amount.toFixed(2),
       count: group.count,
       href: status === "overdue"
-        ? `/admin/financiar/incasari?status=overdue&companyCode=${group.entityCode}&currency=${group.currency}`
+        ? `/admin/financiar/incasari?status=overdue&companyCode=${group.entityCode}&currency=${group.currency}&snapshot=${scope.snapshotDate}&validated=1`
         : status === "dueSoon"
-          ? `/admin/financiar/incasari?status=due_soon&companyCode=${group.entityCode}&currency=${group.currency}`
-          : `/admin/financiar/incasari?companyCode=${group.entityCode}&currency=${group.currency}`
+          ? `/admin/financiar/incasari?status=due_soon&companyCode=${group.entityCode}&currency=${group.currency}&snapshot=${scope.snapshotDate}&validated=1`
+          : undefined
     }));
 }
 
@@ -579,16 +669,16 @@ function pulseDimensions(input: {
   return [
     dimension("finance", "Finance", EXECUTIVE_PULSE_WEIGHTS.finance, currencies.size === 1 ? financeHealth(entityReceivables, input.snapshotDate) : null, currencies.size ? 90 : 20, currencies.size ? 90 : 20,
       currencies.size > 1 ? ["CURRENCY_CONSOLIDATION_NOT_APPROVED"] : currencies.size ? [] : ["FINANCE_DATA_MISSING"], "/admin/financiar/incasari"),
-    dimension("operations", "Operațional", EXECUTIVE_PULSE_WEIGHTS.operations, null, input.operationsConfidence, input.assignmentCompleteness,
-      ["OPERATIONTASK_CUTOVER_PENDING", "ASSIGNMENT_COMPLETENESS_BELOW_THRESHOLD"], "/admin/operational"),
+    dimension("operations", "Operațional", EXECUTIVE_PULSE_WEIGHTS.operations, null, 0, 0,
+      ["OPERATION_ENTITY_ATTRIBUTION_INCOMPLETE", "OPERATIONTASK_CUTOVER_PENDING"], "/admin/operational"),
     dimension("campaigns", "Campanii", EXECUTIVE_PULSE_WEIGHTS.campaigns, campaignScore, entityCampaigns.length ? 85 : 30, entityCampaigns.length ? 90 : 30,
       entityCampaigns.length ? ["CONTRACT_SIGNATURE_STATUS_NOT_CANONICAL", "PARTIAL_BOOKED_COVERAGE_SOURCE_MISSING"] : ["CAMPAIGN_DATA_MISSING"], "/admin/campanii"),
     dimension("sales", "Sales", EXECUTIVE_PULSE_WEIGHTS.sales, null, 40, 40,
       ["SALES_TARGET_SOURCE_MISSING", "DISCOUNT_AND_PROFITABILITY_NOT_CANONICAL"], "/admin/dashboard"),
-    dimension("inventory", "Inventar", EXECUTIVE_PULSE_WEIGHTS.inventory, null, input.inventory.unknown ? 75 : 90, input.inventory.unknown ? 75 : 95,
-      ["OCCUPANCY_TARGET_NOT_APPROVED"], "/admin/locatii"),
-    dimension("crm", "CRM", EXECUTIVE_PULSE_WEIGHTS.crm, input.crmOpportunities.length ? crmCompleteness : null, input.crmOpportunities.length ? 80 : 30, input.crmOpportunities.length ? crmCompleteness : 30,
-      input.crmOpportunities.length ? (input.crmOpenActions ? ["OVERDUE_NEXT_ACTIONS_PRESENT"] : []) : ["CRM_SAMPLE_MISSING"], "/admin/crm?view=today")
+    dimension("inventory", "Inventar", EXECUTIVE_PULSE_WEIGHTS.inventory, null, 0, 0,
+      ["INVENTORY_IS_SHARED_ACROSS_LEGAL_ENTITIES"], "/admin/locatii"),
+    dimension("crm", "CRM", EXECUTIVE_PULSE_WEIGHTS.crm, null, 0, 0,
+      ["CRM_LEGAL_ENTITY_RELATIONSHIP_MISSING"], "/admin/crm?view=today")
   ];
 }
 

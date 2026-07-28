@@ -4,7 +4,7 @@ import type {
   ExecutiveScope
 } from "@/lib/dashboard/executive/contracts";
 
-export const EXECUTIVE_ALERTS_CONTRACT_VERSION = "executive-alerts-v1";
+export const EXECUTIVE_ALERTS_CONTRACT_VERSION = "executive-alerts-v3";
 export const EXECUTIVE_ALERTS_REVALIDATE_SECONDS = 30;
 export const EXECUTIVE_ALERTS_DEFAULT_LIMIT = 50;
 export const EXECUTIVE_ALERTS_PREVIEW_LIMIT = 6;

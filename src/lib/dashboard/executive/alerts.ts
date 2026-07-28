@@ -89,7 +89,7 @@ export const EXECUTIVE_DISABLED_ALERT_RULES = [
 
 const cachedAlerts = unstable_cache(
   async (context: ExecutiveAlertCacheContext) => queryExecutiveAlerts(context),
-  ["executive-alerts-v1"],
+  ["executive-alerts-v3"],
   { revalidate: EXECUTIVE_ALERTS_REVALIDATE_SECONDS, tags: ALERT_CACHE_TAGS }
 );
 
@@ -282,8 +282,12 @@ export async function queryExecutiveAlerts(
     ...campaignAlerts(campaigns, locations, context, snapshotDate, queryNow),
     ...holdAlerts(locations, context, snapshotDate, queryNow),
     ...operationalAlerts(operationTasks, locations, context, snapshotDate, queryNow),
-    ...crmAlerts(crmActions, context, snapshotDate, queryNow),
-    ...inventoryAlerts(locations, campaigns, context, snapshotDate, queryNow)
+    ...(context.selectedEntityCodes.length === 3
+      ? crmAlerts(crmActions, context, snapshotDate, queryNow)
+      : []),
+    ...(context.selectedEntityCodes.length === 3
+      ? inventoryAlerts(locations, campaigns, context, snapshotDate, queryNow)
+      : [])
   ]).sort(alertSort);
   const filtered = filterAlerts(allAlerts, context);
   const offset = cursorOffset(context.cursor);
@@ -425,6 +429,7 @@ function financialAlerts(
       evidence: [
         evidence("Factură", invoiceLabel),
         evidence("Client", clientLabel),
+        evidence("Account Manager", row.accountOwnerUserId ? userLabels.get(row.accountOwnerUserId) || "Responsabil alocat" : "Nealocat"),
         evidence("Scadență", dueKey),
         evidence("Aging", `${overdueDays} zile`),
         evidence("Sold", `${new Prisma.Decimal(row.remainingAmount || 0).toFixed(2)} ${row.currency || "NECUNOSCUT"}`)
@@ -450,7 +455,9 @@ function financialAlerts(
       entityLabel: entityLabelForCode(entityCode as ExecutiveEntityCode),
       companyEntity: entityCode as ExecutiveEntityCode,
       title: "Creanțe fără responsabil canonic",
-      summary: `${group.length} creanțe active nu au accountOwnerUserId.`,
+      summary: group.length === 1
+        ? "O creanță activă nu are responsabil canonic."
+        : `${group.length} creanțe active nu au responsabil canonic.`,
       severity: "DATA_QUALITY",
       impact: { kind: "DATA_QUALITY", label: "Creanțe nealocate", count: group.length },
       confidence: 100,
@@ -580,6 +587,9 @@ function campaignAlerts(
       dueAt: campaign.startDate,
       recommendedAction: "Deschide campania și verifică rezervările, disponibilitatea și responsabilul.",
       evidence: [
+        evidence("Client", campaign.client.companyName),
+        evidence("Campanie", campaign.campaignName),
+        evidence("Account Manager", owner?.name || "Nealocat"),
         evidence("Status efectiv", decision.effectiveStatus),
         evidence("Start", startKey),
         evidence("BOOKED valid", validBooked.length),
@@ -670,6 +680,10 @@ function holdAlerts(
 
   if (inconsistencies.length) {
     const reasonCounts = countBy(inconsistencies.flatMap((row) => row.reasons), (reason) => reason);
+    const inconsistencyEntities = [...new Set(inconsistencies
+      .map((row) => row.entityCode)
+      .filter((code): code is ExecutiveEntityCode => Boolean(code)))];
+    const companyEntity = inconsistencyEntities.length === 1 ? inconsistencyEntities[0] : "UNKNOWN";
     alerts.push(makeAlert({
       ruleType: "HOLD_DATA_INCONSISTENCY",
       reasonCode: "HOLD_DATA_INCONSISTENCY",
@@ -678,9 +692,11 @@ function holdAlerts(
       entityType: "reservation_group",
       entityId: "hold-data-inconsistency",
       entityLabel: "HOLD-uri cu date inconsistente",
-      companyEntity: "UNKNOWN",
+      companyEntity,
       title: "Calitate date HOLD",
-      summary: `${inconsistencies.length} HOLD-uri necesită verificare; disponibilitatea folosește expirarea efectivă.`,
+      summary: inconsistencies.length === 1
+        ? "Un HOLD necesită verificare; disponibilitatea folosește expirarea efectivă."
+        : `${inconsistencies.length} HOLD-uri necesită verificare; disponibilitatea folosește expirarea efectivă.`,
       severity: "DATA_QUALITY",
       impact: { kind: "DATA_QUALITY", label: "HOLD-uri afectate", count: inconsistencies.length },
       confidence: 100,
@@ -733,7 +749,9 @@ function operationalAlerts(
       entityLabel: "Taskuri operaționale active",
       companyEntity: "UNKNOWN",
       title: "Acoperire redusă a assignment-ului",
-      summary: `${unassigned.length} din ${activeTasks.length} taskuri active sunt nealocate.`,
+      summary: activeTasks.length === 1
+        ? "Singurul task activ este nealocat."
+        : `${unassigned.length} din ${activeTasks.length} taskuri active sunt nealocate.`,
       severity: "DATA_QUALITY",
       impact: { kind: "DATA_QUALITY", label: "Taskuri nealocate", count: unassigned.length },
       confidence: assignmentCompleteness,
@@ -780,7 +798,9 @@ function operationalAlerts(
       entityLabel: `${kind} · ${entityText}`,
       companyEntity: entityCode || "UNKNOWN",
       title: "Taskuri operaționale întârziate",
-      summary: `${group.length} taskuri ${kind.toLowerCase()} au depășit data programată.`,
+      summary: group.length === 1
+        ? `Un task de ${operationKindLabel(kind)} a depășit data programată.`
+        : `${group.length} taskuri de ${operationKindLabel(kind)} au depășit data programată.`,
       severity: "P2",
       impact: { kind: "COUNT", label: "Taskuri întârziate", count: group.length },
       confidence: Math.min(70, assignmentCompleteness),
@@ -822,7 +842,9 @@ function operationalAlerts(
       ruleType: "BOOKED_WITHOUT_OPERATION_TASK",
       reasonCode: "REQUIRED_TASK_MISSING",
       title: "Obligații BOOKED fără task operațional",
-      summary: `${missingTasks.length} obligații statice nu au taskul operațional așteptat.`,
+      summary: missingTasks.length === 1
+        ? "O obligație statică nu are taskul operațional așteptat."
+        : `${missingTasks.length} obligații statice nu au taskul operațional așteptat.`,
       rows: missingTasks.map(({ reservation, location, kind }) => ({
         id: `${reservation.id}:${kind}`,
         label: `${location.code} · ${kind}`,
@@ -847,7 +869,9 @@ function operationalAlerts(
       ruleType: "ORPHAN_OPERATION_TASK",
       reasonCode: "ORPHAN_OPERATION_TASK",
       title: "Taskuri fără obligație comercială validă",
-      summary: `${orphans.length} taskuri nu sunt legate de BOOKED sau campanie activă/programată.`,
+      summary: orphans.length === 1
+        ? "Un task nu este legat de BOOKED sau de o campanie activă/programată."
+        : `${orphans.length} taskuri nu sunt legate de BOOKED sau de o campanie activă/programată.`,
       rows: orphans.map((task) => ({ ...operationTaskRef(task), createdAt: task.createdAt })),
       context,
       snapshotDate,
@@ -875,7 +899,9 @@ function operationalAlerts(
       ruleType: "COMPLETED_WITHOUT_PROOF",
       reasonCode: "COMPLETED_WITHOUT_PROOF",
       title: "Taskuri finalizate fără dovadă canonică",
-      summary: `${completedWithoutProof.length} taskuri DONE nu au o fotografie activă legată corect.`,
+      summary: completedWithoutProof.length === 1
+        ? "Un task finalizat nu are o fotografie activă legată corect."
+        : `${completedWithoutProof.length} taskuri finalizate nu au o fotografie activă legată corect.`,
       rows: completedWithoutProof.map((task) => ({ ...operationTaskRef(task), createdAt: task.completedAt || task.updatedAt })),
       context,
       snapshotDate,
@@ -1209,25 +1235,39 @@ export function summarizeAlerts(alerts: ExecutiveAlert[]) {
   return { total: alerts.length, bySeverity, byDomain };
 }
 
-function makeAlertPreview(alert: ExecutiveAlert) {
+function makeAlertPreview(alert: ExecutiveAlert, scope: ExecutiveScope) {
+  const params = new URLSearchParams({
+    panel: "alerts",
+    entity: scope.entitySelection,
+    snapshot: scope.snapshotDate,
+    period: scope.periodPreset,
+    periodStart: scope.periodStart,
+    periodEnd: scope.periodEnd,
+    ruleType: alert.ruleType
+  });
   return {
     id: alert.id,
     label: alert.title,
     detail: alert.summary,
     count: alert.occurrenceCount,
     severity: alert.severity === "P0" ? "critical" as const : alert.severity === "DATA_QUALITY" ? "neutral" as const : "warning" as const,
+    severityCode: alert.severity,
     confidence: alert.confidence,
     dataQuality: alert.dataQualityState,
-    href: `/admin/dashboard?panel=alerts&ruleType=${encodeURIComponent(alert.ruleType)}`
+    href: `/admin/dashboard?${params.toString()}#executive-alerts`
   };
 }
 
 export function executiveAlertPreview(response: ExecutiveAlertsResponse) {
-  return response.items.slice(0, 6).map(makeAlertPreview);
+  return response.items.slice(0, 6).map((alert) => makeAlertPreview(alert, response.scope));
 }
 
 export function executiveAttentionPreview(response: ExecutiveAlertsResponse): ExecutiveAttentionItem[] {
-  return response.items.slice(0, 10).map((alert) => ({
+  const alertPreviewIds = new Set(response.items.slice(0, 3).map((alert) => alert.id));
+  return response.items
+    .filter((alert) => !alertPreviewIds.has(alert.id) && alert.severity !== "DATA_QUALITY")
+    .slice(0, 10)
+    .map((alert) => ({
     id: alert.id,
     title: alert.title,
     summary: alert.summary,
@@ -1268,6 +1308,16 @@ function thresholdEntry(startDate: Date | null, severity: ExecutiveAlertSeverity
   const value = new Date(startDate);
   value.setUTCDate(value.getUTCDate() - days);
   return value;
+}
+
+function operationKindLabel(kind: string) {
+  const labels: Record<string, string> = {
+    DECORATION: "decorare",
+    NEUTRALIZATION: "neutralizare",
+    INSTALLATION: "instalare",
+    MAINTENANCE: "mentenanță"
+  };
+  return labels[kind.toUpperCase()] || "operațiune";
 }
 
 function receivableHref(row: ReceivableRow, overdueDays?: number) {

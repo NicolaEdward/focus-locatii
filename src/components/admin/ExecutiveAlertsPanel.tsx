@@ -18,11 +18,18 @@ import type {
 } from "@/lib/dashboard/executive/alerts-contracts";
 
 const severityLabels: Record<ExecutiveAlertSeverity, string> = {
-  P0: "P0 · Critical",
-  P1: "P1 · High",
-  P2: "P2 · Warning",
-  DATA_QUALITY: "Data Quality"
+  P0: "P0 · Critic",
+  P1: "P1 · Ridicat",
+  P2: "P2 · Avertizare",
+  DATA_QUALITY: "Calitatea datelor"
 };
+
+const dataQualityLabels = {
+  HIGH: "Ridicată",
+  MEDIUM: "Medie",
+  LOW: "Redusă",
+  DATA_INSUFFICIENT: "Date insuficiente"
+} as const;
 
 const domainLabels: Record<ExecutiveAlertDomain, string> = {
   FINANCE: "Financiar",
@@ -123,9 +130,9 @@ function AlertFilters({ data }: { data: ExecutiveAlertsResponse }) {
       </FilterSelect>
       <FilterSelect label="Calitatea datelor" name="dataQuality" value={data.filters.dataQuality}>
         <option value="ALL">Toate nivelurile</option>
-        <option value="HIGH">High</option>
-        <option value="MEDIUM">Medium</option>
-        <option value="LOW">Low</option>
+        <option value="HIGH">Ridicată</option>
+        <option value="MEDIUM">Medie</option>
+        <option value="LOW">Redusă</option>
         <option value="DATA_INSUFFICIENT">Date insuficiente</option>
       </FilterSelect>
       <button className="focus-button min-h-11 self-end justify-center" type="submit">
@@ -165,16 +172,19 @@ function AlertCard({ alert, readOnly }: { alert: ExecutiveAlert; readOnly: boole
             <span className="rounded border border-white/10 px-2 py-1 text-[10px] font-black uppercase text-slate-300">
               {domainLabels[alert.domain]}
             </span>
-            <span className="text-[11px] text-slate-400">Confidence {alert.confidence}% · {alert.dataQualityState}</span>
+            <span className="text-[11px] text-slate-400">Încredere {alert.confidence}% · calitatea datelor {dataQualityLabels[alert.dataQualityState].toLowerCase()}</span>
           </div>
           <h3 className="mt-3 text-base font-black text-white">{alert.title}</h3>
           <p className="mt-1 text-sm leading-6 text-slate-300">{alert.summary}</p>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-            <span>Entitate: <strong className="text-slate-200">{alert.entityLabel}</strong></span>
-            <span>Responsabil: <strong className="text-slate-200">{alert.responsibleLabel}</strong></span>
-            <span>Termen: <strong className="text-slate-200">{alert.dueAt ? dateTimeLabel(alert.dueAt) : "Fără termen canonic"}</strong></span>
-            <span>Vechime: <strong className="text-slate-200">{alert.age.label}</strong></span>
-            <span>Apariții: <strong className="text-slate-200">{alert.occurrenceCount}</strong></span>
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-3">
+            <AlertContext label="Entitate juridică" value={companyEntityLabel(alert.companyEntity)} />
+            <AlertContext label="Client" value={evidenceValue(alert, "Client")} />
+            <AlertContext label="Campanie" value={alert.entityType === "campaign" ? alert.entityLabel : evidenceValue(alert, "Campanie")} />
+            <AlertContext label="Account Manager" value={evidenceValue(alert, "Account Manager")} />
+            <AlertContext label="Responsabil operațional" value={alert.responsibleLabel} />
+            <AlertContext label="Termen" value={alert.dueAt ? dateTimeLabel(alert.dueAt) : "Fără termen canonic"} />
+            <AlertContext label="Vechime" value={alert.age.label} />
+            <AlertContext label="Apariții" value={String(alert.occurrenceCount)} />
           </div>
         </div>
         <div className="flex min-w-44 flex-col justify-between gap-3 lg:items-end">
@@ -190,7 +200,7 @@ function AlertCard({ alert, readOnly }: { alert: ExecutiveAlert; readOnly: boole
 
       <details className="mt-4 border-t border-white/10 pt-2">
         <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-xs font-black text-focus-yellow">
-          <AlertCircle size={16} /> Evidence și acțiune recomandată
+          <AlertCircle size={16} /> Dovezi și acțiune recomandată
         </summary>
         <div className="grid gap-4 pb-2 pt-2 lg:grid-cols-2">
           <div className="grid gap-2">
@@ -222,6 +232,27 @@ function AlertCard({ alert, readOnly }: { alert: ExecutiveAlert; readOnly: boole
       </details>
     </article>
   );
+}
+
+function AlertContext({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="rounded border border-white/5 bg-black/10 px-2 py-1.5 text-slate-400">
+      {label}: <strong className="text-slate-200">{value}</strong>
+    </span>
+  );
+}
+
+function evidenceValue(alert: ExecutiveAlert, label: string) {
+  return alert.evidence.find((item) => item.label === label)?.value || "Nu se aplică / date insuficiente";
+}
+
+function companyEntityLabel(value: ExecutiveAlert["companyEntity"]) {
+  if (value === "FOCUS_MEDIA") return "Focus Media Outdoor";
+  if (value === "EXCELLENCE_MEDIA") return "Excellence Media Production";
+  if (value === "FOCUS_BG") return "Focus Media EOOD Bulgaria";
+  if (value === "SHARED_INVENTORY") return "Inventar comun";
+  if (value === "SHARED_CRM") return "CRM fără asociere juridică";
+  return "Nedeterminată";
 }
 
 function AlertPagination({ data }: { data: ExecutiveAlertsResponse }) {

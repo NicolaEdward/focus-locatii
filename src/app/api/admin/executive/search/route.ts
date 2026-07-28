@@ -13,8 +13,9 @@ export async function GET(request: NextRequest) {
     const { session, response } = await requirePermission(request, "dashboard.executive.view");
     if (response || !session) return response;
     setObservabilityRole(session.role);
+    const scopeInput = Object.fromEntries(request.nextUrl.searchParams.entries());
     return NextResponse.json(
-      await searchExecutive(session, request.nextUrl.searchParams.get("q") || ""),
+      await searchExecutive(session, request.nextUrl.searchParams.get("q") || "", scopeInput),
       { headers: { "cache-control": "private, no-store" } }
     );
   });

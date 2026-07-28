@@ -15,6 +15,8 @@ export type ReceivableRegistryInput = {
   view?: ReceivableRegistryView;
   page?: number;
   take?: number;
+  asOf?: string;
+  validatedOnly?: boolean;
 };
 
 export async function listReceivableRegistry(input: ReceivableRegistryInput = {}) {
@@ -22,11 +24,12 @@ export async function listReceivableRegistry(input: ReceivableRegistryInput = {}
   const page = normalizedPage(input.page);
   const take = normalizedTake(input.take, 40);
   const view: ReceivableRegistryView = input.view === "history" ? "history" : "open";
-  const today = startOfUtcDay(new Date());
+  const today = registryAsOf(input.asOf);
   const baseWhere = receivableBaseWhere({
     query,
     companyCode: input.companyCode,
-    currency: input.currency
+    currency: input.currency,
+    validatedOnly: input.validatedOnly
   });
   const viewWhere: Prisma.FinancialReceivableWhereInput = view === "history"
     ? {
@@ -99,6 +102,13 @@ export async function listReceivableRegistry(input: ReceivableRegistryInput = {}
     issuerCompanies,
     pagination: pagination(page, take, total)
   };
+}
+
+function registryAsOf(value?: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value || "")) {
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+  return startOfUtcDay(new Date());
 }
 
 export async function listReceivableImports(input: { page?: number; take?: number } = {}) {
@@ -560,9 +570,10 @@ function reconciliationCounts(categories: ReconciliationCategory[]) {
   return counts;
 }
 
-function receivableBaseWhere(input: { query: string; companyCode?: string; currency?: string }): Prisma.FinancialReceivableWhereInput {
+function receivableBaseWhere(input: { query: string; companyCode?: string; currency?: string; validatedOnly?: boolean }): Prisma.FinancialReceivableWhereInput {
   return {
     includedInReport: true,
+    ...(input.validatedOnly ? { needsReview: false } : {}),
     ...(input.companyCode ? { companyCode: input.companyCode } : {}),
     ...(input.currency ? { currency: input.currency } : {}),
     ...(input.query ? {

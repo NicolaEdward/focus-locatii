@@ -109,15 +109,17 @@ export function isCampaignActive(input: CampaignStatusInput, now = new Date()) {
 
 export function activeCampaignBookingWhere(now = new Date()): Prisma.ReservationWhereInput {
   const today = dateKeyAsUtcDate(bucharestDateKey(now));
+  const tomorrow = new Date(today.getTime() + 86_400_000);
   return {
     status: "BOOKED",
-    periodStart: { lte: today },
+    periodStart: { lt: tomorrow },
     periodEnd: { gte: today }
   };
 }
 
 export function campaignEffectiveStatusWhere(status: CampaignEffectiveStatus, now = new Date()): Prisma.CampaignWhereInput {
   const today = dateKeyAsUtcDate(bucharestDateKey(now));
+  const tomorrow = new Date(today.getTime() + 86_400_000);
   const nonTerminal: Prisma.CampaignWhereInput = {
     archivedAt: null,
     status: { notIn: ["archived", "cancelled", "completed", "draft"] }
@@ -126,7 +128,7 @@ export function campaignEffectiveStatusWhere(status: CampaignEffectiveStatus, no
     reservations: { some: activeCampaignBookingWhere(now) }
   };
   const campaignPeriodActive: Prisma.CampaignWhereInput = {
-    startDate: { lte: today },
+    startDate: { lt: tomorrow },
     endDate: { gte: today }
   };
 
@@ -142,7 +144,7 @@ export function campaignEffectiveStatusWhere(status: CampaignEffectiveStatus, no
         AND: [
           nonTerminal,
           { NOT: activeBooking },
-          { startDate: { gt: today }, endDate: { not: null } }
+          { startDate: { gte: tomorrow }, endDate: { not: null } }
         ]
       };
     case "ACTIVE":

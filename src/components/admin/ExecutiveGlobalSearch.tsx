@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   BriefcaseBusiness,
@@ -20,6 +21,7 @@ import type {
   ExecutiveSearchResponse,
   ExecutiveSearchResult
 } from "@/lib/dashboard/executive/refinement-contracts";
+import type { ExecutiveOverview } from "@/lib/dashboard/executive/contracts";
 
 const entityLabels: Record<ExecutiveSearchEntity, string> = {
   CLIENT: "Client",
@@ -35,34 +37,53 @@ const entityLabels: Record<ExecutiveSearchEntity, string> = {
   DOCUMENT: "Document"
 };
 
-export function ExecutiveGlobalSearch() {
+export function ExecutiveGlobalSearch({ data }: { data: ExecutiveOverview }) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ExecutiveSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [activeIndex, setActiveIndex] = useState(-1);
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (query.trim().length < 2) {
       setResults([]);
       setLoading(false);
+      setError("");
+      setActiveIndex(-1);
       return;
     }
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setLoading(true);
+      setError("");
       try {
-        const response = await fetch(`/api/admin/executive/search?q=${encodeURIComponent(query.trim())}`, {
+        const params = new URLSearchParams({
+          q: query.trim(),
+          entity: data.scope.entitySelection,
+          snapshot: data.scope.snapshotDate,
+          period: data.scope.periodPreset,
+          periodStart: data.scope.periodStart,
+          periodEnd: data.scope.periodEnd
+        });
+        const response = await fetch(`/api/admin/executive/search?${params}`, {
           cache: "no-store",
           signal: controller.signal
         });
         const payload = await response.json() as ExecutiveSearchResponse;
-        if (response.ok) {
-          setResults(payload.items);
+        if (!response.ok) throw new Error("Căutarea executivă nu este disponibilă.");
+        setResults(payload.items);
+        setActiveIndex(payload.items.length ? 0 : -1);
+        setOpen(true);
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          setResults([]);
+          setActiveIndex(-1);
+          setError(cause instanceof Error ? cause.message : "Căutarea executivă nu este disponibilă.");
           setOpen(true);
         }
-      } catch {
-        if (!controller.signal.aborted) setResults([]);
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -71,7 +92,7 @@ export function ExecutiveGlobalSearch() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [data.scope.entitySelection, data.scope.periodEnd, data.scope.periodPreset, data.scope.periodStart, data.scope.snapshotDate, query]);
 
   useEffect(() => {
     function closeOnOutside(event: MouseEvent) {
@@ -88,16 +109,39 @@ export function ExecutiveGlobalSearch() {
         <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
         <input
           aria-autocomplete="list"
+          aria-activedescendant={activeIndex >= 0 ? `executive-search-result-${activeIndex}` : undefined}
           aria-controls="executive-search-results"
           aria-expanded={open}
           className="focus-input min-h-11 w-full pl-10 pr-10"
           onChange={(event) => {
             setQuery(event.target.value);
             setOpen(true);
+            setActiveIndex(-1);
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={(event) => {
-            if (event.key === "Escape") setOpen(false);
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setOpen(false);
+              return;
+            }
+            if (event.key === "ArrowDown" && results.length) {
+              event.preventDefault();
+              setOpen(true);
+              setActiveIndex((current) => current < results.length - 1 ? current + 1 : 0);
+              return;
+            }
+            if (event.key === "ArrowUp" && results.length) {
+              event.preventDefault();
+              setOpen(true);
+              setActiveIndex((current) => current > 0 ? current - 1 : results.length - 1);
+              return;
+            }
+            if (event.key === "Enter" && open && activeIndex >= 0 && results[activeIndex]) {
+              event.preventDefault();
+              setOpen(false);
+              router.push(results[activeIndex].href);
+            }
           }}
           placeholder="Caută client, campanie, locație, factură, task..."
           role="combobox"
@@ -106,18 +150,21 @@ export function ExecutiveGlobalSearch() {
         {loading
           ? <LoaderCircle className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-focus-yellow" size={17} />
           : query
-            ? <button aria-label="Șterge căutarea" className="absolute right-2 top-1/2 grid min-h-9 min-w-9 -translate-y-1/2 place-items-center text-slate-400 hover:text-white" onClick={() => { setQuery(""); setResults([]); }} type="button"><X size={16} /></button>
+            ? <button aria-label="Șterge căutarea" className="absolute right-2 top-1/2 grid min-h-9 min-w-9 -translate-y-1/2 place-items-center text-slate-400 hover:text-white" onClick={() => { setQuery(""); setResults([]); setError(""); setActiveIndex(-1); }} type="button"><X size={16} /></button>
             : null}
       </label>
 
       {open && query.trim().length >= 2 ? (
         <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 max-h-[min(65vh,560px)] overflow-y-auto rounded-lg border border-focus-line bg-focus-navy p-2 shadow-2xl" id="executive-search-results" role="listbox">
-          {results.length ? results.map((item) => (
+          {results.length ? results.map((item, index) => (
             <Link
-              className="grid min-h-14 grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 hover:bg-white/[0.06]"
+              aria-selected={activeIndex === index}
+              className={`grid min-h-14 grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 ${activeIndex === index ? "bg-white/[0.08] outline outline-1 outline-focus-yellow/60" : "hover:bg-white/[0.06]"}`}
               href={item.href}
+              id={`executive-search-result-${index}`}
               key={`${item.entity}:${item.id}`}
               onClick={() => setOpen(false)}
+              onMouseEnter={() => setActiveIndex(index)}
               prefetch={false}
               role="option"
             >
@@ -125,8 +172,12 @@ export function ExecutiveGlobalSearch() {
               <span className="min-w-0"><strong className="block truncate text-sm text-white">{item.label}</strong><small className="block truncate text-slate-400">{item.context}</small></span>
               <span className="text-[10px] font-black uppercase text-slate-500">{entityLabels[item.entity]}</span>
             </Link>
-          )) : loading ? null : (
-            <p className="p-4 text-sm text-slate-400">Nu am găsit înregistrări în registrele la care ai acces.</p>
+          )) : loading ? (
+            <p className="p-4 text-sm text-slate-400">Căutăm în registrele permise...</p>
+          ) : error ? (
+            <p className="rounded border border-red-300/25 bg-red-400/[0.06] p-4 text-sm text-red-100">{error}</p>
+          ) : (
+            <p className="p-4 text-sm text-slate-400">Niciun rezultat în registrele și entitatea selectate.</p>
           )}
         </div>
       ) : null}

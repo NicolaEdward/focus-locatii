@@ -15,6 +15,8 @@ export async function GET(request: NextRequest) {
       status: request.nextUrl.searchParams.get("status") || "",
       companyCode: request.nextUrl.searchParams.get("companyCode") || "",
       currency: request.nextUrl.searchParams.get("currency") || "",
+      asOf: request.nextUrl.searchParams.get("snapshot") || "",
+      validatedOnly: request.nextUrl.searchParams.get("validated") === "1",
       view: request.nextUrl.searchParams.get("view") === "history" ? "history" : "open",
       page: Number(request.nextUrl.searchParams.get("page") || 1),
       take: Number(request.nextUrl.searchParams.get("take") || 40)

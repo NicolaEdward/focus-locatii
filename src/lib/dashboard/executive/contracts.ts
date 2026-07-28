@@ -2,7 +2,7 @@ import type { UserRole } from "@/lib/rbac";
 import type { ExecutiveAlertsResponse } from "@/lib/dashboard/executive/alerts-contracts";
 import type { OperationTaskReconciliationResponse } from "@/lib/dashboard/executive/operation-task-reconciliation-contracts";
 
-export const EXECUTIVE_CONTRACT_VERSION = "executive-overview-v2";
+export const EXECUTIVE_CONTRACT_VERSION = "executive-overview-v4";
 export const EXECUTIVE_TIME_ZONE = "Europe/Bucharest";
 export const EXECUTIVE_REVALIDATE_SECONDS = 30;
 
@@ -10,6 +10,7 @@ export type ExecutiveEntityCode = "FOCUS_MEDIA" | "EXCELLENCE_MEDIA" | "FOCUS_BG
 export type ExecutiveEntitySelection = ExecutiveEntityCode | "ALL";
 export type ExecutiveDataQuality = "HIGH" | "MEDIUM" | "LOW" | "DATA_INSUFFICIENT";
 export type ExecutivePeriodPreset = "TODAY" | "WEEK" | "MONTH" | "CUSTOM";
+export type ExecutiveFilterApplicability = "APPLIED" | "APPLIED_WITH_LIMITATIONS" | "FILTER_NOT_APPLICABLE";
 
 export type ExecutiveScope = {
   role: Extract<UserRole, "SUPER_ADMIN" | "COO" | "D_CEO">;
@@ -33,7 +34,7 @@ export type ExecutiveMoney = {
   currency: string;
   amount: string;
   count: number;
-  href: string;
+  href?: string;
 };
 
 export type ExecutivePulseDimension = {
@@ -106,6 +107,7 @@ export type ExecutiveFactItem = {
   detail: string;
   count: number;
   severity: "critical" | "warning" | "neutral";
+  severityCode?: "P0" | "P1" | "P2" | "DATA_QUALITY";
   confidence: number;
   dataQuality: ExecutiveDataQuality;
   href: string;
@@ -163,7 +165,22 @@ export type ExecutiveOverview = {
       dataQuality: ExecutiveDataQuality;
       note: string;
     };
+    filterApplicability: {
+      inventory: ExecutiveFilterApplicability;
+      operations: ExecutiveFilterApplicability;
+      crm: ExecutiveFilterApplicability;
+    };
   };
+  operationsTodayDetails?: Array<{
+    id: string;
+    kind: "DECORATION" | "NEUTRALIZATION";
+    status: string;
+    scheduledFor: string;
+    locationLabel: string;
+    campaignLabel: string;
+    responsibleLabel: string;
+    href: string;
+  }>;
   campaignRisks: ExecutiveCampaignRisk[];
   alertPreview: ExecutiveFactItem[];
   attentionPreview: ExecutiveAttentionItem[];

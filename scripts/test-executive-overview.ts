@@ -32,6 +32,9 @@ assert.equal(complete.overallScore, 90);
 assert.equal(complete.totalConfidence, 90);
 assert.equal(insufficient.trend.direction, "UNAVAILABLE", "Trend must remain unavailable when the previous score cannot be reconstructed canonically.");
 assert(insufficient.mainFactors.length > 0, "Pulse must explain its main confidence factors.");
+assert(insufficient.missingData.some((item) => item.includes("registrul operațional")), "Missing data must use business language.");
+assert(!insufficient.mainFactors.some((item) => item.label.includes("OPERATIONTASK_CUTOVER_PENDING")), "Pulse must not expose internal reason codes in UI labels.");
+assert(insufficient.dimensions.some((dimension) => dimension.reasonCodes.includes("OPERATIONTASK_CUTOVER_PENDING")), "Canonical reason codes must remain available for audit.");
 
 assert.deepEqual(operationalRequirementForBooked({ reservationStatus: "HOLD", locationType: "Mesh" }).requiredKinds, []);
 assert.deepEqual(operationalRequirementForBooked({ reservationStatus: "BOOKED", locationType: "Mesh" }).requiredKinds, ["DECORATION", "NEUTRALIZATION"]);
@@ -81,11 +84,16 @@ assert(component.includes("pulse.mainFactors") && component.includes("pulse.tren
 assert(component.indexOf("Executive Alerts") < component.indexOf("Company Pulse"), "Alerts must precede the KPI overview in the first viewport.");
 assert(route.includes('requirePermission(request, "dashboard.executive.view")'));
 assert(route.includes('"cache-control": "private, no-store"'));
-assert(component.includes("/admin/dashboard?panel=campaign-risks#campaign-risks"), "Campaign risk card and drill-down must share the same filtered scope.");
+assert(component.includes("dashboardPanelHref(data, \"campaign-risks\", \"campaign-risks\")"), "Campaign risk card and drill-down must preserve the complete executive scope.");
+assert(component.includes("Campanii încep astăzi") && component.includes("Campanii se încheie astăzi"), "Today strip must expose campaign starts and ends directly.");
+assert(component.includes("FILTER_NOT_APPLICABLE") && component.includes("Filtrul juridic nu se aplică"), "Shared inventory must never masquerade as entity-filtered data.");
+assert(component.includes("operations-today-decoration") && component.includes("operations-today-neutralization"), "Today operation counts must have exact internal drill-downs.");
+assert(service.includes("campaignEffectiveStatusWhere(\"ACTIVE\", snapshotBounds.start)"), "Campaign KPI must reuse the canonical effective-status predicate at the selected snapshot.");
+assert(service.includes('remainingAmount: { gt: new Prisma.Decimal("0.01") }'), "Finance KPI must use the canonical settled tolerance.");
 
 console.log(JSON.stringify({
   ok: true,
-  checks: 34,
+  checks: 37,
   dst: { springHours: 23, autumnHours: 25 },
   inventory,
   cacheIsolation: true,

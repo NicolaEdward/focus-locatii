@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Archive, CalendarDays, FileText, Plus, Save, Search, Upload, Wrench } from "lucide-react";
 import type { AuthSession } from "@/lib/auth";
 import type { AccountOwnerOption } from "@/lib/client-campaigns";
-import type { CampaignListItem, CampaignOverview, ClientListItem, FinanceSummary, WorkspaceDocument, WorkspacePage } from "@/lib/client-campaign-workspaces";
+import type { CampaignDateFilter, CampaignListItem, CampaignOverview, ClientListItem, FinanceSummary, WorkspaceDocument, WorkspacePage } from "@/lib/client-campaign-workspaces";
 import type { CrmHandoffProposal } from "@/lib/crm-handoff-contract";
 import { hasAnyPermission } from "@/lib/rbac";
 import { companyEntities } from "@/lib/company-entities";
@@ -20,8 +20,13 @@ import {
 type ReservationRow = { id: string; locationId: string; locationCode: string; locationName: string | null; city: string | null; status: string; periodStart: string; periodEnd: string; installationDate: string | null; neutralizationDate: string | null; monthlyRent: number; currency: string; productionNotes: string | null };
 type DetailTab = "overview" | "reservations" | "documents" | "finance";
 type SectionData = { reservations?: ReservationRow[]; documents?: WorkspaceDocument[]; finance?: FinanceSummary };
+type ExecutiveCampaignContext = {
+  entityCode: string | null;
+  snapshotDate: string | null;
+  dateFilter: CampaignDateFilter | null;
+};
 
-export function CampaignsWorkspace({ initialPage, initialEffectiveStatus, initialCampaignId, initialClientId, handoffOpportunityId, openCreate, session, accountOwners }: { initialPage: WorkspacePage<CampaignListItem>; initialEffectiveStatus?: CampaignEffectiveStatus | null; initialCampaignId?: string | null; initialClientId?: string | null; handoffOpportunityId?: string | null; openCreate?: boolean; session: AuthSession; accountOwners: AccountOwnerOption[] }) {
+export function CampaignsWorkspace({ initialPage, initialEffectiveStatus, initialCampaignId, initialClientId, handoffOpportunityId, openCreate, session, accountOwners, executiveContext }: { initialPage: WorkspacePage<CampaignListItem>; initialEffectiveStatus?: CampaignEffectiveStatus | null; initialCampaignId?: string | null; initialClientId?: string | null; handoffOpportunityId?: string | null; openCreate?: boolean; session: AuthSession; accountOwners: AccountOwnerOption[]; executiveContext?: ExecutiveCampaignContext }) {
   const router = useRouter(); const pathname = usePathname();
   const [page, setPage] = useState(initialPage); const [query, setQuery] = useState(initialPage.query);
   const [effectiveStatus, setEffectiveStatus] = useState<CampaignEffectiveStatus | "">(initialEffectiveStatus || "");
@@ -98,9 +103,9 @@ export function CampaignsWorkspace({ initialPage, initialEffectiveStatus, initia
     return () => { cancelled = true; };
   }, [canConfirmHandoff, handoffOpportunityId, initialClientId]);
 
-  function updateUrl(nextId: string, nextQuery = query, nextStatus: CampaignEffectiveStatus | "" = effectiveStatus) { const params = new URLSearchParams(); if (nextQuery) params.set("q", nextQuery); if (nextStatus) params.set("effectiveStatus", nextStatus); if (nextId) params.set("campaignId", nextId); router.replace(`${pathname}${params.size ? `?${params}` : ""}`, { scroll: false }); }
+  function updateUrl(nextId: string, nextQuery = query, nextStatus: CampaignEffectiveStatus | "" = effectiveStatus) { const params = executiveCampaignParams(executiveContext); if (nextQuery) params.set("q", nextQuery); if (nextStatus) params.set("effectiveStatus", nextStatus); if (nextId) params.set("campaignId", nextId); router.replace(`${pathname}${params.size ? `?${params}` : ""}`, { scroll: false }); }
 
-  async function loadPage(cursor: string | null, search = query, statusFilter: CampaignEffectiveStatus | "" = effectiveStatus) { setLoadingList(true); setError(""); try { const params = new URLSearchParams({ limit: "30" }); if (search.trim()) params.set("q", search.trim()); if (statusFilter) params.set("effectiveStatus", statusFilter); if (cursor) params.set("cursor", cursor); const response = await fetch(`/api/admin/campaigns?${params}`, { cache: "no-store" }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error || "Lista campaniilor nu a putut fi incarcata."); setPage(payload.page); updateUrl(selectedId, search, statusFilter); } catch (cause) { setError(cause instanceof Error ? cause.message : "Lista campaniilor nu a putut fi incarcata."); } finally { setLoadingList(false); } }
+  async function loadPage(cursor: string | null, search = query, statusFilter: CampaignEffectiveStatus | "" = effectiveStatus) { setLoadingList(true); setError(""); try { const params = executiveCampaignParams(executiveContext); params.set("limit", "30"); if (search.trim()) params.set("q", search.trim()); if (statusFilter) params.set("effectiveStatus", statusFilter); if (cursor) params.set("cursor", cursor); const response = await fetch(`/api/admin/campaigns?${params}`, { cache: "no-store" }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error || "Lista campaniilor nu a putut fi incarcata."); setPage(payload.page); updateUrl(selectedId, search, statusFilter); } catch (cause) { setError(cause instanceof Error ? cause.message : "Lista campaniilor nu a putut fi incarcata."); } finally { setLoadingList(false); } }
   async function loadOverview(id: string) { setLoadingDetail(true); setError(""); setTab("overview"); setSections({}); try { const response = await fetch(`/api/admin/campaigns/${id}`, { cache: "no-store" }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error || "Campania nu a putut fi incarcata."); setOverview(payload.campaign); setForm(formFromOverview(payload.campaign)); } catch (cause) { setOverview(null); setError(cause instanceof Error ? cause.message : "Campania nu a putut fi incarcata."); } finally { setLoadingDetail(false); } }
   async function loadSection(section: Exclude<DetailTab, "overview">, force = false) { if (!selectedId || (!force && sections[selectedId]?.[section])) return; setLoadingSection(true); setError(""); try { const response = await fetch(`/api/admin/campaigns/${selectedId}/${section}`, { cache: "no-store" }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error || "Sectiunea nu a putut fi incarcata."); setSections((current) => ({ ...current, [selectedId]: { ...(current[selectedId] || {}), [section]: payload[section] } })); } catch (cause) { setError(cause instanceof Error ? cause.message : "Sectiunea nu a putut fi incarcata."); } finally { setLoadingSection(false); } }
 
@@ -115,6 +120,15 @@ export function CampaignsWorkspace({ initialPage, initialEffectiveStatus, initia
 
   return <main className="focus-container grid min-w-0 gap-5 py-6">
     <WorkspaceHeader eyebrow="Portofoliu comercial" title="Campanii" description="Campaniile au propria lista si propriul dosar. Inchirierile, documentele si situatia financiara se incarca numai cand deschizi sectiunea respectiva." actions={<>{canManage ? <button className="focus-button" type="button" onClick={openCreateEditor}><Plus size={17} /> Campanie noua</button> : null}<Link className="focus-button secondary" href="/admin/clienti">Clienti</Link></>} />
+    {executiveContext?.snapshotDate || executiveContext?.entityCode || executiveContext?.dateFilter ? (
+      <div className="rounded-md border border-focus-yellow/30 bg-focus-yellow/5 px-3 py-2 text-xs text-slate-300">
+        Filtru executiv aplicat:
+        {executiveContext.entityCode ? ` entitate ${executiveContext.entityCode}` : " toate entitatile"}
+        {executiveContext.snapshotDate ? ` · snapshot ${executiveContext.snapshotDate}` : ""}
+        {executiveContext.dateFilter === "STARTS_ON" ? " · campanii care incep la snapshot" : ""}
+        {executiveContext.dateFilter === "ENDS_ON" ? " · campanii care se incheie la snapshot" : ""}
+      </div>
+    ) : null}
     {handoffBusy ? <Feedback tone="success">Pregatim datele oportunitatii castigate...</Feedback> : null}
     {handoff ? <Panel title="Predare explicita din CRM" action={handoff.ready && handoff.existingCampaign && canConfirmHandoff ? <button className="focus-button" type="button" disabled={handoffBusy} onClick={() => void confirmCampaignHandoff(handoff.existingCampaign!.id)}><Save size={16} /> Confirma campania existenta</button> : undefined}><p className="text-sm text-slate-300">Campania nu este creata automat. {handoff.existingCampaign ? `Am identificat campania ${handoff.existingCampaign.campaignName}; confirma asocierea fara a crea un duplicat.` : "Verifica clientul, perioada, valoarea integrala si responsabilul, apoi salveaza explicit."}</p>{handoff.warnings.length ? <ul className="mt-2 grid gap-1 text-xs text-amber-200">{handoff.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}</Panel> : null}
     {message ? <Feedback tone="success">{message}</Feedback> : null}{error ? <Feedback tone="error">{error}</Feedback> : null}
@@ -140,3 +154,11 @@ function OperationDialog({ reservation, onClose, onSaved }: { reservation: Reser
 
 function Metric({ label, value }: { label: string; value: string }) { return <article className="rounded-lg border border-focus-line bg-focus-navy/30 p-3"><p className="text-xs font-black uppercase text-slate-400">{label}</p><p className="mt-1 text-xl font-black text-white">{value}</p></article>; }
 function formFromOverview(campaign: CampaignOverview): CampaignForm { return { clientId: campaign.clientId, campaignName: campaign.campaignName, campaignCode: campaign.campaignCode || "", status: campaign.status, companyEntity: campaign.companyEntity || "Focus Media", sellerUserId: campaign.sellerUserId || "", accountOwnerUserId: campaign.accountOwnerUserId || "", startDate: dateInput(campaign.startDate), endDate: dateInput(campaign.endDate), currency: campaign.currency || "EUR", totalContractValue: campaign.totalContractValue ? String(campaign.totalContractValue) : "", paymentTermType: campaign.paymentTermType || "30_days", paymentTermDays: campaign.paymentTermDays != null ? String(campaign.paymentTermDays) : "30", billingRule: campaign.billingRule || "manual_per_contract", billingFrequency: campaign.billingFrequency || "monthly", notes: campaign.notes || "" }; }
+
+function executiveCampaignParams(context?: ExecutiveCampaignContext) {
+  const params = new URLSearchParams();
+  if (context?.entityCode) params.set("entity", context.entityCode);
+  if (context?.snapshotDate) params.set("snapshot", context.snapshotDate);
+  if (context?.dateFilter) params.set("dateFilter", context.dateFilter);
+  return params;
+}

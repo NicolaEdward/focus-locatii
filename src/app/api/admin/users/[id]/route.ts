@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
-import { updateUser } from "@/lib/users";
+import { getUserAccessState, updateUser } from "@/lib/users";
 import { rateLimitIdentity } from "@/lib/request-security";
 import { consumeRateLimit } from "@/lib/security-rate-limit";
 
@@ -14,13 +14,20 @@ export async function PATCH(request: NextRequest, context: Context) {
   if (!limit.allowed) return NextResponse.json({ error: "Limita de modificari ale conturilor a fost atinsa temporar." }, { status: 429 });
   try {
     const { id } = await context.params;
-    const user = await updateUser(id, await request.json(), session.id, session.role);
+    const input = await request.json();
+    const before = await getUserAccessState(id);
+    const user = await updateUser(id, input, session.id, session.role);
+    const after = { role: user.role, active: user.active };
     await recordAudit({
       actor: session,
-      action: "user.update",
+      action: auditAction(before, after),
       entityType: "user",
       entityId: id,
-      metadata: { role: user.role, active: user.active },
+      metadata: {
+        reason: typeof input?.reason === "string" ? input.reason.trim().slice(0, 500) : null,
+        before,
+        after
+      },
       request
     });
     return NextResponse.json({ user });
@@ -30,4 +37,13 @@ export async function PATCH(request: NextRequest, context: Context) {
       { status: 400 }
     );
   }
+}
+
+function auditAction(
+  before: { role: string; active: boolean },
+  after: { role: string; active: boolean }
+) {
+  if (before.active !== after.active) return after.active ? "user.activate" : "user.deactivate";
+  if (before.role !== after.role) return "user.role.change";
+  return "user.profile.update";
 }

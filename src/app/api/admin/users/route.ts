@@ -17,13 +17,18 @@ export async function POST(request: NextRequest) {
   const limit = await consumeRateLimit({ scope: "auth.admin.user.create", identifier: rateLimitIdentity(request, session.id), limit: 10, windowSeconds: 60 * 60 });
   if (!limit.allowed) return NextResponse.json({ error: "Limita de creare a conturilor a fost atinsa temporar." }, { status: 429 });
   try {
-    const user = await createUser(await request.json(), session.role);
+    const input = await request.json();
+    const user = await createUser(input, session.role);
     await recordAudit({
       actor: session,
       action: "user.create",
       entityType: "user",
       entityId: user.id,
-      metadata: { role: user.role },
+      metadata: {
+        reason: typeof input?.reason === "string" ? input.reason.trim().slice(0, 500) : null,
+        before: null,
+        after: { role: user.role, active: user.active }
+      },
       request
     });
     return NextResponse.json({ user }, { status: 201 });

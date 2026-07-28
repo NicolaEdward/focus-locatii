@@ -40,6 +40,7 @@
     "test:status-availability": "node scripts/test-status-availability-architecture.cjs",
     "test:prorata": "node scripts/test-prorata.cjs",
     "test:rbac": "tsx scripts/test-rbac.ts",
+    "test:user-management": "tsx scripts/test-user-management.ts",
     "test:d-ceo-mutations": "tsx scripts/test-d-ceo-mutation-inventory.ts",
     "test:public-visibility": "node scripts/test-public-location-serialization.cjs",
     "test:document-access": "node scripts/test-document-access.cjs",

@@ -66,7 +66,7 @@ assert.match(gpsAudit, /aria-label="Filtreaza locatiile dupa statusul GPS"/, "GP
 
 const userManagement = read("src/components/admin/UserManagement.tsx");
 assert.match(userManagement, /aria-label=\{`Rol pentru \$\{user\.name\}`\}/, "User role selectors should identify the affected user.");
-assert.match(userManagement, /focus-input w-\[190px\] min-w-\[190px\]/, "User role labels should remain readable in the account table.");
+assert.match(userManagement, /focus-input w-\[210px\] min-w-\[210px\]/, "User role labels should remain readable in the account table.");
 
 const reservationsPanel = read("src/components/admin/AdminReservationsPanel.tsx");
 assert.match(reservationsPanel, /reservationId/, "Reservations panel should understand reservationId focus query params.");

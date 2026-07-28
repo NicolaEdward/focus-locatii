@@ -2,7 +2,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { authActionTokenHash, findUsableAuthActionToken, issueAuthActionToken } from "@/lib/auth-action-tokens";
 import { hashPassword } from "@/lib/auth";
-import { isUserRole, type UserRole } from "@/lib/rbac";
+import { assertRoleAssignmentAllowed, isUserRole, type UserRole } from "@/lib/rbac";
 import { authEmailCapability, authLink, sendAuthEmail } from "@/lib/transactional-email";
 import { revokeAllAuthSessions } from "@/lib/auth-sessions";
 
@@ -15,9 +15,7 @@ const inviteSchema = z.object({
 
 export async function createUserInvite(input: unknown, actor: { id: string; role: UserRole }) {
   const parsed = inviteSchema.parse(input);
-  if (actor.role !== "SUPER_ADMIN" && parsed.role === "SUPER_ADMIN") {
-    throw new Error("Doar SUPER_ADMIN poate invita un alt SUPER_ADMIN.");
-  }
+  assertRoleAssignmentAllowed(actor.role, null, parsed.role);
   const existing = await prisma.user.findUnique({ where: { email: parsed.email }, select: { id: true } });
   if (existing) throw new Error("Exista deja un cont cu acest email.");
   const synthetic = syntheticAuthFlowAllowed();

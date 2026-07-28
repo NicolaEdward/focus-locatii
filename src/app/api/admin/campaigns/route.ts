@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { createCampaign } from "@/lib/campaigns";
-import { getCampaignsPage, type CampaignDateFilter } from "@/lib/client-campaign-workspaces";
+import { CAMPAIGN_DATE_FILTERS, getCampaignsPage, type CampaignDateFilter } from "@/lib/client-campaign-workspaces";
 import { observeRoute, setObservabilityRole } from "@/lib/observability";
 import { CAMPAIGN_EFFECTIVE_STATUSES, type CampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
 import { companyEntities } from "@/lib/company-entities";
@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     if (response || !session) return response;
     setObservabilityRole(session.role);
     const clientId = request.nextUrl.searchParams.get("clientId");
+    const ownerUserId = request.nextUrl.searchParams.get("owner");
     const query = request.nextUrl.searchParams.get("q")?.trim() || "";
     const cursor = request.nextUrl.searchParams.get("cursor");
     const requestedStatus = request.nextUrl.searchParams.get("effectiveStatus");
@@ -32,12 +33,13 @@ export async function GET(request: NextRequest) {
       .filter((entity) => entity.code === entityCode)
       .map((entity) => entity.value);
     const requestedDateFilter = request.nextUrl.searchParams.get("dateFilter");
-    const dateFilter = ["STARTS_ON", "ENDS_ON"].includes(requestedDateFilter || "")
+    const dateFilter = CAMPAIGN_DATE_FILTERS.includes(requestedDateFilter as CampaignDateFilter)
       ? requestedDateFilter as CampaignDateFilter
       : null;
     const limit = Number(request.nextUrl.searchParams.get("limit") || (clientId ? 50 : 30));
     const page = await getCampaignsPage(session, {
       clientId,
+      ownerUserId,
       query,
       cursor,
       limit,

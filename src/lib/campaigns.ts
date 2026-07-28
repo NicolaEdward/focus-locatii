@@ -18,18 +18,6 @@ const optionalText = z.preprocess((value) => {
   return text || null;
 }, z.string().nullable().optional());
 
-const optionalDate = z.preprocess((value) => {
-  if (value == null || value === "") return null;
-  const date = new Date(String(value));
-  return Number.isNaN(date.getTime()) ? null : date;
-}, z.date().nullable().optional());
-
-const optionalMoney = z.preprocess((value) => {
-  if (value == null || value === "") return null;
-  const parsed = Number(String(value).replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : null;
-}, z.number().nonnegative().nullable().optional());
-
 const optionalInt = z.preprocess((value) => {
   if (value == null || value === "") return null;
   const parsed = Number(value);
@@ -47,10 +35,6 @@ export const campaignInputSchema = z.object({
   sellerUserId: optionalText,
   accountOwnerUserId: optionalText,
   companyEntity: optionalText,
-  startDate: optionalDate,
-  endDate: optionalDate,
-  currency: z.enum(["RON", "EUR"]).nullable().optional(),
-  totalContractValue: optionalMoney,
   paymentTermType: optionalText,
   paymentTermDays: optionalInt,
   customPaymentTermNote: optionalText,
@@ -163,7 +147,6 @@ function normalizeCampaignForCreate(input: z.infer<typeof campaignInputSchema>, 
     status: parseCampaignStatus(input.status || "draft"),
     campaignType: input.campaignType || "direct_client",
     companyEntity: companyEntityOrDefault(input.companyEntity),
-    currency: input.currency || "EUR",
     paymentTermType: input.paymentTermType || "30_days",
     paymentTermDays: paymentDays,
     billingRule: input.billingRule || "manual_per_contract",

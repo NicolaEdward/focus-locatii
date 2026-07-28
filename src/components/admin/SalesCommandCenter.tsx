@@ -9,8 +9,8 @@ export function SalesCommandCenter({ data }: { data: SalesDashboardData }) {
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Rezumat agenda mea">
       <SalesMetric icon={<PhoneCall size={18} />} label="De urmărit azi" value={data.summary.followUpsDue} detail={`${data.summary.overdueFollowUps} restante`} tone={data.summary.overdueFollowUps ? "red" : "green"} href="/admin/crm?view=today" />
       <SalesMetric icon={<ReceiptText size={18} />} label="Scadențe clienții mei" value={data.summary.overdueInvoices} detail={`${data.summary.dueSoonInvoices} în următoarele 7 zile`} tone={data.summary.overdueInvoices ? "red" : "green"} href="/admin/clienti?tab=invoices" />
-      <SalesMetric icon={<BriefcaseBusiness size={18} />} label="Încep curând" value={data.summary.campaignsStarting} detail="Campanii în 7 zile" tone="yellow" href="/admin/campanii" />
-      <SalesMetric icon={<CalendarClock size={18} />} label="Se termină curând" value={data.summary.campaignsEnding} detail="Campanii în 7 zile" tone="neutral" href="/admin/campanii" />
+      <SalesMetric icon={<BriefcaseBusiness size={18} />} label="Încep curând" value={data.summary.campaignsStarting} detail="Campanii în 7 zile" tone="yellow" href={data.links.campaignsStarting} />
+      <SalesMetric icon={<CalendarClock size={18} />} label="Se termină curând" value={data.summary.campaignsEnding} detail="Campanii în 7 zile" tone="neutral" href={data.links.campaignsEnding} />
       <SalesMetric icon={<Wrench size={18} />} label="Probleme operaționale" value={data.summary.operationalProblems} detail="La clienții mei" tone={data.summary.operationalProblems ? "red" : "green"} href="/admin/operational" />
     </section>
 

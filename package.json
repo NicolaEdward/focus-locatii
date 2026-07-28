@@ -39,6 +39,8 @@
     "measure:availability": "node scripts/measure-availability-routes.cjs",
     "test:status-availability": "node scripts/test-status-availability-architecture.cjs",
     "test:prorata": "node scripts/test-prorata.cjs",
+    "test:campaign-commercial-summary": "tsx scripts/test-campaign-commercial-summary.ts",
+    "campaigns:sync-commercial-summary": "tsx scripts/sync-campaign-commercial-summaries.ts",
     "test:rbac": "tsx scripts/test-rbac.ts",
     "test:user-management": "tsx scripts/test-user-management.ts",
     "test:d-ceo-mutations": "tsx scripts/test-d-ceo-mutation-inventory.ts",

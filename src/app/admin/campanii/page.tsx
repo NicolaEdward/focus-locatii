@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { CampaignsWorkspace } from "@/components/admin/client-campaigns/CampaignsWorkspace";
 import { getAuthSession } from "@/lib/auth";
-import { getCampaignsPage, type CampaignDateFilter } from "@/lib/client-campaign-workspaces";
+import { CAMPAIGN_DATE_FILTERS, getCampaignsPage, type CampaignDateFilter } from "@/lib/client-campaign-workspaces";
 import { validAccountOwners } from "@/lib/clients";
 import { hasAnyPermission } from "@/lib/rbac";
 import { CAMPAIGN_EFFECTIVE_STATUSES, type CampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
@@ -20,6 +20,7 @@ export default async function CampaniiPage({ searchParams }: { searchParams: Pro
   const query = first(params.q) || "";
   const campaignId = first(params.campaignId);
   const clientId = first(params.clientId);
+  const ownerUserId = first(params.owner);
   const handoffOpportunityId = first(params.crmOpportunityId);
   const openCreate = first(params.create) === "1";
   const requestedStatus = first(params.effectiveStatus);
@@ -32,12 +33,13 @@ export default async function CampaniiPage({ searchParams }: { searchParams: Pro
     .filter((entity) => entity.code === entityCode)
     .map((entity) => entity.value);
   const requestedDateFilter = first(params.dateFilter);
-  const dateFilter = ["STARTS_ON", "ENDS_ON"].includes(requestedDateFilter || "")
+  const dateFilter = CAMPAIGN_DATE_FILTERS.includes(requestedDateFilter as CampaignDateFilter)
     ? requestedDateFilter as CampaignDateFilter
     : null;
   const [page, accountOwners] = await Promise.all([
     getCampaignsPage(session, {
       query,
+      ownerUserId,
       effectiveStatus,
       snapshotDate,
       companyEntityValues,
@@ -56,7 +58,7 @@ export default async function CampaniiPage({ searchParams }: { searchParams: Pro
       openCreate={openCreate}
       session={session}
       accountOwners={accountOwners}
-      executiveContext={{ entityCode: companyEntityValues.length ? entityCode || null : null, snapshotDate, dateFilter }}
+      executiveContext={{ entityCode: companyEntityValues.length ? entityCode || null : null, ownerUserId: ownerUserId || null, snapshotDate, dateFilter }}
     />
   </>;
 }

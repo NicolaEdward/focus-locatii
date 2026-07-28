@@ -7,7 +7,7 @@ import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
 import { effectiveHoldExpiresAt, effectiveHoldWhere } from "@/lib/reservation-lifecycle";
 import { addUtcDays, daysFromToday, decimalString, startOfUtcDay } from "@/lib/dashboard/dashboard-utils";
-import { campaignEffectiveStatusWhere } from "@/lib/campaigns/campaign-effective-status";
+import { bucharestDateKey, campaignEffectiveStatusWhere } from "@/lib/campaigns/campaign-effective-status";
 import { receivableOwnershipWhere } from "@/lib/receivables-ownership";
 
 export type SalesAgendaItem = {
@@ -30,6 +30,8 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
   const today = startOfUtcDay(now);
   const tomorrow = addUtcDays(today, 1);
   const inSevenDays = addUtcDays(today, 7);
+  const campaignWindowEnd = addUtcDays(today, 8);
+  const snapshotDate = bucharestDateKey(now);
   const ownerId = session.id;
 
   const invoiceOwnership: Prisma.FinancialReceivableWhereInput = receivableOwnershipWhere(ownerId);
@@ -65,8 +67,8 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
           { OR: [campaignEffectiveStatusWhere("ACTIVE", now), campaignEffectiveStatusWhere("SCHEDULED", now)] },
           {
             OR: [
-              { startDate: { lte: inSevenDays }, endDate: { gte: today } },
-              { endDate: { gte: today, lte: inSevenDays } }
+              { startDate: { lt: campaignWindowEnd }, endDate: { gte: today } },
+              { endDate: { gte: today, lt: campaignWindowEnd } }
             ]
           }
         ]
@@ -93,8 +95,8 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
       prisma.crmNextAction.count({ where: { ownerId, status: "open", dueAt: { gte: today, lt: tomorrow } } }),
       prisma.financialReceivable.count({ where: { includedInReport: true, needsReview: false, remainingAmount: { gt: 0 }, dueDate: { lt: today }, ...invoiceOwnership } }),
       prisma.financialReceivable.count({ where: { includedInReport: true, needsReview: false, remainingAmount: { gt: 0 }, dueDate: { gte: today, lte: inSevenDays }, ...invoiceOwnership } }),
-      prisma.campaign.count({ where: { AND: [campaignOwnership, { OR: [campaignEffectiveStatusWhere("ACTIVE", now), campaignEffectiveStatusWhere("SCHEDULED", now)] }, { startDate: { gte: today, lte: inSevenDays } }] } }),
-      prisma.campaign.count({ where: { AND: [campaignOwnership, campaignEffectiveStatusWhere("ACTIVE", now), { endDate: { gte: today, lte: inSevenDays } }] } })
+      prisma.campaign.count({ where: { AND: [campaignOwnership, { OR: [campaignEffectiveStatusWhere("ACTIVE", now), campaignEffectiveStatusWhere("SCHEDULED", now)] }, { startDate: { gte: today, lt: campaignWindowEnd } }] } }),
+      prisma.campaign.count({ where: { AND: [campaignOwnership, campaignEffectiveStatusWhere("ACTIVE", now), { endDate: { gte: today, lt: campaignWindowEnd } }] } })
     ])
   ]);
 
@@ -131,12 +133,12 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
     })),
     ...campaigns.flatMap((row): SalesAgendaItem[] => {
       const items: SalesAgendaItem[] = [];
-      if (row.startDate && row.startDate >= today && row.startDate <= inSevenDays) items.push({
+      if (row.startDate && row.startDate >= today && row.startDate < campaignWindowEnd) items.push({
         id: `campaign-start-${row.id}`, kind: "campaign_start", urgency: "medium", title: row.client.companyName,
         context: `${row.campaignName} începe curând`, dueDate: row.startDate.toISOString(), amount: null, currency: null,
         href: `/admin/campanii?campaignId=${encodeURIComponent(row.id)}`, actionLabel: "Vezi campania"
       });
-      if (row.endDate && row.endDate >= today && row.endDate <= inSevenDays) items.push({
+      if (row.endDate && row.endDate >= today && row.endDate < campaignWindowEnd) items.push({
         id: `campaign-end-${row.id}`, kind: "campaign_end", urgency: "normal", title: row.client.companyName,
         context: `${row.campaignName} se termină curând`, dueDate: row.endDate.toISOString(), amount: null, currency: null,
         href: `/admin/campanii?campaignId=${encodeURIComponent(row.id)}`, actionLabel: "Vezi campania"
@@ -157,12 +159,18 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
     status: row.dueDate && row.dueDate < today ? "overdue" : "due_soon",
     href: row.clientId ? `/admin/clienti?clientId=${encodeURIComponent(row.clientId)}` : "/admin/clienti?tab=invoices"
   }));
+  const startingCampaigns = campaigns.filter((row) => row.startDate && row.startDate >= today && row.startDate < campaignWindowEnd);
+  const endingCampaigns = campaigns.filter((row) => row.endDate && row.endDate >= today && row.endDate < campaignWindowEnd);
 
   return {
     kind: "sales" as const,
     role: session.role,
     userName: session.name,
     generatedAt: now.toISOString(),
+    links: {
+      campaignsStarting: campaignDrillDownHref("STARTS_WITHIN_7_DAYS", snapshotDate, ownerId, summaryCounts[4], startingCampaigns),
+      campaignsEnding: campaignDrillDownHref("ENDS_WITHIN_7_DAYS", snapshotDate, ownerId, summaryCounts[5], endingCampaigns)
+    },
     summary: {
       followUpsDue: summaryCounts[0] + summaryCounts[1], overdueFollowUps: summaryCounts[0],
       overdueInvoices: summaryCounts[2], dueSoonInvoices: summaryCounts[3],
@@ -188,6 +196,18 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
       href: `/admin/locatii?reservationId=${encodeURIComponent(row.id)}#rezervari`
     })).slice(0, 8)
   };
+}
+
+function campaignDrillDownHref(
+  dateFilter: "STARTS_WITHIN_7_DAYS" | "ENDS_WITHIN_7_DAYS",
+  snapshotDate: string,
+  ownerUserId: string,
+  count: number,
+  rows: Array<{ id: string }>
+) {
+  if (count === 1 && rows[0]) return `/admin/campanii?campaignId=${encodeURIComponent(rows[0].id)}`;
+  const params = new URLSearchParams({ dateFilter, snapshot: snapshotDate, owner: ownerUserId });
+  return `/admin/campanii?${params}`;
 }
 
 function salesOperation(row: any, kind: "decoration" | "neutralization", date: Date | null, today: Date) {

@@ -16,6 +16,7 @@ import { assertReservationTransition } from "@/lib/reservation-workflow";
 import { emitStructuredLog } from "@/lib/observability";
 import { resolveSellerForMutation } from "@/lib/seller-users";
 import { paymentTermDays } from "@/lib/billing";
+import { syncCampaignCommercialSummary } from "@/lib/campaigns/campaign-commercial-summary";
 import { companyEntityOrThrow, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
 import {
@@ -634,6 +635,9 @@ export async function createReservation(input: unknown, actor?: AuthSession | nu
       }
       created.push(reservation);
     }
+    if (parsed.status === "BOOKED" && rentalContext?.campaign.id) {
+      await syncCampaignCommercialSummary(tx, rentalContext.campaign.id);
+    }
     return created;
   });
 
@@ -714,6 +718,14 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
     }
 
     await logRentalCorrection(tx, existing, updated, actor?.id || null);
+    if (campaignCommercialSummaryAffected(parsed)) {
+      const affectedCampaignIds = new Set(
+        [existing.campaignId, updated.campaignId].filter((campaignId): campaignId is string => Boolean(campaignId))
+      );
+      for (const campaignId of [...affectedCampaignIds].sort()) {
+        await syncCampaignCommercialSummary(tx, campaignId);
+      }
+    }
 
     return updated;
   });
@@ -791,6 +803,12 @@ export async function updateReservationGroupStatus(
         where: existing.contractGroupId ? { contractGroupId: existing.contractGroupId } : { id },
         data: statusData
       });
+    }
+    const affectedCampaignIds = new Set(
+      reservations.map((reservation) => reservation.campaignId).filter((campaignId): campaignId is string => Boolean(campaignId))
+    );
+    for (const campaignId of [...affectedCampaignIds].sort()) {
+      await syncCampaignCommercialSummary(tx, campaignId);
     }
 
     return tx.reservation.findMany({
@@ -890,6 +908,16 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
       }
       await logRentalCorrection(tx, item.reservation, updatedReservation, actor?.id || null);
     }
+    if (campaignCommercialSummaryAffected(parsed)) {
+      const affectedCampaignIds = new Set(
+        prepared
+          .flatMap((item) => [item.reservation.campaignId, item.rentalContext?.campaign.id])
+          .filter((campaignId): campaignId is string => Boolean(campaignId))
+      );
+      for (const campaignId of [...affectedCampaignIds].sort()) {
+        await syncCampaignCommercialSummary(tx, campaignId);
+      }
+    }
 
     return tx.reservation.findMany({
       where: anchor.contractGroupId ? { contractGroupId: anchor.contractGroupId } : { id },
@@ -925,7 +953,11 @@ export async function updateReservationProductionNotesWithClient(
 }
 
 export async function deleteReservation(id: string) {
-  await prisma.reservation.update({ where: { id }, data: { status: "CANCELLED", holdExpiresAt: null } });
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.reservation.findUniqueOrThrow({ where: { id }, select: { campaignId: true } });
+    await tx.reservation.update({ where: { id }, data: { status: "CANCELLED", holdExpiresAt: null } });
+    if (existing.campaignId) await syncCampaignCommercialSummary(tx, existing.campaignId);
+  });
 }
 
 export async function extendReservationHold(id: string, days: number, actor?: AuthSession | null) {
@@ -1292,6 +1324,19 @@ function normalizeReservationInput<T extends Record<string, unknown>>(input: T) 
   return Object.fromEntries(
     Object.entries(input).map(([key, value]) => [key, typeof value === "string" && !value.trim() ? null : value])
   ) as T;
+}
+
+function campaignCommercialSummaryAffected(input: ReturnType<typeof reservationPatchSchema.parse>) {
+  return [
+    "campaignId",
+    "status",
+    "periodStart",
+    "periodEnd",
+    "amount",
+    "monthlyRentShare",
+    "monthlyRentTotal",
+    "currency"
+  ].some((field) => input[field as keyof typeof input] !== undefined);
 }
 
 function withBillingDefaults<T extends ReturnType<typeof reservationInputSchema.parse>>(input: T) {

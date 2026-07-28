@@ -2,6 +2,7 @@ import { Prisma, PrismaClient, type UserRole } from "@prisma/client";
 import accounts from "../scripts/release/preview-accounts.json";
 import { assertSyntheticEnvironment, loadEnvFile } from "../scripts/release/env-utils";
 import { hashPassword } from "../src/lib/auth";
+import { syncCampaignCommercialSummary } from "../src/lib/campaigns/campaign-commercial-summary";
 
 loadEnvFile();
 const identity = assertSyntheticEnvironment();
@@ -116,13 +117,13 @@ async function main() {
 
   await prisma.campaign.upsert({
     where: { id: ids.campaignAgent },
-    update: { clientId: ids.clientAgent, campaignName: "Campanie Retail Preview", campaignCode: "PV-CAMP-001", status: "active", accountOwnerUserId: agent.id, sellerUserId: agent.id, startDate: day(-5), endDate: day(25), currency: "EUR", totalContractValue: new Prisma.Decimal("4200.00") },
-    create: { id: ids.campaignAgent, clientId: ids.clientAgent, campaignName: "Campanie Retail Preview", campaignCode: "PV-CAMP-001", status: "active", accountOwnerUserId: agent.id, sellerUserId: agent.id, createdByUserId: coo.id, companyEntity: "Focus Media", startDate: day(-5), endDate: day(25), currency: "EUR", totalContractValue: new Prisma.Decimal("4200.00") }
+    update: { clientId: ids.clientAgent, campaignName: "Campanie Retail Preview", campaignCode: "PV-CAMP-001", status: "active", accountOwnerUserId: agent.id, sellerUserId: agent.id },
+    create: { id: ids.campaignAgent, clientId: ids.clientAgent, campaignName: "Campanie Retail Preview", campaignCode: "PV-CAMP-001", status: "active", accountOwnerUserId: agent.id, sellerUserId: agent.id, createdByUserId: coo.id, companyEntity: "Focus Media" }
   });
   await prisma.campaign.upsert({
     where: { id: ids.campaignDirector },
-    update: { clientId: ids.clientDirector, campaignName: "Campanie Mobility Preview", campaignCode: "PV-CAMP-002", status: "active", accountOwnerUserId: director.id, sellerUserId: director.id, startDate: day(3), endDate: day(33), currency: "RON", totalContractValue: new Prisma.Decimal("18000.00") },
-    create: { id: ids.campaignDirector, clientId: ids.clientDirector, campaignName: "Campanie Mobility Preview", campaignCode: "PV-CAMP-002", status: "active", accountOwnerUserId: director.id, sellerUserId: director.id, createdByUserId: coo.id, companyEntity: "Excellence Media", startDate: day(3), endDate: day(33), currency: "RON", totalContractValue: new Prisma.Decimal("18000.00") }
+    update: { clientId: ids.clientDirector, campaignName: "Campanie Mobility Preview", campaignCode: "PV-CAMP-002", status: "active", accountOwnerUserId: director.id, sellerUserId: director.id },
+    create: { id: ids.campaignDirector, clientId: ids.clientDirector, campaignName: "Campanie Mobility Preview", campaignCode: "PV-CAMP-002", status: "active", accountOwnerUserId: director.id, sellerUserId: director.id, createdByUserId: coo.id, companyEntity: "Excellence Media" }
   });
 
   await prisma.reservation.upsert({
@@ -134,6 +135,10 @@ async function main() {
     where: { id: ids.reservationHold },
     update: { locationId: ids.holdLocation, clientId: ids.clientDirector, campaignId: ids.campaignDirector, status: "HOLD", clientName: "Mobility Preview SA", campaignName: "Campanie Mobility Preview", periodStart: day(3), periodEnd: day(33), holdExpiresAt: day(2), sellerUserId: director.id, ownerId: coo.id, amount: 18000, currency: "RON" },
     create: { id: ids.reservationHold, locationId: ids.holdLocation, clientId: ids.clientDirector, campaignId: ids.campaignDirector, status: "HOLD", clientName: "Mobility Preview SA", campaignName: "Campanie Mobility Preview", periodStart: day(3), periodEnd: day(33), holdExpiresAt: day(2), sellerUserId: director.id, ownerId: coo.id, amount: 18000, currency: "RON" }
+  });
+  await prisma.$transaction(async (tx) => {
+    await syncCampaignCommercialSummary(tx, ids.campaignAgent);
+    await syncCampaignCommercialSummary(tx, ids.campaignDirector);
   });
 
   await prisma.operationTask.upsert({

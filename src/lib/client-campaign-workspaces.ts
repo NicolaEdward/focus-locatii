@@ -10,6 +10,10 @@ import {
   deriveCampaignEffectiveStatus,
   type CampaignEffectiveStatus
 } from "@/lib/campaigns/campaign-effective-status";
+import {
+  CAMPAIGN_COMMERCIAL_SUMMARY_SOURCE,
+  deriveCampaignCommercialSummary
+} from "@/lib/campaigns/campaign-commercial-summary";
 
 export const CLIENT_CAMPAIGN_PAGE_SIZE = 30;
 const MAX_PAGE_SIZE = 50;
@@ -50,8 +54,9 @@ export type CampaignListItem = {
   accountOwnerUserId: string | null;
   startDate: string | null;
   endDate: string | null;
-  currency: string;
-  totalContractValue: number;
+  currency: "RON" | "EUR" | null;
+  totalContractValue: number | null;
+  totalsByCurrency: { RON: number; EUR: number };
   paymentTermType: string | null;
   paymentTermDays: number | null;
   billingRule: string | null;
@@ -100,9 +105,13 @@ export type CampaignOverview = {
   endDate: string | null;
   effectiveStartDate: string | null;
   effectiveEndDate: string | null;
-  effectivePeriodSource: "CAMPAIGN" | "ACTIVE_BOOKING";
-  currency: string;
-  totalContractValue: number;
+  effectivePeriodSource: "CAMPAIGN" | "BOOKED";
+  commercialSummarySource: typeof CAMPAIGN_COMMERCIAL_SUMMARY_SOURCE;
+  bookedReservationCount: number;
+  currency: "RON" | "EUR" | null;
+  totalContractValue: number | null;
+  totalsByCurrency: { RON: number; EUR: number };
+  commercialDataQualityReasons: string[];
   paymentTermType: string | null;
   paymentTermDays: number | null;
   billingRule: string | null;
@@ -151,10 +160,18 @@ type PageInput = {
   limit?: number;
 };
 
-export type CampaignDateFilter = "STARTS_ON" | "ENDS_ON";
+export const CAMPAIGN_DATE_FILTERS = [
+  "STARTS_ON",
+  "ENDS_ON",
+  "STARTS_WITHIN_7_DAYS",
+  "ENDS_WITHIN_7_DAYS"
+] as const;
+
+export type CampaignDateFilter = (typeof CAMPAIGN_DATE_FILTERS)[number];
 
 type CampaignPageInput = PageInput & {
   clientId?: string | null;
+  ownerUserId?: string | null;
   effectiveStatus?: CampaignEffectiveStatus | null;
   snapshotDate?: string | null;
   companyEntityValues?: string[];
@@ -222,25 +239,25 @@ export async function getCampaignsPage(session: AuthSession, input: CampaignPage
   const query = String(input.query || "").trim().slice(0, 120);
   const limit = safeLimit(input.limit);
   const snapshotRange = campaignSnapshotRange(input.snapshotDate);
+  const snapshotWindow = campaignSnapshotWindow(input.snapshotDate, 7);
   const where: Prisma.CampaignWhereInput = {
-    archivedAt: null,
-    status: { not: "archived" },
-    ...(input.clientId ? { clientId: input.clientId } : {}),
-    ...(input.effectiveStatus ? campaignEffectiveStatusWhere(input.effectiveStatus, now) : {}),
-    ...(input.companyEntityValues?.length ? { companyEntity: { in: input.companyEntityValues } } : {}),
-    ...(input.dateFilter === "STARTS_ON" && snapshotRange ? { startDate: snapshotRange } : {}),
-    ...(input.dateFilter === "ENDS_ON" && snapshotRange ? { endDate: snapshotRange } : {}),
-    ...campaignReadScope(session),
-    ...(query ? {
-      AND: [{
+    AND: [
+      { archivedAt: null, status: { not: "archived" } },
+      ...(input.clientId ? [{ clientId: input.clientId }] : []),
+      ...(input.ownerUserId ? [campaignOwnerWhere(input.ownerUserId)] : []),
+      ...(input.effectiveStatus ? [campaignEffectiveStatusWhere(input.effectiveStatus, now)] : []),
+      ...(input.companyEntityValues?.length ? [{ companyEntity: { in: input.companyEntityValues } }] : []),
+      ...campaignDateConditions(input.dateFilter, snapshotRange, snapshotWindow, now),
+      campaignReadScope(session),
+      ...(query ? [{
         OR: [
           { campaignName: { contains: query } },
           { campaignCode: { contains: query } },
           { client: { companyName: { contains: query } } },
           { companyEntity: { contains: query } }
         ]
-      }]
-    } : {})
+      }] : [])
+    ]
   };
   const [rows, total] = await Promise.all([
     prisma.campaign.findMany({
@@ -281,30 +298,39 @@ export async function getCampaignsPage(session: AuthSession, input: CampaignPage
   const hasMore = rows.length > limit;
   const visible = hasMore ? rows.slice(0, limit) : rows;
   return {
-    items: visible.map((row) => ({
-      id: row.id,
-      clientId: row.clientId,
-      campaignName: row.campaignName,
-      campaignCode: row.campaignCode,
-      status: row.status,
-      effectiveStatus: deriveCampaignEffectiveStatus({ ...row, bookedPeriods: row.reservations }, now).effectiveStatus,
-      clientName: row.client.companyName,
-      companyEntity: row.companyEntity,
-      sellerUserId: row.sellerUserId,
-      sellerName: row.sellerUser?.name || null,
-      accountOwnerUserId: row.accountOwnerUserId,
-      startDate: row.startDate?.toISOString() || null,
-      endDate: row.endDate?.toISOString() || null,
-      currency: row.currency || "EUR",
-      totalContractValue: moneyNumber(row.totalContractValue),
-      paymentTermType: row.paymentTermType,
-      paymentTermDays: row.paymentTermDays,
-      billingRule: row.billingRule,
-      billingFrequency: row.billingFrequency,
-      reservationCount: row._count.reservations,
-      canEdit: canEditCampaign(session, row),
-      updatedAt: row.updatedAt.toISOString()
-    })),
+    items: visible.map((row) => {
+      const effectiveStatus = deriveCampaignEffectiveStatus({ ...row, bookedPeriods: row.reservations }, now);
+      const currency = row.currency === "RON" || row.currency === "EUR" ? row.currency : null;
+      const totalContractValue = currency ? moneyNumber(row.totalContractValue) : null;
+      return {
+        id: row.id,
+        clientId: row.clientId,
+        campaignName: row.campaignName,
+        campaignCode: row.campaignCode,
+        status: row.status,
+        effectiveStatus: effectiveStatus.effectiveStatus,
+        clientName: row.client.companyName,
+        companyEntity: row.companyEntity,
+        sellerUserId: row.sellerUserId,
+        sellerName: row.sellerUser?.name || null,
+        accountOwnerUserId: row.accountOwnerUserId,
+        startDate: row.startDate?.toISOString() || null,
+        endDate: row.endDate?.toISOString() || null,
+        currency,
+        totalContractValue,
+        totalsByCurrency: {
+          RON: currency === "RON" ? totalContractValue || 0 : 0,
+          EUR: currency === "EUR" ? totalContractValue || 0 : 0
+        },
+        paymentTermType: row.paymentTermType,
+        paymentTermDays: row.paymentTermDays,
+        billingRule: row.billingRule,
+        billingFrequency: row.billingFrequency,
+        reservationCount: row._count.reservations,
+        canEdit: canEditCampaign(session, row),
+        updatedAt: row.updatedAt.toISOString()
+      };
+    }),
     nextCursor: hasMore ? visible.at(-1)?.id || null : null,
     total,
     query
@@ -321,6 +347,42 @@ function campaignSnapshotRange(snapshotDate?: string | null) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate || "")) return null;
   const start = new Date(`${snapshotDate}T00:00:00.000Z`);
   return { gte: start, lt: new Date(start.getTime() + 86_400_000) };
+}
+
+function campaignSnapshotWindow(snapshotDate?: string | null, days = 7) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate || "")) return null;
+  const start = new Date(`${snapshotDate}T00:00:00.000Z`);
+  return { gte: start, lt: new Date(start.getTime() + (days + 1) * 86_400_000) };
+}
+
+function campaignDateConditions(
+  dateFilter: CampaignDateFilter | null | undefined,
+  snapshotRange: { gte: Date; lt: Date } | null,
+  snapshotWindow: { gte: Date; lt: Date } | null,
+  now: Date
+): Prisma.CampaignWhereInput[] {
+  if (dateFilter === "STARTS_ON" && snapshotRange) return [{ startDate: snapshotRange }];
+  if (dateFilter === "ENDS_ON" && snapshotRange) return [{ endDate: snapshotRange }];
+  if (dateFilter === "STARTS_WITHIN_7_DAYS" && snapshotWindow) {
+    return [
+      { startDate: snapshotWindow },
+      { OR: [campaignEffectiveStatusWhere("ACTIVE", now), campaignEffectiveStatusWhere("SCHEDULED", now)] }
+    ];
+  }
+  if (dateFilter === "ENDS_WITHIN_7_DAYS" && snapshotWindow) {
+    return [{ endDate: snapshotWindow }, campaignEffectiveStatusWhere("ACTIVE", now)];
+  }
+  return [];
+}
+
+function campaignOwnerWhere(ownerUserId: string): Prisma.CampaignWhereInput {
+  return {
+    OR: [
+      { sellerUserId: ownerUserId },
+      { accountOwnerUserId: ownerUserId },
+      { client: { is: { accountOwnerUserId: ownerUserId } } }
+    ]
+  };
 }
 
 export async function getClientOverview(session: AuthSession, clientId: string): Promise<ClientOverview | null> {
@@ -409,15 +471,29 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
       client: { select: { companyName: true, accountOwnerUserId: true } },
       sellerUser: { select: { name: true } }, accountOwner: { select: { name: true } },
       reservations: {
-        where: activeCampaignBookingWhere(now),
-        select: { status: true, periodStart: true, periodEnd: true },
-        take: 100
+        where: { status: "BOOKED" },
+        select: {
+          status: true,
+          periodStart: true,
+          periodEnd: true,
+          amount: true,
+          monthlyRentShare: true,
+          monthlyRentTotal: true,
+          contractGroupId: true,
+          currency: true
+        }
       }
     }
   });
   if (!campaign || campaign.status === "archived") return null;
   assertCampaignReadAccess(session, campaign);
-  const effectiveStatus = deriveCampaignEffectiveStatus({ ...campaign, bookedPeriods: campaign.reservations }, now);
+  const commercial = deriveCampaignCommercialSummary(campaign.reservations);
+  const effectiveStatus = deriveCampaignEffectiveStatus({
+    ...campaign,
+    startDate: commercial.periodStart,
+    endDate: commercial.periodEnd,
+    bookedPeriods: campaign.reservations
+  }, now);
   return {
     id: campaign.id,
     clientId: campaign.clientId,
@@ -432,13 +508,17 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
     sellerName: campaign.sellerUser?.name || null,
     accountOwnerUserId: campaign.accountOwnerUserId,
     accountOwnerName: campaign.accountOwner?.name || null,
-    startDate: campaign.startDate?.toISOString() || null,
-    endDate: campaign.endDate?.toISOString() || null,
+    startDate: commercial.periodStart?.toISOString() || null,
+    endDate: commercial.periodEnd?.toISOString() || null,
     effectiveStartDate: effectiveStatus.startDate,
     effectiveEndDate: effectiveStatus.endDate,
     effectivePeriodSource: effectiveStatus.periodSource,
-    currency: campaign.currency || "EUR",
-    totalContractValue: moneyNumber(campaign.totalContractValue),
+    commercialSummarySource: commercial.source,
+    bookedReservationCount: commercial.bookedReservationCount,
+    currency: commercial.currency,
+    totalContractValue: commercial.totalContractValue,
+    totalsByCurrency: commercial.totalsByCurrency,
+    commercialDataQualityReasons: commercial.dataQualityReasons,
     paymentTermType: campaign.paymentTermType,
     paymentTermDays: campaign.paymentTermDays,
     billingRule: campaign.billingRule,

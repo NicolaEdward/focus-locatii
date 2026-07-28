@@ -21,7 +21,7 @@ export type CampaignStatusDecision = {
   label: string;
   startDate: string | null;
   endDate: string | null;
-  periodSource: "CAMPAIGN" | "ACTIVE_BOOKING";
+  periodSource: "CAMPAIGN" | "BOOKED";
   today: string;
   timeZone: typeof CAMPAIGN_TIME_ZONE;
   endDateInclusive: true;
@@ -56,42 +56,41 @@ export function deriveCampaignEffectiveStatus(input: CampaignStatusInput, now = 
   const campaignStartDate = campaignDateKey(input.startDate);
   const campaignEndDate = campaignDateKey(input.endDate);
   const today = bucharestDateKey(now);
-  const activeBookedPeriods = (input.bookedPeriods || [])
+  const bookedPeriods = (input.bookedPeriods || [])
     .filter((period) => String(period.status || "").toUpperCase() === "BOOKED")
     .map((period) => ({ startDate: campaignDateKey(period.periodStart), endDate: campaignDateKey(period.periodEnd) }))
-    .filter((period): period is { startDate: string; endDate: string } => Boolean(period.startDate && period.endDate))
-    .filter((period) => period.startDate <= today && period.endDate >= today);
-  const activeBookedStart = minDateKey(activeBookedPeriods.map((period) => period.startDate));
-  const activeBookedEnd = maxDateKey(activeBookedPeriods.map((period) => period.endDate));
+    .filter((period): period is { startDate: string; endDate: string } => Boolean(period.startDate && period.endDate));
+  const bookedStart = minDateKey(bookedPeriods.map((period) => period.startDate));
+  const bookedEnd = maxDateKey(bookedPeriods.map((period) => period.endDate));
+  const startDate = bookedStart || campaignStartDate;
+  const endDate = bookedEnd || campaignEndDate;
+  const periodSource: CampaignStatusDecision["periodSource"] = bookedStart && bookedEnd ? "BOOKED" : "CAMPAIGN";
 
   if (input.archivedAt || lifecycleStatus === "archived") return decision("ARCHIVED", "ARCHIVED");
   if (lifecycleStatus === "cancelled") return decision("CANCELLED", "CANCELLED");
   if (lifecycleStatus === "completed") return decision("ENDED", "COMPLETED");
   if (lifecycleStatus === "draft") return decision("DRAFT", "DRAFT");
-  if (activeBookedStart && activeBookedEnd) {
-    return decision("ACTIVE", "ACTIVE_BOOKED_PERIOD", activeBookedStart, activeBookedEnd, "ACTIVE_BOOKING");
-  }
-  if (!campaignStartDate || !campaignEndDate) return decision("INCOMPLETE", "MISSING_DATES");
-  if (campaignStartDate > campaignEndDate) return decision("INCOMPLETE", "INVALID_DATES");
-  if (today < campaignStartDate) return decision("SCHEDULED", "BEFORE_START");
-  if (today > campaignEndDate) return decision("ENDED", "AFTER_END");
-  return decision("ACTIVE", "IN_RANGE");
+  if (!startDate || !endDate) return decision("INCOMPLETE", "MISSING_DATES");
+  if (startDate > endDate) return decision("INCOMPLETE", "INVALID_DATES");
+  if (today < startDate) return decision("SCHEDULED", "BEFORE_START");
+  if (today > endDate) return decision("ENDED", "AFTER_END");
+  return decision("ACTIVE", periodSource === "BOOKED" ? "ACTIVE_BOOKED_PERIOD" : "IN_RANGE");
 
   function decision(
     effectiveStatus: CampaignEffectiveStatus,
     reason: CampaignStatusDecision["reason"],
-    startDate = campaignStartDate,
-    endDate = campaignEndDate,
-    periodSource: CampaignStatusDecision["periodSource"] = "CAMPAIGN"
+    decisionStartDate = startDate,
+    decisionEndDate = endDate,
+    decisionPeriodSource: CampaignStatusDecision["periodSource"] = periodSource
   ): CampaignStatusDecision {
     return {
       effectiveStatus,
       lifecycleStatus,
       reason,
       label: labels[effectiveStatus],
-      startDate,
-      endDate,
-      periodSource,
+      startDate: decisionStartDate,
+      endDate: decisionEndDate,
+      periodSource: decisionPeriodSource,
       today,
       timeZone: CAMPAIGN_TIME_ZONE,
       endDateInclusive: true

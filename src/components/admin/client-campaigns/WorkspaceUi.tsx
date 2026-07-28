@@ -28,10 +28,6 @@ export type CampaignForm = {
   companyEntity: string;
   sellerUserId: string;
   accountOwnerUserId: string;
-  startDate: string;
-  endDate: string;
-  currency: string;
-  totalContractValue: string;
   paymentTermType: string;
   paymentTermDays: string;
   billingRule: string;
@@ -47,8 +43,7 @@ export const emptyClientForm: ClientForm = {
 
 export const emptyCampaignForm: CampaignForm = {
   clientId: "", campaignName: "", campaignCode: "", status: "draft", companyEntity: "Focus Media",
-  sellerUserId: "", accountOwnerUserId: "", startDate: "", endDate: "", currency: "EUR",
-  totalContractValue: "", paymentTermType: "30_days", paymentTermDays: "30",
+  sellerUserId: "", accountOwnerUserId: "", paymentTermType: "30_days", paymentTermDays: "30",
   billingRule: "manual_per_contract", billingFrequency: "monthly", notes: ""
 };
 

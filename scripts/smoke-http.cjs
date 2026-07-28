@@ -519,6 +519,10 @@ async function main() {
     });
     assert(campaignResponse.ok, "Admin could not create a real campaign for rental");
     const smokeCampaign = (await campaignResponse.json()).campaign;
+    assert(
+      smokeCampaign.startDate === null && smokeCampaign.endDate === null && smokeCampaign.totalContractValue === null,
+      "Campaign creation persisted manual period/value instead of waiting for BOOKED rentals"
+    );
     const campaignEditResponse = await fetch(`${BASE_URL}/api/admin/campaigns/${smokeCampaign.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie: adminCookie },
@@ -666,6 +670,21 @@ async function main() {
     assert(
       convertedReservations.every((reservation) => reservation.neutralizationDate),
       "Converted rentals did not schedule neutralization"
+    );
+    const derivedCampaignResponse = await fetch(`${BASE_URL}/api/admin/campaigns/${smokeCampaign.id}`, {
+      headers: { cookie: adminCookie }
+    });
+    const derivedCampaignPayload = await derivedCampaignResponse.json().catch(() => null);
+    assert(derivedCampaignResponse.ok, "Campaign derived commercial summary could not be loaded");
+    assert(
+      derivedCampaignPayload.campaign?.startDate?.startsWith("2036-01-10") &&
+      derivedCampaignPayload.campaign?.endDate?.startsWith("2036-01-20"),
+      "Campaign period was not derived from the first and last BOOKED dates"
+    );
+    assert(
+      derivedCampaignPayload.campaign?.totalContractValue === 709.68 &&
+      derivedCampaignPayload.campaign?.totalsByCurrency?.EUR === 709.68,
+      "Campaign value was not calculated from monthly rents using pro-rata"
     );
 
     const directNoDecorationResponse = await fetch(`${BASE_URL}/api/reservations`, {

@@ -29,6 +29,7 @@ assert(!clientListBlock.includes("billingAddress: true") && !clientListBlock.inc
 const campaignListBlock = between(service, "export async function getCampaignsPage", "export async function getClientOverview");
 assert(campaignListBlock.includes("activeCampaignBookingWhere(now)"), "Campaign list may load only active BOOKED periods as lifecycle evidence.");
 assert(campaignListBlock.includes("select: { status: true, periodStart: true, periodEnd: true }"), "Campaign lifecycle evidence must remain a minimal relation projection.");
+assert(campaignListBlock.includes("totalContractValue: true"), "Campaign list must read the transactionally maintained commercial snapshot.");
 assert(!campaignListBlock.includes("clientName: true") && !campaignListBlock.includes("productionNotes: true"), "Campaign list must not hydrate reservation business details.");
 assert(campaignListBlock.includes("_count: { select: { reservations: true } }"), "Campaign list may return only a reservation count.");
 assert(service.includes("financialDocumentScope(session)"), "Finance document tabs must apply the financial-only access policy.");
@@ -44,6 +45,8 @@ assert(clientsUi.includes("Vizibil doar pentru prevenirea duplicatelor") && clie
 assert(clientsUi.includes("merge/preview") && clientsUi.includes("Confirma merge"), "Client merge must require preview and explicit confirmation.");
 assert(service.includes('if (!["COO", "SUPER_ADMIN"].includes(session.role))'), "Merge preview must remain restricted to global managers.");
 assert(campaignDomain.includes("Campania trebuie legata de un client activ") && campaignDomain.includes("resolveRequiredSalesOwner"), "Campaign creation must keep client and explicit owner validation.");
+assert(!campaignDomain.includes("startDate: optionalDate") && !campaignDomain.includes("totalContractValue: optionalMoney"), "Campaign period and value must not be accepted as manual campaign input.");
+assert(campaignsUi.includes("Perioada, moneda si valoarea campaniei nu se introduc manual"), "Campaign editor must explain the BOOKED-derived commercial summary.");
 assert(campaignDomain.includes("effectiveBlockingReservationWhere") && campaignDomain.includes("Campania are inchirieri/hold-uri active"), "Campaign archive must remain blocked by active occupancy.");
 assert(campaignsUi.includes("/api/reservations/${reservation.id}/operations"), "Redecoration mutation must remain available from campaign rental detail.");
 assert(clientsUi.includes("/api/admin/clients/finance") && clientsPage.includes("initialPortfolioFinance"), "Legacy sales invoice deep links must open the lazy owned-finance view.");

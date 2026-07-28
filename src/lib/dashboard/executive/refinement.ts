@@ -27,6 +27,7 @@ import {
 } from "@/lib/dashboard/executive/scope";
 import { bucharestDayBounds } from "@/lib/dashboard/executive/time";
 import { prisma } from "@/lib/prisma";
+import { receivableOwnerUserIds, receivableOwnershipSelect } from "@/lib/receivables-ownership";
 import { ROLE_LABELS, type UserRole } from "@/lib/rbac";
 
 const activeCampaignStatuses = ["ACTIVE", "SCHEDULED"] as const;
@@ -83,7 +84,7 @@ export async function queryExecutivePeople(
   scope: ExecutiveScope,
   now = new Date()
 ): Promise<ExecutivePeopleResponse> {
-  const snapshot = bucharestDayBounds(scope.snapshotDate).endExclusive;
+  const snapshot = bucharestDayBounds(scope.snapshotDate).start;
   const recentCrmThreshold = new Date(snapshot.getTime() - recentCrmThresholdDays * 86_400_000);
   const entityScoped = scope.entitySelection !== "ALL";
   const selectedEntityValues = scope.selectedEntityCodes
@@ -197,15 +198,14 @@ export async function queryExecutivePeople(
         needsReview: false,
         remainingAmount: { gt: 0.01 },
         dueDate: { lt: snapshot },
-        accountOwnerUserId: { not: null },
         companyCode: { in: scope.selectedEntityCodes }
       },
       select: {
         id: true,
-        accountOwnerUserId: true,
         companyCode: true,
         currency: true,
-        remainingAmount: true
+        remainingAmount: true,
+        ...receivableOwnershipSelect
       }
     })
   ]);
@@ -231,7 +231,12 @@ export async function queryExecutivePeople(
   const openActionsByUser = countBy(crmActions.filter((row) => row.ownerId), (row) => row.ownerId as string);
   const overdueActionsByUser = countBy(crmActions.filter((row) => row.ownerId && row.dueAt < snapshot), (row) => row.ownerId as string);
   const opportunitiesByUser = countBy(opportunities.filter((row) => row.ownerId), (row) => row.ownerId as string);
-  const overdueInvoicesByUser = countBy(overdueReceivables, (row) => row.accountOwnerUserId as string);
+  const overdueInvoicesByUser = new Map<string, number>();
+  for (const receivable of overdueReceivables) {
+    for (const ownerUserId of receivableOwnerUserIds(receivable)) {
+      overdueInvoicesByUser.set(ownerUserId, (overdueInvoicesByUser.get(ownerUserId) || 0) + 1);
+    }
+  }
 
   const people: ExecutivePerson[] = users.map((user) => {
     const userTasks = tasks.filter((task) => task.assignedToUserId === user.id);
@@ -242,7 +247,13 @@ export async function queryExecutivePeople(
     const issues: ExecutivePerson["issues"] = [];
     addIssue(issues, "OVERDUE_TASKS", "Taskuri întârziate", overdueTasksByUser.get(user.id) || 0, `/admin/operational?assignee=${user.id}&status=delayed`);
     addIssue(issues, "OVERDUE_CRM_ACTIONS", "Follow-up-uri restante", overdueActionsByUser.get(user.id) || 0, `/admin/crm?view=today&owner=${user.id}&due=overdue`);
-    addIssue(issues, "OVERDUE_RECEIVABLES", "Facturi restante în portofoliu", overdueInvoicesByUser.get(user.id) || 0, `/admin/financiar/incasari?status=overdue&owner=${user.id}`);
+    addIssue(
+      issues,
+      "OVERDUE_RECEIVABLES",
+      "Facturi restante în portofoliu",
+      overdueInvoicesByUser.get(user.id) || 0,
+      `/admin/financiar/incasari?status=overdue&owner=${user.id}&snapshot=${scope.snapshotDate}&validated=1`
+    );
     if (
       !entityScoped &&
       ["SALES_AGENT", "SALES_DIRECTOR"].includes(user.role) &&

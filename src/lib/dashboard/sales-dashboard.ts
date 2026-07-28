@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { effectiveHoldExpiresAt, effectiveHoldWhere } from "@/lib/reservation-lifecycle";
 import { addUtcDays, daysFromToday, decimalString, startOfUtcDay } from "@/lib/dashboard/dashboard-utils";
 import { campaignEffectiveStatusWhere } from "@/lib/campaigns/campaign-effective-status";
+import { receivableOwnershipWhere } from "@/lib/receivables-ownership";
 
 export type SalesAgendaItem = {
   id: string;
@@ -31,13 +32,7 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
   const inSevenDays = addUtcDays(today, 7);
   const ownerId = session.id;
 
-  const invoiceOwnership: Prisma.FinancialReceivableWhereInput = {
-    OR: [
-      { accountOwnerUserId: ownerId },
-      { client: { is: { accountOwnerUserId: ownerId } } },
-      { campaign: { is: { OR: [{ sellerUserId: ownerId }, { accountOwnerUserId: ownerId }] } } }
-    ]
-  };
+  const invoiceOwnership: Prisma.FinancialReceivableWhereInput = receivableOwnershipWhere(ownerId);
   const campaignOwnership: Prisma.CampaignWhereInput = {
     OR: [{ sellerUserId: ownerId }, { accountOwnerUserId: ownerId }, { client: { is: { accountOwnerUserId: ownerId } } }]
   };

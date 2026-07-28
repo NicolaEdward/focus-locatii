@@ -16,6 +16,7 @@ export async function GET(request: NextRequest) {
       status: params.get("status") || "",
       companyCode: params.get("companyCode") || "",
       currency: params.get("currency") || "",
+      ownerUserId: params.get("owner") || "",
       asOf: params.get("snapshot") || "",
       validatedOnly: params.get("validated") === "1",
       view: params.get("view") === "history" ? "history" : "open",

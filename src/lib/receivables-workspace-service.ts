@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { money, receivableStatus } from "@/lib/receivables-domain";
 import { deriveCampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
+import { receivableOwnershipWhere } from "@/lib/receivables-ownership";
 
 const SETTLED_TOLERANCE = new Prisma.Decimal("0.01");
 
@@ -12,6 +13,7 @@ export type ReceivableRegistryInput = {
   status?: string;
   companyCode?: string;
   currency?: string;
+  ownerUserId?: string;
   view?: ReceivableRegistryView;
   page?: number;
   take?: number;
@@ -29,6 +31,7 @@ export async function listReceivableRegistry(input: ReceivableRegistryInput = {}
     query,
     companyCode: input.companyCode,
     currency: input.currency,
+    ownerUserId: input.ownerUserId,
     validatedOnly: input.validatedOnly
   });
   const viewWhere: Prisma.FinancialReceivableWhereInput = view === "history"
@@ -570,12 +573,13 @@ function reconciliationCounts(categories: ReconciliationCategory[]) {
   return counts;
 }
 
-function receivableBaseWhere(input: { query: string; companyCode?: string; currency?: string; validatedOnly?: boolean }): Prisma.FinancialReceivableWhereInput {
+function receivableBaseWhere(input: { query: string; companyCode?: string; currency?: string; ownerUserId?: string; validatedOnly?: boolean }): Prisma.FinancialReceivableWhereInput {
   return {
     includedInReport: true,
     ...(input.validatedOnly ? { needsReview: false } : {}),
     ...(input.companyCode ? { companyCode: input.companyCode } : {}),
     ...(input.currency ? { currency: input.currency } : {}),
+    ...(input.ownerUserId ? receivableOwnershipWhere(input.ownerUserId) : {}),
     ...(input.query ? {
       OR: [
         { invoiceNumber: { contains: input.query } },

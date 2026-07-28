@@ -18,6 +18,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
     status: firstParam(params.status),
     companyCode: firstParam(params.companyCode),
     currency: firstParam(params.currency),
+    ownerUserId: firstParam(params.owner),
     asOf: firstParam(params.snapshot),
     validatedOnly: firstParam(params.validated) === "1"
   };
@@ -26,6 +27,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
     status: filters.status,
     companyCode: filters.companyCode,
     currency: filters.currency,
+    ownerUserId: filters.ownerUserId,
     asOf: filters.asOf,
     validatedOnly: filters.validatedOnly,
     view: "open",

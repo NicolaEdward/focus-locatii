@@ -81,7 +81,7 @@ export function ReceivablesWorkspace({
   canManage
 }: {
   initialRegistry: Registry;
-  initialFilters?: { query?: string; status?: string; companyCode?: string; currency?: string; asOf?: string; validatedOnly?: boolean };
+  initialFilters?: { query?: string; status?: string; companyCode?: string; currency?: string; ownerUserId?: string; asOf?: string; validatedOnly?: boolean };
   canImport: boolean;
   canValidate: boolean;
   canConfirm: boolean;
@@ -98,6 +98,7 @@ export function ReceivablesWorkspace({
   const [status, setStatus] = useState(initialFilters?.status || "");
   const [companyCode, setCompanyCode] = useState(initialFilters?.companyCode || "");
   const [currency, setCurrency] = useState(initialFilters?.currency || "");
+  const ownerUserId = initialFilters?.ownerUserId || "";
   const registryAsOf = initialFilters?.asOf || "";
   const validatedOnly = Boolean(initialFilters?.validatedOnly);
   const [busy, setBusy] = useState(false);
@@ -134,6 +135,7 @@ export function ReceivablesWorkspace({
     });
     if (registryAsOf) params.set("snapshot", registryAsOf);
     if (validatedOnly) params.set("validated", "1");
+    if (ownerUserId) params.set("owner", ownerUserId);
     const payload = await api(`/api/admin/receivables-workspace/registry?${params}`);
     setRegistry(payload.registry);
   }
@@ -144,6 +146,7 @@ export function ReceivablesWorkspace({
       const params = new URLSearchParams({ q: query, companyCode, currency, page: String(page), take: "40", view: "history" });
       if (registryAsOf) params.set("snapshot", registryAsOf);
       if (validatedOnly) params.set("validated", "1");
+      if (ownerUserId) params.set("owner", ownerUserId);
       const payload = await api(`/api/admin/receivables-workspace/registry?${params}`);
       setSettled(payload.registry);
     } catch (loadError) {
@@ -464,6 +467,7 @@ export function ReceivablesWorkspace({
           <div>
             <h2 id="receivables-title" className="text-xl font-black text-white">Solduri de încasat</h2>
             <p className="text-sm text-slate-400">RON și EUR sunt păstrate separat. Totalurile includ doar facturile cu sold activ peste toleranța de 0,01.</p>
+            {ownerUserId ? <p className="mt-2 text-xs font-bold text-focus-yellow">Filtru responsabil activ: sunt afișate numai facturile portofoliului selectat.</p> : null}
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             {registry.summary.map((item) => (

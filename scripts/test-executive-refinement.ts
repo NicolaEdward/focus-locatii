@@ -4,6 +4,7 @@ import path from "node:path";
 import type { AuthSession } from "../src/lib/auth";
 import { executiveScopeForSession } from "../src/lib/dashboard/executive/scope";
 import { hasPermission } from "../src/lib/rbac";
+import { receivableOwnerUserIds, receivableOwnershipWhere } from "../src/lib/receivables-ownership";
 
 const root = process.cwd();
 const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
@@ -16,6 +17,9 @@ const usersComponent = read("src/components/admin/UserManagement.tsx");
 const campaignsService = read("src/lib/client-campaign-workspaces.ts");
 const campaignsPage = read("src/app/admin/campanii/page.tsx");
 const receivablesService = read("src/lib/receivables-workspace-service.ts");
+const salesDashboardService = read("src/lib/dashboard/sales-dashboard.ts");
+const receivablesPage = read("src/app/admin/financiar/incasari/page.tsx");
+const receivablesRoute = read("src/app/api/admin/receivables-workspace/registry/route.ts");
 
 const dceo = session("D_CEO");
 assert.equal(hasPermission("D_CEO", "users.view"), true);
@@ -61,6 +65,24 @@ assert(dashboard.includes("severityLabel") && dashboard.includes("qualityLabel")
 assert(campaignsService.includes("campaignSnapshotNow") && campaignsService.includes("companyEntityValues") && campaignsService.includes("dateFilter"), "Campaign destination must reproduce snapshot, entity and today filters.");
 assert(campaignsPage.includes("executiveContext"), "Campaign workspace must preserve the originating executive context.");
 assert(receivablesService.includes("registryAsOf") && receivablesService.includes("validatedOnly"), "Financial drill-down must reproduce snapshot and validation rules.");
+assert.deepEqual(receivableOwnerUserIds({
+  accountOwnerUserId: null,
+  client: { accountOwnerUserId: "gabriel" },
+  campaign: { accountOwnerUserId: "gabriel", sellerUserId: "seller" }
+}), ["gabriel", "seller"]);
+assert.deepEqual(receivableOwnershipWhere("gabriel"), {
+  OR: [
+    { accountOwnerUserId: "gabriel" },
+    { client: { is: { accountOwnerUserId: "gabriel" } } },
+    { campaign: { is: { OR: [{ sellerUserId: "gabriel" }, { accountOwnerUserId: "gabriel" }] } } }
+  ]
+});
+assert(service.includes("receivableOwnerUserIds"), "People Overview must resolve invoice ownership through canonical client and campaign relations.");
+assert(service.includes("bucharestDayBounds(scope.snapshotDate).start"), "Overdue people metrics must use the start of the Bucharest business day.");
+assert(salesDashboardService.includes("receivableOwnershipWhere(ownerId)"), "Sales and executive dashboards must share the same invoice ownership rule.");
+assert(receivablesService.includes("receivableOwnershipWhere(input.ownerUserId)"), "Invoice registry drill-down must apply the canonical owner scope.");
+assert(receivablesPage.includes("params.owner") && receivablesRoute.includes('params.get("owner")'), "Owner drill-down must survive SSR and API pagination.");
+assert(service.includes("validated=1") && service.includes("snapshot=${scope.snapshotDate}"), "People invoice drill-down must preserve validation and snapshot parity.");
 
 for (const route of ["people", "customers", "activity", "search"]) {
   const source = read(`src/app/api/admin/executive/${route}/route.ts`);
@@ -70,7 +92,7 @@ for (const route of ["people", "customers", "activity", "search"]) {
 
 console.log(JSON.stringify({
   ok: true,
-  checks: 37,
+  checks: 45,
   periods: {
     today: [today.periodStart, today.periodEnd],
     week: [week.periodStart, week.periodEnd],

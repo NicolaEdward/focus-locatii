@@ -126,7 +126,7 @@ async function main() {
   const created = await syncFinancialNotifications(now);
   assert.equal(created, 2, "due-soon and overdue receivable notifications are created");
   assert(openNotification("soon-1", "receivable_due_soon"), "due-soon receivable notification is created");
-  assert.equal(openNotification("soon-1", "receivable_due_soon").userId, "direct-owner-1", "snapshot owner takes precedence over a later client owner change");
+  assert.equal(openNotification("soon-1", "receivable_due_soon").userId, "client-owner-1", "the current client seller owns the invoice notification");
   assert(openNotification("overdue-1", "receivable_overdue"), "overdue receivable notification is created");
   assert.equal(notificationById("stale-1").status, "archived", "stale receivable notification is cleaned");
 
@@ -229,6 +229,7 @@ function receivable(id, dueDate, ownerId, directOwnerId = null) {
   return {
     id,
     uploadId: "active-upload",
+    clientId: `client-${id}`,
     accountOwnerUserId: directOwnerId,
     dueDate: new Date(`${dueDate}T00:00:00.000Z`),
     clientName: `Client ${id}`,

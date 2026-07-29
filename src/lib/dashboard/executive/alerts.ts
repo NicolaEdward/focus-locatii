@@ -36,8 +36,10 @@ import {
   daysBetween
 } from "@/lib/dashboard/executive/time";
 import { isProductionSketchImage } from "@/lib/location-images";
+import { operationalBusinessOwner } from "@/lib/operational-responsibility";
 import { parseOperationalProofNotes } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
+import { receivableResponsibleUser } from "@/lib/receivables-ownership";
 import {
   effectiveHoldExpiresAt,
   isEffectiveHold,
@@ -129,6 +131,7 @@ export async function queryExecutiveAlerts(
       },
       select: {
         id: true,
+        clientId: true,
         invoiceNumber: true,
         clientName: true,
         companyCode: true,
@@ -137,7 +140,14 @@ export async function queryExecutiveAlerts(
         remainingAmount: true,
         accountOwnerUserId: true,
         createdAt: true,
-        client: { select: { id: true, companyName: true } }
+        client: {
+          select: {
+            id: true,
+            companyName: true,
+            accountOwnerUserId: true,
+            accountOwner: { select: { id: true, name: true } }
+          }
+        }
       },
       orderBy: [{ dueDate: "asc" }, { id: "asc" }]
     }),
@@ -230,7 +240,23 @@ export async function queryExecutiveAlerts(
         createdAt: true,
         updatedAt: true,
         assignedTo: { select: { id: true, name: true } },
-        campaign: { select: { id: true, campaignName: true, companyEntity: true, status: true, startDate: true, endDate: true, archivedAt: true } },
+        campaign: {
+          select: {
+            id: true,
+            campaignName: true,
+            companyEntity: true,
+            status: true,
+            startDate: true,
+            endDate: true,
+            archivedAt: true,
+            client: {
+              select: {
+                accountOwnerUserId: true,
+                accountOwner: { select: { id: true, name: true } }
+              }
+            }
+          }
+        },
         location: { select: { id: true, code: true, type: true } },
         reservation: {
           select: {
@@ -241,7 +267,29 @@ export async function queryExecutiveAlerts(
             periodStart: true,
             periodEnd: true,
             location: { select: { id: true, code: true, type: true } },
-            campaign: { select: { id: true, campaignName: true, companyEntity: true, status: true, startDate: true, endDate: true, archivedAt: true } },
+            client: {
+              select: {
+                accountOwnerUserId: true,
+                accountOwner: { select: { id: true, name: true } }
+              }
+            },
+            campaign: {
+              select: {
+                id: true,
+                campaignName: true,
+                companyEntity: true,
+                status: true,
+                startDate: true,
+                endDate: true,
+                archivedAt: true,
+                client: {
+                  select: {
+                    accountOwnerUserId: true,
+                    accountOwner: { select: { id: true, name: true } }
+                  }
+                }
+              }
+            },
             documents: {
               where: { documentType: "operational_proof_photo", status: "active" },
               select: { id: true, documentType: true, status: true, expiryDate: true, notes: true }
@@ -326,9 +374,12 @@ export async function queryExecutiveAlerts(
 
 type ReceivableRow = Awaited<ReturnType<typeof prisma.financialReceivable.findMany<{
   select: {
-    id: true; invoiceNumber: true; clientName: true; companyCode: true; currency: true; dueDate: true;
+    id: true; clientId: true; invoiceNumber: true; clientName: true; companyCode: true; currency: true; dueDate: true;
     remainingAmount: true; accountOwnerUserId: true; createdAt: true;
-    client: { select: { id: true; companyName: true } };
+    client: { select: {
+      id: true; companyName: true; accountOwnerUserId: true;
+      accountOwner: { select: { id: true; name: true } };
+    } };
   };
 }>>>[number];
 
@@ -363,12 +414,28 @@ type OperationTaskRow = Awaited<ReturnType<typeof prisma.operationTask.findMany<
     dedupeKey: true; legacyTaskId: true; scheduledFor: true; completedAt: true; assignedToUserId: true;
     createdAt: true; updatedAt: true;
     assignedTo: { select: { id: true; name: true } };
-    campaign: { select: { id: true; campaignName: true; companyEntity: true; status: true; startDate: true; endDate: true; archivedAt: true } };
+    campaign: { select: {
+      id: true; campaignName: true; companyEntity: true; status: true; startDate: true; endDate: true; archivedAt: true;
+      client: { select: {
+        accountOwnerUserId: true;
+        accountOwner: { select: { id: true; name: true } };
+      } };
+    } };
     location: { select: { id: true; code: true; type: true } };
     reservation: { select: {
       id: true; status: true; campaignId: true; contractCompany: true; periodStart: true; periodEnd: true;
       location: { select: { id: true; code: true; type: true } };
-      campaign: { select: { id: true; campaignName: true; companyEntity: true; status: true; startDate: true; endDate: true; archivedAt: true } };
+      client: { select: {
+        accountOwnerUserId: true;
+        accountOwner: { select: { id: true; name: true } };
+      } };
+      campaign: { select: {
+        id: true; campaignName: true; companyEntity: true; status: true; startDate: true; endDate: true; archivedAt: true;
+        client: { select: {
+          accountOwnerUserId: true;
+          accountOwner: { select: { id: true; name: true } };
+        } };
+      } };
       documents: { select: { id: true; documentType: true; status: true; expiryDate: true; notes: true } };
     } };
   };
@@ -395,7 +462,8 @@ function financialAlerts(
   for (const row of rows) {
     const entityCode = knownEntityCode(row.companyCode);
     if (!entityCode || !context.selectedEntityCodes.includes(entityCode)) continue;
-    if (!row.accountOwnerUserId) addToGroup(ownerless, entityCode, row);
+    const responsible = receivableResponsibleUser(row);
+    if (!responsible) addToGroup(ownerless, entityCode, row);
     if (!row.dueDate || row.dueDate >= snapshotDate || new Prisma.Decimal(row.remainingAmount || 0).lte("0.01")) continue;
     const dueKey = dateKey(row.dueDate);
     const overdueDays = Math.max(1, daysBetween(dueKey, context.snapshotDate));
@@ -421,15 +489,15 @@ function financialAlerts(
       },
       confidence: 100,
       dataQualityState: "HIGH",
-      responsibleUserId: row.accountOwnerUserId,
-      responsibleLabel: row.accountOwnerUserId ? userLabels.get(row.accountOwnerUserId) || "Responsabil alocat" : "Nealocat",
+      responsibleUserId: responsible?.id || null,
+      responsibleLabel: responsible?.name || (responsible?.id ? userLabels.get(responsible.id) : null) || "Nealocat",
       detectedAt: bucharestDayBounds(addDateKeyDays(dueKey, 1)).start,
       dueAt: row.dueDate,
       recommendedAction: "Verifică factura și stabilește următorul pas de încasare.",
       evidence: [
         evidence("Factură", invoiceLabel),
         evidence("Client", clientLabel),
-        evidence("Account Manager", row.accountOwnerUserId ? userLabels.get(row.accountOwnerUserId) || "Responsabil alocat" : "Nealocat"),
+        evidence("Account Manager", responsible?.name || (responsible?.id ? userLabels.get(responsible.id) : null) || "Nealocat"),
         evidence("Scadență", dueKey),
         evidence("Aging", `${overdueDays} zile`),
         evidence("Sold", `${new Prisma.Decimal(row.remainingAmount || 0).toFixed(2)} ${row.currency || "NECUNOSCUT"}`)
@@ -733,13 +801,20 @@ function operationalAlerts(
   const alerts: ExecutiveAlert[] = [];
   const relevantTasks = tasks.filter((task) => taskMatchesEntity(task, context.selectedEntityCodes));
   const activeTasks = relevantTasks.filter((task) => ACTIVE_TASK_STATUSES.has(task.status));
-  const unassigned = activeTasks.filter((task) => !task.assignedToUserId);
-  const assignmentCompleteness = activeTasks.length
-    ? Math.round(((activeTasks.length - unassigned.length) / activeTasks.length) * 100)
+  const businessOwnerByTaskId = new Map(activeTasks.map((task) => [task.id, operationalBusinessOwner(task)]));
+  const ownerless = activeTasks.filter((task) => !businessOwnerByTaskId.get(task.id));
+  const withoutExecutor = activeTasks.filter((task) => !task.assignedToUserId);
+  const businessAssignmentCompleteness = activeTasks.length
+    ? Math.round(((activeTasks.length - ownerless.length) / activeTasks.length) * 100)
     : 0;
-  if (activeTasks.length && unassigned.length) {
-    const byKind = countBy(unassigned, (task) => task.kind);
-    const byEntity = countBy(unassigned, (task) => taskEntityCode(task) || "UNKNOWN");
+  const executorCoverage = activeTasks.length
+    ? Math.round(((activeTasks.length - withoutExecutor.length) / activeTasks.length) * 100)
+    : 0;
+  const assignmentCompleteness = Math.min(businessAssignmentCompleteness, executorCoverage);
+  if (activeTasks.length && (ownerless.length || withoutExecutor.length)) {
+    const affected = [...new Map([...ownerless, ...withoutExecutor].map((task) => [task.id, task])).values()];
+    const byKind = countBy(affected, (task) => task.kind);
+    const byEntity = countBy(affected, (task) => taskEntityCode(task) || "UNKNOWN");
     alerts.push(makeAlert({
       ruleType: "OPERATION_ASSIGNMENT_COVERAGE_LOW",
       reasonCode: "OPERATION_ASSIGNMENT_COVERAGE_LOW",
@@ -748,31 +823,31 @@ function operationalAlerts(
       entityId: "active-unassigned",
       entityLabel: "Taskuri operaționale active",
       companyEntity: "UNKNOWN",
-      title: "Acoperire redusă a assignment-ului",
-      summary: activeTasks.length === 1
-        ? "Singurul task activ este nealocat."
-        : `${unassigned.length} din ${activeTasks.length} taskuri active sunt nealocate.`,
+      title: "Responsabilitate sau execuție neplanificată",
+      summary: `${ownerless.length} taskuri nu au vânzător prin client, iar ${withoutExecutor.length} nu au executor de teren.`,
       severity: "DATA_QUALITY",
-      impact: { kind: "DATA_QUALITY", label: "Taskuri nealocate", count: unassigned.length },
+      impact: { kind: "DATA_QUALITY", label: "Taskuri afectate", count: affected.length },
       confidence: assignmentCompleteness,
       dataQualityState: assignmentCompleteness >= 80 ? "MEDIUM" : "LOW",
       responsibleUserId: null,
       responsibleLabel: "Nealocat",
-      detectedAt: earliestDate(unassigned.map((task) => task.createdAt)) || snapshotDate,
+      detectedAt: earliestDate(affected.map((task) => task.createdAt)) || snapshotDate,
       dueAt: null,
       recommendedAction: "Revizuiește raportul read-only de reconciliere înainte de orice assignment în lot.",
       evidence: [
         evidence("Taskuri eligibile", activeTasks.length),
-        evidence("Nealocate", unassigned.length),
-        evidence("Assignment completeness", `${assignmentCompleteness}%`),
+        evidence("Fără responsabil comercial", ownerless.length),
+        evidence("Fără executor alpinist", withoutExecutor.length),
+        evidence("Responsabilitate comercială", `${businessAssignmentCompleteness}%`),
+        evidence("Planificare execuție", `${executorCoverage}%`),
         ...recordEvidence("Tip", byKind),
         ...recordEvidence("Entitate", byEntity)
       ],
-      sourceRefs: unassigned.slice(0, 10).map(operationTaskRef),
+      sourceRefs: affected.slice(0, 10).map(operationTaskRef),
       deepLink: "/admin/dashboard?panel=operation-task-reconciliation",
       relevantWindow: `snapshot:${context.snapshotDate}`,
       groupKey: "OPERATION_ASSIGNMENT_COVERAGE_LOW",
-      occurrenceCount: unassigned.length,
+      occurrenceCount: affected.length,
       asOf,
       ageReference: snapshotDate
     }));
@@ -782,12 +857,14 @@ function operationalAlerts(
   for (const task of activeTasks) {
     if (!task.scheduledFor || task.scheduledFor >= snapshotDate) continue;
     if (task.reservation?.status !== "BOOKED") continue;
-    const key = `${taskEntityCode(task) || "UNKNOWN"}|${task.kind}`;
+    const ownerId = businessOwnerByTaskId.get(task.id)?.id || "UNASSIGNED";
+    const key = `${taskEntityCode(task) || "UNKNOWN"}|${task.kind}|${ownerId}`;
     addToGroup(overdueGroups, key, task);
   }
   for (const [key, group] of overdueGroups) {
     const [entityText, kind] = key.split("|");
     const entityCode = knownEntityCode(entityText);
+    const responsible = operationalBusinessOwner(group[0]);
     const earliest = earliestDate(group.map((task) => task.scheduledFor).filter(Boolean) as Date[]) || snapshotDate;
     alerts.push(makeAlert({
       ruleType: "OPERATION_TASK_OVERDUE",
@@ -805,15 +882,16 @@ function operationalAlerts(
       impact: { kind: "COUNT", label: "Taskuri întârziate", count: group.length },
       confidence: Math.min(70, assignmentCompleteness),
       dataQualityState: assignmentCompleteness >= 80 ? "MEDIUM" : "LOW",
-      responsibleUserId: null,
-      responsibleLabel: "Nealocat",
+      responsibleUserId: responsible?.id || null,
+      responsibleLabel: responsible?.name || "Nealocat",
       detectedAt: earliest,
       dueAt: earliest,
       recommendedAction: "Verifică taskurile și legăturile lor cu obligațiile BOOKED.",
       evidence: [
         evidence("Tip", kind),
         evidence("Taskuri", group.length),
-        evidence("Assignment completeness", `${assignmentCompleteness}%`)
+        evidence("Responsabil client", responsible?.name || "Nealocat"),
+        evidence("Executori planificați", group.filter((task) => task.assignedToUserId).length)
       ],
       sourceRefs: group.slice(0, 10).map(operationTaskRef),
       deepLink: `/admin/operational?status=overdue&kind=${encodeURIComponent(kind)}`,

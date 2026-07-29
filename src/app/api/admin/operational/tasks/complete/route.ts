@@ -27,6 +27,7 @@ import {
   getOperationalTaskForAccess,
   operationalAssignmentEnabled
 } from "@/lib/operational-assignment";
+import { operationalBusinessOwner } from "@/lib/operational-responsibility";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -83,7 +84,12 @@ export async function POST(request: NextRequest) {
         sellerUserId: true,
         salesperson: true,
         client: { select: { accountOwnerUserId: true, companyName: true } },
-        campaign: { select: { campaignName: true } },
+        campaign: {
+          select: {
+            campaignName: true,
+            client: { select: { accountOwnerUserId: true } }
+          }
+        },
         location: { select: { code: true } }
       }
     });
@@ -97,8 +103,19 @@ export async function POST(request: NextRequest) {
     const fieldHasAssignment = session.role === "FIELD_OPERATOR"
       && existing.status === "BOOKED"
       && relationalTask?.assignedToUserId === session.id;
-    if (session.role === "FIELD_OPERATOR" ? !fieldHasAssignment : !canCompleteOperationalReservation(session, existing)) {
-      return NextResponse.json({ error: "Nu ai acces sa finalizezi aceasta lucrare." }, { status: 403, headers: noStoreHeaders });
+    const hasPlannedFieldExecutor = Boolean(relationalTask?.assignedToUserId);
+    const canComplete = hasPlannedFieldExecutor
+      ? fieldHasAssignment
+      : session.role !== "FIELD_OPERATOR" && canCompleteOperationalReservation(session, existing);
+    if (!canComplete) {
+      return NextResponse.json(
+        {
+          error: hasPlannedFieldExecutor
+            ? "Lucrarea poate fi finalizata numai de executorul de teren planificat."
+            : "Nu ai acces sa finalizezi aceasta lucrare."
+        },
+        { status: 403, headers: noStoreHeaders }
+      );
     }
     const relationalKindMatches = !relationalTask || (kind === "neutralization"
       ? relationalTask.kind === "NEUTRALIZATION"
@@ -205,8 +222,9 @@ export async function POST(request: NextRequest) {
     });
 
     try {
+      const businessOwner = operationalBusinessOwner({ reservation: existing });
       await createOperationalNotifications({
-        recipientUserIds: [existing.ownerId, existing.sellerUserId, existing.client?.accountOwnerUserId, relationalTask?.assignedToUserId],
+        recipientUserIds: [businessOwner?.id, relationalTask?.assignedToUserId],
         actorUserId: session.id,
         type: `operation_${kind}_completed`,
         title: kind === "decoration" ? "Decorare finalizata" : "Neutralizare finalizata",

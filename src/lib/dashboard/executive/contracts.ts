@@ -179,6 +179,7 @@ export type ExecutiveOverview = {
     locationLabel: string;
     campaignLabel: string;
     responsibleLabel: string;
+    executorLabel: string;
     href: string;
   }>;
   campaignRisks: ExecutiveCampaignRisk[];

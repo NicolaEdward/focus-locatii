@@ -70,7 +70,14 @@ export async function listReceivableRegistry(input: ReceivableRegistryInput = {}
         status: true,
         needsReview: true,
         updatedAt: true,
-        client: { select: { id: true, companyName: true } }
+        client: {
+          select: {
+            id: true,
+            companyName: true,
+            accountOwnerUserId: true,
+            accountOwner: { select: { id: true, name: true } }
+          }
+        }
       },
       orderBy: view === "history"
         ? [{ collectedAt: "desc" }, { updatedAt: "desc" }, { id: "desc" }]
@@ -94,6 +101,9 @@ export async function listReceivableRegistry(input: ReceivableRegistryInput = {}
       invoicedAmount: decimalString(row.invoicedAmount),
       collectedAmount: decimalString(row.collectedAmount),
       remainingAmount: decimalString(row.remainingAmount),
+      responsibleUser: row.client?.accountOwner
+        ? { id: row.client.accountOwner.id, name: row.client.accountOwner.name }
+        : null,
       status: receivableStatus({
         invoiceAmount: row.invoicedAmount,
         collectedAmount: row.collectedAmount,

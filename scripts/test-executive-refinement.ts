@@ -66,18 +66,18 @@ assert(campaignsService.includes("campaignSnapshotNow") && campaignsService.incl
 assert(campaignsPage.includes("executiveContext"), "Campaign workspace must preserve the originating executive context.");
 assert(receivablesService.includes("registryAsOf") && receivablesService.includes("validatedOnly"), "Financial drill-down must reproduce snapshot and validation rules.");
 assert.deepEqual(receivableOwnerUserIds({
-  accountOwnerUserId: null,
-  client: { accountOwnerUserId: "gabriel" },
-  campaign: { accountOwnerUserId: "gabriel", sellerUserId: "seller" }
-}), ["gabriel", "seller"]);
+  clientId: "client-1",
+  client: { accountOwnerUserId: "gabriel" }
+}), ["gabriel"]);
+assert.deepEqual(receivableOwnerUserIds({
+  clientId: null,
+  client: null
+}), []);
 assert.deepEqual(receivableOwnershipWhere("gabriel"), {
-  OR: [
-    { accountOwnerUserId: "gabriel" },
-    { client: { is: { accountOwnerUserId: "gabriel" } } },
-    { campaign: { is: { OR: [{ sellerUserId: "gabriel" }, { accountOwnerUserId: "gabriel" }] } } }
-  ]
+  client: { is: { accountOwnerUserId: "gabriel" } }
 });
-assert(service.includes("receivableOwnerUserIds"), "People Overview must resolve invoice ownership through canonical client and campaign relations.");
+assert(service.includes("receivableOwnerUserIds"), "People Overview must resolve invoice ownership through the canonical client relation.");
+assert(service.includes("operationalBusinessOwner"), "People Overview must attribute operational responsibility through the client owner.");
 assert(service.includes("bucharestDayBounds(scope.snapshotDate).start"), "Overdue people metrics must use the start of the Bucharest business day.");
 assert(salesDashboardService.includes("receivableOwnershipWhere(ownerId)"), "Sales and executive dashboards must share the same invoice ownership rule.");
 assert(receivablesService.includes("receivableOwnershipWhere(input.ownerUserId)"), "Invoice registry drill-down must apply the canonical owner scope.");

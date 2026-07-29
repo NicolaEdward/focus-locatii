@@ -1,39 +1,49 @@
 import type { Prisma } from "@prisma/client";
 
 export const receivableOwnershipSelect = {
+  clientId: true,
   accountOwnerUserId: true,
-  client: { select: { accountOwnerUserId: true } },
-  campaign: { select: { accountOwnerUserId: true, sellerUserId: true } }
+  client: {
+    select: {
+      accountOwnerUserId: true,
+      accountOwner: { select: { id: true, name: true } }
+    }
+  }
 } satisfies Prisma.FinancialReceivableSelect;
 
-type ReceivableOwnership = Prisma.FinancialReceivableGetPayload<{
-  select: typeof receivableOwnershipSelect;
-}>;
+type ReceivableResponsibilitySource = {
+  clientId?: string | null;
+  client?: {
+    accountOwnerUserId: string | null;
+    accountOwner?: { id: string; name: string } | null;
+  } | null;
+};
 
 export function receivableOwnershipWhere(ownerUserId: string): Prisma.FinancialReceivableWhereInput {
   return {
-    OR: [
-      { accountOwnerUserId: ownerUserId },
-      { client: { is: { accountOwnerUserId: ownerUserId } } },
-      {
-        campaign: {
-          is: {
-            OR: [
-              { sellerUserId: ownerUserId },
-              { accountOwnerUserId: ownerUserId }
-            ]
-          }
-        }
-      }
-    ]
+    client: { is: { accountOwnerUserId: ownerUserId } }
   };
 }
 
-export function receivableOwnerUserIds(receivable: ReceivableOwnership) {
-  return Array.from(new Set([
-    receivable.accountOwnerUserId,
-    receivable.client?.accountOwnerUserId,
-    receivable.campaign?.sellerUserId,
-    receivable.campaign?.accountOwnerUserId
-  ].filter((value): value is string => Boolean(value))));
+export function receivableResponsibleUserId(
+  receivable: ReceivableResponsibilitySource
+) {
+  if (!receivable.clientId || !receivable.client) return null;
+  return receivable.client.accountOwnerUserId || null;
+}
+
+export function receivableResponsibleUser(
+  receivable: ReceivableResponsibilitySource
+) {
+  const id = receivableResponsibleUserId(receivable);
+  if (!id) return null;
+  return {
+    id,
+    name: receivable.client?.accountOwner?.name || null
+  };
+}
+
+export function receivableOwnerUserIds(receivable: ReceivableResponsibilitySource) {
+  const ownerUserId = receivableResponsibleUserId(receivable);
+  return ownerUserId ? [ownerUserId] : [];
 }

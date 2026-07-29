@@ -38,6 +38,10 @@ import {
   dateKeyAsStorageDate,
   daysBetween
 } from "@/lib/dashboard/executive/time";
+import {
+  operationalBusinessOwner,
+  operationalBusinessOwnerAssignedWhere
+} from "@/lib/operational-responsibility";
 import { prisma } from "@/lib/prisma";
 import { effectiveHoldWhere } from "@/lib/reservation-lifecycle";
 import { isEffectiveHold } from "@/lib/reservation-lifecycle-domain";
@@ -128,7 +132,7 @@ export async function queryExecutiveOverview(
     campaigns,
     locations,
     todayTaskGroups,
-    assignmentGroups,
+    assignmentCoverage,
     crmOpportunities,
     crmOpenActions,
     todayTaskDetails
@@ -239,11 +243,20 @@ export async function queryExecutiveOverview(
       },
       _count: { _all: true }
     }),
-    prisma.operationTask.groupBy({
-      by: ["assignedToUserId"],
-      where: { ...operationEntityWhere, status: { in: [...activeTaskStatuses] } },
-      _count: { _all: true }
-    }),
+    Promise.all([
+      prisma.operationTask.count({
+        where: { ...operationEntityWhere, status: { in: [...activeTaskStatuses] } }
+      }),
+      prisma.operationTask.count({
+        where: {
+          AND: [
+            operationEntityWhere,
+            { status: { in: [...activeTaskStatuses] } },
+            operationalBusinessOwnerAssignedWhere()
+          ]
+        }
+      })
+    ]),
     scope.entitySelection === "ALL"
       ? prisma.crmOpportunity.findMany({
           where: { stage: { in: activeOpportunityStages } },
@@ -278,11 +291,37 @@ export async function queryExecutiveOverview(
             scheduledFor: true,
             assignedTo: { select: { name: true } },
             location: { select: { code: true } },
-            campaign: { select: { campaignName: true } },
+            campaign: {
+              select: {
+                campaignName: true,
+                client: {
+                  select: {
+                    accountOwnerUserId: true,
+                    accountOwner: { select: { id: true, name: true } }
+                  }
+                }
+              }
+            },
             reservation: {
               select: {
                 location: { select: { code: true } },
-                campaign: { select: { campaignName: true } }
+                client: {
+                  select: {
+                    accountOwnerUserId: true,
+                    accountOwner: { select: { id: true, name: true } }
+                  }
+                },
+                campaign: {
+                  select: {
+                    campaignName: true,
+                    client: {
+                      select: {
+                        accountOwnerUserId: true,
+                        accountOwner: { select: { id: true, name: true } }
+                      }
+                    }
+                  }
+                }
               }
             }
           },
@@ -318,9 +357,9 @@ export async function queryExecutiveOverview(
     dateKeyAsStorageDate(addDateKeyDays(scope.snapshotDate, 8)),
     scope
   );
-  const unassignedTasks = assignmentGroups.find((row) => row.assignedToUserId === null)?._count._all || 0;
-  const activeTasks = assignmentGroups.reduce((sum, row) => sum + row._count._all, 0);
-  const assignmentCompleteness = activeTasks ? Math.round(((activeTasks - unassignedTasks) / activeTasks) * 100) : 0;
+  const [activeTasks, assignedBusinessTasks] = assignmentCoverage;
+  const unassignedTasks = activeTasks - assignedBusinessTasks;
+  const assignmentCompleteness = activeTasks ? Math.round((assignedBusinessTasks / activeTasks) * 100) : 0;
   const operationsConfidence = activeTasks ? Math.min(70, assignmentCompleteness) : 0;
   const operationsToday = {
     decorations: taskGroupCount(todayTaskGroups, "DECORATION"),
@@ -328,7 +367,7 @@ export async function queryExecutiveOverview(
     confidence: operationsConfidence,
     dataQuality: operationsConfidence >= 60 ? "MEDIUM" as const : activeTasks ? "LOW" as const : "DATA_INSUFFICIENT" as const,
     note: activeTasks
-      ? `${unassignedTasks} din ${activeTasks} taskuri active sunt nealocate. Valorile reprezintă doar taskurile înregistrate și legate de scope.`
+      ? `${unassignedTasks} din ${activeTasks} taskuri active nu au responsabil comercial prin client. Executorul de teren este urmărit separat.`
       : "Nu există suficiente taskuri operaționale canonice pentru scope-ul selectat."
   };
 
@@ -390,16 +429,20 @@ export async function queryExecutiveOverview(
         crm: scope.entitySelection === "ALL" ? "APPLIED" : "FILTER_NOT_APPLICABLE"
       }
     },
-    operationsTodayDetails: todayTaskDetails.map((task) => ({
-      id: task.id,
-      kind: task.kind as "DECORATION" | "NEUTRALIZATION",
-      status: task.status,
-      scheduledFor: task.scheduledFor!.toISOString(),
-      locationLabel: task.location?.code || task.reservation?.location.code || "Locație nealocată",
-      campaignLabel: task.campaign?.campaignName || task.reservation?.campaign?.campaignName || "Fără campanie",
-      responsibleLabel: task.assignedTo?.name || "Nealocat",
-      href: `/admin/operational?taskId=${encodeURIComponent(task.id)}`
-    })),
+    operationsTodayDetails: todayTaskDetails.map((task) => {
+      const businessOwner = operationalBusinessOwner(task);
+      return {
+        id: task.id,
+        kind: task.kind as "DECORATION" | "NEUTRALIZATION",
+        status: task.status,
+        scheduledFor: task.scheduledFor!.toISOString(),
+        locationLabel: task.location?.code || task.reservation?.location.code || "Locație nealocată",
+        campaignLabel: task.campaign?.campaignName || task.reservation?.campaign?.campaignName || "Fără campanie",
+        responsibleLabel: businessOwner?.name || "Nealocat",
+        executorLabel: task.assignedTo?.name || "Neplanificat",
+        href: `/admin/operational?taskId=${encodeURIComponent(task.id)}`
+      };
+    }),
     campaignRisks: scope.panel === "campaign-risks" ? campaignRisks : campaignRisks.slice(0, 6),
     alertPreview: [],
     attentionPreview: [],
@@ -727,7 +770,7 @@ function alertPreview(input: {
   if (overdueCount) items.push(fact("overdue", "Facturi restante", `${overdueCount} facturi necesită urmărire financiară.`, overdueCount, "critical", 100, "HIGH", "/admin/financiar/incasari?status=overdue"));
   if (input.campaignRisks.length) items.push(fact("campaign-risk", "Campanii în risc", `${input.campaignRisks.length} campanii au condiții deterministe de risc.`, input.campaignRisks.length, "warning", 85, "MEDIUM", "/admin/dashboard?panel=campaign-risks#campaign-risks"));
   if (input.inventory.lifecycleBookingConflicts) items.push(fact("inventory-conflict", "Conflict lifecycle / BOOKED", "Există suporturi neeligibile cu BOOKED activ.", input.inventory.lifecycleBookingConflicts, "critical", 100, "HIGH", "/admin/locatii#rezervari"));
-  if (input.unassignedTasks) items.push(fact("ops-unassigned", "Calitate date operaționale", `${input.unassignedTasks} taskuri active sunt nealocate.`, input.unassignedTasks, "neutral", input.assignmentCompleteness, "LOW", "/admin/operational"));
+  if (input.unassignedTasks) items.push(fact("ops-unassigned", "Calitate date operaționale", `${input.unassignedTasks} taskuri active nu au vânzător alocat prin client.`, input.unassignedTasks, "neutral", input.assignmentCompleteness, "LOW", "/admin/operational"));
   return items.slice(0, 6);
 }
 
@@ -743,7 +786,7 @@ function bottleneckPreview(input: {
   return [
     missingOwners ? fact("missing-owner", "Ownership campanii", "Campanii active sau programate fără responsabil canonic.", missingOwners, "warning", 100, "HIGH", "/admin/dashboard?panel=campaign-risks#campaign-risks") : null,
     missingBooked ? fact("missing-booked", "Acoperire BOOKED", "Campanii fără nicio rezervare BOOKED validă.", missingBooked, "warning", 100, "HIGH", "/admin/dashboard?panel=campaign-risks#campaign-risks") : null,
-    input.unassignedTasks ? fact("assignment", "Assignment operațional", `${input.unassignedTasks} din ${input.activeTasks} taskuri active sunt nealocate.`, input.unassignedTasks, "neutral", input.activeTasks ? Math.round(((input.activeTasks - input.unassignedTasks) / input.activeTasks) * 100) : 0, "LOW", "/admin/operational") : null,
+    input.unassignedTasks ? fact("assignment", "Responsabilitate operațională", `${input.unassignedTasks} din ${input.activeTasks} taskuri active nu au vânzător alocat prin client.`, input.unassignedTasks, "neutral", input.activeTasks ? Math.round(((input.activeTasks - input.unassignedTasks) / input.activeTasks) * 100) : 0, "LOW", "/admin/operational") : null,
     input.inventory.manualUnavailable ? fact("manual-blocks", "Capacitate blocată manual", "Suporturi active indisponibile prin override sau compatibilitate legacy.", input.inventory.manualUnavailable, "neutral", 100, "HIGH", "/admin/locatii#locatii") : null
   ].filter((item): item is ExecutiveFactItem => Boolean(item)).slice(0, 5);
 }

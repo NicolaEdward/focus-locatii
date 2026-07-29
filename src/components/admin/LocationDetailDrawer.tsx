@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CalendarDays, CheckCircle2, Copy, Edit, ExternalLink, MapPin, Plus, X } from "lucide-react";
+import { AlertTriangle, CalendarDays, CheckCircle2, Copy, Download, Edit, ExternalLink, MapPin, Plus, X } from "lucide-react";
 import { adminNewReservationHref, adminReservationHref } from "@/lib/admin-routes";
 import { monthlyRate, oneTimeRate, sqm } from "@/lib/format";
 import { mapsHref } from "@/lib/gps";
@@ -117,6 +117,7 @@ export function LocationDetailDrawer({
   const publicHref = `/locatii/${displayLocation.id}`;
   const mapsUrl = mapsHref(data?.admin.internal?.mapsUrl || displayLocation.mapsUrl, displayLocation.latDisplay, displayLocation.lngDisplay);
   const adminCommercial = data?.admin.commercial;
+  const productionSketchUrl = data?.location.productionSketchUrl || null;
 
   useEffect(() => {
     let cancelled = false;
@@ -310,6 +311,12 @@ export function LocationDetailDrawer({
                   <ExternalLink size={18} />
                   Deschide prezentarea publica
                 </a>
+                {productionSketchUrl ? (
+                  <a className="focus-button secondary" href={productionSketchUrl} target="_blank" rel="noreferrer" download>
+                    <Download size={18} />
+                    Descarca schita de productie
+                  </a>
+                ) : null}
                 <button className="focus-button secondary" type="button" onClick={copyPublicLink}>
                   <Copy size={18} />
                   Copiaza link prezentare

@@ -96,6 +96,8 @@ async function main() {
     const managerTasks = await assignment.listOperationalAssignmentTasks({ session: cooSession });
     const bookedTasks = managerTasks.filter((task: any) => task.reservationId === booked.id);
     assert.deepEqual(bookedTasks.map((task: any) => task.kind).sort(), ["DECORATION", "NEUTRALIZATION"], "BOOKED derives decoration and neutralization tasks");
+    assert(bookedTasks.every((task: any) => task.businessOwner?.id === owner.id), "task business responsibility follows the client seller");
+    assert(bookedTasks.every((task: any) => task.assignedTo === null), "field executor remains separate from the client seller");
     assert.equal(managerTasks.some((task: any) => task.reservationId === hold.id), false, "HOLD is absent from assignment board");
     assert.equal((await assignment.listOperationalAssignmentTasks({ session: fieldOneSession, includeCompleted: true })).length, 0, "Field sees no unassigned task");
 

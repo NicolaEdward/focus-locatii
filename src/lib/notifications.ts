@@ -10,6 +10,7 @@ import {
 } from "@/lib/crm-domain";
 import { moneyNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
+import { receivableResponsibleUserId } from "@/lib/receivables-ownership";
 
 const receivableReminderDays = new Set([7, 3, 0, -1, -7]);
 const receivableNotificationTypes = ["receivable_overdue", "receivable_due_today", "receivable_due_soon"];
@@ -74,7 +75,7 @@ export async function syncFinancialNotifications(now = new Date()) {
     if (!row.dueDate) continue;
     const days = daysBetween(today, startOfDay(row.dueDate));
     if (!shouldNotifyReceivable(days)) continue;
-    const ownerUserId = row.accountOwnerUserId || row.client?.accountOwnerUserId;
+    const ownerUserId = receivableResponsibleUserId(row);
     const recipients = ownerUserId ? [ownerUserId] : fallbackIds;
     for (const userId of recipients) {
       const type = days < 0 ? "receivable_overdue" : days === 0 ? "receivable_due_today" : "receivable_due_soon";

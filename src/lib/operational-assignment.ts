@@ -15,6 +15,7 @@ import {
   type OperationTaskStatus
 } from "@/lib/operation-tasks";
 import { mirrorOperationTaskStatusToProductionNotes } from "@/lib/operation-task-bridge";
+import { operationalBusinessOwner } from "@/lib/operational-responsibility";
 import { prisma } from "@/lib/prisma";
 
 type OperationalAssignmentClient = typeof prisma | Prisma.TransactionClient;
@@ -42,7 +43,22 @@ const assignmentReservationSelect = {
   productionNotes: true,
   location: { select: { code: true, city: true, address: true } },
   sellerUser: { select: { name: true } },
-  client: { select: { accountOwnerUserId: true } },
+  client: {
+    select: {
+      accountOwnerUserId: true,
+      accountOwner: { select: { id: true, name: true } }
+    }
+  },
+  campaign: {
+    select: {
+      client: {
+        select: {
+          accountOwnerUserId: true,
+          accountOwner: { select: { id: true, name: true } }
+        }
+      }
+    }
+  },
   documents: {
     where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active" },
     orderBy: { uploadedAt: "desc" as const },
@@ -87,6 +103,7 @@ export type OperationalAssignmentTaskDto = {
   status: OperationTaskStatus;
   scheduledFor: string;
   completedAt: string | null;
+  businessOwner: { id: string; name: string } | null;
   assignedTo: { id: string; name: string } | null;
   location: { code: string; city: string | null; address: string | null };
   clientName: string;
@@ -173,7 +190,7 @@ export async function buildOperationalAssignmentDryRun(input: {
     where: { id: input.assigneeUserId, role: "FIELD_OPERATOR", active: true },
     select: { id: true, name: true }
   });
-  if (!assignee) throw new Error("Responsabilul de teren nu este activ sau nu are rol Field Operator.");
+  if (!assignee) throw new Error("Executorul de teren nu este activ sau nu are rol Field Operator.");
 
   const tasks = await listManagerAssignmentTasks(true, client);
   const tasksByKey = new Map(tasks.map((task) => [task.taskKey, task]));
@@ -277,7 +294,7 @@ export async function applyOperationalAssignmentBatch(input: {
       if (!draft || !draft.dedupeKey) throw new Error(`Lucrarea ${item.taskKey} nu mai este eligibila.`);
       const existing = await tx.operationTask.findUnique({ where: { dedupeKey: item.taskKey } });
       if ((existing?.assignedToUserId || null) !== item.beforeAssigneeUserId) {
-        throw new Error(`Responsabilul lucrarii ${item.taskKey} s-a schimbat dupa dry-run.`);
+        throw new Error(`Executorul lucrarii ${item.taskKey} s-a schimbat dupa dry-run.`);
       }
       let task;
       if (existing) {
@@ -286,7 +303,7 @@ export async function applyOperationalAssignmentBatch(input: {
           data: assignmentTaskSyncData(draft, input.assigneeUserId)
         });
         if (updated.count !== 1) {
-          throw new Error(`Responsabilul lucrarii ${item.taskKey} s-a schimbat in timpul aplicarii.`);
+          throw new Error(`Executorul lucrarii ${item.taskKey} s-a schimbat in timpul aplicarii.`);
         }
         task = await tx.operationTask.findUniqueOrThrow({ where: { id: existing.id } });
       } else {
@@ -380,15 +397,22 @@ export async function getOperationalTaskForAccess(operationTaskId: string, sessi
   const task = await client.operationTask.findUnique({
     where: { id: operationTaskId },
     include: {
+      campaign: {
+        select: {
+          client: { select: { accountOwnerUserId: true } }
+        }
+      },
       reservation: {
         select: {
           id: true,
           status: true,
-          ownerId: true,
-          sellerUserId: true,
-          salesperson: true,
           productionNotes: true,
-          client: { select: { accountOwnerUserId: true } }
+          client: { select: { accountOwnerUserId: true } },
+          campaign: {
+            select: {
+              client: { select: { accountOwnerUserId: true } }
+            }
+          }
         }
       }
     }
@@ -398,11 +422,7 @@ export async function getOperationalTaskForAccess(operationTaskId: string, sessi
   if (isOperationalAssignmentManager(session)) return task;
   if (session.role === "SALES_DIRECTOR") return task;
   if (session.role !== "SALES_AGENT") return null;
-  const reservation = task.reservation;
-  const legacyOwner = !reservation.ownerId && (reservation.salesperson === session.name || reservation.salesperson === session.email);
-  return reservation.ownerId === session.id || reservation.sellerUserId === session.id || reservation.client?.accountOwnerUserId === session.id || legacyOwner
-    ? task
-    : null;
+  return operationalBusinessOwner(task)?.id === session.id ? task : null;
 }
 
 export async function findOperationalTaskForWork(input: {
@@ -508,6 +528,7 @@ function mergeAssignmentTasks(reservations: AssignmentReservation[], tasks: Assi
 function toAssignmentTaskDto(reservation: AssignmentReservation, draft: OperationTaskDraft, relational: AssignmentTaskRecord | null): OperationalAssignmentTaskDto {
   const scheduledFor = relational?.assignedToUserId && relational.scheduledFor ? relational.scheduledFor : draft.scheduledFor;
   const status = relational?.assignedToUserId ? relational.status : draft.status;
+  const businessOwner = operationalBusinessOwner({ reservation });
   const proofPhotos = reservation.documents.flatMap((document) => {
     if (!isOperationalProofActive(document)) return [];
     const notes = parseOperationalProofNotes(document.notes);
@@ -530,6 +551,7 @@ function toAssignmentTaskDto(reservation: AssignmentReservation, draft: Operatio
     status,
     scheduledFor: scheduledFor?.toISOString() || "",
     completedAt: relational?.completedAt?.toISOString() || draft.completedAt?.toISOString() || null,
+    businessOwner: businessOwner ? { id: businessOwner.id, name: businessOwner.name || "Vanzator alocat" } : null,
     assignedTo: relational?.assignedTo ? { id: relational.assignedTo.id, name: relational.assignedTo.name } : null,
     location: {
       code: reservation.location.code,
@@ -538,7 +560,7 @@ function toAssignmentTaskDto(reservation: AssignmentReservation, draft: Operatio
     },
     clientName: reservation.clientName,
     campaignName: reservation.campaignName,
-    salesperson: reservation.sellerUser?.name || reservation.salesperson || "Nealocat",
+    salesperson: businessOwner?.name || "Nealocat",
     periodStart: reservation.periodStart.toISOString(),
     periodEnd: reservation.periodEnd.toISOString(),
     source: relational ? "relational" : "derived",

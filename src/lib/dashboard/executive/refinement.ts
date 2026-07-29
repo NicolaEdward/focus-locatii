@@ -26,6 +26,7 @@ import {
   executiveScopeForSession
 } from "@/lib/dashboard/executive/scope";
 import { bucharestDayBounds } from "@/lib/dashboard/executive/time";
+import { operationalBusinessOwner } from "@/lib/operational-responsibility";
 import { prisma } from "@/lib/prisma";
 import { receivableOwnerUserIds, receivableOwnershipSelect } from "@/lib/receivables-ownership";
 import { ROLE_LABELS, type UserRole } from "@/lib/rbac";
@@ -152,7 +153,22 @@ export async function queryExecutivePeople(
         assignedToUserId: true,
         status: true,
         scheduledFor: true,
-        updatedAt: true
+        updatedAt: true,
+        campaign: {
+          select: {
+            client: { select: { accountOwnerUserId: true } }
+          }
+        },
+        reservation: {
+          select: {
+            client: { select: { accountOwnerUserId: true } },
+            campaign: {
+              select: {
+                client: { select: { accountOwnerUserId: true } }
+              }
+            }
+          }
+        }
       }
     }),
     entityScoped
@@ -225,9 +241,31 @@ export async function queryExecutivePeople(
   const crmActivityByUser = new Map(crmActivity.map((row) => [row.actorUserId as string, row._max.occurredAt]));
   const auditActivityByUser = new Map(auditActivity.map((row) => [row.userId as string, row._max.createdAt]));
   const clientsByUser = countBy(clients, (row) => row.accountOwnerUserId as string);
-  const openTasksByUser = countBy(tasks.filter((row) => activeTaskStatuses.includes(row.status as typeof activeTaskStatuses[number]) && row.assignedToUserId), (row) => row.assignedToUserId as string);
-  const completedTasksByUser = countBy(tasks.filter((row) => row.status === "DONE" && row.assignedToUserId), (row) => row.assignedToUserId as string);
-  const overdueTasksByUser = countBy(tasks.filter((row) => activeTaskStatuses.includes(row.status as typeof activeTaskStatuses[number]) && row.assignedToUserId && row.scheduledFor && row.scheduledFor < snapshot), (row) => row.assignedToUserId as string);
+  const businessOwnerByTaskId = new Map(tasks.map((task) => [task.id, operationalBusinessOwner(task)?.id || null]));
+  const openTasksByUser = countBy(
+    tasks.filter((row) => activeTaskStatuses.includes(row.status as typeof activeTaskStatuses[number]) && businessOwnerByTaskId.get(row.id)),
+    (row) => businessOwnerByTaskId.get(row.id) as string
+  );
+  const completedTasksByUser = countBy(
+    tasks.filter((row) => row.status === "DONE" && businessOwnerByTaskId.get(row.id)),
+    (row) => businessOwnerByTaskId.get(row.id) as string
+  );
+  const overdueTasksByUser = countBy(
+    tasks.filter((row) => activeTaskStatuses.includes(row.status as typeof activeTaskStatuses[number]) && businessOwnerByTaskId.get(row.id) && row.scheduledFor && row.scheduledFor < snapshot),
+    (row) => businessOwnerByTaskId.get(row.id) as string
+  );
+  const executorOpenTasksByUser = countBy(
+    tasks.filter((row) => activeTaskStatuses.includes(row.status as typeof activeTaskStatuses[number]) && row.assignedToUserId),
+    (row) => row.assignedToUserId as string
+  );
+  const executorCompletedTasksByUser = countBy(
+    tasks.filter((row) => row.status === "DONE" && row.assignedToUserId),
+    (row) => row.assignedToUserId as string
+  );
+  const executorOverdueTasksByUser = countBy(
+    tasks.filter((row) => activeTaskStatuses.includes(row.status as typeof activeTaskStatuses[number]) && row.assignedToUserId && row.scheduledFor && row.scheduledFor < snapshot),
+    (row) => row.assignedToUserId as string
+  );
   const openActionsByUser = countBy(crmActions.filter((row) => row.ownerId), (row) => row.ownerId as string);
   const overdueActionsByUser = countBy(crmActions.filter((row) => row.ownerId && row.dueAt < snapshot), (row) => row.ownerId as string);
   const opportunitiesByUser = countBy(opportunities.filter((row) => row.ownerId), (row) => row.ownerId as string);
@@ -239,13 +277,33 @@ export async function queryExecutivePeople(
   }
 
   const people: ExecutivePerson[] = users.map((user) => {
-    const userTasks = tasks.filter((task) => task.assignedToUserId === user.id);
+    const isFieldExecutor = user.role === "FIELD_OPERATOR";
+    const userTasks = tasks.filter((task) => isFieldExecutor
+      ? task.assignedToUserId === user.id
+      : businessOwnerByTaskId.get(task.id) === user.id);
+    const userOpenTasks = isFieldExecutor
+      ? executorOpenTasksByUser.get(user.id) || 0
+      : openTasksByUser.get(user.id) || 0;
+    const userCompletedTasks = isFieldExecutor
+      ? executorCompletedTasksByUser.get(user.id) || 0
+      : completedTasksByUser.get(user.id) || 0;
+    const userOverdueTasks = isFieldExecutor
+      ? executorOverdueTasksByUser.get(user.id) || 0
+      : overdueTasksByUser.get(user.id) || 0;
     const lastTaskActivity = latestDate(userTasks.map((task) => task.updatedAt));
     const lastCrmActivity = crmActivityByUser.get(user.id) || null;
     const lastAuditActivity = auditActivityByUser.get(user.id) || null;
     const lastBusinessActivityAt = latestDate([lastTaskActivity, lastCrmActivity, lastAuditActivity].filter(Boolean) as Date[]);
     const issues: ExecutivePerson["issues"] = [];
-    addIssue(issues, "OVERDUE_TASKS", "Taskuri întârziate", overdueTasksByUser.get(user.id) || 0, `/admin/operational?assignee=${user.id}&status=delayed`);
+    addIssue(
+      issues,
+      "OVERDUE_TASKS",
+      "Taskuri întârziate",
+      userOverdueTasks,
+      isFieldExecutor
+        ? "/admin/operational"
+        : `/admin/dashboard?panel=alerts&domain=OPERATIONS&owner=${user.id}&ruleType=OPERATION_TASK_OVERDUE#executive-alerts`
+    );
     addIssue(issues, "OVERDUE_CRM_ACTIONS", "Follow-up-uri restante", overdueActionsByUser.get(user.id) || 0, `/admin/crm?view=today&owner=${user.id}&due=overdue`);
     addIssue(
       issues,
@@ -261,12 +319,12 @@ export async function queryExecutivePeople(
     ) {
       addIssue(issues, "CRM_ACTIVITY_MISSING", `Nicio activitate CRM în ultimele ${recentCrmThresholdDays} zile`, 1, `/admin/crm?owner=${user.id}`);
     }
-    const openTasks = openTasksByUser.get(user.id) || 0;
+    const openTasks = userOpenTasks;
     const campaignsManaged = campaignCounts.get(user.id) || 0;
     const workload = factualWorkload({
       openTasks,
       campaignsManaged,
-      overdueTasks: overdueTasksByUser.get(user.id) || 0,
+      overdueTasks: userOverdueTasks,
       overdueInvoices: overdueInvoicesByUser.get(user.id) || 0,
       overdueActions: overdueActionsByUser.get(user.id) || 0,
       entityScoped
@@ -281,7 +339,7 @@ export async function queryExecutivePeople(
       clientsManaged: clientsByUser.get(user.id) || 0,
       campaignsManaged,
       openTasks,
-      completedTasks: completedTasksByUser.get(user.id) || 0,
+      completedTasks: userCompletedTasks,
       openCrmActions: openActionsByUser.get(user.id) || 0,
       openOpportunities: opportunitiesByUser.get(user.id) || 0,
       pipeline: opportunityAmounts(opportunities.filter((row) => row.ownerId === user.id)),

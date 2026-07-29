@@ -28,6 +28,7 @@ import { FocusLogo } from "@/components/brand/FocusLogo";
 import { LogoutButton } from "@/components/admin/LogoutButton";
 import { NotificationBell } from "@/components/admin/NotificationBell";
 import { SalesReportExportButton } from "@/components/admin/SalesReportExportButton";
+import { ThemeToggle } from "@/components/admin/ThemeToggle";
 import type { AuthSession } from "@/lib/auth";
 import { hasAnyPermission, hasPermission, ROLE_LABELS } from "@/lib/rbac";
 
@@ -104,6 +105,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
         </nav>
         <div className="col-start-3 row-start-1 flex shrink-0 items-center gap-2">
           {!isFieldOperator && !isDceo ? <NotificationBell /> : null}
+          <ThemeToggle />
           <Link className="focus-button secondary px-3" href="/admin/securitate" prefetch={false} aria-label="Securitatea contului" title="Securitatea contului"><KeyRound size={18} /></Link>
           <div className="relative z-50">
             <LogoutButton />

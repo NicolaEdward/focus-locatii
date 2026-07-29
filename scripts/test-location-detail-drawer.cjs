@@ -73,6 +73,8 @@ function drawerHasExpectedSectionsAndQuickActions() {
   assert(drawer.includes("adminNewReservationHref({ locationId: displayLocation.id })"), "new reservation quick action should include selected location id");
   assert(drawer.includes("adminReservationHref(period.id)"), "timeline rows should deep-link to the focused reservation");
   assert(drawer.includes("Copiaza link prezentare"), "drawer should support copying the public presentation link");
+  assert(drawer.includes("Descarca schita de productie"), "drawer should offer the production sketch only when the location has one");
+  assert(drawer.includes("productionSketchUrl ?"), "drawer must not render a broken sketch action when no sketch exists");
 }
 
 function presentationBlockAvoidsPrivateFields() {

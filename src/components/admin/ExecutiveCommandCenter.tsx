@@ -296,7 +296,7 @@ function DateField({ label, name, value }: { label: string; name: string; value:
 function PulsePanel({ data }: { data: ExecutiveOverview }) {
   const compact = data.pulseByEntity.length > 1;
   return (
-    <section className="h-full min-w-0 rounded-lg border border-focus-yellow/55 bg-[linear-gradient(145deg,rgba(8,34,55,0.98),rgba(3,19,34,0.96))] p-3 shadow-focus" aria-labelledby="company-pulse-title">
+    <section className="theme-dark-panel h-full min-w-0 rounded-lg border border-focus-yellow/55 bg-[linear-gradient(145deg,rgba(8,34,55,0.98),rgba(3,19,34,0.96))] p-3 shadow-focus" aria-labelledby="company-pulse-title">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-black uppercase text-focus-yellow">Confidence înainte de scor</p>
@@ -562,7 +562,7 @@ function OperationsTodayDetails({ data }: { data: ExecutiveOverview }) {
         {rows.length ? rows.map((row) => (
           <Link className="grid min-h-14 gap-2 rounded-md border border-white/10 bg-focus-ink/50 p-3 hover:border-focus-yellow md:grid-cols-[minmax(0,1fr)_minmax(180px,0.5fr)_auto]" href={row.href} key={row.id} prefetch={false}>
             <span><strong className="block text-white">{row.locationLabel}</strong><small className="text-slate-400">{row.campaignLabel}</small></span>
-            <span className="text-sm text-slate-300">Responsabil: <strong className="text-white">{row.responsibleLabel}</strong></span>
+            <span className="text-sm text-slate-300">Responsabil client: <strong className="text-white">{row.responsibleLabel}</strong><small className="mt-0.5 block text-slate-500">Executor: {row.executorLabel}</small></span>
             <span className="text-xs font-black text-focus-yellow">{row.status}</span>
           </Link>
         )) : <div className="flex min-h-20 items-center gap-3 rounded border border-dashed border-focus-line px-4 text-sm text-slate-400"><CheckCircle2 size={19} />Nu există operațiuni de acest tip la snapshot.</div>}

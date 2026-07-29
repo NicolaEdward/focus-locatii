@@ -121,6 +121,7 @@ export function FieldWorkInbox({ initialTasks }: { initialTasks: OperationalAssi
               <div className="flex items-center gap-2 text-slate-300"><MapPin className="h-4 w-4 text-focus-yellow" /><span>{task.location.city || "-"}</span></div>
               <div className="text-slate-300"><dt className="text-xs uppercase text-slate-500">Client</dt><dd className="font-bold text-white">{task.clientName}</dd></div>
               <div className="text-slate-300"><dt className="text-xs uppercase text-slate-500">Campanie</dt><dd className="font-bold text-white">{task.campaignName || "-"}</dd></div>
+              <div className="text-slate-300 sm:col-span-2"><dt className="text-xs uppercase text-slate-500">Responsabil comercial</dt><dd className="font-bold text-white">{task.businessOwner?.name || "Nealocat"}</dd></div>
             </dl>
             <div className="mt-5 grid gap-2 sm:grid-cols-2">
               {task.status === "NEW" ? (
@@ -140,7 +141,7 @@ export function FieldWorkInbox({ initialTasks }: { initialTasks: OperationalAssi
       <details className="mt-6 rounded-lg border border-slate-700 bg-focus-navy p-4">
         <summary className="cursor-pointer font-black text-white">Finalizate recent ({completed.length})</summary>
         <div className="mt-4 grid gap-3">
-          {completed.map((task) => <div key={task.taskKey} className="rounded-md border border-slate-700 p-3 text-sm"><p className="font-black text-white">{task.location.code} - {kindLabel(task.kind)}</p><p className="text-slate-400">{task.completedAt ? dateTimeLabel(task.completedAt) : dateLabel(task.scheduledFor)}</p>{task.proofPhotos.map((photo) => <a key={photo.id} href={photo.downloadUrl} className="mt-2 mr-2 inline-flex text-focus-yellow underline">{photo.fileName}</a>)}</div>)}
+          {completed.map((task) => <div key={task.taskKey} className="rounded-md border border-slate-700 p-3 text-sm"><p className="font-black text-white">{task.location.code} - {kindLabel(task.kind)}</p><p className="text-slate-400">{task.completedAt ? dateTimeLabel(task.completedAt) : dateLabel(task.scheduledFor)}</p><p className="mt-1 text-xs text-slate-400">Executat de: <strong className="text-slate-200">{task.proofPhotos[0]?.uploadedBy || task.assignedTo?.name || "Operator teren"}</strong></p>{task.proofPhotos.map((photo) => <a key={photo.id} href={photo.downloadUrl} className="mt-2 mr-2 inline-flex text-focus-yellow underline">{photo.fileName}</a>)}</div>)}
           {!completed.length ? <p className="text-sm text-slate-400">Nu exista lucrari finalizate recent.</p> : null}
         </div>
       </details>

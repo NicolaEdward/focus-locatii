@@ -98,27 +98,7 @@ export async function resolveDocumentAccess(links: DocumentAccessLinks): Promise
           where: { id: links.financialReceivableId },
           select: {
             id: true,
-            accountOwnerUserId: true,
-            client: { select: { accountOwnerUserId: true } },
-            campaign: {
-              select: {
-                accountOwnerUserId: true,
-                sellerUserId: true,
-                client: { select: { accountOwnerUserId: true } }
-              }
-            },
-            billingItem: {
-              select: {
-                client: { select: { accountOwnerUserId: true } },
-                reservation: {
-                  select: {
-                    ownerId: true,
-                    sellerUserId: true,
-                    client: { select: { accountOwnerUserId: true } }
-                  }
-                }
-              }
-            }
+            client: { select: { accountOwnerUserId: true } }
           }
         })
       : null,
@@ -174,15 +154,7 @@ export async function resolveDocumentAccess(links: DocumentAccessLinks): Promise
   if (links.financialReceivableId) {
     if (financialReceivable) {
       pushOwnerCheck(ownerChecks, "financialReceivable", financialReceivable.id, [
-        financialReceivable.accountOwnerUserId,
-        financialReceivable.client?.accountOwnerUserId,
-        financialReceivable.campaign?.accountOwnerUserId,
-        financialReceivable.campaign?.sellerUserId,
-        financialReceivable.campaign?.client.accountOwnerUserId,
-        financialReceivable.billingItem?.client?.accountOwnerUserId,
-        financialReceivable.billingItem?.reservation?.ownerId,
-        financialReceivable.billingItem?.reservation?.sellerUserId,
-        financialReceivable.billingItem?.reservation?.client?.accountOwnerUserId
+        financialReceivable.client?.accountOwnerUserId
       ]);
     } else {
       missingLinks.push("financialReceivableId");

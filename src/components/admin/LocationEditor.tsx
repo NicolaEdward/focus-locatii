@@ -377,8 +377,8 @@ function SketchPreview({ url, code }: { url: string; code: string }) {
           <p className="text-xs font-black uppercase text-focus-yellow">Schita de productie</p>
           <p className="text-sm font-bold text-slate-300">{code || "Locatie"} are o schita atasata.</p>
         </div>
-        <a className="focus-button secondary !min-h-0 px-3 py-2 text-xs" href={safeUrl} target="_blank" rel="noreferrer">
-          Deschide schita
+        <a className="focus-button secondary !min-h-0 px-3 py-2 text-xs" href={safeUrl} target="_blank" rel="noreferrer" download>
+          Descarca schita
         </a>
       </div>
     </div>

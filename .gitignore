@@ -12,5 +12,6 @@ public/samples/*.png
 tsconfig.tsbuildinfo
 backups/
 artifacts/
+outputs/
 
 .vercel

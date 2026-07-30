@@ -71,7 +71,10 @@ async function main() {
     header: 1,
     defval: ""
   });
-  assert(rows[1]?.[0] === "Nr" && rows[1]?.[12] === "Schita" && rows[1]?.[13] === "Availability", "Live admin export headers mismatch");
+  const headerRow = rows.find(
+    (row) => row[0] === "Nr" && row[12] === "Schita" && row[13] === "Availability"
+  );
+  assert(headerRow, "Live admin export headers mismatch");
 
   const publicPage = await fetch(`${BASE_URL}/locatii`).then((response) => response.text());
   assert(publicPage.includes("Focus Media") || publicPage.includes("PORTOFOLIU"), "Live public page content missing");

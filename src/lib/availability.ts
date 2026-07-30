@@ -307,6 +307,16 @@ export function publicAvailability(input: AvailabilityInput, now = new Date()): 
     };
   }
 
+  if (status === "UNKNOWN" && decisionValue.status === "AVAILABLE") {
+    return {
+      publicStatus: "AVAILABLE",
+      label: "Disponibil",
+      detail: availabilityText && availabilityText.toLocaleLowerCase("ro-RO") !== "disponibil"
+        ? availabilityText
+        : null
+    };
+  }
+
   if ((status === "BOOKED" || status === "RESERVED") && bookedFrom && bookedFrom > today) {
     const until = availableUntil || addDays(bookedFrom, -1);
     return {

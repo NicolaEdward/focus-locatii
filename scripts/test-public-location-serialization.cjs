@@ -78,6 +78,23 @@ const cancelledAndArchived = serializeLocation(location({
 }));
 assert.equal(cancelledAndArchived.publicStatus, "AVAILABLE", "Cancelled/archived reservations must not block public availability.");
 
+const legacyUnknownButCanonicallyAvailable = serializeLocation(location({
+  status: "UNKNOWN",
+  availabilityText: "Disponibil",
+  reservations: [],
+  availabilityOverrides: []
+}));
+assert.equal(
+  legacyUnknownButCanonicallyAvailable.publicStatus,
+  "AVAILABLE",
+  "Legacy UNKNOWN must not override canonical availability when there are no blockers."
+);
+assert.equal(
+  legacyUnknownButCanonicallyAvailable.availabilityLabel,
+  "Disponibil",
+  "A canonically available location must not be labelled as requiring review."
+);
+
 const manuallyBlocked = serializeLocation(location({
   availabilityOverrides: [{
     id: "override-private",
@@ -116,7 +133,8 @@ console.log(JSON.stringify({
     "public location detail API has short public cache",
     "private coordinates hidden",
     "BOOKED blocks with or without client/campaign",
-    "CANCELLED/ARCHIVED ignored"
+    "CANCELLED/ARCHIVED ignored",
+    "legacy UNKNOWN cannot override canonical availability"
   ]
 }, null, 2));
 

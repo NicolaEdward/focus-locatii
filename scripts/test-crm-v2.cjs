@@ -75,7 +75,10 @@ async function handoffRuntimeRules() {
     "@/lib/prisma": { prisma: { $transaction: async (callback) => callback(tx) } },
     "@/lib/clients": { normalizeClientName: (value) => value.toLowerCase().replace(/\bsrl\b/g, "").trim() },
     "@/lib/crm-domain-service": { CrmDomainError, hasGlobalCrmAccess: () => false },
-    "@/lib/rbac": { hasAnyPermission: () => true },
+    "@/lib/rbac": {
+      hasAnyPermission: (_role, permissions) =>
+        permissions.includes("leads.manage.own") || permissions.includes("leads.view.own")
+    },
     "@/lib/tax-id": {
       taxIdSearchValues: (value) => [value].filter(Boolean),
       taxIdsMatch: (left, right) => String(left || "").replace(/^RO/, "") === String(right || "").replace(/^RO/, "")
@@ -217,6 +220,7 @@ function sourceArchitectureRules() {
   assert(!service.includes("metricOpportunities.findMany"), "workspace must not fetch every opportunity for totals");
 
   assert(page.includes("CrmWorkspaceV4"));
+  assert(page.includes('canAssignOwners={hasPermission(session.role, "leads.manage")}'), "global CRM visibility must not grant owner reassignment");
   assert(!page.includes("CrmWorkspace\n"));
   for (const label of ["Astăzi", "Prospectare", "Oportunități", "Toate"]) assert(workspace.includes(label), `missing CRM view ${label}`);
   for (const stage of ["opportunity", "quoted", "negotiation", "contracting"]) assert(workspace.includes(stage));
@@ -238,12 +242,17 @@ function sourceArchitectureRules() {
 
   assert(queryRoute.includes('["leads.view", "leads.view.own"]'));
   assert(commands.includes('["leads.manage", "leads.manage.own"]'));
-  assert(commands.includes('session.role === "COO"'), "COO CRM commands need an API-level read-only guard");
+  assert(!commands.includes('session.role === "COO"'), "COO must use the same permission-enforced CRM commands as other seller-capable roles");
   const cooPermissions = rbac.slice(rbac.indexOf("COO: ["), rbac.indexOf("SALES_DIRECTOR: ["));
   assert(cooPermissions.includes('"leads.view"'));
   assert(cooPermissions.includes('"opportunities.view"'));
-  assert(!cooPermissions.includes('"leads.manage"'), "COO must not manage CRM leads");
-  assert(!cooPermissions.includes('"opportunities.manage"'), "COO must not manage CRM opportunities");
+  assert(cooPermissions.includes('"leads.manage.own"'), "COO must be able to manage own commercial work");
+  assert(cooPermissions.includes('"opportunities.manage.own"'), "COO must be able to manage own opportunities");
+  assert(!cooPermissions.includes('"leads.manage",'), "COO must not modify another seller's CRM portfolio");
+  assert(service.includes("prospectManageScope(actor)"), "CRM commands must enforce owner scope separately from global read access");
+  assert(service.includes("opportunityManageScope(actor)"), "opportunity commands must enforce owner scope separately from global read access");
+  assert(workspace.includes("canAssignOwners"), "new CRM records must expose owner assignment only to global CRM managers");
+  assert(handoff.includes("hasGlobalCrmManageAccess(actor)"), "won handoff must not turn COO global read access into global write access");
   assert(workspace.includes("Mod vizualizare"));
   assert(detailRoute.includes('["leads.view", "leads.view.own"]'));
   assert(service.includes("skip: (page - 1) * limit"));

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
 import { assertRoleAssignmentAllowed, USER_ROLES, type UserRole } from "@/lib/rbac";
 import { assertUserCanBeDeactivated } from "@/lib/ownership-integrity";
+import { isSellerCapableRole } from "@/lib/sales-roles";
 
 const roleSchema = z.enum(USER_ROLES);
 
@@ -106,9 +107,9 @@ export async function updateUser(id: string, input: unknown, actorId: string, ac
     throw new Error("Nu iti poti schimba propriul rol.");
   }
   const removesCommercialOwnershipRole =
-    ["SALES_AGENT", "SALES_DIRECTOR"].includes(existing.role) &&
+    isSellerCapableRole(existing.role) &&
     parsed.role !== undefined &&
-    !["SALES_AGENT", "SALES_DIRECTOR"].includes(parsed.role);
+    !isSellerCapableRole(parsed.role);
   if (existing.active && (parsed.active === false || removesCommercialOwnershipRole)) {
     await assertUserCanBeDeactivated(id);
   }

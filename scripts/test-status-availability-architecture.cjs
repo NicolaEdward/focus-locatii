@@ -70,7 +70,7 @@ assert(salesDashboard.includes("effectiveHoldWhere(now)"), "Sales HOLD lists mus
 assert(!salesDashboard.includes("addUtcDays(row.createdAt, 14)"), "Sales dashboard must not use the old 14-day HOLD fallback");
 
 assert(availability.includes("canonicalBlockingIntervals"), "shared availability calculator must treat all blockers as canonical intervals");
-assert(availability.includes('dateSemantics: "INCLUSIVE"'), "canonical availability must declare inclusive date semantics");
+assert(availability.includes('dateSemantics: "INCLUSIVE_WITH_SAME_DAY_HANDOFF"'), "canonical availability must declare the same-day BOOKED handoff semantics");
 assert(availability.includes("lifecycleStatus"), "shared availability calculator must understand lifecycle status");
 assert(availability.includes("Locatie inactiva"), "inactive lifecycle status should suspend availability");
 

@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
+import { isSellerCapableRole, SELLER_CAPABLE_ROLES } from "@/lib/sales-roles";
 
 export const OWNERSHIP_EVIDENCE_PRECEDENCE = [
   "DIRECT_OWNER",
@@ -298,7 +299,7 @@ export async function getSellerReassignmentDryRun(sourceUserId: string, targetUs
   if (sourceUserId === targetUserId) throw new Error("Alege doi utilizatori diferiti.");
   const [source, target, dependencies] = await Promise.all([
     prisma.user.findUnique({ where: { id: sourceUserId }, select: { id: true, name: true, active: true, role: true } }),
-    prisma.user.findFirst({ where: { id: targetUserId, active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } }, select: { id: true, name: true, role: true } }),
+    prisma.user.findFirst({ where: { id: targetUserId, active: true, role: { in: [...SELLER_CAPABLE_ROLES] } }, select: { id: true, name: true, role: true } }),
     getUserActiveDependencySummary(sourceUserId)
   ]);
   if (!source) throw new Error("Utilizatorul sursa nu exista.");
@@ -389,7 +390,7 @@ async function ids(rows: Promise<Array<{ id: string }>>) {
 export async function getOwnershipIntegrityReport(now = new Date()): Promise<OwnershipIntegrityReport> {
   const [sellers, reservations, clients, campaigns, baseCounts, financeLegacy, ownerlessClientStatuses, operationalAssignment] = await Promise.all([
     prisma.user.findMany({
-      where: { role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } },
+      where: { role: { in: [...SELLER_CAPABLE_ROLES] } },
       select: { id: true, name: true, email: true, active: true, role: true }
     }),
     prisma.reservation.findMany({
@@ -752,7 +753,7 @@ function evidenceRank(source: OwnershipEvidence["source"]) {
 }
 
 function isActiveSalesUser(user?: { active: boolean; role: string } | null) {
-  return Boolean(user?.active && ["SALES_AGENT", "SALES_DIRECTOR"].includes(user.role));
+  return Boolean(user?.active && isSellerCapableRole(user.role));
 }
 
 function userEvidence(

@@ -115,7 +115,7 @@ assert.equal(hasPermission("FINANCE_OPERATOR", "finance.validate"), true);
 assert.equal(hasPermission("FINANCE_OPERATOR", "finance.confirm"), true);
 assert.equal(hasPermission("SALES_AGENT", "finance.view"), false);
 assert.equal(hasPermission("COO", "leads.view"), true);
-assert.equal(hasPermission("COO", "leads.manage"), false);
+assert.equal(hasPermission("COO", "leads.manage.own"), true);
 
 const root = path.resolve(process.cwd());
 const service = read("src/lib/receivables-import-service.ts");

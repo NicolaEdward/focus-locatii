@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/rbac";
 import type { AuthSession } from "@/lib/auth";
 import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
-import { adminAvailabilityExplanation, decideAvailability } from "@/lib/availability";
+import { adminAvailabilityExplanation, bookingPeriodsConflict, decideAvailability } from "@/lib/availability";
 
 type Context = {
   params: Promise<{ id: string }>;
@@ -158,7 +158,12 @@ function serializeTimelinePeriod(
   const conflicts = allRows.filter((row) =>
     row.id !== reservation.id &&
     row.periodStart <= reservation.periodEnd &&
-    row.periodEnd >= reservation.periodStart
+    row.periodEnd >= reservation.periodStart &&
+    (
+      row.status !== "BOOKED" ||
+      reservation.status !== "BOOKED" ||
+      bookingPeriodsConflict(row.periodStart, row.periodEnd, reservation.periodStart, reservation.periodEnd)
+    )
   );
 
   return {

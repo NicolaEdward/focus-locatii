@@ -14,6 +14,7 @@ import { getCrmTeamDashboardData } from "@/lib/crm-dashboard";
 import { crmCurrentOpportunityValue, crmNextActionLabel } from "@/lib/crm-domain";
 import { effectiveInstallationDate, hasMissingInstallationSchedule } from "@/lib/installation-date";
 import { effectiveNeutralizationDate, hasMissingNeutralizationSchedule } from "@/lib/neutralization-date";
+import { bookingPeriodsConflict } from "@/lib/availability";
 import { isEffectiveHold } from "@/lib/reservation-lifecycle";
 import {
   listOperationalTasksWithFallback,
@@ -1188,7 +1189,9 @@ function findConflicts(items: CampaignRow[], now: Date) {
   for (const item of active) {
     const group = byLocation.get(item.location.id) || [];
     for (const existing of group) {
-      if (existing.periodEnd >= item.periodStart) conflicts.push([existing, item]);
+      if (bookingPeriodsConflict(existing.periodStart, existing.periodEnd, item.periodStart, item.periodEnd)) {
+        conflicts.push([existing, item]);
+      }
     }
     group.push(item);
     byLocation.set(item.location.id, group);

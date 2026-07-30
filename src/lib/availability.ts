@@ -72,7 +72,7 @@ export type AvailabilityDecision = {
   activeOverride: AvailabilityConflictInterval | null;
   lifecycleReason: AvailabilityReasonCode | null;
   effectiveHoldExpiry: Date | null;
-  dateSemantics: "INCLUSIVE";
+  dateSemantics: "INCLUSIVE_WITH_SAME_DAY_HANDOFF";
   periodStart: Date | null;
   periodEnd: Date | null;
 };
@@ -138,7 +138,9 @@ export function decideAvailability(input: AvailabilityDecisionInput): Availabili
 
   const rangeEnd = periodEnd || FAR_FUTURE_DATE;
   const conflictingIntervals = canonicalBlockingIntervals(input, periodStart, rangeEnd, now)
-    .filter((interval) => interval.from <= rangeEnd && interval.to >= periodStart)
+    .filter((interval) => periodEnd
+      ? availabilityIntervalConflicts(interval, periodStart, periodEnd)
+      : interval.from <= periodStart && interval.to >= periodStart)
     .sort(compareCanonicalIntervals);
   const activeOverride = conflictingIntervals.find((interval) =>
     interval.source === "OVERRIDE" &&
@@ -282,17 +284,25 @@ export function publicAvailability(input: AvailabilityInput, now = new Date()): 
 
   if (activeReservation) {
     const activeStatus = activeReservation.status === "RESERVED" || activeReservation.status === "HOLD" ? "RESERVED" : "BOOKED";
+    const nextAvailable = activeStatus === "BOOKED"
+      ? activeReservation.periodEnd
+      : addDays(activeReservation.periodEnd, 1);
     return {
       publicStatus: activeStatus,
       label: `${activeStatus === "RESERVED" ? "Rezervat" : "Inchiriat"} pana la ${formatDate(activeReservation.periodEnd)}`,
-      detail: `Disponibil din ${formatDate(addDays(activeReservation.periodEnd, 1))}`
+      detail: activeStatus === "BOOKED"
+        ? `Disponibil pentru changeover din ${formatDate(nextAvailable)}`
+        : `Disponibil din ${formatDate(nextAvailable)}`
     };
   }
 
   if (futureReservation) {
+    const availableUntil = allowsSameDayHandoff(futureReservation.status)
+      ? futureReservation.periodStart
+      : addDays(futureReservation.periodStart, -1);
     return {
       publicStatus: "AVAILABLE",
-      label: `Disponibil pana la ${formatDate(addDays(futureReservation.periodStart, -1))}`,
+      label: `Disponibil pana la ${formatDate(availableUntil)}`,
       detail: bookingWindowLabel(futureReservation.status, futureReservation.periodStart, futureReservation.periodEnd)
     };
   }
@@ -550,7 +560,7 @@ function availableWindows(from: Date, to: Date, occupied: Array<{ from: Date; to
 
   for (const interval of occupied) {
     if (interval.from > cursor) {
-      const windowEnd = addDays(interval.from, -1);
+      const windowEnd = allowsSameDayHandoff(interval.status) ? interval.from : addDays(interval.from, -1);
       windows.push({
         from: cursor,
         to: windowEnd,
@@ -558,11 +568,15 @@ function availableWindows(from: Date, to: Date, occupied: Array<{ from: Date; to
         labelTo: interval.from
       });
     }
-    if (interval.to >= cursor) cursor = addDays(interval.to, 1);
+    if (interval.to >= cursor) cursor = allowsSameDayHandoff(interval.status) ? interval.to : addDays(interval.to, 1);
     if (cursor > to) break;
   }
 
-  if (cursor <= to) {
+  const cursorIsOccupiedBookedBoundary = occupied.some((interval) =>
+    allowsSameDayHandoff(interval.status) &&
+    interval.to.getTime() === cursor.getTime()
+  );
+  if (cursor <= to && (cursor < to || !cursorIsOccupiedBookedBoundary)) {
     const previous = occupied.filter((interval) => interval.to < cursor).at(-1);
     windows.push({
       from: cursor,
@@ -614,7 +628,7 @@ function decision(input: {
     activeOverride: input.activeOverride || null,
     lifecycleReason: input.lifecycleReason || null,
     effectiveHoldExpiry: input.effectiveHoldExpiry || null,
-    dateSemantics: "INCLUSIVE",
+    dateSemantics: "INCLUSIVE_WITH_SAME_DAY_HANDOFF",
     periodStart: input.periodStart,
     periodEnd: input.periodEnd
   };
@@ -660,6 +674,39 @@ function compareCanonicalIntervals(a: AvailabilityConflictInterval, b: Availabil
 
 function isManualBlockingStatus(status: string) {
   return ["COMMERCIAL_BLOCK", "MAINTENANCE", "INTERNAL_HOLD"].includes(status);
+}
+
+export function bookingPeriodsConflict(
+  firstStart: Date,
+  firstEnd: Date,
+  secondStart: Date,
+  secondEnd: Date
+) {
+  if (firstStart > firstEnd || secondStart > secondEnd) return false;
+  if (firstStart > secondEnd || firstEnd < secondStart) return false;
+
+  const firstHandsToSecond =
+    firstEnd.getTime() === secondStart.getTime() &&
+    firstStart.getTime() < secondStart.getTime();
+  const secondHandsToFirst =
+    secondEnd.getTime() === firstStart.getTime() &&
+    secondStart.getTime() < firstStart.getTime();
+  return !firstHandsToSecond && !secondHandsToFirst;
+}
+
+function availabilityIntervalConflicts(
+  interval: AvailabilityConflictInterval,
+  requestedStart: Date,
+  requestedEnd: Date
+) {
+  if (interval.source === "RESERVATION" && allowsSameDayHandoff(interval.status)) {
+    return bookingPeriodsConflict(interval.from, interval.to, requestedStart, requestedEnd);
+  }
+  return interval.from <= requestedEnd && interval.to >= requestedStart;
+}
+
+function allowsSameDayHandoff(status: string) {
+  return status === "BOOKED";
 }
 
 function minDate(a: Date, b: Date) {

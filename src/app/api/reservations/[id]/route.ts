@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission, requirePermission } from "@/lib/auth";
-import { deleteReservation, getReservation, updateReservation, updateReservationGroupStatus } from "@/lib/reservations";
+import { deleteReservation, getReservationGroup, updateReservation, updateReservationGroupStatus } from "@/lib/reservations";
 import { recordAudit } from "@/lib/audit";
 import { observeRoute, setObservabilityRole } from "@/lib/observability";
 
@@ -21,7 +21,9 @@ export async function GET(request: NextRequest, context: Context) {
 
   const { id } = await context.params;
   try {
-    return NextResponse.json({ reservation: await getReservation(id, session) }, { headers: noStoreHeaders });
+    const reservations = await getReservationGroup(id, session);
+    const reservation = reservations.find((row) => row.id === id) || reservations[0];
+    return NextResponse.json({ reservation, reservations }, { headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Rezervarea nu a putut fi incarcata." },

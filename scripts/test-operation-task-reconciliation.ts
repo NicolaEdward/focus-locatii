@@ -21,8 +21,12 @@ const locations: ReconciliationLocation[] = [
   location("l-digital", "FM002", "Ecran digital")
 ];
 const reservations: ReconciliationReservation[] = [
-  reservation("r-static", "BOOKED", "c-active", "l-static", "2026-07-01", "2026-07-31"),
-  reservation("r-changeover", "BOOKED", "c-active", "l-static", "2026-08-01", "2026-08-31"),
+  reservation("r-static", "BOOKED", "c-active", "l-static", "2026-07-01", "2026-07-31", {
+    neutralizationDate: new Date("2026-08-01T00:00:00.000Z")
+  }),
+  reservation("r-changeover", "BOOKED", "c-active", "l-static", "2026-08-01", "2026-08-31", {
+    installationDate: new Date("2026-08-01T00:00:00.000Z")
+  }),
   reservation("r-digital", "BOOKED", "c-active", "l-digital", "2026-07-01", "2026-07-31"),
   reservation("r-cancelled", "CANCELLED", "c-ended", "l-static", "2026-05-01", "2026-05-31")
 ];
@@ -78,6 +82,10 @@ assert.equal(noProofReport.summary.bookedObligations, 3);
 assert.equal(noProofReport.summary.operationTasks, tasks.length);
 assert.equal(noProofReport.summary.byMedium.DIGITAL, undefined, "Taskurile nu trebuie inventate pentru obligația digitală.");
 assert.equal(noProofReport.batches.every((batch) => batch.executionApproved === false), true);
+assert(
+  noProofReport.items.some((item) => item.category === "POSSIBLE_CHANGEOVER" && item.summary.includes("aceeași zi")),
+  "Neutralizarea și montajul din aceeași zi trebuie clasificate drept changeover posibil."
+);
 
 const proof: ReconciliationProof = {
   id: "proof-1",
@@ -177,7 +185,8 @@ function reservation(
   campaignId: string,
   locationId: string,
   start: string,
-  end: string
+  end: string,
+  overrides: Partial<ReconciliationReservation> = {}
 ): ReconciliationReservation {
   return {
     id,
@@ -196,7 +205,8 @@ function reservation(
     bookedAt: status === "BOOKED" ? new Date("2026-06-01T00:00:00.000Z") : null,
     productionNotes: null,
     createdAt: new Date("2026-06-01T00:00:00.000Z"),
-    updatedAt: new Date("2026-07-01T00:00:00.000Z")
+    updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+    ...overrides
   };
 }
 

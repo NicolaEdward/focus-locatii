@@ -1,6 +1,7 @@
 import { crmDaysBetween, crmOpportunityTotals } from "@/lib/crm-analytics-v4";
 import { CRM_OPPORTUNITY_STAGE_OPTIONS, CRM_PROSPECT_STATUS_OPTIONS } from "@/lib/crm-domain";
 import { prisma } from "@/lib/prisma";
+import { SELLER_CAPABLE_ROLES } from "@/lib/sales-roles";
 
 export type CrmTeamDashboardData = Awaited<ReturnType<typeof getCrmTeamDashboardData>>;
 
@@ -12,7 +13,7 @@ export async function getCrmTeamDashboardData(now = new Date()) {
   const activeOpportunityStages = ["opportunity", "quoted", "negotiation", "contracting"];
   const [sellers, prospects, opportunities, actions, activities7, activities30] = await Promise.all([
     prisma.user.findMany({
-      where: { active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } },
+      where: { active: true, role: { in: [...SELLER_CAPABLE_ROLES] } },
       select: { id: true, name: true, email: true },
       orderBy: { name: "asc" }
     }),

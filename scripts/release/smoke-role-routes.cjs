@@ -29,6 +29,7 @@ const adminRoutes = [
   "/admin/securitate",
 ];
 const expectedDashboard = {
+  SUPER_ADMIN: "/admin/dashboard",
   COO: "/admin/dashboard",
   D_CEO: "/admin/dashboard",
   SALES_DIRECTOR: "/admin/dashboard",
@@ -37,8 +38,9 @@ const expectedDashboard = {
   FIELD_OPERATOR: "/admin/operational",
 };
 const allowed = {
+  SUPER_ADMIN: new Set(adminRoutes),
   COO: new Set(adminRoutes),
-  D_CEO: new Set(adminRoutes.filter((route) => !["/admin/locatii/import", "/admin/locatii/gps", "/admin/utilizatori", "/admin/integritate-date"].includes(route))),
+  D_CEO: new Set(adminRoutes.filter((route) => !["/admin/locatii/import", "/admin/locatii/gps", "/admin/integritate-date"].includes(route))),
   SALES_DIRECTOR: new Set(adminRoutes.filter((route) => !["/admin/financiar/incasari", "/admin/integrari/saga", "/admin/furnizori", "/admin/locatii/import", "/admin/locatii/gps", "/admin/utilizatori", "/admin/integritate-date"].includes(route))),
   SALES_AGENT: new Set(adminRoutes.filter((route) => !["/admin/financiar/incasari", "/admin/integrari/saga", "/admin/furnizori", "/admin/locatii/import", "/admin/locatii/gps", "/admin/utilizatori", "/admin/integritate-date"].includes(route))),
   FINANCE_OPERATOR: new Set(["/admin/clienti", "/admin/campanii", "/admin/financiar/incasari", "/admin/integrari/saga", "/admin/furnizori", "/admin/securitate"]),

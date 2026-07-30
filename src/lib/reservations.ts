@@ -19,6 +19,8 @@ import { paymentTermDays } from "@/lib/billing";
 import { syncCampaignCommercialSummary } from "@/lib/campaigns/campaign-commercial-summary";
 import { companyEntityOrThrow, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
+import { SELLER_CAPABLE_ROLES } from "@/lib/sales-roles";
+import { operationCost, withOperationCost } from "@/lib/operation-status";
 import {
   OPERATIONAL_PROOF_DOCUMENT_TYPE,
   isOperationalProofActive,
@@ -31,6 +33,7 @@ const activeReservationStatuses = ["HOLD", "RESERVED", "BOOKED"] as const;
 const operationalReservationStatuses = ["BOOKED"] as const;
 type SellerPatch = { ownerId?: string | null; sellerUserId?: string | null; salesperson?: string | null };
 type ReservationDbClient = typeof prisma | Prisma.TransactionClient;
+const reservationUpdateTransactionOptions = { maxWait: 5_000, timeout: 30_000 } as const;
 
 const reservationInclude = {
   client: { select: { accountOwnerUserId: true } },
@@ -513,6 +516,23 @@ export async function getReservation(id: string, actor?: AuthSession | null) {
   return serializeReservation(reservation);
 }
 
+export async function getReservationGroup(id: string, actor?: AuthSession | null) {
+  const anchor = await prisma.reservation.findUniqueOrThrow({
+    where: { id },
+    include: reservationInclude
+  });
+  assertReservationOwnership(anchor, actor);
+  if (!anchor.contractGroupId) return [serializeReservation(anchor)];
+
+  const reservations = await prisma.reservation.findMany({
+    where: { contractGroupId: anchor.contractGroupId },
+    include: reservationInclude,
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+  });
+  for (const reservation of reservations) assertReservationOwnership(reservation, actor);
+  return reservations.map(serializeReservation);
+}
+
 export async function listOperationReservations(session: AuthSession) {
   if (session.role === "FIELD_OPERATOR") return [];
   const today = startOfUtcDay(new Date());
@@ -588,10 +608,15 @@ export async function createReservation(input: unknown, actor?: AuthSession | nu
     }
 
     const created = [];
-    for (const locationId of locationIds) {
+    for (const [locationIndex, locationId] of locationIds.entries()) {
       const reservation = await tx.reservation.create({
         data: {
           ...reservationData,
+          productionNotes: splitDecorationCostForGroup(
+            reservationData.productionNotes,
+            locationIds.length,
+            locationIndex
+          ),
           locationId,
           clientId: rentalContext?.client.id || null,
           campaignId: rentalContext?.campaign.id || null,
@@ -651,9 +676,9 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
   const reservation = await prisma.$transaction(async (tx) => {
     const existing = await tx.reservation.findUniqueOrThrow({ where: { id }, include: { client: true, campaign: true } });
     assertReservationOwnership(existing, actor);
-    const ownershipPatch: SellerPatch = await resolveUpdateSeller(parsed, existing, actor);
+    const ownershipPatch: SellerPatch = await resolveUpdateSeller(parsed, existing, actor, tx);
     const nextStatusForClient = parsed.status || existing.status;
-    const rentalContext = await resolveRentalContextForUpdate(parsed, existing);
+    const rentalContext = await resolveRentalContextForUpdate(parsed, existing, tx);
     if (nextStatusForClient !== "BOOKED") {
       assertHoldHasClientName(nextStatusForClient, parsed.clientName === undefined ? existing.clientName : parsed.clientName);
     }
@@ -728,7 +753,7 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
     }
 
     return updated;
-  });
+  }, reservationUpdateTransactionOptions);
 
   const reservationWithSegments = await prisma.reservation.findUniqueOrThrow({
     where: { id: reservation.id },
@@ -760,7 +785,7 @@ export async function updateReservationGroupStatus(
         assertReservationTransition(reservation.status as ReservationDTO["status"], status, actor.role);
       }
       if (status === "BOOKED") {
-        await assertExistingBookedLink(reservation.clientId, reservation.campaignId);
+        await assertExistingBookedLink(reservation.clientId, reservation.campaignId, tx);
       }
       await assertCanonicalReservationAvailabilityForWrite(
         tx,
@@ -840,11 +865,12 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
     await lockReservationLocationsForWrite(tx, locationIdsToLock);
 
     const prepared = [];
+    const rentalContextCache = new Map<string, ReturnType<typeof loadAndValidateRentalContext>>();
     for (const reservation of reservations) {
       assertReservationOwnership(reservation, actor);
-      const ownershipPatch: SellerPatch = await resolveUpdateSeller(parsed, reservation, actor);
+      const ownershipPatch: SellerPatch = await resolveUpdateSeller(parsed, reservation, actor, tx);
       const nextStatusForClient = parsed.status || reservation.status;
-      const rentalContext = await resolveRentalContextForUpdate(parsed, reservation);
+      const rentalContext = await resolveRentalContextForUpdate(parsed, reservation, tx, rentalContextCache);
       if (nextStatusForClient !== "BOOKED") {
         assertHoldHasClientName(nextStatusForClient, parsed.clientName === undefined ? reservation.clientName : parsed.clientName);
       }
@@ -868,8 +894,15 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
       });
     }
 
-    for (const item of prepared) {
+    for (const [itemIndex, item] of prepared.entries()) {
       const patchData = reservationPatchData(parsed, item.rentalContext, item.nextStatusForClient, item.reservation);
+      if (parsed.productionNotes !== undefined) {
+        patchData.productionNotes = splitDecorationCostForGroup(
+          parsed.productionNotes,
+          prepared.length,
+          itemIndex
+        );
+      }
       const updatedReservation = await tx.reservation.update({
         where: { id: item.reservation.id },
         data: {
@@ -924,7 +957,7 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
       include: reservationInclude,
       orderBy: [{ createdAt: "asc" }]
     });
-  });
+  }, reservationUpdateTransactionOptions);
 
   return updated.map(serializeReservation);
 }
@@ -1070,7 +1103,7 @@ function assertSellerReassignmentAllowed(actor?: AuthSession | null) {
 
 async function loadAssignableSeller(sellerUserId: string) {
   const seller = await prisma.user.findFirst({
-    where: { id: sellerUserId, active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } },
+    where: { id: sellerUserId, active: true, role: { in: [...SELLER_CAPABLE_ROLES] } },
     select: { id: true, name: true }
   });
   if (!seller) throw new Error("Vanzatorul ales nu este valid.");
@@ -1172,7 +1205,9 @@ async function resolveRentalContextForUpdate(
     clientId: string | null;
     campaignId: string | null;
     status: string;
-  }
+  },
+  client: ReservationDbClient = prisma,
+  cache?: Map<string, ReturnType<typeof loadAndValidateRentalContext>>
 ) {
   const nextStatus = input.status || existing.status;
   if (nextStatus !== "BOOKED") return null;
@@ -1181,31 +1216,44 @@ async function resolveRentalContextForUpdate(
   if (!clientId || !campaignId) {
     throw new Error("Transformarea in inchiriere cere client si campanie reale.");
   }
-  return loadAndValidateRentalContext(clientId, campaignId);
+  const cacheKey = `${clientId}:${campaignId}`;
+  const cached = cache?.get(cacheKey);
+  if (cached) return cached;
+  const context = loadAndValidateRentalContext(clientId, campaignId, client);
+  cache?.set(cacheKey, context);
+  return context;
 }
 
-async function loadAndValidateRentalContext(clientId: string, campaignId: string) {
-  const [client, campaign] = await Promise.all([
-    prisma.clientAccount.findUnique({ where: { id: clientId } }),
-    prisma.campaign.findUnique({ where: { id: campaignId } })
+async function loadAndValidateRentalContext(
+  clientId: string,
+  campaignId: string,
+  db: ReservationDbClient = prisma
+) {
+  const [clientAccount, campaign] = await Promise.all([
+    db.clientAccount.findUnique({ where: { id: clientId } }),
+    db.campaign.findUnique({ where: { id: campaignId } })
   ]);
-  if (!client || ["archived", "merged"].includes(client.status)) {
+  if (!clientAccount || ["archived", "merged"].includes(clientAccount.status)) {
     throw new Error("Clientul selectat nu exista sau este arhivat.");
   }
   if (!campaign || campaign.archivedAt || campaign.status === "archived") {
     throw new Error("Campania selectata nu exista sau este arhivata.");
   }
-  if (campaign.clientId !== client.id) {
+  if (campaign.clientId !== clientAccount.id) {
     throw new Error("Campania selectata nu apartine clientului ales.");
   }
-  return { client, campaign };
+  return { client: clientAccount, campaign };
 }
 
-async function assertExistingBookedLink(clientId: string | null, campaignId: string | null) {
+async function assertExistingBookedLink(
+  clientId: string | null,
+  campaignId: string | null,
+  client: ReservationDbClient = prisma
+) {
   if (!clientId || !campaignId) {
     throw new Error("Nu poti confirma hold-ul ca inchiriere fara client si campanie reale. Foloseste conversia hold -> inchiriere.");
   }
-  await loadAndValidateRentalContext(clientId, campaignId);
+  await loadAndValidateRentalContext(clientId, campaignId, client);
 }
 
 function matchesActorSeller(value: string | null | undefined, actor?: AuthSession | null) {
@@ -1230,11 +1278,17 @@ async function resolveCreateSeller(
 async function resolveUpdateSeller(
   input: ReturnType<typeof reservationPatchSchema.parse>,
   existing: { ownerId: string | null; sellerUserId: string | null; salesperson: string | null },
-  actor?: AuthSession | null
+  actor?: AuthSession | null,
+  db: ReservationDbClient = prisma
 ): Promise<SellerPatch> {
   if (!actor) return {};
   const touchesSeller = input.ownerId !== undefined || input.sellerUserId !== undefined || input.salesperson !== undefined;
   if (!touchesSeller) return {};
+  const sellerUnchanged =
+    (input.ownerId === undefined || input.ownerId === existing.ownerId) &&
+    (input.sellerUserId === undefined || input.sellerUserId === existing.sellerUserId) &&
+    (input.salesperson === undefined || input.salesperson === existing.salesperson);
+  if (sellerUnchanged) return {};
 
   return resolveSellerForMutation({
     actor,
@@ -1242,7 +1296,8 @@ async function resolveUpdateSeller(
     legacySalesperson: input.salesperson || null,
     existingSellerUserId: existing.sellerUserId,
     existingOwnerId: existing.ownerId,
-    existingSalesperson: existing.salesperson
+    existingSalesperson: existing.salesperson,
+    db
   });
 }
 
@@ -1579,6 +1634,22 @@ function rentalCorrectionSnapshot(reservation: {
 
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+export function splitDecorationCostForGroup(
+  notes: string | null | undefined,
+  locationCount: number,
+  locationIndex: number
+) {
+  const count = Math.max(1, Math.trunc(locationCount));
+  const cost = operationCost(notes, "decoration");
+  if (cost.cost == null || count === 1) return notes ?? null;
+
+  const totalCents = Math.round(cost.cost * 100);
+  const baseCents = Math.floor(totalCents / count);
+  const remainder = totalCents % count;
+  const share = (baseCents + (locationIndex < remainder ? 1 : 0)) / 100;
+  return withOperationCost(notes, "decoration", share, cost.currency);
 }
 
 function normalizeCurrency(value?: string | null): "RON" | "EUR" {

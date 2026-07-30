@@ -1,3 +1,5 @@
+import { isSellerCapableRole } from "@/lib/sales-roles";
+
 const SYSTEM_SELLER_NAMES = new Set([
   "admin",
   "administrator",
@@ -6,8 +8,6 @@ const SYSTEM_SELLER_NAMES = new Set([
   "super admin",
   "super administrator"
 ]);
-
-const SELLER_CAPABLE_ROLES = new Set(["SALES_AGENT", "SALES_DIRECTOR", "COO"]);
 
 export type SellerAttribution = {
   salesperson?: string | null;
@@ -20,7 +20,7 @@ export type SellerAttribution = {
 
 export function reportableSellerName(attribution: SellerAttribution) {
   const user = attribution.sellerUser;
-  if (user && (user.active === false || !SELLER_CAPABLE_ROLES.has(String(user.role || "")))) return null;
+  if (user && (user.active === false || !isSellerCapableRole(user.role))) return null;
 
   const name = cleanSellerName(user?.name || attribution.salesperson);
   if (!name || SYSTEM_SELLER_NAMES.has(normalizeSellerName(name))) return null;

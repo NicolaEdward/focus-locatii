@@ -21,6 +21,7 @@ const {
 const { loadAvailabilityDecisions } = loadTsModule(path.join(process.cwd(), "src", "lib", "availability-service.ts"));
 const { getLocationSelectionAvailability } = loadTsModule(path.join(process.cwd(), "src", "lib", "location-selection-availability.ts"));
 const { publicAvailability } = loadTsModule(path.join(process.cwd(), "src", "lib", "availability.ts"));
+const { operationCost, withOperationCost } = loadTsModule(path.join(process.cwd(), "src", "lib", "operation-status.ts"));
 
 const suffix = `reservation-integrity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const created = {
@@ -59,7 +60,7 @@ async function main() {
   );
   await rejects(
     () => createHold(ctx.locationA.id, "2026-01-10", "2026-01-15", agentSession),
-    "same-day boundary is rejected under inclusive interval semantics"
+    "an active HOLD keeps blocking on its end date"
   );
 
   const nonOverlap = await createHold(ctx.locationA.id, "2026-01-11", "2026-01-20", agentSession);
@@ -104,6 +105,46 @@ async function main() {
     "conversion to BOOKED rechecks conflicts"
   );
   await prisma.reservation.update({ where: { id: directConflict.id }, data: { status: "CANCELLED", holdExpiresAt: null } });
+
+  const previousBooked = await directReservation(ctx.locationT.id, "2027-01-01", "2027-01-15", "BOOKED", ctx.agent, {
+    clientId: ctx.client.id,
+    campaignId: ctx.campaign.id
+  });
+  const sameDayHandoff = await createBooked(ctx.locationT.id, "2027-01-15", "2027-01-31", ctx, agentSession);
+  assert.equal(sameDayHandoff.status, "BOOKED", "BOOKED campaigns may hand off on the same calendar date");
+  await rejects(
+    () => createBooked(ctx.locationT.id, "2027-01-10", "2027-01-20", ctx, agentSession),
+    "a real BOOKED overlap remains rejected"
+  );
+  assert.notEqual(previousBooked.id, sameDayHandoff.id);
+
+  const groupedDecoration = await createReservation({
+    locationIds: [ctx.locationU.id, ctx.locationV.id],
+    status: "BOOKED",
+    clientId: ctx.client.id,
+    campaignId: ctx.campaign.id,
+    periodStart: "2027-02-01",
+    periodEnd: "2027-02-28",
+    monthlyRentTotal: 1000,
+    currency: "EUR",
+    productionNotes: withOperationCost(null, "decoration", 100, "EUR")
+  }, agentSession);
+  created.reservations.push(...groupedDecoration.map((row) => row.id));
+  const initialDecorationShares = groupedDecoration.map((row) =>
+    Number(operationCost(row.productionNotes, "decoration").cost)
+  );
+  assert(
+    initialDecorationShares.length === 2 && initialDecorationShares.every((value) => value === 50),
+    "decoration total is divided between selected locations"
+  );
+  const regroupedDecoration = await updateReservationGroup(groupedDecoration[0].id, {
+    productionNotes: withOperationCost(groupedDecoration[0].productionNotes, "decoration", 100.01, "EUR")
+  }, agentSession);
+  assert.equal(
+    Math.round(regroupedDecoration.reduce((sum, row) => sum + operationCost(row.productionNotes, "decoration").cost, 0) * 100),
+    10001,
+    "group decoration edit reconciles exactly to the entered total"
+  );
 
   const concurrentLocation = ctx.locationD.id;
   const concurrent = await Promise.allSettled([
@@ -234,6 +275,8 @@ async function main() {
       "update non-overlap succeeds",
       "single reservation cancellation preserves its reason without an invalid Prisma field",
       "BOOKED conversion rechecks conflicts",
+      "BOOKED campaigns allow same-day operational handoff while real overlaps remain blocked",
+      "group decoration cost is divided exactly across locations",
       "concurrency overlapping create only one succeeds",
       "lifecycle and manual blocks reject writes",
       "public selector and write share override decision",
@@ -276,7 +319,7 @@ async function setup() {
   created.campaigns.push(campaign.id);
 
   const locations = {};
-  for (const letter of "ABCDEFGHIJKLMNOPQRS") {
+  for (const letter of "ABCDEFGHIJKLMNOPQRSTUVW") {
     locations[`location${letter}`] = await location(category.id, letter);
   }
   return { category, agent, otherAgent, coo, superAdmin, client, campaign, ...locations };
@@ -318,6 +361,21 @@ async function createHold(locationId, start, end, actor) {
     clientName: `Hold ${suffix}`,
     periodStart: start,
     periodEnd: end
+  }, actor);
+  created.reservations.push(row.id);
+  return row;
+}
+
+async function createBooked(locationId, start, end, ctx, actor) {
+  const [row] = await createReservation({
+    locationId,
+    status: "BOOKED",
+    clientId: ctx.client.id,
+    campaignId: ctx.campaign.id,
+    periodStart: start,
+    periodEnd: end,
+    monthlyRentTotal: 1000,
+    currency: "EUR"
   }, actor);
   created.reservations.push(row.id);
   return row;

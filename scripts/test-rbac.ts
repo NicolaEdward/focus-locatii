@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { dashboardPathForRole, hasGlobalDataAccess, hasPermission, isBusinessReadOnlyRole, permissionsForRole, ROLE_LABELS, USER_ROLES } from "../src/lib/rbac";
 import { classifyDceoRequest } from "../src/lib/business-mutation-policy";
 import { allowedReservationTransitions, canTransitionReservation } from "../src/lib/reservation-workflow";
+import { isSellerCapableRole } from "../src/lib/sales-roles";
 
 for (const role of USER_ROLES) {
   assert(permissionsForRole(role).length > 0, `${role} must have permissions`);
@@ -16,6 +17,13 @@ assert.equal(hasPermission("SALES_DIRECTOR", "leads.manage"), true);
 assert.equal(hasPermission("SALES_AGENT", "leads.view.own"), true);
 assert.equal(hasPermission("SALES_AGENT", "leads.manage.own"), true);
 assert.equal(hasPermission("COO", "leads.view"), true);
+assert.equal(hasPermission("COO", "leads.manage"), false);
+assert.equal(hasPermission("COO", "leads.manage.own"), true);
+assert.equal(hasPermission("COO", "opportunities.manage"), false);
+assert.equal(hasPermission("COO", "opportunities.manage.own"), true);
+assert.equal(hasPermission("COO", "proposals.create"), true);
+assert.equal(isSellerCapableRole("COO"), true);
+assert.equal(isSellerCapableRole("D_CEO"), false);
 assert.equal(hasPermission("D_CEO", "leads.view"), true);
 assert.equal(hasPermission("D_CEO", "finance.view"), true);
 assert.equal(hasPermission("D_CEO", "inventory.manage"), false);
@@ -70,4 +78,4 @@ assert.equal(canTransitionReservation("COMPLETED" as never, "RESERVED"), false);
 assert.equal(allowedReservationTransitions("RESERVED", "SALES_AGENT").includes("BOOKED"), false);
 assert.equal(allowedReservationTransitions("RESERVED", "SALES_DIRECTOR").includes("BOOKED"), true);
 
-console.log(JSON.stringify({ ok: true, roles: USER_ROLES, checks: 60 }, null, 2));
+console.log(JSON.stringify({ ok: true, roles: USER_ROLES, checks: 62 }, null, 2));

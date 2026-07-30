@@ -18,6 +18,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import type { ExecutiveOverview } from "@/lib/dashboard/executive/contracts";
+import { isSellerCapableRole } from "@/lib/sales-roles";
 import type {
   ExecutiveActivityItem,
   ExecutiveActivityResponse,
@@ -335,7 +336,7 @@ function renderTab(
   customers: ExecutiveCustomersResponse | null
 ) {
   if (tab === "people") return people ? <PeopleGrid people={people.people} notes={people.notes} /> : <EmptyState text="Deschide din nou tabul pentru încărcare." />;
-  if (tab === "sales") return people ? <PeopleGrid people={people.people.filter((person) => ["SALES_AGENT", "SALES_DIRECTOR"].includes(person.role))} notes={people.notes} sales /> : <EmptyState text="Datele Sales se încarcă la cerere." />;
+  if (tab === "sales") return people ? <PeopleGrid people={people.people.filter((person) => isSellerCapableRole(person.role))} notes={people.notes} sales /> : <EmptyState text="Datele Sales se încarcă la cerere." />;
   if (tab === "customers") return customers ? <CustomerViews data={customers} /> : <EmptyState text="Clienții se încarcă la cerere." />;
   if (tab === "operations") return <OperationsView data={data} />;
   if (tab === "finance") return <FinanceView data={data} />;

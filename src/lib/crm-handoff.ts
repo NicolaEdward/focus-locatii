@@ -124,7 +124,7 @@ export async function recordCrmHandoff(input: {
         id: input.opportunityId,
         version: input.version,
         stage: "won",
-        ...(hasGlobalCrmAccess(actor) ? {} : { ownerId: actor.id })
+        ...(hasGlobalCrmManageAccess(actor) ? {} : { ownerId: actor.id })
       },
       select: { id: true, companyId: true, sourceProspectId: true, ownerId: true, company: { select: { name: true, taxId: true } } }
     });
@@ -187,10 +187,14 @@ async function resolveTarget(
 }
 
 function assertTargetOwnership(actor: AuthSession, opportunityOwnerId: string | null, targetOwnerId: string | null) {
-  if (hasGlobalCrmAccess(actor)) return;
+  if (hasGlobalCrmManageAccess(actor)) return;
   if (opportunityOwnerId !== actor.id || targetOwnerId !== actor.id) {
     throw new CrmDomainError("Poti confirma doar clientii si campaniile proprii.", "CRM_FORBIDDEN", 403);
   }
+}
+
+function hasGlobalCrmManageAccess(actor: AuthSession) {
+  return hasAnyPermission(actor.role, ["leads.manage"]);
 }
 
 function assertCanView(actor: AuthSession) {
@@ -198,7 +202,7 @@ function assertCanView(actor: AuthSession) {
 }
 
 function assertCanManage(actor: AuthSession) {
-  if (actor.role === "COO" || !hasAnyPermission(actor.role, ["leads.manage", "leads.manage.own"])) {
+  if (!hasAnyPermission(actor.role, ["leads.manage", "leads.manage.own"])) {
     throw new CrmDomainError("Nu poti confirma handoff-ul acestei oportunitati.", "CRM_FORBIDDEN", 403);
   }
 }

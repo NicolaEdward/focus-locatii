@@ -28,6 +28,7 @@ import {
 import { bucharestDayBounds } from "@/lib/dashboard/executive/time";
 import { operationalBusinessOwner } from "@/lib/operational-responsibility";
 import { prisma } from "@/lib/prisma";
+import { isSellerCapableRole } from "@/lib/sales-roles";
 import { receivableOwnerUserIds, receivableOwnershipSelect } from "@/lib/receivables-ownership";
 import { ROLE_LABELS, type UserRole } from "@/lib/rbac";
 
@@ -314,7 +315,7 @@ export async function queryExecutivePeople(
     );
     if (
       !entityScoped &&
-      ["SALES_AGENT", "SALES_DIRECTOR"].includes(user.role) &&
+      isSellerCapableRole(user.role) &&
       (!lastCrmActivity || lastCrmActivity < recentCrmThreshold)
     ) {
       addIssue(issues, "CRM_ACTIVITY_MISSING", `Nicio activitate CRM în ultimele ${recentCrmThresholdDays} zile`, 1, `/admin/crm?owner=${user.id}`);
@@ -992,7 +993,7 @@ function countLabel(count: number, singular: string, plural: string) {
 }
 
 function departmentForRole(role: UserRole) {
-  if (["SALES_AGENT", "SALES_DIRECTOR"].includes(role)) return "Comercial";
+  if (isSellerCapableRole(role)) return "Comercial";
   if (role === "FINANCE_OPERATOR") return "Financiar";
   if (role === "FIELD_OPERATOR") return "Operațional";
   return "Management";

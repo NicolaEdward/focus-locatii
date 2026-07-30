@@ -317,6 +317,7 @@ export function AdminReservationsPanel({
   const [showOperationHistory, setShowOperationHistory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingReservation, setEditingReservation] = useState<ReservationDTO | null>(null);
+  const [editingGroupReservations, setEditingGroupReservations] = useState<ReservationDTO[]>([]);
   const [editForm, setEditForm] = useState<ReservationEditForm | null>(null);
   const [editing, setEditing] = useState(false);
   const reservationDetailRequestRef = useRef<string | null>(null);
@@ -622,22 +623,19 @@ export function AdminReservationsPanel({
 
   const editingGroupCount = useMemo(() => {
     if (!editingReservation?.contractGroupId) return 1;
-    return reservations.filter((reservation) => reservation.contractGroupId === editingReservation.contractGroupId).length;
-  }, [editingReservation, reservations]);
+    return editingGroupReservations.length || 1;
+  }, [editingGroupReservations.length, editingReservation]);
 
   const editingGroupLocations = useMemo(() => {
     if (!editingReservation?.contractGroupId) return [];
-    return reservations
-      .filter((reservation) => reservation.contractGroupId === editingReservation.contractGroupId)
+    return editingGroupReservations
       .map((reservation) => reservation.locationCode || locationsById.get(reservation.locationId)?.code || reservation.locationId);
-  }, [editingReservation, locationsById, reservations]);
+  }, [editingGroupReservations, editingReservation, locationsById]);
 
   const editingGroupLocationIds = useMemo(() => {
     if (!editingReservation?.contractGroupId) return [];
-    return reservations
-      .filter((reservation) => reservation.contractGroupId === editingReservation.contractGroupId)
-      .map((reservation) => reservation.locationId);
-  }, [editingReservation, reservations]);
+    return editingGroupReservations.map((reservation) => reservation.locationId);
+  }, [editingGroupReservations, editingReservation]);
 
   const operationalReservations = isOperationalWorkspace ? reservations : [];
 
@@ -810,7 +808,7 @@ export function AdminReservationsPanel({
       setLocationSearch("");
       setMessage(
         createdReservations.length > 1
-          ? `Contractul a fost salvat pe ${createdReservations.length} locatii. Chiria a fost impartita automat.`
+          ? `Contractul a fost salvat pe ${createdReservations.length} locatii. Chiria si costul de decorare au fost impartite automat.`
           : "Rezervarea a fost salvata si disponibilitatea s-a recalculat."
       );
       await refreshLocations();
@@ -829,6 +827,9 @@ export function AdminReservationsPanel({
 
     try {
       let reservation = summary;
+      let loadedGroupReservations = summary.contractGroupId
+        ? reservations.filter((row) => row.contractGroupId === summary.contractGroupId)
+        : [summary];
       if (!options?.preloaded) {
         const response = await fetch(`/api/reservations/${summary.id}`, { cache: "no-store" });
         const payload = await response.json().catch(() => null);
@@ -836,11 +837,23 @@ export function AdminReservationsPanel({
           throw new Error(payload?.error || "Rezervarea nu a putut fi incarcata.");
         }
         reservation = payload.reservation as ReservationDTO;
+        loadedGroupReservations = Array.isArray(payload.reservations) && payload.reservations.length
+          ? payload.reservations as ReservationDTO[]
+          : [reservation];
       }
       setMessage(null);
       setEditingReservation(reservation);
+      setEditingGroupReservations(loadedGroupReservations);
       setEditClientSearch(reservation.clientName || reservation.clientCompany || "");
       const decorationCost = operationCost(reservation.productionNotes, "decoration");
+      const groupDecorationCosts = loadedGroupReservations
+        .map((row) => operationCost(row.productionNotes, "decoration").cost)
+        .filter((cost): cost is number => cost != null);
+      const decorationCostTotal = reservation.contractGroupId && loadedGroupReservations.length > 1
+        ? groupDecorationCosts.length
+          ? groupDecorationCosts.reduce((total, cost) => total + cost, 0)
+          : null
+        : decorationCost.cost;
       setEditForm({
         clientId: reservation.clientId || "",
         campaignId: reservation.campaignId || "",
@@ -869,7 +882,9 @@ export function AdminReservationsPanel({
         periodStart: dateInputValue(reservation.periodStart),
         periodEnd: dateInputValue(reservation.periodEnd),
         installationDate: dateInputValue(reservation.installationDate),
-        decorationCost: numberInputValue(decorationCost.cost),
+        decorationCost: numberInputValue(
+          decorationCostTotal == null ? null : Math.round(decorationCostTotal * 100) / 100
+        ),
         decorationCurrency: decorationCost.currency || reservation.currency || "EUR",
         neutralizationDate: dateInputValue(reservation.neutralizationDate),
         productionNotes: reservation.productionNotes || "",
@@ -887,6 +902,7 @@ export function AdminReservationsPanel({
   function closeReservationEditor() {
     if (editing) return;
     setEditingReservation(null);
+    setEditingGroupReservations([]);
     setEditForm(null);
   }
 
@@ -900,7 +916,7 @@ export function AdminReservationsPanel({
     try {
       const groupReservations =
         editForm.applyToGroup && editingReservation.contractGroupId
-          ? reservations.filter((reservation) => reservation.contractGroupId === editingReservation.contractGroupId)
+          ? editingGroupReservations
           : [editingReservation];
       const groupShare = editForm.applyToGroup ? rentShareInputValue(editForm.monthlyRentTotal, groupReservations.length) : null;
 
@@ -983,6 +999,7 @@ export function AdminReservationsPanel({
           : "Inchirierea a fost actualizata."
       );
       setEditingReservation(null);
+      setEditingGroupReservations([]);
       setEditForm(null);
       if (onQuickActionComplete) onQuickActionComplete();
       else await refreshLocations();
@@ -1525,13 +1542,19 @@ export function AdminReservationsPanel({
                   </label>
                   {form.needsDecoration ? (
                     <div className="grid gap-3 rounded-lg border border-focus-line bg-focus-ink/35 p-3 md:grid-cols-[1fr_160px]">
-                      <InputField label="Cost montaj / decorare" value={form.decorationCost} onChange={(decorationCost) => setForm({ ...form, decorationCost })} />
+                      <InputField
+                        label={form.locationIds.length > 1 ? "Cost total montaj / decorare" : "Cost montaj / decorare"}
+                        value={form.decorationCost}
+                        onChange={(decorationCost) => setForm({ ...form, decorationCost })}
+                      />
                       <SelectField label="Moneda" value={form.decorationCurrency} onChange={(decorationCurrency) => setForm({ ...form, decorationCurrency })}>
                         <option value="EUR">EUR</option>
                         <option value="RON">RON</option>
                       </SelectField>
                       <p className="text-xs font-bold text-slate-400 md:col-span-2">
-                        Daca este bifat, apare ca task de montaj la data de start si intra in sumarul lunar de decorari.
+                        {form.locationIds.length > 1
+                          ? `Costul total se imparte automat pe cele ${form.locationIds.length} locatii si se reconciliaza exact la cent.`
+                          : "Daca este bifat, apare ca task de montaj la data de start si intra in sumarul lunar de decorari."}
                       </p>
                     </div>
                   ) : null}
@@ -2491,7 +2514,7 @@ function ReservationEditDialog({
   sellers: SellerUser[];
   onChange: React.Dispatch<React.SetStateAction<ReservationEditForm | null>>;
   onClose: () => void;
-  onSave: () => void;
+  onSave: () => Promise<void>;
 }) {
   const canApplyToGroup = Boolean(reservation.contractGroupId) && groupCount > 1;
   const calculatedShare = form.applyToGroup ? rentShareInputValue(form.monthlyRentTotal, groupCount) : null;
@@ -2507,9 +2530,10 @@ function ReservationEditDialog({
   const mustPreviewPeriod = periodChanged;
   const saveDisabled =
     saving ||
+    periodPreviewLoading ||
     Boolean(periodError) ||
     (isBookedRental && (!form.clientId || !form.campaignId)) ||
-    (mustPreviewPeriod && (!currentPeriodPreview || currentPeriodPreview.conflicts.length > 0));
+    Boolean(currentPeriodPreview?.conflicts.length);
   const updateField = (field: keyof ReservationEditForm, value: string | boolean) => {
     if (field === "periodStart" || field === "periodEnd" || field === "applyToGroup") {
       setPeriodPreview(null);
@@ -2522,11 +2546,11 @@ function ReservationEditDialog({
     });
   };
 
-  async function runPeriodPreview() {
+  async function runPeriodPreview(): Promise<ReservationConflictPreview | null> {
     setPeriodPreviewError(null);
     if (periodError) {
       setPeriodPreviewError(periodError);
-      return;
+      return null;
     }
     setPeriodPreviewLoading(true);
     try {
@@ -2542,17 +2566,34 @@ function ReservationEditDialog({
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error || "Disponibilitatea nu a putut fi verificata.");
-      setPeriodPreview({
+      const preview = {
         key: periodPreviewKey,
         conflicts: Array.isArray(payload?.conflicts) ? payload.conflicts : [],
         warnings: Array.isArray(payload?.warnings) ? payload.warnings : []
-      });
+      };
+      setPeriodPreview(preview);
+      return preview;
     } catch (error) {
       setPeriodPreview(null);
       setPeriodPreviewError(error instanceof Error ? error.message : "Disponibilitatea nu a putut fi verificata.");
+      return null;
     } finally {
       setPeriodPreviewLoading(false);
     }
+  }
+
+  async function handleSave() {
+    if (periodError) {
+      setPeriodPreviewError(periodError);
+      return;
+    }
+
+    if (mustPreviewPeriod) {
+      const preview = currentPeriodPreview || await runPeriodPreview();
+      if (!preview || preview.conflicts.length > 0) return;
+    }
+
+    await onSave();
   }
 
   return (
@@ -2724,7 +2765,7 @@ function ReservationEditDialog({
                   : "Perioada este neschimbata; verificarea nu este necesara."}
               </p>
               {mustPreviewPeriod ? (
-                <button className="focus-button secondary" type="button" onClick={runPeriodPreview} disabled={periodPreviewLoading || Boolean(periodError)}>
+                <button className="focus-button secondary" type="button" onClick={() => void runPeriodPreview()} disabled={periodPreviewLoading || Boolean(periodError)}>
                   {periodPreviewLoading ? "Se verifica..." : "Verifica disponibilitatea"}
                 </button>
               ) : null}
@@ -2738,13 +2779,19 @@ function ReservationEditDialog({
             <p className="text-xs font-bold text-slate-400">Implicit: data de start {dateLabel(form.periodStart)}.</p>
           ) : null}
           <div className="grid gap-3 md:col-span-2 md:grid-cols-[1fr_160px]">
-            <InputField label="Cost montaj / decorare" value={form.decorationCost} onChange={(value) => updateField("decorationCost", value)} />
+            <InputField
+              label={form.applyToGroup && groupCount > 1 ? "Cost total montaj / decorare grup" : "Cost montaj / decorare"}
+              value={form.decorationCost}
+              onChange={(value) => updateField("decorationCost", value)}
+            />
             <SelectField label="Moneda" value={form.decorationCurrency} onChange={(value) => updateField("decorationCurrency", value)}>
               <option value="EUR">EUR</option>
               <option value="RON">RON</option>
             </SelectField>
             <p className="text-xs font-bold text-slate-400 md:col-span-2">
-              Costul apare in lista de decorari si in sumarul lunar pentru facturare.
+              {form.applyToGroup && groupCount > 1
+                ? `Totalul se imparte automat pe cele ${groupCount} locatii; fiecare task pastreaza numai partea sa.`
+                : "Costul apare in lista de decorari si in sumarul lunar pentru facturare."}
             </p>
           </div>
           <InputField type="date" label="Data neutralizare" value={form.neutralizationDate} onChange={(value) => updateField("neutralizationDate", value)} />
@@ -2796,9 +2843,15 @@ function ReservationEditDialog({
           <button className="focus-button secondary" type="button" onClick={onClose} disabled={saving}>
             Renunta
           </button>
-          <button className="focus-button" type="button" onClick={onSave} disabled={saveDisabled}>
+          <button className="focus-button" type="button" onClick={() => void handleSave()} disabled={saveDisabled}>
             <Save size={18} />
-            {saving ? "Se salveaza..." : "Salveaza modificarile"}
+            {saving
+              ? "Se salveaza..."
+              : periodPreviewLoading
+                ? "Se verifica..."
+                : mustPreviewPeriod && !currentPeriodPreview
+                  ? "Verifica si salveaza"
+                  : "Salveaza modificarile"}
           </button>
         </div>
       </div>

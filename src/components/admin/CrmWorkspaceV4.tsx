@@ -69,7 +69,17 @@ const primaryButton = "inline-flex min-h-10 items-center justify-center gap-2 ro
 const secondaryButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-600 bg-focus-navy/60 px-4 py-2 text-sm font-bold text-white transition hover:border-focus-yellow/60 hover:bg-focus-navy disabled:cursor-not-allowed disabled:opacity-50";
 const fieldClass = "min-h-10 w-full rounded-md border border-slate-600 bg-focus-ink/85 px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-focus-yellow focus:ring-2 focus:ring-focus-yellow/15";
 
-export function CrmWorkspaceV4({ canViewTeam, canEdit, sessionUserId }: { canViewTeam: boolean; canEdit: boolean; sessionUserId: string }) {
+export function CrmWorkspaceV4({
+  canViewTeam,
+  canEdit,
+  canAssignOwners,
+  sessionUserId
+}: {
+  canViewTeam: boolean;
+  canEdit: boolean;
+  canAssignOwners: boolean;
+  sessionUserId: string;
+}) {
   const initial = useMemo(readInitialUrlState, []);
   const [view, setView] = useState<View>(initial.view);
   const [query, setQuery] = useState(initial.query);
@@ -196,7 +206,7 @@ export function CrmWorkspaceV4({ canViewTeam, canEdit, sessionUserId }: { canVie
     {error ? <ErrorState message={error} onRetry={() => void load()} /> : loading && !data ? <LoadingState /> : <WorkspaceBody view={view} data={data} onOpen={(kind, id) => setSelected({ kind, id })} />}
 
     {data && data.pagination.pages > 1 ? <Pagination pagination={data.pagination} onPage={setPage} /> : null}
-    {canEdit && createMode ? <CreateDialog mode={createMode} owners={owners} canViewTeam={canViewTeam} sessionUserId={sessionUserId} onClose={() => setCreateMode(null)} onCreated={(message) => { setCreateMode(null); completed(message); }} /> : null}
+    {canEdit && createMode ? <CreateDialog mode={createMode} owners={owners} canAssignOwners={canAssignOwners} sessionUserId={sessionUserId} onClose={() => setCreateMode(null)} onCreated={(message) => { setCreateMode(null); completed(message); }} /> : null}
     {selected ? <RecordDrawer selected={selected} canEdit={canEdit} onClose={() => setSelected(null)} onChanged={completed} /> : null}
   </main>;
 }
@@ -271,7 +281,7 @@ function AllRecordsView({ prospects, opportunities, onOpen }: { prospects: Prosp
   </div>;
 }
 
-function CreateDialog({ mode, owners, canViewTeam, sessionUserId, onClose, onCreated }: { mode: "prospect" | "inbound"; owners: Owner[]; canViewTeam: boolean; sessionUserId: string; onClose: () => void; onCreated: (message: string) => void }) {
+function CreateDialog({ mode, owners, canAssignOwners, sessionUserId, onClose, onCreated }: { mode: "prospect" | "inbound"; owners: Owner[]; canAssignOwners: boolean; sessionUserId: string; onClose: () => void; onCreated: (message: string) => void }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [duplicatePayload, setDuplicatePayload] = useState<Record<string, unknown> | null>(null);
@@ -311,7 +321,7 @@ function CreateDialog({ mode, owners, canViewTeam, sessionUserId, onClose, onCre
         {mode === "prospect" ? <Field label="Stadiu inițial"><select className={fieldClass} value={prospectStatus} onChange={(event) => setProspectStatus(event.target.value as (typeof CRM_PROSPECT_STATUS_OPTIONS)[number]["value"])}>{CRM_PROSPECT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field> : null}
         <Field label="Domeniu"><input className={fieldClass} name="industry" placeholder="Retail, betting, auto..." /></Field>
         <Field label="Sursă"><input className={fieldClass} name="source" placeholder="Prospectare proprie" /></Field>
-        {canViewTeam ? <Field label="Responsabil"><select className={fieldClass} name="ownerId" defaultValue={sessionUserId}><option value={sessionUserId}>Eu</option>{owners.filter((owner) => owner.id !== sessionUserId).map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></Field> : null}
+        {canAssignOwners ? <Field label="Responsabil"><select className={fieldClass} name="ownerId" defaultValue={sessionUserId}><option value={sessionUserId}>Eu</option>{owners.filter((owner) => owner.id !== sessionUserId).map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></Field> : null}
         <Field label={mode === "inbound" || qualifiedProspect ? "Persoană de contact *" : "Persoană de contact"}><input className={fieldClass} name="contactName" required={mode === "inbound" || qualifiedProspect} /></Field>
         <Field label="Funcție"><input className={fieldClass} name="contactRole" /></Field>
         <Field label="Email"><input className={fieldClass} name="email" type="email" /></Field>

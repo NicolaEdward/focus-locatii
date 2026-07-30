@@ -24,6 +24,7 @@ import {
 } from "@/lib/crm-domain";
 import { crmOpportunityTotalsFromAggregates, type CrmOpportunityAggregate } from "@/lib/crm-analytics-v4";
 import { prisma } from "@/lib/prisma";
+import { SELLER_CAPABLE_ROLES } from "@/lib/sales-roles";
 import { hasPermission } from "@/lib/rbac";
 import { normalizeTaxId } from "@/lib/tax-id";
 
@@ -311,6 +312,14 @@ export async function createColdProspect(input: {
   if (reusable?.prospects.length) {
     throw new CrmDomainError("Firma are deja o prospectare activa.", "CRM_ACTIVE_PROSPECT_EXISTS", 409, { companyId: reusable.id, prospectId: reusable.prospects[0].id });
   }
+  if (reusable && !hasGlobalCrmManageAccess(actor) && reusable.owner?.id !== actor.id) {
+    throw new CrmDomainError(
+      "Firma exista deja in portofoliul altui responsabil. Poti consulta datele, dar nu le poti prelua sau modifica.",
+      "CRM_COMPANY_ASSIGNED_TO_ANOTHER_OWNER",
+      403,
+      { companyId: reusable.id }
+    );
+  }
   if (!reusable && duplicates.length && !input.allowPotentialDuplicate) {
     throw new CrmDomainError("Am gasit firme similare. Verifica inainte de a crea o inregistrare noua.", "CRM_POSSIBLE_DUPLICATE", 409, { duplicates });
   }
@@ -474,7 +483,7 @@ export async function qualifyProspect(input: {
       const event = await tx.crmEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { prospectId: true } });
       if (event?.prospectId) return getProspectAfterTransaction(tx, event.prospectId);
     }
-    const prospect = await tx.crmProspect.findFirst({ where: { id: input.prospectId, ...prospectScope(actor) }, include: { company: { include: { contacts: { take: 1 } } } } });
+    const prospect = await tx.crmProspect.findFirst({ where: { id: input.prospectId, ...prospectManageScope(actor) }, include: { company: { include: { contacts: { take: 1 } } } } });
     if (!prospect) throw new CrmDomainError("Prospectul nu exista sau nu iti este alocat.", "CRM_NOT_FOUND", 404);
     crmAssertProspectTransition(prospect.status, "qualified");
     assertQualificationReady(prospect.company.normalizedTaxId, prospect.company.contacts.length, input.qualificationSummary);
@@ -513,7 +522,7 @@ export async function qualifyProspectAndCreateOpportunity(input: {
       if (event?.opportunityId) return getOpportunityAfterTransaction(tx, event.opportunityId);
     }
     const prospect = await tx.crmProspect.findFirst({
-      where: { id: input.prospectId, ...prospectScope(actor) },
+      where: { id: input.prospectId, ...prospectManageScope(actor) },
       include: { company: { include: { contacts: { take: 1 } } } }
     });
     if (!prospect) throw new CrmDomainError("Prospectul nu exista sau nu iti este alocat.", "CRM_NOT_FOUND", 404);
@@ -602,7 +611,7 @@ export async function transitionProspect(input: {
 }, actor: AuthSession) {
   assertCanManage(actor);
   return crmTransaction(async (tx) => {
-    const prospect = await tx.crmProspect.findFirst({ where: { id: input.prospectId, ...prospectScope(actor) } });
+    const prospect = await tx.crmProspect.findFirst({ where: { id: input.prospectId, ...prospectManageScope(actor) } });
     if (!prospect) throw new CrmDomainError("Prospectul nu exista sau nu iti este alocat.", "CRM_NOT_FOUND", 404);
     crmAssertProspectTransition(prospect.status, input.toStatus);
     if (["return_later", "disqualified", "inactive"].includes(input.toStatus) && !input.reason?.trim()) {
@@ -667,7 +676,7 @@ export async function transitionOpportunity(input: {
       const existing = await tx.crmEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { opportunityId: true } });
       if (existing?.opportunityId) return getOpportunityAfterTransaction(tx, existing.opportunityId);
     }
-    const opportunity = await tx.crmOpportunity.findFirst({ where: { id: input.opportunityId, ...opportunityScope(actor) } });
+    const opportunity = await tx.crmOpportunity.findFirst({ where: { id: input.opportunityId, ...opportunityManageScope(actor) } });
     if (!opportunity) throw new CrmDomainError("Oportunitatea nu exista sau nu iti este alocata.", "CRM_NOT_FOUND", 404);
     crmAssertOpportunityTransition(opportunity.stage, input.toStage);
     const closed = closedOpportunityStages.includes(input.toStage);
@@ -756,7 +765,7 @@ export async function addCrmUpdate(input: {
       if (event) return input.kind === "prospect" ? getProspectAfterTransaction(tx, input.id) : getOpportunityAfterTransaction(tx, input.id);
     }
     if (input.kind === "prospect") {
-      const row = await tx.crmProspect.findFirst({ where: { id: input.id, ...prospectScope(actor) } });
+      const row = await tx.crmProspect.findFirst({ where: { id: input.id, ...prospectManageScope(actor) } });
       if (!row) throw new CrmDomainError("Prospectul nu exista sau nu iti este alocat.", "CRM_NOT_FOUND", 404);
       const update = await tx.crmProspect.updateMany({ where: { id: row.id, version: input.version }, data: { contactState: input.contactState?.trim() || row.contactState, version: { increment: 1 } } });
       if (update.count !== 1) throw concurrencyError();
@@ -764,7 +773,7 @@ export async function addCrmUpdate(input: {
       await tx.crmEvent.create({ data: { companyId: row.companyId, prospectId: row.id, actorUserId: actor.id, type: input.type, summary: requiredText(input.summary, "Rezumatul este obligatoriu."), result: input.result?.trim() || null, idempotencyKey: input.idempotencyKey || null } });
       return getProspectAfterTransaction(tx, row.id);
     }
-    const row = await tx.crmOpportunity.findFirst({ where: { id: input.id, ...opportunityScope(actor) } });
+    const row = await tx.crmOpportunity.findFirst({ where: { id: input.id, ...opportunityManageScope(actor) } });
     if (!row) throw new CrmDomainError("Oportunitatea nu exista sau nu iti este alocata.", "CRM_NOT_FOUND", 404);
     const update = await tx.crmOpportunity.updateMany({ where: { id: row.id, version: input.version }, data: { version: { increment: 1 } } });
     if (update.count !== 1) throw concurrencyError();
@@ -786,7 +795,7 @@ export async function updateCrmCompany(input: {
 }, actor: AuthSession) {
   assertCanManage(actor);
   const company = await prisma.crmCompany.findUnique({ where: { id: input.companyId } });
-  if (!company || (!hasGlobalCrmAccess(actor) && company.ownerId !== actor.id)) throw new CrmDomainError("Firma nu exista sau nu iti este alocata.", "CRM_NOT_FOUND", 404);
+  if (!company || (!hasGlobalCrmManageAccess(actor) && company.ownerId !== actor.id)) throw new CrmDomainError("Firma nu exista sau nu iti este alocata.", "CRM_NOT_FOUND", 404);
   const ownerId = input.ownerId === undefined ? company.ownerId : await resolveOwner(actor, input.ownerId);
   if (ownerId !== company.ownerId && !input.reason?.trim()) throw new CrmDomainError("Motivul transferului este obligatoriu.");
   const taxId = input.taxId === undefined ? company.taxId : input.taxId?.trim() || null;
@@ -835,7 +844,7 @@ export async function addCrmCompanyContact(input: {
 }, actor: AuthSession) {
   assertCanManage(actor);
   const company = await prisma.crmCompany.findUnique({ where: { id: input.companyId }, select: { id: true, ownerId: true } });
-  if (!company || (!hasGlobalCrmAccess(actor) && company.ownerId !== actor.id)) throw new CrmDomainError("Firma nu exista sau nu iti este alocata.", "CRM_NOT_FOUND", 404);
+  if (!company || (!hasGlobalCrmManageAccess(actor) && company.ownerId !== actor.id)) throw new CrmDomainError("Firma nu exista sau nu iti este alocata.", "CRM_NOT_FOUND", 404);
   return crmTransaction(async (tx) => {
     if (input.isPrimary) await tx.crmCompanyContact.updateMany({ where: { companyId: company.id, isPrimary: true }, data: { isPrimary: false } });
     const contact = await tx.crmCompanyContact.create({ data: { companyId: company.id, name: requiredText(input.name, "Numele contactului este obligatoriu."), role: input.role?.trim() || null, email: input.email?.trim() || null, normalizedEmail: crmNormalizeEmail(input.email), phone: input.phone?.trim() || null, normalizedPhone: crmNormalizePhone(input.phone), preferredChannel: input.preferredChannel?.trim() || null, isDecisionMaker: Boolean(input.isDecisionMaker), isPrimary: Boolean(input.isPrimary), createdByUserId: actor.id } });
@@ -848,7 +857,7 @@ export async function listCrmAssignees(actor: AuthSession) {
   assertCanView(actor);
   if (!hasGlobalCrmAccess(actor)) return [{ id: actor.id, name: actor.name, email: actor.email, role: actor.role }];
   return prisma.user.findMany({
-    where: { active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } },
+    where: { active: true, role: { in: [...SELLER_CAPABLE_ROLES] } },
     select: { id: true, name: true, email: true, role: true },
     orderBy: { name: "asc" }
   });
@@ -866,6 +875,10 @@ function assertCanManage(actor: AuthSession) {
   if (!hasPermission(actor.role, "leads.manage") && !hasPermission(actor.role, "leads.manage.own")) throw new CrmDomainError("Nu poti modifica CRM-ul.", "CRM_FORBIDDEN", 403);
 }
 
+function hasGlobalCrmManageAccess(actor: AuthSession) {
+  return hasPermission(actor.role, "leads.manage");
+}
+
 function scopedOwner(actor: AuthSession, requested?: string | null) {
   return hasGlobalCrmAccess(actor) ? requested || undefined : actor.id;
 }
@@ -878,10 +891,23 @@ function opportunityScope(actor: AuthSession): Prisma.CrmOpportunityWhereInput {
   return hasGlobalCrmAccess(actor) ? {} : { ownerId: actor.id };
 }
 
+function prospectManageScope(actor: AuthSession): Prisma.CrmProspectWhereInput {
+  return hasGlobalCrmManageAccess(actor) ? {} : { ownerId: actor.id };
+}
+
+function opportunityManageScope(actor: AuthSession): Prisma.CrmOpportunityWhereInput {
+  return hasGlobalCrmManageAccess(actor) ? {} : { ownerId: actor.id };
+}
+
 async function resolveOwner(actor: AuthSession, requested?: string | null) {
-  if (!hasGlobalCrmAccess(actor)) return actor.id;
+  if (!hasGlobalCrmManageAccess(actor)) {
+    if (requested && requested !== actor.id) {
+      throw new CrmDomainError("Poti crea sau modifica numai propriul portofoliu CRM.", "CRM_OWNER_SCOPE_FORBIDDEN", 403);
+    }
+    return actor.id;
+  }
   const ownerId = requested || actor.id;
-  const owner = await prisma.user.findFirst({ where: { id: ownerId, active: true, role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] } }, select: { id: true } });
+  const owner = await prisma.user.findFirst({ where: { id: ownerId, active: true, role: { in: [...SELLER_CAPABLE_ROLES] } }, select: { id: true } });
   if (!owner) throw new CrmDomainError("Responsabilul selectat nu este un utilizator comercial activ.");
   return owner.id;
 }

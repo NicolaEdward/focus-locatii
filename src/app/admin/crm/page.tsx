@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { CrmWorkspaceV4 } from "@/components/admin/CrmWorkspaceV4";
 import { getAuthSession } from "@/lib/auth";
-import { hasAnyPermission, hasGlobalDataAccess } from "@/lib/rbac";
+import { hasAnyPermission, hasGlobalDataAccess, hasPermission } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +15,7 @@ export default async function CrmPage() {
     <CrmWorkspaceV4
       canViewTeam={hasGlobalDataAccess(session.role)}
       canEdit={hasAnyPermission(session.role, ["leads.manage", "leads.manage.own"])}
+      canAssignOwners={hasPermission(session.role, "leads.manage")}
       sessionUserId={session.id}
     />
   </>;

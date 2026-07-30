@@ -676,7 +676,11 @@ function addChangeoverFindings(
     for (let index = 0; index < sorted.length - 1; index += 1) {
       const current = sorted[index];
       const next = sorted[index + 1];
-      if (dateKey(next.periodStart) !== addDateKeyDays(dateKey(current.periodEnd), 1)) continue;
+      const currentOperationEnd = current.neutralizationDate || current.periodEnd;
+      const nextOperationStart = next.installationDate || next.periodStart;
+      const currentEndKey = dateKey(currentOperationEnd);
+      const nextStartKey = dateKey(nextOperationStart);
+      if (![currentEndKey, addDateKeyDays(currentEndKey, 1)].includes(nextStartKey)) continue;
       const location = locationById.get(current.locationId);
       findings.push(finding({
         category: "POSSIBLE_CHANGEOVER",
@@ -691,7 +695,7 @@ function addChangeoverFindings(
         confidence: 80,
         reasonCode: "CONSECUTIVE_BOOKED_POSSIBLE_CHANGEOVER",
         title: "Changeover direct posibil",
-        summary: `${location?.code || current.locationId}: următoarea campanie începe în ziua următoare.`,
+        summary: `${location?.code || current.locationId}: neutralizarea și montajul pot forma un changeover ${currentEndKey === nextStartKey ? "în aceeași zi" : "în ziua următoare"}.`,
         reservation: current,
         campaignId: current.campaignId,
         locationId: current.locationId,
@@ -699,7 +703,7 @@ function addChangeoverFindings(
         evidence: [
           evidence("BOOKED curent", current.id),
           evidence("BOOKED următor", next.id),
-          evidence("Tranziție", `${dateKey(current.periodEnd)} → ${dateKey(next.periodStart)}`)
+          evidence("Tranziție operațională", `${currentEndKey} → ${nextStartKey}`)
         ]
       }));
     }

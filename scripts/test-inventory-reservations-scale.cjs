@@ -84,8 +84,17 @@ function main() {
 
   assert(reservationsService.includes("assertCanonicalReservationAvailabilityForWrite"), "reservation writes must keep the canonical conflict service");
   assert(reservationsService.includes("lockReservationLocationsForWrite"), "reservation writes must keep the row lock");
+  assert(reservationWorkspace.includes("const preview = currentPeriodPreview || await runPeriodPreview()"), "period edits must validate availability automatically when saving");
+  assert(!reservationWorkspace.includes("mustPreviewPeriod && (!currentPeriodPreview"), "a missing manual preview must not disable period save");
+  assert(reservationWorkspace.includes('"Verifica si salveaza"'), "period save action must explain the automatic validation");
+  assert(reservationsService.includes("reservationUpdateTransactionOptions"), "reservation edits must tolerate normal database latency");
+  assert(reservationsService.includes("resolveRentalContextForUpdate(parsed, existing, tx)"), "single edits must validate rental context inside the write transaction");
+  assert(reservationsService.includes("rentalContextCache"), "group edits must not reload the same client and campaign for every location");
+  assert(reservationsService.includes("splitDecorationCostForGroup"), "group writes must divide the decoration total server-side");
+  assert(reservationWorkspace.includes("editingGroupReservations"), "the editor must load the complete group before calculating totals");
+  assert(read("src", "app", "api", "reservations", "[id]", "route.ts").includes("getReservationGroup"), "reservation detail must return the complete contract group");
 
-  console.log(JSON.stringify({ ok: true, checked: 38 }, null, 2));
+  console.log(JSON.stringify({ ok: true, checked: 47 }, null, 2));
 }
 
 function blockFrom(source, start, end) {

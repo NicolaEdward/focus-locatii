@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import type { AuthSession } from "@/lib/auth";
+import type { Prisma } from "@prisma/client";
+import { isSellerCapableRole, SELLER_CAPABLE_ROLES } from "@/lib/sales-roles";
 
-const sellerRoles = ["SALES_AGENT", "SALES_DIRECTOR"] as const;
 const assignerRoles = ["SALES_DIRECTOR", "COO", "SUPER_ADMIN"] as const;
+type SellerDbClient = typeof prisma | Prisma.TransactionClient;
 
 export type SellerUserDTO = {
   id: string;
@@ -17,18 +19,22 @@ export function canAssignSellerForAnotherUser(actor?: AuthSession | null) {
 
 export async function listSellerUsers() {
   const users = await prisma.user.findMany({
-    where: { active: true, role: { in: [...sellerRoles] } },
+    where: { active: true, role: { in: [...SELLER_CAPABLE_ROLES] } },
     select: { id: true, name: true, email: true, role: true },
     orderBy: [{ role: "asc" }, { name: "asc" }]
   });
   return users.map((user) => ({ ...user, role: String(user.role) }));
 }
 
-export async function resolveRequiredSalesOwner(actor: AuthSession, requestedUserId?: string | null) {
+export async function resolveRequiredSalesOwner(
+  actor: AuthSession,
+  requestedUserId?: string | null,
+  db: SellerDbClient = prisma
+) {
   if (actor.role === "SALES_AGENT" && requestedUserId && requestedUserId !== actor.id) {
     throw new Error("Nu poti asigna inregistrarea catre alt vanzator.");
   }
-  const actorIsSeller = sellerRoles.includes(actor.role as never);
+  const actorIsSeller = isSellerCapableRole(actor.role);
   const targetUserId = requestedUserId || (actorIsSeller ? actor.id : null);
   if (!targetUserId) {
     throw new Error("Alege un agent sau director de vanzari responsabil.");
@@ -36,8 +42,8 @@ export async function resolveRequiredSalesOwner(actor: AuthSession, requestedUse
   if (targetUserId !== actor.id && !canAssignSellerForAnotherUser(actor)) {
     throw new Error("Nu poti crea sau realoca pe alt vanzator.");
   }
-  const target = await prisma.user.findFirst({
-    where: { id: targetUserId, active: true, role: { in: [...sellerRoles] } },
+  const target = await db.user.findFirst({
+    where: { id: targetUserId, active: true, role: { in: [...SELLER_CAPABLE_ROLES] } },
     select: { id: true, name: true, email: true, role: true }
   });
   if (!target) throw new Error("Responsabilul trebuie sa fie un utilizator comercial activ.");
@@ -52,6 +58,7 @@ export async function resolveSellerForMutation(input: {
   existingOwnerId?: string | null;
   existingSalesperson?: string | null;
   keepExisting?: boolean;
+  db?: SellerDbClient;
 }) {
   const actor = input.actor;
   if (!actor) {
@@ -75,7 +82,7 @@ export async function resolveSellerForMutation(input: {
     throw new Error("Nu poti crea sau realoca pe alt vanzator.");
   }
 
-  const target = await resolveRequiredSalesOwner(actor, requestedSellerId);
+  const target = await resolveRequiredSalesOwner(actor, requestedSellerId, input.db);
 
   return {
     sellerUserId: target.id,

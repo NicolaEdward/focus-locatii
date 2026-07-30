@@ -11,6 +11,7 @@ import type { CrmHandoffProposal } from "@/lib/crm-handoff-contract";
 import { hasAnyPermission } from "@/lib/rbac";
 import { companyEntities } from "@/lib/company-entities";
 import { campaignEffectiveStatusLabel, type CampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
+import { isSellerCapableRole } from "@/lib/sales-roles";
 import {
   Dialog, DocumentUploadDialog, DocumentsList, EmptyState, ErrorState, Feedback, Field, LoadingState,
   OwnerSelect, Pagination, Panel, SelectField, StatusBadge, Tabs, TextArea, WorkspaceHeader,
@@ -36,7 +37,7 @@ export function CampaignsWorkspace({ initialPage, initialEffectiveStatus, initia
   const [loadingList, setLoadingList] = useState(false); const [loadingDetail, setLoadingDetail] = useState(false); const [loadingSection, setLoadingSection] = useState(false);
   const [error, setError] = useState(""); const [message, setMessage] = useState(""); const [cursorTrail, setCursorTrail] = useState<Array<string | null>>([null]);
   const [editorOpen, setEditorOpen] = useState(Boolean(openCreate)); const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState<CampaignForm>({ ...emptyCampaignForm, clientId: initialClientId || "", sellerUserId: ["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role) ? session.id : "", accountOwnerUserId: ["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role) ? session.id : "" });
+  const [form, setForm] = useState<CampaignForm>({ ...emptyCampaignForm, clientId: initialClientId || "", sellerUserId: isSellerCapableRole(session.role) ? session.id : "", accountOwnerUserId: isSellerCapableRole(session.role) ? session.id : "" });
   const [clientQuery, setClientQuery] = useState(""); const [clientOptions, setClientOptions] = useState<ClientListItem[]>([]);
   const [documentOpen, setDocumentOpen] = useState(false); const [operationTarget, setOperationTarget] = useState<ReservationRow | null>(null);
   const [handoff, setHandoff] = useState<CrmHandoffProposal | null>(null); const [handoffBusy, setHandoffBusy] = useState(Boolean(handoffOpportunityId));
@@ -110,7 +111,7 @@ export function CampaignsWorkspace({ initialPage, initialEffectiveStatus, initia
   async function confirmCampaignHandoff(campaignId: string) { if (!handoff || !handoffOpportunityId) return; setHandoffBusy(true); try { const response = await fetch(`/api/admin/crm/opportunities/${encodeURIComponent(handoffOpportunityId)}/handoff`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: handoff.version, targetType: "campaign", targetId: campaignId, idempotencyKey: `crm-handoff-campaign-${handoffOpportunityId}-${campaignId}` }) }); const payload = await response.json().catch(() => null); if (!response.ok) { setError(`Campania este salvata, dar legatura CRM necesita reincercare: ${payload?.error || "eroare de audit"}`); return; } setMessage("Campania a fost confirmata explicit si legatura cu oportunitatea a fost auditata."); } catch (cause) { setError(`Campania este salvata, dar legatura CRM necesita reincercare: ${cause instanceof Error ? cause.message : "eroare de retea"}`); } finally { setHandoffBusy(false); } }
   async function archiveCampaign() { if (!selectedId || !overview) return; setLoadingDetail(true); setError(""); try { const response = await fetch(`/api/admin/campaigns/${selectedId}`, { method: "DELETE" }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.error || "Campania nu a putut fi arhivata."); setSelectedId(""); setOverview(null); updateUrl(""); setMessage("Campania a fost arhivata."); await loadPage(null); } catch (cause) { setError(cause instanceof Error ? cause.message : "Campania nu a putut fi arhivata."); } finally { setLoadingDetail(false); } }
 
-  function openCreateEditor() { setEditing(false); setForm({ ...emptyCampaignForm, clientId: initialClientId || "", sellerUserId: ["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role) ? session.id : "", accountOwnerUserId: ["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role) ? session.id : "" }); setClientQuery(""); setEditorOpen(true); }
+  function openCreateEditor() { setEditing(false); setForm({ ...emptyCampaignForm, clientId: initialClientId || "", sellerUserId: isSellerCapableRole(session.role) ? session.id : "", accountOwnerUserId: isSellerCapableRole(session.role) ? session.id : "" }); setClientQuery(""); setEditorOpen(true); }
   function openEditEditor() { if (!overview) return; setEditing(true); setForm(formFromOverview(overview)); setClientQuery(overview.clientName); setClientOptions([{ id: overview.clientId, companyName: overview.clientName } as ClientListItem]); setEditorOpen(true); }
   const nextPage = () => { if (!page.nextCursor) return; const next = page.nextCursor; setCursorTrail((current) => [...current, next]); void loadPage(next); };
   const previousPage = () => { if (cursorTrail.length <= 1) return; const trail = cursorTrail.slice(0, -1); setCursorTrail(trail); void loadPage(trail.at(-1) || null); };

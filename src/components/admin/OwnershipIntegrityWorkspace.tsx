@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw, Search, ShieldCheck, UsersRound } from "lucide-react";
 import type { OwnershipClassification, OwnershipIntegrityReport, OwnershipRemediationDryRun } from "@/lib/ownership-integrity";
+import { isSellerCapableRole } from "@/lib/sales-roles";
 
 type UserOption = { id: string; name: string; role: string; active: boolean };
 type ReassignDryRun = {
@@ -108,8 +109,8 @@ export function OwnershipIntegrityWorkspace({ initialReport, users }: { initialR
     }
   }
 
-  const activeSellers = users.filter((user) => user.active && ["SALES_AGENT", "SALES_DIRECTOR"].includes(user.role));
-  const sourceUsers = users.filter((user) => !user.active || ["SALES_AGENT", "SALES_DIRECTOR"].includes(user.role));
+  const activeSellers = users.filter((user) => user.active && isSellerCapableRole(user.role));
+  const sourceUsers = users.filter((user) => !user.active || isSellerCapableRole(user.role));
 
   return (
     <main className="focus-container space-y-6 py-8">

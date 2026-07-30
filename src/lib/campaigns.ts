@@ -11,6 +11,7 @@ import {
 import { companyEntityOrDefault, companyEntityOrThrow } from "@/lib/company-entities";
 import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
 import { resolveRequiredSalesOwner } from "@/lib/seller-users";
+import { isSellerCapableRole } from "@/lib/sales-roles";
 
 const optionalText = z.preprocess((value) => {
   if (value == null || value === "") return null;
@@ -151,8 +152,8 @@ function normalizeCampaignForCreate(input: z.infer<typeof campaignInputSchema>, 
     paymentTermDays: paymentDays,
     billingRule: input.billingRule || "manual_per_contract",
     billingFrequency: input.billingFrequency || "monthly",
-    sellerUserId: input.sellerUserId || (["SALES_AGENT", "SALES_DIRECTOR"].includes(actor.role) ? actor.id : null),
-    accountOwnerUserId: input.accountOwnerUserId || input.sellerUserId || (["SALES_AGENT", "SALES_DIRECTOR"].includes(actor.role) ? actor.id : null)
+    sellerUserId: input.sellerUserId || (isSellerCapableRole(actor.role) ? actor.id : null),
+    accountOwnerUserId: input.accountOwnerUserId || input.sellerUserId || (isSellerCapableRole(actor.role) ? actor.id : null)
   };
 }
 

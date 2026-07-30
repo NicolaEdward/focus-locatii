@@ -31,7 +31,7 @@ const cases = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "pana la data de 30.06.2026"
+    expectedLabelIncludes: "pana la data de 01.07.2026"
   },
   {
     name: "locatie libera doar la final",
@@ -42,7 +42,7 @@ const cases = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "din data de 01.07.2026"
+    expectedLabelIncludes: "din data de 30.06.2026"
   },
   {
     name: "locatie libera intre doua inchirieri",
@@ -56,7 +56,7 @@ const cases = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "din data de 11.06.2026 pana la data de 30.06.2026"
+    expectedLabelIncludes: "din data de 10.06.2026 pana la data de 01.07.2026"
   },
   {
     name: "status legacy necunoscut nu suprascrie disponibilitatea derivata",
@@ -201,8 +201,13 @@ const canonicalCases = [
     expected: "AVAILABLE"
   },
   {
-    name: "aceeasi zi este suprapunere inclusiva",
+    name: "BOOKED permite changeover in aceeasi zi",
     input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-10", periodEnd: "2026-08-12", now, reservations: [{ id: "inclusive", status: "BOOKED", periodStart: "2026-08-01", periodEnd: "2026-08-10", createdAt: now }] },
+    expected: "AVAILABLE"
+  },
+  {
+    name: "HOLD nu permite predare in aceeasi zi",
+    input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-10", periodEnd: "2026-08-12", now, reservations: [{ id: "hold-boundary", status: "RESERVED", periodStart: "2026-08-01", periodEnd: "2026-08-10", createdAt: now, holdExpiresAt: "2026-07-20T12:00:00.000Z" }] },
     expected: "PARTIAL"
   },
   {
@@ -215,7 +220,7 @@ const canonicalCases = [
 for (const testCase of canonicalCases) {
   const result = decideAvailability(testCase.input);
   assert(result.status === testCase.expected, `${testCase.name}: expected ${testCase.expected}, got ${result.status}`);
-  assert(result.dateSemantics === "INCLUSIVE", `${testCase.name}: date semantics must remain inclusive`);
+  assert(result.dateSemantics === "INCLUSIVE_WITH_SAME_DAY_HANDOFF", `${testCase.name}: date semantics must expose same-day BOOKED handoff`);
   assert(result.isBookable === (testCase.expected === "AVAILABLE"), `${testCase.name}: isBookable mismatch`);
 }
 

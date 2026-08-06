@@ -1,6 +1,6 @@
 import { hasGlobalDataAccess } from "@/lib/rbac";
 import type { AuthSession } from "@/lib/auth";
-import type { AvailabilityDecision } from "@/lib/availability";
+import { summarizeAvailabilityTimeline, type AvailabilityDecision } from "@/lib/availability";
 import { loadAvailabilityDecisions, type AvailabilityReservationRow } from "@/lib/availability-service";
 import {
   isManualAvailabilityStatus,
@@ -52,7 +52,7 @@ export async function getLocationSelectionAvailability(input: {
     if (!periodEnd) {
       if (decision.lifecycleReason) return [location.id, lifecycleUnavailable(location)];
       if (decision.status === "UNKNOWN") return [location.id, unknownAvailability(location, "Perioada selectata nu este valida.")];
-      return [location.id, buildNoPeriodAvailability(location, conflicts, referenceDate)];
+      return [location.id, buildNoPeriodAvailability(location, conflicts, referenceDate, decision)];
     }
     return [location.id, buildAvailability({ location, conflicts, decision })];
   }));
@@ -164,19 +164,21 @@ function lifecycleUnavailable(location: AvailabilityLocation): LocationSelection
 function buildNoPeriodAvailability(
   location: AvailabilityLocation,
   futureConflicts: LocationSelectionConflict[],
-  referenceDate: Date
+  referenceDate: Date,
+  decision: AvailabilityDecision
 ): LocationSelectionAvailability {
   const intervals = futureConflicts.map(toBlockingInterval);
-  const current = futureConflicts.find((conflict) => new Date(conflict.periodStart) <= referenceDate && new Date(conflict.periodEnd) >= referenceDate);
-  const next = futureConflicts.find((conflict) => new Date(conflict.periodStart) > referenceDate);
+  const timeline = summarizeAvailabilityTimeline(decision, referenceDate);
+  const current = timeline.activeInterval;
+  const next = timeline.nextInterval;
   const baseWarnings = locationWarnings(location).filter((warning) => !isGenericAvailableNote(warning));
 
   if (current) {
     if (current.openEnded || isManualAvailabilityStatus(current.status)) {
       const label = manualAvailabilityStatusLabel(current.status);
       const explanation = current.openEnded
-        ? `Blocat din ${formatDate(current.periodStart)}.`
-        : `Blocat la data verificata: ${formatDate(current.periodStart)} - ${formatDate(current.periodEnd)}.`;
+        ? `Blocat din ${formatDate(current.from)}.`
+        : `Blocat la data verificata: ${formatDate(current.from)} - ${formatDate(current.to)}.`;
       return {
         locationId: location.id,
         state: "CONFLICT",
@@ -188,36 +190,52 @@ function buildNoPeriodAvailability(
         blockingIntervals: intervals
       };
     }
-    const availableFrom = addDays(new Date(current.periodEnd), 1).toISOString();
-    const label = `Disponibil din ${formatDate(availableFrom)}`;
+    const occupiedUntil = timeline.activeUntil || current.to;
+    const availableFrom = timeline.availableFrom?.toISOString() || null;
+    const availableUntil = timeline.availableUntil?.toISOString() || null;
     const action = reservationIntervalAction(current.status);
-    const remaining = reservationHoldRemainingSuffix({ status: current.status, holdExpiresAt: current.holdExpiresAt });
+    const remaining = reservationHoldRemainingSuffix({
+      status: current.status,
+      holdExpiresAt: current.holdExpiresAt?.toISOString() || null
+    });
+    const availableWindow = timeline.availableDays && availableFrom && availableUntil
+      ? ` Disponibil ${timeline.availableDays} ${timeline.availableDays === 1 ? "zi" : "zile"}, intre ${formatDate(availableFrom)} si ${formatDate(availableUntil)}.`
+      : "";
+    const nextOccupation = next
+      ? ` Urmatoarea ocupare incepe la ${formatDate(next.from)} si se termina la ${formatDate(next.to)}.`
+      : "";
     return {
       locationId: location.id,
       state: "CONFLICT",
-      label,
+      label: `${action} pana la ${formatDate(occupiedUntil)}`,
       tone: "red",
-      explanation: `${action} la data verificata: ${formatDate(current.periodStart)} - ${formatDate(current.periodEnd)}${remaining}.`,
-      warnings: [`${action} pana la ${formatDate(current.periodEnd)}${remaining}.`, ...baseWarnings],
+      explanation: `${action} la data verificata: ${formatDate(current.from)} - ${formatDate(occupiedUntil)}${remaining}.${availableWindow}${nextOccupation}`,
+      warnings: [
+        `${action} pana la ${formatDate(occupiedUntil)}${remaining}.`,
+        ...(availableWindow ? [availableWindow.trim()] : []),
+        ...baseWarnings
+      ],
       conflicts: futureConflicts,
       blockingIntervals: intervals,
-      availableFrom
+      availableFrom,
+      availableUntil
     };
   }
 
-  if (next) {
-    const availableUntil = addDays(new Date(next.periodStart), -1).toISOString();
+  if (next && timeline.availableUntil) {
+    const availableUntil = timeline.availableUntil.toISOString();
     const hasMultipleFuture = futureConflicts.length > 1;
+    const daysText = timeline.availableDays
+      ? ` Disponibila ${timeline.availableDays} ${timeline.availableDays === 1 ? "zi" : "zile"}.`
+      : "";
     return {
       locationId: location.id,
       state: "AVAILABLE",
       label: `Disponibil pana la ${formatDate(availableUntil)}`,
       tone: "yellow",
-      explanation: hasMultipleFuture
-        ? `Verifica perioada - exista ${futureConflicts.length} rezervari viitoare.`
-        : `Urmatoarea ocupare incepe la ${formatDate(next.periodStart)}.`,
+      explanation: `${daysText} Urmatoarea ocupare incepe la ${formatDate(next.from)} si se termina la ${formatDate(next.to)}.`.trim(),
       warnings: [
-        hasMultipleFuture ? `Exista ${futureConflicts.length} rezervari viitoare.` : `Rezervare viitoare din ${formatDate(next.periodStart)}.`,
+        hasMultipleFuture ? `Exista ${futureConflicts.length} rezervari viitoare.` : `Rezervare viitoare din ${formatDate(next.from)}.`,
         ...baseWarnings
       ],
       conflicts: futureConflicts,
@@ -382,10 +400,6 @@ function groupByLocationId<T extends { locationId: string }>(rows: T[]) {
 
 function startOfUtcDay(date: Date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
-function addDays(date: Date, days: number) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
 }
 
 function formatDate(value: string | Date) {

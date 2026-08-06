@@ -48,7 +48,9 @@ assert(!files.availability.includes("Status inventar: ${location.status}"), "leg
 assert(files.availability.includes("referenceDate"), "start-date-only availability should use the selected start date as reference");
 assert(files.availabilityService.includes("periodEnd: { gte: referenceDate }"), "start-date-only availability should look forward from the selected start date");
 assert(files.availability.includes("Disponibil pana la"), "no-period future booking should show available-until label");
-assert(files.availability.includes("Disponibil din"), "current booking should show available-from label");
+assert(files.availability.includes("summarizeAvailabilityTimeline"), "selector and public portal must reuse the same future availability timeline");
+assert(files.availability.includes('label: `${action} pana la ${formatDate(occupiedUntil)}`'), "current booking should show the complete occupied chain");
+assert(files.availability.includes("Disponibil ${timeline.availableDays}"), "bounded gaps between bookings should display their duration");
 assert(files.availability.includes("label: \"Indisponibil\""), "selected-period conflicts must be labelled unavailable");
 assert(files.availability.includes("reservationIntervalAction(first.status)"), "selected-period conflicts must explain occupied/reserved period through normalized reservation labels");
 assert(files.availability.includes("Disponibil in perioada selectata"), "selected-period available state must be unambiguous");

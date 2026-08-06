@@ -1,6 +1,12 @@
 const path = require("path");
 const { loadTsModule } = require("./load-ts-module.cjs");
-const { calculateAvailability, decideAvailability } = loadTsModule(path.join(process.cwd(), "src", "lib", "availability.ts"));
+const {
+  calculateAvailability,
+  adminAvailabilityExplanation,
+  decideAvailability,
+  publicAvailability,
+  summarizeAvailabilityTimeline
+} = loadTsModule(path.join(process.cwd(), "src", "lib", "availability.ts"));
 
 const cases = [
   {
@@ -224,7 +230,60 @@ for (const testCase of canonicalCases) {
   assert(result.isBookable === (testCase.expected === "AVAILABLE"), `${testCase.name}: isBookable mismatch`);
 }
 
-console.log(JSON.stringify({ ok: true, checked: [...cases, ...canonicalCases].map((testCase) => testCase.name) }, null, 2));
+const futureDecision = decideAvailability({
+  lifecycleStatus: "ACTIVE",
+  referenceDate: "2026-08-06",
+  now: new Date("2026-08-06T12:00:00.000Z"),
+  reservations: [{ id: "future", status: "BOOKED", periodStart: "2026-09-15", periodEnd: "2026-12-15" }]
+});
+assert(futureDecision.status === "AVAILABLE", "Future BOOKED must not block availability today.");
+assert(futureDecision.conflictingIntervals.length === 1, "No-period decisions must preserve future intervals for timeline display.");
+const futureTimeline = summarizeAvailabilityTimeline(futureDecision, "2026-08-06");
+assert(futureTimeline.availableDays === 40, `Future availability window should contain 40 days, got ${futureTimeline.availableDays}.`);
+const futurePublic = publicAvailability({
+  lifecycleStatus: "ACTIVE",
+  status: "AVAILABLE",
+  reservations: [{ id: "future", status: "BOOKED", periodStart: "2026-09-15", periodEnd: "2026-12-15" }]
+}, new Date("2026-08-06T12:00:00.000Z"));
+assert(futurePublic.label === "Disponibil pana la 15.09.2026", `Future BOOKED label is incomplete: ${futurePublic.label}`);
+assert(futurePublic.detail?.includes("Inchiriat intre 15.09.2026 si 15.12.2026"), `Future BOOKED detail is missing: ${futurePublic.detail}`);
+assert(
+  adminAvailabilityExplanation(futureDecision).includes("Disponibila pana la 15.09.2026"),
+  "Admin timeline must describe a future booking without presenting it as occupied today."
+);
+
+const sameDayHandoffPublic = publicAvailability({
+  lifecycleStatus: "ACTIVE",
+  status: "AVAILABLE",
+  reservations: [
+    { id: "current", status: "BOOKED", periodStart: "2026-06-01", periodEnd: "2026-09-15" },
+    { id: "next-same-day", status: "BOOKED", periodStart: "2026-09-15", periodEnd: "2026-12-15" }
+  ]
+}, new Date("2026-08-06T12:00:00.000Z"));
+assert(sameDayHandoffPublic.label === "Inchiriat pana la 15.12.2026", `Same-day bookings must be presented as one occupied chain: ${sameDayHandoffPublic.label}`);
+assert(!sameDayHandoffPublic.detail?.includes("15.09.2026"), `The shared handoff day must not be advertised as a free date: ${sameDayHandoffPublic.detail}`);
+
+const shortGapPublic = publicAvailability({
+  lifecycleStatus: "ACTIVE",
+  status: "AVAILABLE",
+  reservations: [
+    { id: "current-gap", status: "BOOKED", periodStart: "2026-06-01", periodEnd: "2026-09-15" },
+    { id: "next-gap", status: "BOOKED", periodStart: "2026-09-17", periodEnd: "2026-12-15" }
+  ]
+}, new Date("2026-08-06T12:00:00.000Z"));
+assert(shortGapPublic.detail?.includes("Disponibil 2 zile"), `A bounded gap must display its duration: ${shortGapPublic.detail}`);
+assert(shortGapPublic.detail?.includes("intre 15.09.2026 si 17.09.2026"), `A bounded gap must display both boundaries: ${shortGapPublic.detail}`);
+
+console.log(JSON.stringify({
+  ok: true,
+  checked: [
+    ...cases,
+    ...canonicalCases,
+    { name: "rezervare viitoare vizibila in disponibilitate" },
+    { name: "changeover in aceeasi zi fara falsa disponibilitate" },
+    { name: "fereastra scurta afisata cu numar de zile" }
+  ].map((testCase) => testCase.name)
+}, null, 2));
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);

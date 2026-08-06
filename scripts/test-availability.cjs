@@ -262,6 +262,8 @@ const sameDayHandoffPublic = publicAvailability({
 }, new Date("2026-08-06T12:00:00.000Z"));
 assert(sameDayHandoffPublic.label === "Inchiriat pana la 15.12.2026", `Same-day bookings must be presented as one occupied chain: ${sameDayHandoffPublic.label}`);
 assert(!sameDayHandoffPublic.detail?.includes("15.09.2026"), `The shared handoff day must not be advertised as a free date: ${sameDayHandoffPublic.detail}`);
+assert(sameDayHandoffPublic.detail === "Disponibil pentru inchiriere din 15.12.2026", `Public copy must describe rental availability without internal terminology: ${sameDayHandoffPublic.detail}`);
+assert(!sameDayHandoffPublic.detail?.toLowerCase().includes("changeover"), "Internal operational terminology must not be exposed publicly.");
 
 const shortGapPublic = publicAvailability({
   lifecycleStatus: "ACTIVE",

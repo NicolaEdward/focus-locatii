@@ -308,7 +308,7 @@ export function publicAvailability(input: AvailabilityInput, now = new Date()): 
         ? bookingWindowLabel(timeline.nextInterval.status, timeline.nextInterval.from, timeline.nextInterval.to)
         : nextAvailable
           ? activeStatus === "BOOKED"
-            ? `Disponibil pentru changeover din ${formatDate(nextAvailable)}`
+            ? `Disponibil pentru inchiriere din ${formatDate(nextAvailable)}`
             : `Disponibil din ${formatDate(nextAvailable)}`
           : null)
     };

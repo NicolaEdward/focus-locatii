@@ -33,6 +33,7 @@ import {
   CRM_OPPORTUNITY_STAGE_OPTIONS,
   CRM_PROSPECT_STATUS_OPTIONS
 } from "@/lib/crm-domain";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
 type View = "today" | "prospecting" | "opportunities" | "all";
 type RecordKind = "prospect" | "opportunity";
@@ -369,6 +370,7 @@ function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { k
   }
 
   return <aside className="fixed inset-0 z-[90] flex justify-end bg-black/65" role="dialog" aria-modal="true" aria-label="Dosar CRM">
+    <EscapeCloseHandler onClose={onClose} />
     <div className="h-full w-full max-w-3xl overflow-y-auto border-l border-slate-700 bg-focus-ink shadow-2xl">
       <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-700 bg-focus-ink/95 px-4 py-4 backdrop-blur sm:px-6">
         <div className="min-w-0"><p className="text-xs font-black uppercase text-focus-yellow">Dosar {selected.kind === "prospect" ? "prospect" : "oportunitate"}</p><h2 className="mt-1 truncate text-xl font-black text-white">{detail?.companyName || "Se încarcă..."}</h2></div>
@@ -492,7 +494,7 @@ function EmptyState({ icon, title, text }: { icon: React.ReactNode; title: strin
 function LoadingState({ compact = false }: { compact?: boolean }) { return <div className={`flex items-center justify-center gap-3 text-sm font-bold text-slate-400 ${compact ? "py-12" : "rounded-lg border border-slate-700 py-20"}`}><Loader2 className="animate-spin text-focus-yellow" size={20} /> Se încarcă...</div>; }
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) { return <div className="rounded-lg border border-red-400/25 bg-red-950/25 p-5"><p className="font-bold text-red-100">{message}</p><button className={`${secondaryButton} mt-4`} onClick={onRetry} type="button">Reîncearcă</button></div>; }
 function Pagination({ pagination, onPage }: { pagination: WorkspaceData["pagination"]; onPage: (page: number) => void }) { return <div className="flex items-center justify-between rounded-lg border border-slate-700 bg-focus-navy/35 p-3 text-sm text-slate-300"><span>{pagination.total} înregistrări · pagina {pagination.page}/{pagination.pages}</span><span className="flex gap-2"><button className={secondaryButton} disabled={pagination.page <= 1} onClick={() => onPage(pagination.page - 1)} aria-label="Pagina anterioară"><ChevronLeft size={17} /></button><button className={secondaryButton} disabled={pagination.page >= pagination.pages} onClick={() => onPage(pagination.page + 1)} aria-label="Pagina următoare"><ChevronRight size={17} /></button></span></div>; }
-function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) { return <div className="fixed inset-0 z-[95] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true"><div className="max-h-[95vh] w-full max-w-2xl overflow-y-auto rounded-t-lg border border-slate-700 bg-focus-navy p-4 shadow-2xl sm:rounded-lg sm:p-6"><div className="mb-5 flex items-center justify-between gap-4"><h2 className="text-xl font-black text-white">{title}</h2><button className="rounded-md p-2 text-slate-300 hover:bg-white/10" onClick={onClose} type="button" aria-label="Închide"><X size={21} /></button></div>{children}</div></div>; }
+function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) { return <div className="fixed inset-0 z-[95] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true"><EscapeCloseHandler onClose={onClose} /><div className="max-h-[95vh] w-full max-w-2xl overflow-y-auto rounded-t-lg border border-slate-700 bg-focus-navy p-4 shadow-2xl sm:rounded-lg sm:p-6"><div className="mb-5 flex items-center justify-between gap-4"><h2 className="text-xl font-black text-white">{title}</h2><button className="rounded-md p-2 text-slate-300 hover:bg-white/10" onClick={onClose} type="button" aria-label="Închide"><X size={21} /></button></div>{children}</div></div>; }
 
 function readInitialUrlState() {
   if (typeof window === "undefined") return { view: "today" as View, query: "", ownerId: "", status: "", stage: "", due: "all", page: 1, selected: null as { kind: RecordKind; id: string } | null };

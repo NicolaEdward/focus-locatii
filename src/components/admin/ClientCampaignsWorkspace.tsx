@@ -27,6 +27,7 @@ import type {
 import type { AuthSession } from "@/lib/auth";
 import { hasAnyPermission } from "@/lib/rbac";
 import { companyEntities, normalizeCompanyEntity } from "@/lib/company-entities";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
 export type ClientCampaignsWorkspaceTab = "clients" | "campaigns" | "invoices" | "cleanup" | "documents";
 type WorkspaceTab = ClientCampaignsWorkspaceTab;
@@ -1210,6 +1211,7 @@ function RedecorationModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <EscapeCloseHandler onClose={onClose} enabled={!busy} />
       <div className="focus-card w-full max-w-2xl rounded-lg p-5 shadow-2xl">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1411,7 +1413,8 @@ function DocumentUploadModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" role="dialog" aria-modal="true">
+      <EscapeCloseHandler onClose={onClose} enabled={!busy && !saving} />
       <div className="w-full max-w-2xl rounded-lg border border-focus-line bg-focus-ink p-5 shadow-2xl">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

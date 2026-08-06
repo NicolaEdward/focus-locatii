@@ -81,7 +81,7 @@ function dirtyResetConfirmationIsInApp() {
   assert(panel.includes("Ai modificari nesalvate"), "dirty reset copy should be visible");
   assert(!panel.includes("prompt("), "reservation panel should not use browser prompts");
   assert(panel.includes("reservationFormPeriodError"), "create form should validate campaign date range before submit");
-  assert(panel.includes("mustPreviewPeriod && (!currentPeriodPreview || currentPeriodPreview.conflicts.length > 0)"), "edit dialog should require conflict preview before saving period changes");
+  assert(panel.includes("const preview = currentPeriodPreview || await runPeriodPreview()"), "edit dialog should recheck conflicts before saving a changed period");
   assert(panel.includes("Perioada a fost modificata. Verifica disponibilitatea inainte de salvare."), "edit dialog should tell users why preview is required");
 }
 

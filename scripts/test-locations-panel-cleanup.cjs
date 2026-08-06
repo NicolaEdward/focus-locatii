@@ -194,7 +194,7 @@ function locationWorkspaceLoadsSummaryDataFirst() {
   assert(reservations.includes("reservationSummaryInclude"), "reservation summary query should use a narrow relation set");
   assert(locations.includes("effectiveBlockingReservationWhere"), "location summaries must use the canonical effective reservation rule");
   assert(!locations.includes("await expireStaleHolds()"), "location summaries must ignore expired holds without relying on a write during page load");
-  assert(detailRoute.includes("getReservation(id, session)"), "reservation detail route should enforce authenticated ownership");
+  assert(detailRoute.includes("getReservationGroup(id, session)"), "reservation detail route should enforce authenticated ownership for the requested reservation group");
 }
 
 function salesExportsBelongToFinance() {

@@ -47,7 +47,7 @@ function LocationMapComponent({
       leafletRef.current = L;
       const map = L.map(containerRef.current, {
         preferCanvas: true,
-        scrollWheelZoom: false,
+        scrollWheelZoom: true,
         zoomControl: false,
         zoomSnap: 0.25
       }).setView([44.45, 26.1], 10);

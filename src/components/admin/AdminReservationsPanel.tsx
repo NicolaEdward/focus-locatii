@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { AdminSalesMap } from "@/components/admin/AdminSalesMap";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 import type { AdminLocationListItemDTO, OccupancySummaryDTO, OfferRequestDTO, OfferRequestStatus, ReservationDTO, ReservationStatus } from "@/types/location";
 import { calculateAvailability } from "@/lib/availability";
 import {
@@ -2172,6 +2173,7 @@ function ReservationResetConfirmDialog({
 }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <EscapeCloseHandler onClose={onCancel} />
       <div className="focus-card w-full max-w-lg rounded-lg p-5 shadow-2xl">
         <p className="text-xs font-black uppercase text-focus-yellow">Curata formularul</p>
         <h2 className="font-display mt-1 text-2xl font-black uppercase text-white">Ai modificari nesalvate</h2>
@@ -2227,6 +2229,7 @@ function OperationCompletionDialog({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <EscapeCloseHandler onClose={onClose} enabled={!saving} />
       <div className="focus-card max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg p-5 shadow-2xl">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -2372,6 +2375,7 @@ function ReservationCancellationConfirmDialog({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <EscapeCloseHandler onClose={onCancel} />
       <div className="focus-card w-full max-w-xl rounded-lg p-5 shadow-2xl">
         <p className="text-xs font-black uppercase text-focus-yellow">Anulare cu istoric</p>
         <h2 className="font-display mt-1 text-2xl font-black uppercase text-white">Anuleaza inregistrarea</h2>
@@ -2430,6 +2434,7 @@ function OfferRequestArchiveConfirmDialog({
 }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <EscapeCloseHandler onClose={onCancel} />
       <div className="focus-card w-full max-w-lg rounded-lg p-5 shadow-2xl">
         <p className="text-xs font-black uppercase text-focus-yellow">Arhivare solicitare</p>
         <h2 className="font-display mt-1 text-2xl font-black uppercase text-white">Sterge din lista activa</h2>
@@ -2598,6 +2603,7 @@ function ReservationEditDialog({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <EscapeCloseHandler onClose={onClose} enabled={!saving} />
       <div className="focus-card max-h-[92vh] w-full max-w-5xl overflow-auto rounded-lg p-5 shadow-2xl">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -3443,6 +3449,7 @@ function ProofPhotosDialog({
   const photos = proofPhotosForTask(target.reservation, target.type, target.taskId);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <EscapeCloseHandler onClose={onClose} />
       <div className="focus-card max-h-[92vh] w-full max-w-4xl overflow-auto rounded-lg p-5 shadow-2xl">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -3518,6 +3525,7 @@ function OperationRescheduleDialog({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <EscapeCloseHandler onClose={onClose} enabled={!saving} />
       <div className="focus-card max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg p-5 shadow-2xl">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

@@ -19,6 +19,7 @@ import {
   Trash2,
   Upload
 } from "lucide-react";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
 type JsonMap = Record<string, any>;
 type Registry = {
@@ -602,7 +603,7 @@ function SimpleTable({ title, subtitle, headers, rows }: { title: string; subtit
 }
 
 function Modal({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode }) {
-  return <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4" role="dialog" aria-modal="true"><div className="focus-card max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg p-5"><div className="mb-5 flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase text-focus-yellow">Facturi clienți</p><h2 className="text-xl font-black text-white">{title}</h2>{subtitle ? <p className="text-sm text-slate-400">{subtitle}</p> : null}</div><button className="focus-button secondary" type="button" onClick={onClose}>Închide</button></div>{children}</div></div>;
+  return <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4" role="dialog" aria-modal="true"><EscapeCloseHandler onClose={onClose} /><div className="focus-card max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg p-5"><div className="mb-5 flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase text-focus-yellow">Facturi clienți</p><h2 className="text-xl font-black text-white">{title}</h2>{subtitle ? <p className="text-sm text-slate-400">{subtitle}</p> : null}</div><button className="focus-button secondary" type="button" onClick={onClose}>Închide</button></div>{children}</div></div>;
 }
 
 function Field({ label, wide = false, children }: { label: string; wide?: boolean; children: ReactNode }) { return <label className={`grid gap-1 text-sm font-bold text-slate-200 ${wide ? "sm:col-span-2" : ""}`}>{label}{children}</label>; }

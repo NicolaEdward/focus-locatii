@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, Camera, CheckCircle2, Clock3, MapPin, Play, Trash2, Upload } from "lucide-react";
 import type { OperationalAssignmentTaskDto } from "@/lib/operational-assignment";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
 type PreviewFile = { file: File; url: string };
 
@@ -148,6 +149,7 @@ export function FieldWorkInbox({ initialTasks }: { initialTasks: OperationalAssi
 
       {target ? (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="field-completion-title">
+          <EscapeCloseHandler onClose={closeCompletion} enabled={busyId !== target.operationTaskId} />
           <div className="mx-auto max-w-xl rounded-lg border border-focus-line bg-focus-dark p-4 sm:p-6">
             <h2 id="field-completion-title" className="text-2xl font-black text-white">Finalizeaza {target.location.code}</h2>
             <p className="mt-2 text-sm text-slate-300">Pozele sunt pastrate 30 de zile si nu apar public.</p>

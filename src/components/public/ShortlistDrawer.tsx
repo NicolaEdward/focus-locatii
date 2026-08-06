@@ -8,6 +8,7 @@ import { downloadMediaPlanExcel } from "@/lib/media-plan-download";
 import { mediaPlanMessage, selectedSqm } from "@/lib/media-plan";
 import { ContactButtons } from "@/components/public/ContactButtons";
 import type { LocationDTO } from "@/types/location";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
 export function ShortlistDrawer({
   locations,
@@ -117,6 +118,7 @@ export function ShortlistDrawer({
       aria-modal="true"
       aria-label="Selectia ta de locatii"
     >
+      <EscapeCloseHandler onClose={onClose} enabled={open} />
       <header className="flex items-center justify-between gap-3 border-b border-focus-line p-5">
         <div className="min-w-0">
           <p className="text-xs font-black uppercase text-focus-yellow">Selectie client</p>

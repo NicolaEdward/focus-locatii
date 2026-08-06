@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
 type SalesReportExportButtonProps = {
   label?: string;
@@ -60,6 +61,7 @@ export function SalesReportExportButton({
 
       {open ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-focus-navy/80 px-4 py-8 backdrop-blur-sm">
+          <EscapeCloseHandler onClose={() => setOpen(false)} />
           <div
             aria-labelledby="sales-export-period-title"
             aria-modal="true"

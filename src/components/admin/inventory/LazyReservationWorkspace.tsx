@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { LoaderCircle, X } from "lucide-react";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 import type { AuthSession } from "@/lib/auth";
 import type { AdminLocationListItemDTO, OccupancySummaryDTO, OfferRequestDTO, ReservationDTO } from "@/types/location";
 
@@ -79,6 +80,7 @@ export function LazyReservationWorkspace({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Gestionare rezervari">
+      <EscapeCloseHandler onClose={close} />
       <div className="flex h-full min-w-0 flex-col bg-focus-navy">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-focus-line bg-focus-ink px-4 py-3">
           <div><p className="text-xs font-black uppercase text-focus-yellow">Modul incarcat la cerere</p><h2 className="font-display text-2xl font-black uppercase text-white">Gestionare completa rezervari</h2></div>

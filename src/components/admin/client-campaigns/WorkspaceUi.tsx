@@ -4,6 +4,7 @@ import { useState } from "react";
 import { FileArchive, Upload, X } from "lucide-react";
 import type { AccountOwnerOption } from "@/lib/client-campaigns";
 import type { WorkspaceDocument } from "@/lib/client-campaign-workspaces";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
 export type ClientForm = {
   companyName: string;
@@ -181,7 +182,7 @@ export function DocumentUploadDialog({ target, onClose, onSaved }: { target: { c
 }
 
 export function Dialog({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/75 p-4"><div className="my-auto w-full max-w-3xl rounded-lg border border-focus-line bg-focus-ink p-5 shadow-2xl">
+  return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/75 p-4" role="dialog" aria-modal="true"><EscapeCloseHandler onClose={onClose} /><div className="my-auto w-full max-w-3xl rounded-lg border border-focus-line bg-focus-ink p-5 shadow-2xl">
     <div className="mb-4 flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase text-focus-yellow">{title}</p>{subtitle ? <h3 className="mt-1 text-xl font-black text-white">{subtitle}</h3> : null}</div><button className="grid h-10 w-10 place-items-center rounded-md border border-focus-line text-slate-300 hover:text-white" type="button" onClick={onClose} aria-label="Inchide"><X size={18} /></button></div>
     {children}
   </div></div>;

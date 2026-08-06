@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AlertTriangle, CalendarClock, CheckCircle2, XCircle } from "lucide-react";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
 export type ReservationPeriodChangeTarget = {
   id: string;
@@ -118,6 +119,7 @@ export function ReservationPeriodChangeDialog({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <EscapeCloseHandler onClose={onClose} enabled={!saving && !loadingPreview} />
       <div className="focus-card w-full max-w-2xl rounded-lg p-5 shadow-2xl">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Banknote, CheckCircle2, Download, FileSpreadsheet, PlusCircle, UploadCloud, XCircle } from "lucide-react";
 import type { DashboardData } from "@/lib/dashboard";
 import { companyEntities } from "@/lib/company-entities";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
 type FinancialData = NonNullable<DashboardData["finance"]>;
 type FinancialListRow = FinancialData["lists"]["overdueReceivables"][number] | FinancialData["lists"]["overduePayables"][number];
@@ -1391,7 +1392,8 @@ function SmartBillConfirmDialog({
   const createEntities = preview.summary.createClientCount + preview.summary.createSupplierCount;
   const reviewRows = preview.summary.needsReviewCount + preview.summary.adjustmentNeedsReviewCount + preview.summary.invalidCount;
   const financialLabel = preview.reportType === "customer_invoices" ? "facturi clienti" : "documente furnizori";
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6">
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6" role="dialog" aria-modal="true">
+    <EscapeCloseHandler onClose={onCancel} enabled={!busy} />
     <section className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-focus-line bg-focus-ink p-5 shadow-2xl">
       <div className="flex items-start justify-between gap-3">
         <div>

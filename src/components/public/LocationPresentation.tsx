@@ -15,7 +15,7 @@ import {
   Star,
   Target
 } from "lucide-react";
-import { monthlyRate, sqm } from "@/lib/format";
+import { monthlyRate, oneTimeRate, sqm } from "@/lib/format";
 import { mapsHref } from "@/lib/gps";
 import type { LocationDTO } from "@/types/location";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -34,6 +34,7 @@ export function LocationPresentation({
   const mapsUrl = mapsHref(null, location.latDisplay, location.lngDisplay);
   const hasMap = mapsUrl !== "#";
   const showRateCard = Boolean(location.rateCard || location.rateCardValue);
+  const showInstallationCost = Boolean(location.installationRemoval || location.installationRemovalValue);
   const area = [location.city, location.county].filter(Boolean).join(", ") || "Romania";
   const title = location.address || location.code;
   const message = `Buna ziua, sunt interesat de locatia ${title} (${location.code}) - ${location.categoryName}.`;
@@ -111,6 +112,9 @@ export function LocationPresentation({
               ) : (
                 <InfoLine label="Pret" value="Oferta personalizata la cerere" />
               )}
+              {showInstallationCost ? (
+                <InfoLine label="Montaj / neutralizare" value={oneTimeRate(location.installationRemovalValue, location.installationRemoval)} />
+              ) : null}
               {location.productionSketchUrl ? (
                 <a className="focus-button secondary justify-center" href={location.productionSketchUrl} target="_blank" rel="noreferrer" download>
                   <Download size={18} />

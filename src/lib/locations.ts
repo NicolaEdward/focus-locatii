@@ -234,7 +234,7 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
   const lngDisplay = validCoordinate(displayLat, displayLng) ? displayLng : null;
   const type = normalizeMediaType(location.type, location.category.name, location.address, location.code);
   const exposePrice = options.includeHiddenCommercials || location.showPricePublic;
-  const exposeInstallationCost = Boolean(options.includePrivateFields);
+  const exposeInstallationCost = Boolean(options.includePrivateFields || location.showInstallationCostPublic);
   const exposePrivateFields = Boolean(options.includePrivateFields);
   const normalizedStatus = statusFromAvailabilityText(location.status, location.availabilityText);
   const availabilityReservations = location.reservations.filter((reservation) =>

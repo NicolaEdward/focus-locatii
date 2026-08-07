@@ -2,7 +2,7 @@ import * as XLSX from "xlsx";
 import { NextRequest, NextResponse } from "next/server";
 import { formatAvailability } from "@/lib/availability";
 import { mapsHref } from "@/lib/gps";
-import { monthlyRate } from "@/lib/format";
+import { monthlyRate, oneTimeRate } from "@/lib/format";
 import { listPublicLocations } from "@/lib/locations";
 import { escapeSpreadsheetFormula } from "@/lib/spreadsheet-export";
 
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
 
   for (const [categoryName, locations] of groups) {
     const rows = [
-      [`Locații ${categoryName}`, "", "", "", "", "", "", "", "", "", "", ""],
+      [`Locații ${categoryName}`, "", "", "", "", "", "", "", "", "", "", "", ""],
       [
         "Nr",
         "City",
@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
         "SQM",
         "Illum",
         "Rate Card",
+        "Installation & Removal",
         "Availability"
       ],
       ...locations.map((location, index) => [
@@ -58,14 +59,15 @@ export async function POST(request: NextRequest) {
         location.sqm ?? "",
         location.illum ? "Yes" : location.illum === false ? "No" : "",
         location.rateCard || location.rateCardValue ? monthlyRate(location.rateCardValue, location.rateCard) : "",
+        location.installationRemoval || location.installationRemovalValue ? oneTimeRate(location.installationRemovalValue, location.installationRemoval) : "",
         formatAvailability({ label: location.availabilityLabel, detail: location.availabilityDetail })
       ])
     ];
 
     const sheet = XLSX.utils.aoa_to_sheet(rows.map((row) => row.map((value) => escapeSpreadsheetFormula(value))));
-    sheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 11 } }];
+    sheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 12 } }];
     sheet["!cols"] = defaultColumns();
-    sheet["!autofilter"] = { ref: `A2:L${rows.length}` };
+    sheet["!autofilter"] = { ref: `A2:M${rows.length}` };
     sheet["!freeze"] = { xSplit: 0, ySplit: 2 };
 
     for (let rowIndex = 0; rowIndex < locations.length; rowIndex++) {
@@ -131,6 +133,7 @@ function defaultColumns() {
     { wch: 8 },
     { wch: 8 },
     { wch: 16 },
+    { wch: 24 },
     { wch: 28 }
   ];
 }

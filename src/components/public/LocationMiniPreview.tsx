@@ -3,7 +3,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { ExternalLink, MapPin, Presentation, Star, X } from "lucide-react";
 import { useEffect } from "react";
-import { monthlyRate, sqm } from "@/lib/format";
+import { monthlyRate, oneTimeRate, sqm } from "@/lib/format";
 import { mapsHref } from "@/lib/gps";
 import type { LocationDTO } from "@/types/location";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -26,6 +26,7 @@ export function LocationMiniPreview({
   const mapsUrl = mapsHref(null, location.latDisplay, location.lngDisplay);
   const hasMap = mapsUrl !== "#";
   const showRateCard = Boolean(location.rateCard || location.rateCardValue);
+  const showInstallationCost = Boolean(location.installationRemoval || location.installationRemovalValue);
   const area = [location.city, location.county].filter(Boolean).join(", ") || "Romania";
   const subject = `Cerere locatie ${location.code}`;
   const message = `Buna ziua, sunt interesat de locatia ${location.address || location.code} (${location.code}) - ${location.categoryName}.`;
@@ -127,6 +128,9 @@ export function LocationMiniPreview({
               <MiniSpec label="Dimensiune" value={location.size || "N/A"} />
               <MiniSpec label="Suprafata" value={sqm(location.sqm)} />
               <MiniSpec label="Tip media" value={location.type || "N/A"} />
+              {showInstallationCost ? (
+                <MiniSpec label="Montare/neutralizare" value={oneTimeRate(location.installationRemovalValue, location.installationRemoval)} />
+              ) : null}
             </div>
           </div>
 

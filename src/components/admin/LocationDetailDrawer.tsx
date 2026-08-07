@@ -110,7 +110,8 @@ export function LocationDetailDrawer({
   const displayLocation = data?.location || location;
   const publicVisibility = data?.admin.publicVisibility || {
     showInPublic: location.showInPublic,
-    showPricePublic: location.showPricePublic
+    showPricePublic: location.showPricePublic,
+    showInstallationCostPublic: location.showInstallationCostPublic
   };
   const images = useMemo(() => data ? imageSet(data.location) : imageSetFromSummary(location), [data, location]);
   const publicHref = `/locatii/${displayLocation.id}`;
@@ -239,6 +240,7 @@ export function LocationDetailDrawer({
               <div className="grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-3">
                 <MiniSpec label="Portal public" value={publicVisibility.showInPublic ? "Vizibila" : "Ascunsa"} />
                 <MiniSpec label="Pret public" value={publicVisibility.showPricePublic ? "Da" : "Nu"} />
+                <MiniSpec label="Cost montaj public" value={publicVisibility.showInstallationCostPublic ? "Da" : "Nu"} />
                 <MiniSpec label="Rate card admin" value={monthlyRate(adminCommercial?.rateCardValue ?? displayLocation.rateCardValue, adminCommercial?.rateCard ?? displayLocation.rateCard)} />
                 <MiniSpec label="Montaj / neutralizare" value={oneTimeRate(adminCommercial?.installationRemovalValue ?? displayLocation.installationRemovalValue, adminCommercial?.installationRemoval ?? displayLocation.installationRemoval)} />
                 <MiniSpec label="Status administrativ" value={adminCommercial?.status || displayLocation.status} />

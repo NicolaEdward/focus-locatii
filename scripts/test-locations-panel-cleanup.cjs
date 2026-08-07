@@ -102,10 +102,9 @@ function publicImpactFieldsHaveWarning() {
   const editor = read("src", "components", "admin", "LocationEditor.tsx");
   assert(editor.includes("function PublicImpactNotice"), "public-impact warning component should exist");
   assert(editor.includes("Aceasta schimbare afecteaza portalul public"), "public-impact warning text should be visible");
-  for (const field of ["showPricePublic", "showInPublic", "latDisplay", "lngDisplay"]) {
+  for (const field of ["showPricePublic", "showInstallationCostPublic", "showInPublic", "latDisplay", "lngDisplay"]) {
     assert(editor.includes(field), `${field} should remain editable in the appropriate section`);
   }
-  assert(!editor.includes('label="Arata montarea public"'), "installation and printing costs must not have a public visibility control");
 }
 
 function manualAvailabilityActionsAreClear() {

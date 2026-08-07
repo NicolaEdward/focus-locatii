@@ -171,6 +171,7 @@ export function LocationEditor({
             <Text label="Montare/neutralizare" value={state.installationRemoval} onChange={(value) => update("installationRemoval", value)} />
             <Text label="Install numeric" type="number" value={state.installationRemovalValue} onChange={(value) => update("installationRemovalValue", value)} />
             <Toggle label="Arata pret public" checked={state.showPricePublic} onChange={(value) => update("showPricePublic", value)} />
+            <Toggle label="Arata montarea public" checked={state.showInstallationCostPublic} onChange={(value) => update("showInstallationCostPublic", value)} />
             <Toggle label="Vizibil public" checked={state.showInPublic} onChange={(value) => update("showInPublic", value)} />
             <Toggle label="Premium" checked={state.isPremium} onChange={(value) => update("isPremium", value)} />
             <Toggle label="Featured in hero" checked={state.isFeatured} onChange={(value) => update("isFeatured", value)} />

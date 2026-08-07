@@ -403,6 +403,8 @@ function locationsSignature(locations: LocationDTO[]) {
       illum: location.illum,
       rateCard: location.rateCard,
       rateCardValue: location.rateCardValue,
+      installationRemoval: location.installationRemoval,
+      installationRemovalValue: location.installationRemovalValue,
       availabilityText: location.availabilityText,
       availableFrom: location.availableFrom,
       availableUntil: location.availableUntil,

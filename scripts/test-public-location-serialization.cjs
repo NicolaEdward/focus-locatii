@@ -13,8 +13,8 @@ const visible = serializeLocation(location({
 }));
 assert.equal(visible.rateCard, "1200 EUR/luna", "Public price text should be visible when enabled.");
 assert.equal(visible.rateCardValue, 1200, "Public price value should be visible when enabled.");
-assert.equal(visible.installationRemoval, "Montare 250 EUR", "Installation text should be visible when enabled.");
-assert.equal(visible.installationRemovalValue, 250, "Installation value should be visible when enabled.");
+assert.equal("installationRemoval" in visible, false, "Public DTO must never expose installation or printing cost text.");
+assert.equal("installationRemovalValue" in visible, false, "Public DTO must never expose installation or printing cost values.");
 assert.equal(visible.latDisplay, 44.43, "Display latitude should be exposed.");
 assert.equal(visible.lngDisplay, 26.1, "Display longitude should be exposed.");
 assert.equal("latReal" in visible, false, "Internal latitude key must not be exposed publicly.");
@@ -112,6 +112,9 @@ assert.equal(JSON.stringify(manuallyBlocked).includes("Motiv intern secret"), fa
 const portfolioHero = fs.readFileSync(path.join(process.cwd(), "src", "components", "public", "PortfolioHero.tsx"), "utf8");
 const locationExplorer = fs.readFileSync(path.join(process.cwd(), "src", "components", "public", "LocationExplorer.tsx"), "utf8");
 const publicLocationRoute = fs.readFileSync(path.join(process.cwd(), "src", "app", "api", "locations", "[id]", "route.ts"), "utf8");
+const publicPresentation = fs.readFileSync(path.join(process.cwd(), "src", "components", "public", "LocationPresentation.tsx"), "utf8");
+const publicMiniPreview = fs.readFileSync(path.join(process.cwd(), "src", "components", "public", "LocationMiniPreview.tsx"), "utf8");
+const publicShortlistExport = fs.readFileSync(path.join(process.cwd(), "src", "app", "api", "shortlist", "excel", "route.ts"), "utf8");
 assert(portfolioHero.includes('label: "Locatii libere"'), "Public hero should show free locations count.");
 assert(!portfolioHero.includes('{ label: "Locatii",'), "Public hero must not expose total location count label.");
 assert(!portfolioHero.includes('{ label: "Inchiriate",'), "Public hero must not expose rented/reserved count label.");
@@ -120,12 +123,16 @@ assert(!locationExplorer.includes("Date.now()"), "Public catalog refresh must no
 assert(!locationExplorer.includes('cache: "no-store"'), "Public catalog refresh should allow /api/locations edge cache.");
 assert(publicLocationRoute.includes("publicCacheHeaders"), "Public location detail API should use public cache headers.");
 assert(publicLocationRoute.includes("s-maxage=60"), "Public location detail API should cache safely for short public TTL.");
+assert(!publicPresentation.includes("Selectie Focus Media pregatita pentru planificare rapida"), "Public presentation must not show leftover implementation copy.");
+assert(!publicPresentation.includes("installationRemoval") && !publicPresentation.includes("oneTimeRate"), "Public presentation must not render installation or printing prices.");
+assert(!publicMiniPreview.includes("installationRemoval") && !publicMiniPreview.includes("oneTimeRate"), "Public quick preview must not render installation or printing prices.");
+assert(!publicShortlistExport.includes("Installation & Removal") && !publicShortlistExport.includes("installationRemoval"), "Public shortlist export must not contain installation or printing prices.");
 
 console.log(JSON.stringify({
   ok: true,
   checked: [
     "price visible/hidden",
-    "installation cost visible/hidden",
+    "installation and printing costs always hidden publicly",
     "display coordinates exposed",
     "production sketch exposed as a deliberate public/commercial asset",
     "public hero shows only free locations count",

@@ -191,7 +191,7 @@ function LocationActions({ location, canManage, onOpen, onEdit, onDuplicate, onD
 }
 
 function Visibility({ location }: { location: AdminLocationListItemDTO }) {
-  return <div className="grid gap-1"><span className={`text-xs font-black uppercase ${location.showInPublic ? "text-emerald-200" : "text-slate-500"}`}>{location.showInPublic ? "Publica" : "Ascunsa public"}</span><span className="text-xs text-slate-400">Pret {location.showPricePublic ? "public" : "ascuns"} / montaj {location.showInstallationCostPublic ? "public" : "ascuns"}</span></div>;
+  return <div className="grid gap-1"><span className={`text-xs font-black uppercase ${location.showInPublic ? "text-emerald-200" : "text-slate-500"}`}>{location.showInPublic ? "Publica" : "Ascunsa public"}</span><span className="text-xs text-slate-400">Pret {location.showPricePublic ? "public" : "ascuns"}</span></div>;
 }
 
 function Th({ children }: { children: ReactNode }) { return <th className="px-4 py-3 font-black">{children}</th>; }

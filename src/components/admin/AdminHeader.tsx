@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import {
   BriefcaseBusiness,
+  ArrowRightLeft,
   Building2,
   ChevronDown,
   CircleDollarSign,
@@ -84,6 +85,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
               label="Financiar"
             >
               {canViewFinance ? <AdminMenuLink href="/admin/financiar/incasari" active={isActiveAdminPath(pathname, "/admin/financiar/incasari")} icon={<ReceiptText size={17} />} label="Facturi clienți" /> : null}
+              {canViewFinance ? <AdminMenuLink href="/admin/financiar/reconciliere" active={isActiveAdminPath(pathname, "/admin/financiar/reconciliere")} icon={<ArrowRightLeft size={17} />} label="Import și reconciliere" /> : null}
               {canViewFinance ? <AdminMenuLink href="/admin/furnizori" active={isActiveAdminPath(pathname, "/admin/furnizori")} icon={<Truck size={17} />} label="Furnizori" /> : null}
               {canExportSales ? <SalesReportExportButton variant="menu" icon={<Download size={17} />} label="Export vanzari" /> : null}
             </AdminNavMenu>

@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import type { Prisma } from "@prisma/client";
 import { normalizeClientName, normalizeInvoiceNumber } from "@/lib/clients";
-import { companyCodeForEntity, companyEntityOrThrow, type CompanyEntity } from "@/lib/company-entities";
+import { companyCodeForEntity, companyEntities, companyEntityOrThrow, type CompanyEntity } from "@/lib/company-entities";
 import { financialStatus } from "@/lib/financial-review";
 import { roundMoney } from "@/lib/money";
 import { excelSerialToUtcDate, parseSecureSpreadsheet } from "@/lib/secure-spreadsheet";
@@ -38,6 +38,7 @@ export type SmartBillCustomerInvoiceRow = {
   issueDate: Date | null;
   dueDate: Date | null;
   sourceStatus: string | null;
+  spvIndex: string | null;
   status: string;
   ignored: boolean;
   currency: string | null;
@@ -85,6 +86,9 @@ export type SmartBillParsedReport = {
   detectedColumns: string[];
   rows: SmartBillParsedRow[];
   invalidRows: SmartBillParsedRow[];
+  detectedCompanyCode: string | null;
+  detectedCompanyName: string | null;
+  detectedCompanyTaxId: string | null;
 };
 
 export type SmartBillMatchEntity = {
@@ -105,6 +109,7 @@ export type SmartBillExistingFinancialRow = {
   dueDate?: Date | string | null;
   clientId?: string | null;
   supplierId?: string | null;
+  partnerId?: string | null;
   clientName?: string | null;
   supplierName?: string | null;
   entityTaxId?: string | null;
@@ -228,7 +233,8 @@ const customerColumns = {
   netAmount: ["valoare fara tva", "total fara tva", "baza"],
   vatAmount: ["valoare tva", "tva"],
   totalAmount: ["valoare totala", "total"],
-  notes: ["observatii", "observatii factura"]
+  notes: ["observatii", "observatii factura"],
+  spvIndex: ["index spv", "index"]
 };
 
 const supplierColumns = {
@@ -293,6 +299,7 @@ export async function parseSmartBillWorkbook(
       reportType
     }))
     .filter(Boolean) as SmartBillParsedRow[];
+  const detectedCompany = detectSmartBillSourceEntity(rows.slice(0, headerIndex));
 
   return {
     reportType,
@@ -301,7 +308,10 @@ export async function parseSmartBillWorkbook(
     headerRow: headerIndex + 1,
     detectedColumns: header.filter(Boolean),
     rows: parsedRows,
-    invalidRows: parsedRows.filter((row) => row.issues.length)
+    invalidRows: parsedRows.filter((row) => row.issues.length),
+    detectedCompanyCode: detectedCompany?.code || null,
+    detectedCompanyName: detectedCompany?.legalName || null,
+    detectedCompanyTaxId: detectedCompany?.taxId || null
   };
 }
 
@@ -373,13 +383,7 @@ export function mapSmartBillCustomerInvoiceStatus(value: unknown, input?: { tota
   if (total < 0) {
     return { status: "adjustment", collectedAmount: 0, remainingAmount: 0, ignored: false, needsReview: false };
   }
-  if (["incasata", "incasat", "platita", "achitata"].includes(normalized)) {
-    return { status: "collected", collectedAmount: total, remainingAmount: 0, ignored: false, needsReview: false };
-  }
-  if (["depasita", "restanta", "restant"].includes(normalized)) {
-    return { status: "overdue", collectedAmount: 0, remainingAmount: Math.max(0, total), ignored: false, needsReview: false };
-  }
-  if (["emisa", "emisa client", "trimisa", "deschisa", "open"].includes(normalized)) {
+  if (["incasata", "incasat", "platita", "achitata", "depasita", "restanta", "restant", "emisa", "emisa client", "trimisa", "deschisa", "open"].includes(normalized)) {
     const remainingAmount = Math.max(0, total);
     return {
       status: financialStatus({ kind: "receivable", remainingAmount, paidOrCollected: 0, dueDate: input?.dueDate, now: input?.now }),
@@ -401,13 +405,10 @@ export function mapSmartBillSupplierDocumentStatus(value: unknown, input?: { tot
   if (total < 0) {
     return { status: "supplier_adjustment", paidAmount: 0, remainingAmount: 0, ignored: false, needsReview: true };
   }
-  if (["platita", "achitata", "paid"].includes(normalized)) {
-    return { status: "paid", paidAmount: total, remainingAmount: 0, ignored: false, needsReview: false };
-  }
   if (["anulata", "anulat", "ciorna", "draft"].includes(normalized)) {
     return { status: "cancelled", paidAmount: 0, remainingAmount: 0, ignored: true, needsReview: false };
   }
-  if (["nesalvata", "nesalvat", "in asteptare", "asteptare", "returnata", "returnat", "emisa", "open", "pending"].includes(normalized)) {
+  if (["platita", "achitata", "paid", "nesalvata", "nesalvat", "in asteptare", "asteptare", "returnata", "returnat", "emisa", "open", "pending"].includes(normalized)) {
     const remainingAmount = Math.max(0, total);
     return {
       status: financialStatus({ kind: "payable", remainingAmount, paidOrCollected: 0, dueDate: input?.dueDate, now: input?.now }),
@@ -513,6 +514,12 @@ export function smartBillCustomerReceivableData(input: {
     invoiceNumber: input.row.invoiceNumber,
     normalizedInvoiceNumber: input.row.normalizedInvoiceNumber,
     invoiceDate: input.row.issueDate,
+    sourceStatus: input.row.sourceStatus,
+    sourceExternalId: input.row.spvIndex,
+    sourceFingerprint: `${input.companyContext.companyCode}:${input.row.dedupeKey}`,
+    spvIndex: input.row.spvIndex,
+    netAmount: input.row.netAmount,
+    vatAmount: input.row.vatAmount,
     clientName: input.row.clientName,
     dueDate: input.row.dueDate,
     invoicedAmount: input.row.totalAmount,
@@ -551,6 +558,10 @@ export function smartBillSupplierPayableData(input: {
     invoiceNumber: input.row.documentNumber,
     normalizedInvoiceNumber: input.row.normalizedInvoiceNumber,
     invoiceDate: input.row.issueDate,
+    sourceStatus: input.row.sourceStatus,
+    sourceFingerprint: `${input.companyContext.companyCode}:${input.row.dedupeKey}`,
+    netAmount: input.row.netAmount,
+    vatAmount: input.row.vatAmount,
     documentDescription: input.row.category || input.row.notes || null,
     dueDate: input.row.dueDate,
     amountToPay: input.row.totalAmount,
@@ -579,16 +590,17 @@ export function smartBillCustomerAdjustmentReceivableData(input: {
   const rawRowJson = {
     ...(smartBillRawJson(input.row, input.companyContext) as Record<string, Prisma.InputJsonValue>),
     smartBillAdjustment: {
-    kind: classifySmartBillAdjustment(input.row) || "CREDIT_NOTE",
-    linkedReceivableId: input.linkedReceivable.id,
-    linkedInvoiceNumber: input.linkedReceivable.invoiceNumber || input.linkedReceivable.normalizedInvoiceNumber || null,
-    adjustmentAmount: Math.abs(input.row.totalAmount),
-    appliedToRemainingAmount: true
+      kind: classifySmartBillAdjustment(input.row) || "CREDIT_NOTE",
+      linkedReceivableId: input.linkedReceivable.id,
+      linkedInvoiceNumber: input.linkedReceivable.invoiceNumber || input.linkedReceivable.normalizedInvoiceNumber || null,
+      adjustmentAmount: Math.abs(input.row.totalAmount),
+      appliedToRemainingAmount: true
     }
   } satisfies Prisma.InputJsonObject;
   return {
     uploadId: input.uploadId,
     clientId: input.linkedReceivable.clientId || null,
+    partnerId: input.linkedReceivable.partnerId || null,
     campaignId: null,
     accountOwnerUserId: null,
     companyName: input.companyContext.companyName,
@@ -596,6 +608,12 @@ export function smartBillCustomerAdjustmentReceivableData(input: {
     invoiceNumber: input.row.invoiceNumber,
     normalizedInvoiceNumber: input.row.normalizedInvoiceNumber,
     invoiceDate: input.row.issueDate,
+    sourceStatus: input.row.sourceStatus,
+    sourceExternalId: input.row.spvIndex,
+    sourceFingerprint: `${input.companyContext.companyCode}:${input.row.dedupeKey}`,
+    spvIndex: input.row.spvIndex,
+    netAmount: input.row.netAmount,
+    vatAmount: input.row.vatAmount,
     clientName: input.row.clientName,
     dueDate: input.row.dueDate,
     invoicedAmount: input.row.totalAmount,
@@ -639,6 +657,7 @@ export function smartBillRawJson(row: SmartBillParsedRow, companyContext: SmartB
     fiscalCode: row.fiscalCode,
     normalizedFiscalCode: row.normalizedFiscalCode,
     sourceStatus: row.sourceStatus,
+    ...(row.kind === "customer_invoice" ? { spvIndex: row.spvIndex } : {}),
     netAmount: row.netAmount,
     vatAmount: row.vatAmount,
     totalAmount: row.totalAmount,
@@ -656,6 +675,16 @@ function parseSmartBillRow(input: {
 }): SmartBillParsedRow | null {
   const raw = rawRow(input.header, input.row);
   if (Object.values(raw).every((value) => !cleanCell(value))) return null;
+  if (input.reportType === "customer_invoices") {
+    const hasIdentity = cleanCell(cell(input.row, input.columnMap.clientName)) && cleanCell(cell(input.row, input.columnMap.invoiceNumber));
+    const hasIssueDate = Boolean(normalizeSmartBillDate(cell(input.row, input.columnMap.issueDate)));
+    if (!hasIdentity && !hasIssueDate) return null;
+  }
+  if (input.reportType === "supplier_documents") {
+    const hasIdentity = cleanCell(cell(input.row, input.columnMap.supplierName)) && cleanCell(cell(input.row, input.columnMap.documentNumber));
+    const hasIssueDate = Boolean(normalizeSmartBillDate(cell(input.row, input.columnMap.issueDate)));
+    if (!hasIdentity && !hasIssueDate) return null;
+  }
   return input.reportType === "customer_invoices"
     ? parseCustomerInvoiceRow(input, raw)
     : parseSupplierDocumentRow(input, raw);
@@ -685,6 +714,7 @@ function parseCustomerInvoiceRow(
     issueDate,
     dueDate,
     sourceStatus: cleanCell(cell(input.row, input.columnMap.status)) || null,
+    spvIndex: cleanCell(cell(input.row, input.columnMap.spvIndex)) || null,
     status: mapped.status,
     ignored: mapped.ignored,
     currency: normalizedCurrency(cell(input.row, input.columnMap.currency)),
@@ -784,10 +814,10 @@ function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, c
     warning = "Status SmartBill necunoscut sau insuficient pentru import automat.";
   } else if (conflictingDocument && !duplicate) {
     proposedAction = "NEEDS_REVIEW";
-    warning = "Exista acelasi numar de document si aceeasi data, dar suma difera.";
+    warning = "Același număr de document există deja, dar clientul/furnizorul, data sau suma nu coincid.";
   } else if (match.kind === "ambiguous") {
     proposedAction = "NEEDS_REVIEW";
-    warning = "Exista mai multe potriviri posibile pentru companie.";
+    warning = "CIF-ul nu coincide sigur sau există mai multe potriviri posibile pentru companie.";
   } else if (match.kind === "none") {
     proposedAction = entityKind === "client" ? "PROPOSE_CREATE_CLIENT" : "PROPOSE_CREATE_SUPPLIER";
   }
@@ -833,6 +863,10 @@ export function matchSmartBillEntity(row: SmartBillParsedRow, entities: SmartBil
     const taxMatches = entities.filter((entity) => normalizeFiscalCode(entity.taxId) === normalizedTaxId);
     if (taxMatches.length === 1) return { kind: "matched" as const, entity: taxMatches[0] };
     if (taxMatches.length > 1) return { kind: "ambiguous" as const, matches: taxMatches };
+    const name = normalizeCompanyName(row.kind === "customer_invoice" ? row.clientName : row.supplierName);
+    const conflictingNameMatches = entities.filter((entity) => (entity.normalizedName || normalizeCompanyName(entity.name)) === name);
+    if (conflictingNameMatches.length) return { kind: "ambiguous" as const, matches: conflictingNameMatches };
+    return { kind: "none" as const };
   }
   const name = normalizeCompanyName(row.kind === "customer_invoice" ? row.clientName : row.supplierName);
   if (name) {
@@ -848,6 +882,7 @@ export function findSmartBillDuplicate(row: SmartBillParsedRow, existingRows: Sm
     if (!sameFinancialCompany(existing, companyContext)) return false;
     if (rawSmartBillDedupeKey(existing.rawRowJson) === row.dedupeKey) return true;
     if (normalizeInvoiceNumber(existing.normalizedInvoiceNumber || existing.invoiceNumber) !== row.normalizedInvoiceNumber) return false;
+    if (!sameSmartBillEntity(row, existing)) return false;
     if (dateKey(existing.invoiceDate) !== dateKey(row.issueDate)) return false;
     if (Math.abs(existingAmount(existing) - row.totalAmount) > 0.01) return false;
     if (existing.includedInReport === false || ["cancelled", "archived"].includes(String(existing.status || ""))) return false;
@@ -859,10 +894,15 @@ export function findSmartBillDocumentConflict(row: SmartBillParsedRow, existingR
   return existingRows.find((existing) => {
     if (!sameFinancialCompany(existing, companyContext)) return false;
     if (normalizeInvoiceNumber(existing.normalizedInvoiceNumber || existing.invoiceNumber) !== row.normalizedInvoiceNumber) return false;
-    if (dateKey(existing.invoiceDate) !== dateKey(row.issueDate)) return false;
     if (existing.includedInReport === false || ["cancelled", "archived"].includes(String(existing.status || ""))) return false;
-    return Math.abs(existingAmount(existing) - row.totalAmount) > 0.01;
+    return !sameSmartBillEntity(row, existing) || dateKey(existing.invoiceDate) !== dateKey(row.issueDate) || Math.abs(existingAmount(existing) - row.totalAmount) > 0.01;
   }) || null;
+}
+
+export function assertSmartBillCompanyMatchesReport(parsed: SmartBillParsedReport, companyContext: SmartBillCompanyContext) {
+  if (parsed.detectedCompanyCode && parsed.detectedCompanyCode !== companyContext.companyCode) {
+    throw new Error(`Entitatea selectata nu corespunde emitentului detectat in raport (${parsed.detectedCompanyName || parsed.detectedCompanyCode}).`);
+  }
 }
 
 export function isSmartBillSourceDuplicate(existing: SmartBillExistingFinancialRow, dedupeKey: string) {
@@ -1006,6 +1046,7 @@ function sameReportAdjustmentCandidates(row: SmartBillParsedRow, reportRows: Sma
       candidate.totalAmount > 0 &&
       !candidate.ignored &&
       !candidate.issues.length &&
+      !["incasata", "incasat", "platita", "achitata", "paid"].includes(normalizeText(candidate.sourceStatus)) &&
       !["collected", "cancelled", "needs_review"].includes(candidate.status)
     )
     .map((candidate) => ({
@@ -1113,6 +1154,21 @@ function findHeaderRow(rows: unknown[][], aliases: Record<string, string[]>) {
     const score = requiredKeys.filter((key) => aliases[key].some((alias) => normalized.includes(normalizeText(alias)))).length;
     return score >= Math.min(requiredKeys.length, 6);
   });
+}
+
+function detectSmartBillSourceEntity(rows: unknown[][]) {
+  const headerText = rows.flat().map(cleanCell).filter(Boolean).join(" ");
+  const normalizedHeader = normalizeCompanyName(headerText);
+  const normalizedTaxIds = new Set((headerText.match(/(?:RO\s*)?[A-Z0-9]{6,16}/gi) || []).map(normalizeFiscalCode).filter(Boolean));
+  const taxMatches = companyEntities.filter((entity) => entity.taxId && normalizedTaxIds.has(normalizeFiscalCode(entity.taxId)));
+  if (taxMatches.length === 1) return taxMatches[0];
+  if (taxMatches.length > 1) return null;
+  const nameMatches = companyEntities
+    .map((entity) => ({ entity, normalizedLegalName: normalizeCompanyName(entity.legalName) }))
+    .filter((item) => item.normalizedLegalName && normalizedHeader.includes(item.normalizedLegalName))
+    .sort((left, right) => right.normalizedLegalName.length - left.normalizedLegalName.length);
+  if (!nameMatches.length || nameMatches[0].normalizedLegalName === nameMatches[1]?.normalizedLegalName) return null;
+  return nameMatches[0].entity;
 }
 
 function mapColumns(header: string[], aliases: Record<string, string[]>) {

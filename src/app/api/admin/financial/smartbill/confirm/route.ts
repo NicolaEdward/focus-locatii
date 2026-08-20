@@ -5,7 +5,17 @@ import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { normalizeClientName } from "@/lib/clients";
 import { recalculateFinancialSnapshots } from "@/lib/financial-review";
+import { ensureFinancialLegalEntity, ensureFinancialPartner } from "@/lib/financial-partners";
+import {
+  applyImmediatePaymentRule,
+  bootstrapLegacyPayablePayment,
+  synchronizePayableLedger
+} from "@/lib/payables-payment-service";
 import { prisma } from "@/lib/prisma";
+import {
+  bootstrapLegacyReceivablePayment,
+  synchronizeReceivableLedger
+} from "@/lib/receivables-payment-service";
 import {
   buildSmartBillPreview,
   findSmartBillDuplicate,
@@ -43,6 +53,7 @@ const schema = z.object({
   importToken: z.string().min(20),
   companyName: z.string().trim().min(1, "Firma SmartBill este obligatorie."),
   reportType: z.enum(["customer_invoices", "supplier_documents"]),
+  defaultDocumentType: z.string().trim().max(80).optional().default("unknown"),
   manualActions: z.array(z.object({
     dedupeKey: z.string().min(1),
     rowNumber: z.number().int().positive(),
@@ -84,6 +95,7 @@ type SmartBillConfirmSummary = {
   updatedReceivables: number;
   createdPayables: number;
   updatedPayables: number;
+  presumedPayments: number;
   skippedDuplicates: number;
   skippedNeedsReview: number;
   skippedInvalid: number;
@@ -126,7 +138,10 @@ export async function POST(request: NextRequest) {
       headerRow: 0,
       detectedColumns: [],
       rows: payload.rows,
-      invalidRows: payload.rows.filter((row) => row.issues.length)
+      invalidRows: payload.rows.filter((row) => row.issues.length),
+      detectedCompanyCode: null,
+      detectedCompanyName: null,
+      detectedCompanyTaxId: null
     };
     const preview = buildSmartBillPreview({ parsed, fileName: payload.fileName, companyContext, context, includeToken: false });
     const manualActions = normalizeManualActions(body.manualActions);
@@ -165,6 +180,7 @@ export async function POST(request: NextRequest) {
         where: { activeVersion: true, status: "confirmed" },
         select: { id: true }
       });
+      const legalEntity = await ensureFinancialLegalEntity(tx, companyContext.companyCode);
       const upload = await tx.financialReportUpload.create({
         data: {
             uploadedByUserId: session.id,
@@ -173,11 +189,41 @@ export async function POST(request: NextRequest) {
             fileHash: `smartbill-${companyContext.companyCode}-${payload.fileHash}`,
             status: "confirmed",
           activeVersion: !existingActiveUpload,
+          legalEntityId: legalEntity.id,
+          importType: payload.reportType === "customer_invoices" ? "smartbill_customer_invoices" : "smartbill_supplier_documents",
+          parserName: payload.reportType === "customer_invoices" ? "SmartBillIssuedInvoicesImporter" : "SmartBillSupplierDocumentsImporter",
+          parserVersion: "2",
+          rowsRead: payload.rows.length,
+          rowsIgnored: planStats.manualSkipped + preview.summary.ignoredCount,
+          rowsFailed: preview.summary.invalidCount,
+          warningCount: preview.summary.needsReviewCount + preview.summary.adjustmentNeedsReviewCount,
           errorSummary: preview.summary.needsReviewCount || preview.summary.adjustmentNeedsReviewCount || preview.summary.invalidCount
             ? `${preview.summary.needsReviewCount + preview.summary.adjustmentNeedsReviewCount + preview.summary.invalidCount} randuri SmartBill au ramas pentru verificare.`
             : null
         }
       });
+
+      const importIssues = plan.flatMap((item) => {
+        const messages = [...new Set([
+          ...item.row.issues,
+          ...(item.previewRow?.errors || []),
+          item.previewRow?.warning || "",
+          item.action === "SKIP_MANUAL" ? item.manualAction?.reason || "Rand ignorat explicit la confirmare." : ""
+        ].filter(Boolean))];
+        if (!messages.length) return [];
+        return [{
+          uploadId: upload.id,
+          companyName: companyContext.companyName,
+          companyCode: companyContext.companyCode,
+          sheetName: item.row.sheetName,
+          rowNumber: item.row.rowNumber,
+          issueType: String(item.previewRow?.proposedAction || "import_warning").toLowerCase(),
+          issueMessage: messages.join(" "),
+          severity: item.previewRow?.proposedAction === "INVALID" ? "error" : "warning",
+          rawRowJson: JSON.parse(JSON.stringify(item.row.raw)) as Prisma.InputJsonObject
+        }];
+      });
+      if (importIssues.length) await tx.financialImportIssue.createMany({ data: importIssues });
 
       const summary: SmartBillConfirmSummary = {
         uploadId: upload.id,
@@ -191,6 +237,7 @@ export async function POST(request: NextRequest) {
         updatedReceivables: 0,
         createdPayables: 0,
         updatedPayables: 0,
+        presumedPayments: 0,
         skippedDuplicates: 0,
         skippedNeedsReview: 0,
         skippedInvalid: 0,
@@ -232,6 +279,7 @@ export async function POST(request: NextRequest) {
             normalizedInvoiceNumber: true,
             invoiceNumber: true,
             invoiceDate: true,
+            partnerId: true,
             clientId: true,
             clientName: true,
             dueDate: true,
@@ -264,6 +312,7 @@ export async function POST(request: NextRequest) {
             normalizedInvoiceNumber: true,
             invoiceNumber: true,
             invoiceDate: true,
+            partnerId: true,
             supplierId: true,
             supplierName: true,
             dueDate: true,
@@ -324,7 +373,8 @@ export async function POST(request: NextRequest) {
               companyContext,
               session.id,
               latestReceivables,
-              linkedFinancialRowId
+              linkedFinancialRowId,
+              legalEntity.id
             );
             if (!applied) {
               summary.skippedUnsafe += 1;
@@ -359,22 +409,35 @@ export async function POST(request: NextRequest) {
             accountOwnerUserId: client.accountOwnerUserId,
             reviewedByUserId: session.id
           });
+          const partner = await ensureFinancialPartner(tx, {
+            name: row.clientName,
+            taxId: row.fiscalCode,
+            legalEntityId: legalEntity.id,
+            role: "customer",
+            clientId: client.id
+          });
+          const linkedData = { ...data, legalEntityId: legalEntity.id, partnerId: partner.id };
           if (duplicate && isSmartBillSourceDuplicate(duplicate, row.dedupeKey)) {
             const updated = await tx.financialReceivable.update({
               where: { id: duplicate.id },
-              data: smartBillReceivableUpdateData(data)
+              data: smartBillReceivableUpdateData(linkedData)
             });
+            await bootstrapLegacyReceivablePayment(tx, updated, session.id);
+            await synchronizeReceivableLedger(tx, updated.id);
             summary.updatedReceivables += 1;
             summary.updatedReceivableIds.push(updated.id);
           } else {
             const created = await tx.financialReceivable.create({
-              data: { ...data, rawRowJson: data.rawRowJson as Prisma.InputJsonValue }
+              data: { ...linkedData, rawRowJson: linkedData.rawRowJson as Prisma.InputJsonValue }
             });
             latestReceivables.unshift({
               id: created.id,
               normalizedInvoiceNumber: created.normalizedInvoiceNumber,
               invoiceNumber: created.invoiceNumber,
               invoiceDate: created.invoiceDate,
+              companyName: created.companyName,
+              companyCode: created.companyCode,
+              partnerId: created.partnerId,
               clientId: created.clientId,
               clientName: created.clientName,
               currency: created.currency,
@@ -413,22 +476,41 @@ export async function POST(request: NextRequest) {
             supplierId: supplier.id,
             reviewedByUserId: session.id
           });
+          const partner = await ensureFinancialPartner(tx, {
+            name: row.supplierName,
+            taxId: row.fiscalCode,
+            legalEntityId: legalEntity.id,
+            role: "supplier",
+            supplierId: supplier.id
+          });
+          const linkedData = {
+            ...data,
+            legalEntityId: legalEntity.id,
+            partnerId: partner.id,
+            documentType: body.defaultDocumentType || "unknown"
+          };
           if (duplicate && isSmartBillSourceDuplicate(duplicate, row.dedupeKey)) {
             const updated = await tx.financialPayable.update({
               where: { id: duplicate.id },
-              data: smartBillPayableUpdateData(data)
+              data: smartBillPayableUpdateData(linkedData)
             });
+            await bootstrapLegacyPayablePayment(tx, updated, session.id);
+            await synchronizePayableLedger(tx, updated.id);
             summary.updatedPayables += 1;
             summary.updatedPayableIds.push(updated.id);
+            if (await applyImmediatePaymentRule(tx, { payableId: updated.id, actorId: session.id })) summary.presumedPayments += 1;
           } else {
             const created = await tx.financialPayable.create({
-              data: { ...data, rawRowJson: data.rawRowJson as Prisma.InputJsonValue }
+              data: { ...linkedData, rawRowJson: linkedData.rawRowJson as Prisma.InputJsonValue }
             });
             latestPayables.unshift({
               id: created.id,
               normalizedInvoiceNumber: created.normalizedInvoiceNumber,
               invoiceNumber: created.invoiceNumber,
               invoiceDate: created.invoiceDate,
+              companyName: created.companyName,
+              companyCode: created.companyCode,
+              partnerId: created.partnerId,
               supplierId: created.supplierId,
               supplierName: created.supplierName,
               currency: created.currency,
@@ -439,6 +521,7 @@ export async function POST(request: NextRequest) {
             });
             summary.createdPayables += 1;
             summary.createdPayableIds.push(created.id);
+            if (await applyImmediatePaymentRule(tx, { payableId: created.id, actorId: session.id })) summary.presumedPayments += 1;
           }
         }
       }
@@ -447,6 +530,18 @@ export async function POST(request: NextRequest) {
       if (!changedRows) {
         throw new Error("Importul SmartBill nu a schimbat niciun rand financiar; raportul activ a ramas neschimbat.");
       }
+
+      await tx.financialReportUpload.update({
+        where: { id: upload.id },
+        data: {
+          rowsCreated: summary.createdReceivables + summary.createdPayables,
+          rowsUpdated: summary.updatedReceivables + summary.updatedPayables,
+          rowsDuplicate: summary.skippedDuplicates,
+          rowsIgnored: summary.skippedIgnored + summary.skippedManual,
+          rowsFailed: summary.skippedInvalid + summary.skippedUnsafe + summary.skippedNeedsReview,
+          summaryJson: summary as unknown as Prisma.InputJsonValue
+        }
+      });
 
       emitStructuredLog("info", "spreadsheet_import_transaction_end", {
         correlationId,
@@ -685,6 +780,7 @@ async function loadSmartBillConfirmContext(reportType: SmartBillReportType, comp
           normalizedInvoiceNumber: true,
           invoiceNumber: true,
           invoiceDate: true,
+          partnerId: true,
           clientId: true,
           clientName: true,
           dueDate: true,
@@ -733,6 +829,7 @@ async function loadSmartBillConfirmContext(reportType: SmartBillReportType, comp
         normalizedInvoiceNumber: true,
         invoiceNumber: true,
         invoiceDate: true,
+        partnerId: true,
         supplierId: true,
           supplierName: true,
           dueDate: true,
@@ -821,7 +918,8 @@ async function applySmartBillCustomerAdjustment(
   companyContext: SmartBillCompanyContext,
   actorId: string,
   existingRows: SmartBillExistingFinancialRow[],
-  linkedFinancialRowId?: string
+  linkedFinancialRowId?: string,
+  legalEntityId?: string
 ) {
   const match = linkedFinancialRowId
     ? validateManualSmartBillAdjustmentLink(row, existingRows, linkedFinancialRowId, companyContext)
@@ -843,7 +941,7 @@ async function applySmartBillCustomerAdjustment(
     reviewedByUserId: actorId
   });
   const adjustment = await tx.financialReceivable.create({
-    data: { ...adjustmentData, rawRowJson: adjustmentData.rawRowJson as Prisma.InputJsonValue }
+    data: { ...adjustmentData, legalEntityId: legalEntityId || null, rawRowJson: adjustmentData.rawRowJson as Prisma.InputJsonValue }
   });
   const updatedRaw = appendSmartBillAdjustmentMetadata(linkedRow.rawRowJson, row, adjustment.id, application.adjustmentAmount, application.remainingAmount);
   const updated = await tx.financialReceivable.update({
@@ -967,43 +1065,46 @@ function appendSmartBillAdjustmentMetadata(
   };
 }
 
-function smartBillReceivableUpdateData(data: ReturnType<typeof smartBillCustomerReceivableData>) {
+function smartBillReceivableUpdateData(data: ReturnType<typeof smartBillCustomerReceivableData> & { legalEntityId?: string | null; partnerId?: string | null }) {
   return {
+    legalEntityId: data.legalEntityId,
+    partnerId: data.partnerId,
     companyName: data.companyName,
     companyCode: data.companyCode,
+    invoiceDate: data.invoiceDate,
+    sourceStatus: data.sourceStatus,
+    sourceExternalId: data.sourceExternalId,
+    sourceFingerprint: data.sourceFingerprint,
+    spvIndex: data.spvIndex,
+    netAmount: data.netAmount,
+    vatAmount: data.vatAmount,
     dueDate: data.dueDate,
     invoicedAmount: data.invoicedAmount,
-    collectedAmount: data.collectedAmount,
-    remainingAmount: data.remainingAmount,
-    collectedAt: data.collectedAt,
     currency: data.currency,
-    status: data.status,
     rawRowJson: data.rawRowJson as Prisma.InputJsonValue,
-    needsReview: data.needsReview,
-    includedInReport: data.includedInReport,
     rowType: data.rowType,
-    reviewNote: data.reviewNote,
     reviewedByUserId: data.reviewedByUserId,
     reviewedAt: data.reviewedAt
   };
 }
 
-function smartBillPayableUpdateData(data: ReturnType<typeof smartBillSupplierPayableData>) {
+function smartBillPayableUpdateData(data: ReturnType<typeof smartBillSupplierPayableData> & { legalEntityId?: string | null; partnerId?: string | null; documentType?: string }) {
   return {
+    legalEntityId: data.legalEntityId,
+    partnerId: data.partnerId,
     companyName: data.companyName,
     companyCode: data.companyCode,
+    invoiceDate: data.invoiceDate,
+    documentType: data.documentType,
+    sourceStatus: data.sourceStatus,
+    sourceFingerprint: data.sourceFingerprint,
+    netAmount: data.netAmount,
+    vatAmount: data.vatAmount,
     dueDate: data.dueDate,
     amountToPay: data.amountToPay,
-    amountPaid: data.amountPaid,
-    remainingAmount: data.remainingAmount,
-    paidAt: data.paidAt,
     currency: data.currency,
-    status: data.status,
     rawRowJson: data.rawRowJson as Prisma.InputJsonValue,
-    needsReview: data.needsReview,
-    includedInReport: data.includedInReport,
     rowType: data.rowType,
-    reviewNote: data.reviewNote,
     reviewedByUserId: data.reviewedByUserId,
     reviewedAt: data.reviewedAt
   };

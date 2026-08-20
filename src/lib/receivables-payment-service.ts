@@ -27,8 +27,8 @@ export async function recordReceivablePayment(input: ReceivablePaymentInput) {
     if (!receivable.currency || receivable.invoicedAmount == null) throw new Error("Factura nu are monedă sau valoare validă.");
     const amount = money(input.amount);
     if (!amount.greaterThan(0)) throw new Error("Suma încasată trebuie să fie mai mare decât zero.");
-    await bootstrapLegacyPayment(tx, receivable, input.actor.id);
-    const previousCollected = await activePaymentTotal(tx, receivable.id);
+    await bootstrapLegacyReceivablePayment(tx, receivable, input.actor.id);
+    const previousCollected = await activeReceivablePaymentTotal(tx, receivable.id);
     const nextCollected = previousCollected.plus(amount);
     const invoiceAmount = money(receivable.invoicedAmount);
     if (nextCollected.greaterThan(invoiceAmount.plus("0.01")) && !input.confirmOverpayment) {
@@ -49,7 +49,7 @@ export async function recordReceivablePayment(input: ReceivablePaymentInput) {
       }
     });
     await createCreditDelta(tx, receivable, payment.id, previousCollected, nextCollected, input.actor.id);
-    await synchronizeReceivable(tx, receivable.id);
+    await synchronizeReceivableLedger(tx, receivable.id);
     await tx.auditLog.create({
       data: {
         userId: input.actor.id,
@@ -99,7 +99,7 @@ export async function cancelReceivablePayment(input: {
         data: { status: "cancelled", remainingAmount: money(0) }
       });
     }
-    await synchronizeReceivable(tx, payment.receivableId);
+    await synchronizeReceivableLedger(tx, payment.receivableId);
     await tx.auditLog.create({
       data: {
         userId: input.actor.id,
@@ -128,7 +128,7 @@ export async function correctReceivablePayment(input: Omit<ReceivablePaymentInpu
     assertReceivablePaymentTransition(original.status, "cancelled");
     const amount = money(input.amount);
     if (!amount.greaterThan(0)) throw new Error("Suma corectată trebuie să fie mai mare decât zero.");
-    const currentTotal = await activePaymentTotal(tx, original.receivableId);
+    const currentTotal = await activeReceivablePaymentTotal(tx, original.receivableId);
     const totalWithoutOriginal = currentTotal.minus(original.amount);
     const nextTotal = totalWithoutOriginal.plus(amount);
     const invoiceAmount = money(original.receivable.invoicedAmount);
@@ -161,7 +161,7 @@ export async function correctReceivablePayment(input: Omit<ReceivablePaymentInpu
       }
     });
     await createCreditDelta(tx, original.receivable, replacement.id, totalWithoutOriginal, nextTotal, input.actor.id);
-    await synchronizeReceivable(tx, original.receivableId);
+    await synchronizeReceivableLedger(tx, original.receivableId);
     await tx.auditLog.create({
       data: {
         userId: input.actor.id,
@@ -181,7 +181,7 @@ export async function correctReceivablePayment(input: Omit<ReceivablePaymentInpu
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15_000 });
 }
 
-async function bootstrapLegacyPayment(tx: Prisma.TransactionClient, receivable: {
+export async function bootstrapLegacyReceivablePayment(tx: Prisma.TransactionClient, receivable: {
   id: string;
   collectedAmount: Prisma.Decimal | null;
   collectedAt: Date | null;
@@ -236,10 +236,10 @@ async function createCreditDelta(tx: Prisma.TransactionClient, receivable: {
   });
 }
 
-async function synchronizeReceivable(tx: Prisma.TransactionClient, receivableId: string) {
+export async function synchronizeReceivableLedger(tx: Prisma.TransactionClient, receivableId: string) {
   const receivable = await tx.financialReceivable.findUnique({ where: { id: receivableId } });
   if (!receivable) throw new Error("Factura nu mai există.");
-  const collected = await activePaymentTotal(tx, receivableId);
+  const collected = await activeReceivablePaymentTotal(tx, receivableId);
   const invoiceAmount = money(receivable.invoicedAmount);
   const remaining = Prisma.Decimal.max(invoiceAmount.minus(collected), 0);
   const latest = await tx.financialReceivablePayment.findFirst({
@@ -273,7 +273,7 @@ async function synchronizeReceivable(tx: Prisma.TransactionClient, receivableId:
   }
 }
 
-async function activePaymentTotal(tx: Prisma.TransactionClient, receivableId: string) {
+export async function activeReceivablePaymentTotal(tx: Prisma.TransactionClient, receivableId: string) {
   const aggregate = await tx.financialReceivablePayment.aggregate({
     where: { receivableId, status: "active" },
     _sum: { amount: true }

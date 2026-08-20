@@ -133,9 +133,11 @@ assert.equal(smartbill.normalizeFiscalCode("15116098"), "15116098");
 assert.equal(smartbill.normalizeSmartBillDate("01/05/2026").toISOString().slice(0, 10), "2026-05-01");
 assert.equal(smartbill.normalizeSmartBillMoney("1.234,56"), 1234.56);
 assert.equal(smartbill.normalizeSmartBillMoney("(1.234,56)"), -1234.56);
-assert.equal(smartbill.mapSmartBillCustomerInvoiceStatus("incasata", { totalAmount: 100 }).status, "collected");
+assert.equal(smartbill.mapSmartBillCustomerInvoiceStatus("incasata", { totalAmount: 100 }).status, "needs_review");
+assert.equal(smartbill.mapSmartBillCustomerInvoiceStatus("incasata", { totalAmount: 100 }).collectedAmount, 0);
 assert.equal(smartbill.mapSmartBillCustomerInvoiceStatus("anulata", { totalAmount: 100 }).ignored, true);
-assert.equal(smartbill.mapSmartBillSupplierDocumentStatus("platita", { totalAmount: 100 }).status, "paid");
+assert.equal(smartbill.mapSmartBillSupplierDocumentStatus("platita", { totalAmount: 100 }).status, "needs_review");
+assert.equal(smartbill.mapSmartBillSupplierDocumentStatus("platita", { totalAmount: 100 }).paidAmount, 0);
 assert.equal(smartbill.mapSmartBillSupplierDocumentStatus("status strain", { totalAmount: 100 }).status, "needs_review");
 
 const customerParsed = await smartbill.parseSmartBillCustomerInvoices(customerWorkbook());
@@ -146,7 +148,8 @@ assert.equal(customerParsed.rows[0].normalizedFiscalCode, "15116098");
 assert.equal(customerParsed.rows[0].invoiceNumber, "EMP0361");
 assert.equal(customerParsed.rows[0].issueDate.toISOString().slice(0, 10), "2026-05-01");
 assert.equal(customerParsed.rows[0].totalAmount, 47283.07);
-assert.equal(customerParsed.rows[1].status, "collected");
+assert.notEqual(customerParsed.rows[1].status, "collected");
+assert.equal(customerParsed.rows[1].sourceStatus, "incasata");
 
 const negativeCustomerParsed = await smartbill.parseSmartBillCustomerInvoices(negativeCustomerWorkbook());
 assert.equal(negativeCustomerParsed.rows[0].issues.some((issue) => issue.includes("negativa")), false);
@@ -167,7 +170,8 @@ assert.deepEqual(supplierParsed.detectedColumns.slice(0, 4), ["Document", "Denum
 assert.equal(supplierParsed.rows[0].supplierName, "ASOCIATIA DE PROPRIETARI TURN T3");
 assert.equal(supplierParsed.rows[0].normalizedFiscalCode, "28993486");
 assert.equal(supplierParsed.rows[0].documentNumber, "T3.564");
-assert.equal(supplierParsed.rows[1].status, "paid");
+assert.notEqual(supplierParsed.rows[1].status, "paid");
+assert.equal(supplierParsed.rows[1].sourceStatus, "Platita");
 const negativeSupplierParsed = await smartbill.parseSmartBillSupplierDocuments(negativeSupplierWorkbook());
 assert.equal(negativeSupplierParsed.rows[0].issues.some((issue) => issue.includes("negativa")), false);
 assert.equal(smartbill.classifySmartBillAdjustment(negativeSupplierParsed.rows[0]), "STORNO");
@@ -355,8 +359,9 @@ const receivableData = smartbill.smartBillCustomerReceivableData({
 });
 assert.equal(receivableData.companyName, "Excellence Media");
 assert.equal(receivableData.companyCode, "EXCELLENCE_MEDIA");
-assert.equal(receivableData.remainingAmount, 0);
-assert.equal(receivableData.status, "collected");
+assert.equal(receivableData.remainingAmount, 119);
+assert.notEqual(receivableData.status, "collected");
+assert.equal(receivableData.sourceStatus, "incasata");
 assert.equal(receivableData.rawRowJson.source, "SmartBill");
 assert.equal(receivableData.rawRowJson.companyCode, "EXCELLENCE_MEDIA");
 assert.equal(receivableData.rawRowJson.smartBillDedupeKey, customerParsed.rows[1].dedupeKey);
@@ -408,17 +413,16 @@ if (fs.existsSync(realCustomerFile)) {
     context: {},
     includeToken: false
   });
-  assert.equal(realCustomerParsed.rows.length, 12, "Real SmartBill customer file must keep 12 parsed rows.");
+  assert.equal(realCustomerParsed.rows.length, 11, "Real SmartBill customer file must ignore the report total/footer row.");
   assert.equal(realCustomerParsed.rows.filter((row) => !row.issues.length).length, 11, "Real SmartBill customer file must keep 11 valid rows.");
-  assert.equal(realCustomerPreview.summary.invalidCount, 1, "Real SmartBill customer file must keep exactly one invalid footer/blank row.");
+  assert.equal(realCustomerPreview.summary.invalidCount, 0, "Report total/footer rows must not enter the import preview.");
   assert.equal(realCustomerPreview.rows.filter((row) => row.totalAmount < 0).length, 3, "Real SmartBill customer file must keep three negative adjustment rows.");
   assert.equal(realCustomerPreview.summary.autoLinkedAdjustmentCount, 2, "Kepi negative rows must auto-link to the same-report open invoice.");
   assert.equal(realCustomerPreview.summary.adjustmentNeedsReviewCount, 1, "Rentea negative row must stay in review.");
   assert.equal(realCustomerPreview.rows.find((row) => row.documentNumber === "EMP0364").linkedDocumentNumber, "EMP0367");
   assert.equal(realCustomerPreview.rows.find((row) => row.documentNumber === "EMP0368").linkedDocumentNumber, "EMP0367");
   assert.equal(realCustomerPreview.rows.find((row) => row.documentNumber === "EMP0365").proposedAction, "ADJUSTMENT_NEEDS_REVIEW");
-  assert.equal(wrongTypeCustomerParsed.rows.length, 12, "Wrong report type still reads the customer file rows.");
-  assert.equal(wrongTypeCustomerParsed.rows.filter((row) => row.issues.length).length, 12, "Wrong report type reproduces the 12/12 invalid regression.");
+  assert.equal(wrongTypeCustomerParsed.rows.length, 0, "Wrong report type must not manufacture supplier documents from a customer report.");
 }
 
 if (fs.existsSync(realSupplierFile)) {

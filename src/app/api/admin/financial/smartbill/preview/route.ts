@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
 import {
+  assertSmartBillCompanyMatchesReport,
   buildSmartBillPreview,
   parseSmartBillCustomerInvoices,
   parseSmartBillSupplierDocuments,
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
 
       const buffer = Buffer.from(await file.arrayBuffer());
       const parsed = await parseSmartBillReportWithDetection(buffer, reportType, { fileName: file.name, mimeType: file.type, signal: request.signal });
+      assertSmartBillCompanyMatchesReport(parsed, companyContext);
       const context = await loadSmartBillPreviewContext(parsed.reportType, companyContext);
       const preview = buildSmartBillPreview({ parsed, fileName: file.name, companyContext, context });
       return NextResponse.json({ preview }, { headers: noStoreHeaders });

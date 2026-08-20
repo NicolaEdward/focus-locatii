@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Archive, PlusCircle, Save, Search } from "lucide-react";
 
 type SupplierRow = {
@@ -29,7 +29,7 @@ const emptyForm: SupplierForm = {
   notes: ""
 };
 
-export function SupplierWorkspace({ initialSuppliers }: { initialSuppliers: SupplierRow[] }) {
+export function SupplierWorkspace({ initialSuppliers, legalEntities, canManagePaymentRules }: { initialSuppliers: SupplierRow[]; legalEntities: Array<{ id: string; code: string; legalName: string }>; canManagePaymentRules: boolean }) {
   const [suppliers, setSuppliers] = useState(initialSuppliers);
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
@@ -37,6 +37,10 @@ export function SupplierWorkspace({ initialSuppliers }: { initialSuppliers: Supp
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paymentRules, setPaymentRules] = useState<Array<Record<string, any>>>([]);
+  const [ruleEntityId, setRuleEntityId] = useState(legalEntities[0]?.id || "");
+  const [immediateRuleEnabled, setImmediateRuleEnabled] = useState(false);
+  const [sameDayRequired, setSameDayRequired] = useState(true);
 
   const filtered = suppliers.filter((supplier) => {
     const haystack = [supplier.supplierName, supplier.taxId, supplier.generalEmail, supplier.generalPhone].join(" ").toLowerCase();
@@ -48,6 +52,60 @@ export function SupplierWorkspace({ initialSuppliers }: { initialSuppliers: Supp
     setForm(formFromSupplier(supplier));
     setMessage(null);
     setError(null);
+  }
+
+  useEffect(() => {
+    if (!selectedId) { setPaymentRules([]); setImmediateRuleEnabled(false); return; }
+    let cancelled = false;
+    fetch(`/api/admin/financial/payment-rules?supplierId=${encodeURIComponent(selectedId)}`, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => {
+        if (cancelled) return;
+        const rows = payload?.rules || [];
+        setPaymentRules(rows);
+        const selectedRule = rows.find((rule: Record<string, any>) => rule.legalEntityId === ruleEntityId && rule.active);
+        setImmediateRuleEnabled(Boolean(selectedRule && ["always_presume_paid", "presume_paid_if_immediate"].includes(selectedRule.ruleMode)));
+        setSameDayRequired(selectedRule?.requireSameDayDueDate ?? true);
+      })
+      .catch(() => { if (!cancelled) setPaymentRules([]); });
+    return () => { cancelled = true; };
+  }, [selectedId, ruleEntityId]);
+
+  async function savePaymentRule() {
+    if (!selectedId || !ruleEntityId || !canManagePaymentRules) return;
+    setBusy(true); setMessage(null); setError(null);
+    try {
+      const active = paymentRules.find((rule) => rule.legalEntityId === ruleEntityId && rule.active);
+      if (!immediateRuleEnabled) {
+        if (active) {
+          const response = await fetch(`/api/admin/financial/payment-rules/${active.id}`, { method: "DELETE" });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) throw new Error(payload?.error || "Regula nu a putut fi dezactivata.");
+        }
+        setMessage("Regula de plata imediata este dezactivata pentru aceasta entitate.");
+      } else {
+        const body = {
+          legalEntityId: ruleEntityId,
+          supplierId: selectedId,
+          ruleMode: "presume_paid_if_immediate",
+          requireSameDayDueDate: sameDayRequired,
+          maxDueDays: 0,
+          defaultPaymentMethod: "card_or_cash",
+          priority: 100
+        };
+        const response = await fetch(active ? `/api/admin/financial/payment-rules/${active.id}` : "/api/admin/financial/payment-rules", {
+          method: active ? "PATCH" : "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error || "Regula nu a putut fi salvata.");
+        setMessage("Regula de plata imediata a fost salvata.");
+      }
+      const refreshed = await fetch(`/api/admin/financial/payment-rules?supplierId=${encodeURIComponent(selectedId)}`, { cache: "no-store" }).then((response) => response.json());
+      setPaymentRules(refreshed.rules || []);
+    } catch (ruleError) { setError(ruleError instanceof Error ? ruleError.message : "Regula nu a putut fi salvata."); }
+    finally { setBusy(false); }
   }
 
   async function saveSupplier() {
@@ -187,6 +245,16 @@ export function SupplierWorkspace({ initialSuppliers }: { initialSuppliers: Supp
               <textarea className="focus-input min-h-24" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
             </label>
           </div>
+          {selectedId ? <div className="mt-6 border-t border-focus-line pt-5">
+            <h3 className="text-sm font-black uppercase text-focus-yellow">Comportament plata la cumparare</h3>
+            <p className="mt-1 text-sm text-slate-400">Se aplica numai documentelor care respecta conditiile. O factura periodica cu scadenta viitoare nu este marcata automat achitata.</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1 text-sm font-bold text-slate-200">Entitate juridica<select className="focus-input" value={ruleEntityId} onChange={(event) => setRuleEntityId(event.target.value)}><option value="">Selecteaza</option>{legalEntities.map((entity) => <option key={entity.id} value={entity.id}>{entity.legalName}</option>)}</select></label>
+              <label className="flex items-center gap-3 rounded-lg border border-focus-line p-3 text-sm font-bold text-slate-200"><input checked={immediateRuleEnabled} disabled={!canManagePaymentRules} type="checkbox" onChange={(event) => setImmediateRuleEnabled(event.target.checked)} /> Facturile sunt de regula platite la cumparare</label>
+              <label className="flex items-center gap-3 text-sm text-slate-300"><input checked={sameDayRequired} disabled={!canManagePaymentRules || !immediateRuleEnabled} type="checkbox" onChange={(event) => setSameDayRequired(event.target.checked)} /> Cere scadenta in aceeasi zi</label>
+              {canManagePaymentRules ? <button className="focus-button justify-self-start" disabled={busy || !ruleEntityId} type="button" onClick={savePaymentRule}><Save size={18} /> Salveaza regula</button> : <p className="text-xs text-slate-500">Doar vizualizare.</p>}
+            </div>
+          </div> : null}
         </section>
       </section>
     </main>

@@ -1,7 +1,7 @@
 export const companyEntities = [
-  { value: "Focus Media", label: "Focus Media", code: "FOCUS_MEDIA" },
-  { value: "Excellence Media", label: "Excellence Media", code: "EXCELLENCE_MEDIA" },
-  { value: "Focus BG / Focus Media LLC EOOD", label: "Focus BG / Focus Media LLC EOOD", code: "FOCUS_BG" }
+  { value: "Focus Media", label: "Focus Media", code: "FOCUS_MEDIA", legalName: "FOCUS MEDIA OUTDOOR SRL", taxId: "40766474" },
+  { value: "Excellence Media", label: "Excellence Media", code: "EXCELLENCE_MEDIA", legalName: "EXCELLENCE MEDIA PRODUCTION SRL", taxId: "29522177" },
+  { value: "Focus BG / Focus Media LLC EOOD", label: "Focus BG / Focus Media LLC EOOD", code: "FOCUS_BG", legalName: "FOCUS MEDIA LLC EOOD", taxId: null }
 ] as const;
 
 export type CompanyEntity = (typeof companyEntities)[number]["value"];
@@ -9,8 +9,13 @@ export type CompanyEntity = (typeof companyEntities)[number]["value"];
 const aliases = new Map<string, CompanyEntity>([
   ["focus media", "Focus Media"],
   ["focus", "Focus Media"],
+  ["focus media outdoor", "Focus Media"],
+  ["focus media outdoor srl", "Focus Media"],
   ["excellence", "Excellence Media"],
   ["excellence media", "Excellence Media"],
+  ["excellence media production", "Excellence Media"],
+  ["excellence media production srl", "Excellence Media"],
+  ["excellence media production s r l", "Excellence Media"],
   ["focus bg", "Focus BG / Focus Media LLC EOOD"],
   ["focus media llc eood", "Focus BG / Focus Media LLC EOOD"],
   ["focus bg / focus media llc eood", "Focus BG / Focus Media LLC EOOD"],

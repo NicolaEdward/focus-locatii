@@ -12,11 +12,11 @@ export default async function SuppliersPage() {
   const session = await getAdminSession();
   if (!session) redirect("/admin/login");
   if (!hasPermission(session.role, "finance.view")) redirect("/admin/dashboard");
-  const suppliers = await prisma.supplier.findMany({
+  const [suppliers, legalEntities] = await Promise.all([prisma.supplier.findMany({
     where: { status: { not: "archived" } },
     orderBy: { supplierName: "asc" },
     take: 5000
-  });
+  }), prisma.financialLegalEntity.findMany({ where: { active: true }, select: { id: true, code: true, legalName: true }, orderBy: { legalName: "asc" } })]);
   return (
     <>
       <AdminHeader session={session} />
@@ -28,7 +28,7 @@ export default async function SuppliersPage() {
         generalPhone: supplier.generalPhone,
         status: supplier.status,
         notes: supplier.notes
-      }))} />
+      }))} legalEntities={legalEntities} canManagePaymentRules={hasPermission(session.role, "finance.manage")} />
     </>
   );
 }

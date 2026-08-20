@@ -354,6 +354,9 @@ model User {
   completedCrmNextActions CrmNextAction[] @relation("CrmNextActionCompleter")
   crmDomainEvents CrmEvent[] @relation("CrmEventActor")
   createdSuppliers Supplier[] @relation("SupplierCreator")
+  createdPayablePayments FinancialPayablePayment[] @relation("FinancialPayablePaymentCreator")
+  cancelledPayablePayments FinancialPayablePayment[] @relation("FinancialPayablePaymentCanceller")
+  createdSupplierPaymentRules SupplierPaymentRule[] @relation("SupplierPaymentRuleCreator")
   assignedOperationTasks OperationTask[] @relation("OperationTaskAssignee")
   createdOperationTasks OperationTask[] @relation("OperationTaskCreator")
   authMfaCredential AuthMfaCredential?
@@ -484,6 +487,7 @@ model ClientAccount {
   financialAliases FinancialClientAlias[]
   financialCredits FinancialClientCredit[]
   documents ClientDocument[] @relation("ClientDocuments")
+  financialPartnerRoles FinancialPartnerRole[]
 
   @@index([normalizedName])
   @@index([clientType])
@@ -613,21 +617,37 @@ model FinancialReportUpload {
   status           String   @default("uploaded")
   errorSummary     String?  @db.Text
   activeVersion    Boolean  @default(false)
+  legalEntityId    String?
+  importType       String?
+  fileSize         Int?
+  parserName       String?
+  parserVersion    String?
+  rowsRead         Int      @default(0)
+  rowsCreated      Int      @default(0)
+  rowsUpdated      Int      @default(0)
+  rowsDuplicate    Int      @default(0)
+  rowsIgnored      Int      @default(0)
+  rowsFailed       Int      @default(0)
+  warningCount     Int      @default(0)
+  summaryJson      Json?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   uploadedBy User? @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  legalEntity FinancialLegalEntity? @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
   companySnapshots FinancialReportCompanySnapshot[]
   payables FinancialPayable[]
   receivables FinancialReceivable[]
   issues FinancialImportIssue[]
   receivableImportRows FinancialReceivableImportRow[]
+  bankStatements FinancialBankStatement[]
 
   @@index([uploadedByUserId])
   @@index([reportDate])
   @@index([status])
   @@index([activeVersion])
   @@index([fileHash])
+  @@index([legalEntityId, importType, uploadedAt])
   @@map("portfolio_financial_report_uploads")
 }
 
@@ -670,12 +690,20 @@ model FinancialPayable {
   id                  String   @id @default(cuid())
   uploadId            String
   supplierId          String?
+  legalEntityId       String?
+  partnerId           String?
   companyName         String
   companyCode         String?
   supplierName        String?
   invoiceNumber       String?
   normalizedInvoiceNumber String?
   invoiceDate         DateTime?
+  documentType        String   @default("unknown")
+  sourceStatus        String?
+  sourceExternalId    String?
+  sourceFingerprint   String?  @unique
+  netAmount           Decimal? @db.Decimal(14, 2)
+  vatAmount           Decimal? @db.Decimal(14, 2)
   documentDescription String?  @db.Text
   dueDate             DateTime?
   amountToPay         Decimal? @db.Decimal(14, 2)
@@ -686,6 +714,7 @@ model FinancialPayable {
   paymentNotes        String?  @db.Text
   currency            String?  @db.VarChar(3)
   status              String   @default("needs_review")
+  paymentVerification String   @default("none")
   rawRowJson          Json?
   needsReview         Boolean  @default(false)
   includedInReport    Boolean  @default(true)
@@ -695,14 +724,20 @@ model FinancialPayable {
   reviewedAt          DateTime?
   excludeReason       String?  @db.Text
   createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   upload FinancialReportUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
   supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  legalEntity FinancialLegalEntity? @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  partner FinancialPartner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  payments FinancialPayablePayment[]
   reviewedBy User? @relation("FinancialPayableReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
   documents ClientDocument[] @relation("PayableDocuments")
 
   @@index([uploadId])
   @@index([supplierId])
+  @@index([legalEntityId, dueDate])
+  @@index([partnerId])
   @@index([companyCode])
   @@index([supplierName])
   @@index([normalizedInvoiceNumber])
@@ -723,12 +758,20 @@ model FinancialReceivable {
   campaignId      String?
   billingItemId   String?
   accountOwnerUserId String?
+  legalEntityId   String?
+  partnerId       String?
   companyName     String
   companyCode     String?
   invoiceNumber   String?
   normalizedInvoiceNumber String?
   canonicalKey    String?  @unique
   invoiceDate     DateTime?
+  sourceStatus    String?
+  sourceExternalId String?
+  sourceFingerprint String? @unique
+  spvIndex        String?
+  netAmount       Decimal? @db.Decimal(14, 2)
+  vatAmount       Decimal? @db.Decimal(14, 2)
   location        String?  @db.Text
   campaignDetails String?  @db.Text
   clientName      String?
@@ -755,6 +798,8 @@ model FinancialReceivable {
   lastImportedAt  DateTime?
 
   upload FinancialReportUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  legalEntity FinancialLegalEntity? @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  partner FinancialPartner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
   client ClientAccount? @relation(fields: [clientId], references: [id], onDelete: SetNull)
   campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   billingItem BillingItem? @relation(fields: [billingItemId], references: [id], onDelete: SetNull)
@@ -769,6 +814,9 @@ model FinancialReceivable {
   @@index([campaignId])
   @@index([billingItemId])
   @@index([accountOwnerUserId])
+  @@index([legalEntityId, dueDate])
+  @@index([partnerId])
+  @@index([sourceExternalId])
   @@index([companyCode])
   @@index([normalizedInvoiceNumber])
   @@index([companyCode, normalizedInvoiceNumber, currency])
@@ -844,6 +892,7 @@ model FinancialReceivablePayment {
   id                 String   @id @default(cuid())
   receivableId       String
   sourceImportRowId  String?  @unique
+  bankTransactionId  String?
   requestKey         String?  @unique
   amount             Decimal  @db.Decimal(14, 2)
   currency           String   @db.VarChar(3)
@@ -852,6 +901,7 @@ model FinancialReceivablePayment {
   paymentReference   String?
   notes              String?  @db.Text
   source             String   @default("manual")
+  verificationStatus String   @default("manual")
   status             String   @default("active")
   correctsPaymentId  String?
   createdByUserId    String?
@@ -863,6 +913,7 @@ model FinancialReceivablePayment {
 
   receivable      FinancialReceivable          @relation(fields: [receivableId], references: [id], onDelete: Restrict)
   sourceImportRow FinancialReceivableImportRow? @relation(fields: [sourceImportRowId], references: [id], onDelete: SetNull)
+  bankTransaction FinancialBankTransaction? @relation(fields: [bankTransactionId], references: [id], onDelete: SetNull)
   createdBy       User? @relation("FinancialReceivablePaymentCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
   cancelledBy     User? @relation("FinancialReceivablePaymentCanceller", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
   correctsPayment FinancialReceivablePayment? @relation("FinancialReceivablePaymentCorrections", fields: [correctsPaymentId], references: [id], onDelete: SetNull)
@@ -871,6 +922,7 @@ model FinancialReceivablePayment {
 
   @@index([receivableId, status, receivedAt])
   @@index([sourceImportRowId])
+  @@index([bankTransactionId, status])
   @@index([createdByUserId])
   @@index([correctsPaymentId])
   @@map("portfolio_financial_receivable_payments")
@@ -943,12 +995,261 @@ model Supplier {
   payables FinancialPayable[]
   documents ClientDocument[] @relation("SupplierDocuments")
   operationTasks OperationTask[]
+  financialPartnerRoles FinancialPartnerRole[]
+  paymentRules SupplierPaymentRule[]
 
   @@index([normalizedName])
   @@index([status])
   @@index([createdByUserId])
   @@index([archivedAt])
   @@map("portfolio_suppliers")
+}
+
+model FinancialLegalEntity {
+  id                  String   @id @default(cuid())
+  code                String   @unique
+  legalName           String
+  normalizedName      String
+  taxIdOriginal       String?
+  taxIdNormalized     String?  @unique
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  imports             FinancialReportUpload[]
+  partnerRoles        FinancialPartnerRole[]
+  partnerAliases      FinancialPartnerAlias[]
+  receivables         FinancialReceivable[]
+  payables            FinancialPayable[]
+  bankAccounts        FinancialBankAccount[]
+  bankStatements      FinancialBankStatement[]
+  bankTransactions    FinancialBankTransaction[]
+  supplierPaymentRules SupplierPaymentRule[]
+
+  @@index([normalizedName])
+  @@index([active])
+  @@map("portfolio_financial_legal_entities")
+}
+
+model FinancialPartner {
+  id                  String   @id @default(cuid())
+  identityKey         String   @unique
+  legalName           String
+  normalizedName      String
+  taxIdOriginal       String?
+  taxIdNormalized     String?
+  countryCode         String?  @db.VarChar(2)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  roles               FinancialPartnerRole[]
+  aliases             FinancialPartnerAlias[]
+  receivables         FinancialReceivable[]
+  payables            FinancialPayable[]
+
+  @@index([taxIdNormalized])
+  @@index([normalizedName])
+  @@map("portfolio_financial_partners")
+}
+
+model FinancialPartnerRole {
+  id                  String   @id @default(cuid())
+  legalEntityId       String
+  partnerId           String
+  role                String
+  clientId            String?
+  supplierId          String?
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  legalEntity FinancialLegalEntity @relation(fields: [legalEntityId], references: [id], onDelete: Cascade)
+  partner     FinancialPartner     @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  client      ClientAccount?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  supplier    Supplier?            @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@unique([legalEntityId, partnerId, role])
+  @@index([clientId])
+  @@index([supplierId])
+  @@index([legalEntityId, role, active])
+  @@map("portfolio_financial_partner_roles")
+}
+
+model FinancialPartnerAlias {
+  id                  String   @id @default(cuid())
+  aliasKey            String   @unique
+  legalEntityId       String?
+  partnerId           String
+  alias               String
+  normalizedAlias     String
+  source              String   @default("manual")
+  createdByUserId     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  legalEntity FinancialLegalEntity? @relation(fields: [legalEntityId], references: [id], onDelete: Cascade)
+  partner     FinancialPartner      @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([legalEntityId, normalizedAlias])
+  @@index([partnerId])
+  @@map("portfolio_financial_partner_aliases")
+}
+
+model FinancialBankAccount {
+  id                  String   @id @default(cuid())
+  legalEntityId       String
+  ibanOriginal        String
+  ibanNormalized      String
+  currency            String   @db.VarChar(3)
+  bankName            String?
+  accountLabel        String?
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  legalEntity FinancialLegalEntity @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  statements  FinancialBankStatement[]
+  transactions FinancialBankTransaction[]
+
+  @@unique([legalEntityId, ibanNormalized])
+  @@index([ibanNormalized])
+  @@map("portfolio_financial_bank_accounts")
+}
+
+model FinancialBankStatement {
+  id                  String   @id @default(cuid())
+  uploadId            String
+  legalEntityId       String
+  bankAccountId       String
+  statementFingerprint String @unique
+  periodStart         DateTime
+  periodEnd           DateTime
+  issuedAt            DateTime?
+  currency            String   @db.VarChar(3)
+  openingBalance      Decimal? @db.Decimal(16, 2)
+  closingBalance      Decimal? @db.Decimal(16, 2)
+  status              String   @default("imported")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  upload      FinancialReportUpload @relation(fields: [uploadId], references: [id], onDelete: Restrict)
+  legalEntity FinancialLegalEntity  @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  bankAccount FinancialBankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+  transactions FinancialBankTransaction[]
+
+  @@index([legalEntityId, periodStart, periodEnd])
+  @@index([bankAccountId, periodStart])
+  @@map("portfolio_financial_bank_statements")
+}
+
+model FinancialBankTransaction {
+  id                  String   @id @default(cuid())
+  statementId         String
+  legalEntityId       String
+  bankAccountId       String
+  fingerprint         String   @unique
+  bookedAt            DateTime
+  valueDate           DateTime?
+  currency            String   @db.VarChar(3)
+  debitAmount         Decimal  @default(0) @db.Decimal(16, 2)
+  creditAmount        Decimal  @default(0) @db.Decimal(16, 2)
+  description         String   @db.Text
+  documentReference   String?
+  bankReference       String?
+  payerName           String?
+  payerIban           String?
+  payerTaxId          String?
+  beneficiaryName     String?
+  beneficiaryIban     String?
+  beneficiaryTaxId    String?
+  paymentDetails      String?  @db.Text
+  merchantName        String?
+  maskedCard          String?
+  transactionType     String?
+  classification      String
+  reconciliationStatus String @default("unmatched")
+  rawRowJson          Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  statement    FinancialBankStatement @relation(fields: [statementId], references: [id], onDelete: Restrict)
+  legalEntity  FinancialLegalEntity  @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  bankAccount  FinancialBankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+  receivablePayments FinancialReceivablePayment[]
+  payablePayments FinancialPayablePayment[]
+
+  @@index([legalEntityId, bookedAt])
+  @@index([bankAccountId, bookedAt])
+  @@index([classification, reconciliationStatus])
+  @@index([payerTaxId])
+  @@index([beneficiaryTaxId])
+  @@map("portfolio_financial_bank_transactions")
+}
+
+model FinancialPayablePayment {
+  id                  String   @id @default(cuid())
+  payableId           String
+  bankTransactionId   String?
+  supplierPaymentRuleId String?
+  requestKey          String?  @unique
+  replacesPaymentId   String?  @unique
+  amount              Decimal  @db.Decimal(16, 2)
+  currency            String   @db.VarChar(3)
+  paidAt              DateTime
+  paymentMethod       String?
+  paymentReference    String?
+  notes               String?  @db.Text
+  source              String   @default("manual")
+  verificationStatus  String   @default("manual")
+  status              String   @default("active")
+  createdByUserId     String?
+  cancelledByUserId   String?
+  cancelledAt         DateTime?
+  cancellationReason  String?  @db.Text
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  payable         FinancialPayable       @relation(fields: [payableId], references: [id], onDelete: Restrict)
+  bankTransaction FinancialBankTransaction? @relation(fields: [bankTransactionId], references: [id], onDelete: SetNull)
+  supplierPaymentRule SupplierPaymentRule? @relation(fields: [supplierPaymentRuleId], references: [id], onDelete: SetNull)
+  replacesPayment FinancialPayablePayment? @relation("FinancialPayablePaymentReplacements", fields: [replacesPaymentId], references: [id], onDelete: SetNull)
+  replacement     FinancialPayablePayment? @relation("FinancialPayablePaymentReplacements")
+  createdBy       User? @relation("FinancialPayablePaymentCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  cancelledBy     User? @relation("FinancialPayablePaymentCanceller", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+
+  @@index([payableId, status, paidAt])
+  @@index([bankTransactionId, status])
+  @@index([replacesPaymentId])
+  @@index([verificationStatus, status])
+  @@map("portfolio_financial_payable_payments")
+}
+
+model SupplierPaymentRule {
+  id                  String   @id @default(cuid())
+  legalEntityId       String
+  supplierId          String
+  ruleMode            String
+  documentType        String?
+  supplierCategory    String?
+  requireSameDayDueDate Boolean @default(false)
+  maxDueDays          Int?
+  amountLimit         Decimal? @db.Decimal(16, 2)
+  defaultPaymentMethod String?
+  priority            Int      @default(100)
+  active              Boolean  @default(true)
+  effectiveFrom       DateTime?
+  effectiveTo         DateTime?
+  createdByUserId     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  legalEntity FinancialLegalEntity @relation(fields: [legalEntityId], references: [id], onDelete: Cascade)
+  supplier    Supplier             @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  createdBy   User?                @relation("SupplierPaymentRuleCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  payments    FinancialPayablePayment[]
+
+  @@index([legalEntityId, supplierId, active, priority])
+  @@map("portfolio_supplier_payment_rules")
 }
 
 model SupplierContact {

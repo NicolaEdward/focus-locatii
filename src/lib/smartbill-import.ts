@@ -4,6 +4,7 @@ import { normalizeClientName, normalizeInvoiceNumber } from "@/lib/clients";
 import { companyCodeForEntity, companyEntities, companyEntityOrThrow, type CompanyEntity } from "@/lib/company-entities";
 import { financialStatus } from "@/lib/financial-review";
 import { roundMoney } from "@/lib/money";
+import { receivableNetAmount } from "@/lib/receivable-adjustments";
 import { excelSerialToUtcDate, parseSecureSpreadsheet } from "@/lib/secure-spreadsheet";
 
 export type SmartBillReportType = "customer_invoices" | "supplier_documents";
@@ -944,9 +945,9 @@ export function findSmartBillAdjustmentMatch(
     sameSmartBillEntity(row, existing) &&
     normalizedCurrency(existing.currency) === normalizedCurrency(row.currency) &&
     existingAmount(existing) > 0 &&
-    existingRemainingAmount(existing) > 0 &&
+    existingNetAmount(existing) > 0 &&
     existing.includedInReport !== false &&
-    !["cancelled", "archived", "lost", "collected", "paid"].includes(String(existing.status || ""))
+    !["cancelled", "archived", "lost"].includes(String(existing.status || ""))
   );
 
   if (!candidates.length) {
@@ -968,7 +969,8 @@ export function findSmartBillAdjustmentMatch(
     };
   }
 
-  const linkedRow = referenced[0] || (candidates.length === 1 ? candidates[0] : null);
+  const openCandidates = candidates.filter((candidate) => existingEffectiveRemaining(candidate) > 0.01);
+  const linkedRow = referenced[0] || (openCandidates.length === 1 ? openCandidates[0] : null);
   if (!linkedRow) {
     return {
       kind: "review" as const,
@@ -978,14 +980,14 @@ export function findSmartBillAdjustmentMatch(
     };
   }
 
-  const remaining = existingRemainingAmount(linkedRow);
-  if (adjustmentAmount > remaining + 0.01) {
+  const netAmount = existingNetAmount(linkedRow);
+  if (adjustmentAmount > netAmount + 0.01) {
     return {
       kind: "review" as const,
       adjustmentKind,
       linkedRow,
       matchConfidence: referenced[0] ? "high" as const : "medium" as const,
-      reason: "Valoarea negativa depaseste soldul deschis al facturii gasite; poate necesita impartire."
+      reason: "Valoarea negativă depășește valoarea netă rămasă a facturii găsite; poate necesita împărțire."
     };
   }
 
@@ -995,8 +997,8 @@ export function findSmartBillAdjustmentMatch(
     linkedRow,
     matchConfidence: referenced[0] ? "high" as const : "medium" as const,
     reason: referenced[0]
-      ? "Factura originala este mentionata clar in observatiile SmartBill."
-      : "Exista exact o singura factura pozitiva deschisa pentru client si moneda."
+      ? "Factura originală este menționată clar în observațiile SmartBill."
+      : "Există exact o singură factură pozitivă deschisă pentru client și monedă."
   };
 }
 
@@ -1013,9 +1015,9 @@ export function findSmartBillAdjustmentCandidates(
       sameSmartBillEntity(row, existing) &&
       normalizedCurrency(existing.currency) === normalizedCurrency(row.currency) &&
       existingAmount(existing) > 0 &&
-      existingRemainingAmount(existing) > 0 &&
+      existingNetAmount(existing) > 0 &&
       existing.includedInReport !== false &&
-      !["cancelled", "archived", "lost", "collected", "paid"].includes(String(existing.status || ""))
+      !["cancelled", "archived", "lost"].includes(String(existing.status || ""))
     )
     .slice(0, 25)
     .map((existing) => {
@@ -1028,7 +1030,7 @@ export function findSmartBillAdjustmentCandidates(
         dueDate: isoDate(existing.dueDate),
         currency: normalizedCurrency(existing.currency),
         totalAmount: existingAmount(existing),
-        remainingAmount: existingRemainingAmount(existing),
+        remainingAmount: existingEffectiveRemaining(existing),
         matchConfidence: referenced ? "high" : "medium",
         reason: referenced
           ? "Factura pare mentionata in observatiile documentului negativ."
@@ -1076,19 +1078,27 @@ export function calculateSmartBillReceivableAdjustment(input: {
   now?: Date;
 }) {
   const adjustmentAmount = roundMoney(Math.abs(input.row.totalAmount));
-  const currentRemaining = existingRemainingAmount(input.receivable);
-  if (adjustmentAmount > currentRemaining + 0.01) {
-    throw new Error("Ajustarea SmartBill depaseste soldul facturii legate.");
+  const currentNetAmount = existingNetAmount(input.receivable);
+  if (adjustmentAmount > currentNetAmount + 0.01) {
+    throw new Error("Ajustarea SmartBill depășește valoarea netă a facturii legate.");
   }
-  const remainingAmount = roundMoney(Math.max(0, currentRemaining - adjustmentAmount));
+  const collectedAmount = existingPaidOrCollectedAmount(input.receivable);
+  const netAmount = roundMoney(Math.max(0, currentNetAmount - adjustmentAmount));
+  const remainingAmount = roundMoney(Math.max(0, netAmount - collectedAmount));
+  const previousCredit = roundMoney(Math.max(0, collectedAmount - currentNetAmount));
+  const nextCredit = roundMoney(Math.max(0, collectedAmount - netAmount));
   return {
     adjustmentAmount,
     remainingAmount,
     originalInvoicedAmount: existingAmount(input.receivable),
+    previousNetAmount: currentNetAmount,
+    netAmount,
+    collectedAmount,
+    creditDelta: roundMoney(Math.max(0, nextCredit - previousCredit)),
     status: financialStatus({
       kind: "receivable",
       remainingAmount,
-      paidOrCollected: input.receivable.paidOrCollectedAmount,
+      paidOrCollected: collectedAmount,
       dueDate: parseExistingDate(input.receivable.dueDate),
       now: input.now
     })
@@ -1246,12 +1256,20 @@ function existingAmount(existing: SmartBillExistingFinancialRow) {
   return Number.isFinite(parsed) ? roundMoney(parsed) : 0;
 }
 
-function existingRemainingAmount(existing: SmartBillExistingFinancialRow) {
-  if (existing.remainingAmount && typeof existing.remainingAmount === "object" && "toNumber" in existing.remainingAmount) {
-    return roundMoney((existing.remainingAmount as Prisma.Decimal).toNumber());
+function existingPaidOrCollectedAmount(existing: SmartBillExistingFinancialRow) {
+  if (existing.paidOrCollectedAmount && typeof existing.paidOrCollectedAmount === "object" && "toNumber" in existing.paidOrCollectedAmount) {
+    return roundMoney((existing.paidOrCollectedAmount as Prisma.Decimal).toNumber());
   }
-  const parsed = Number(String(existing.remainingAmount ?? existing.amount ?? 0).replace(",", "."));
+  const parsed = Number(String(existing.paidOrCollectedAmount ?? 0).replace(",", "."));
   return Number.isFinite(parsed) ? roundMoney(parsed) : 0;
+}
+
+function existingNetAmount(existing: SmartBillExistingFinancialRow) {
+  return roundMoney(receivableNetAmount(existingAmount(existing), existing.rawRowJson).toNumber());
+}
+
+function existingEffectiveRemaining(existing: SmartBillExistingFinancialRow) {
+  return roundMoney(Math.max(0, existingNetAmount(existing) - existingPaidOrCollectedAmount(existing)));
 }
 
 function sameSmartBillEntity(row: SmartBillParsedRow, existing: SmartBillExistingFinancialRow) {

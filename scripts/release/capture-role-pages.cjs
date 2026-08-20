@@ -33,6 +33,7 @@ const pages = [
   { name: "sales-director-dashboard", route: "/admin/dashboard", role: "SALES_DIRECTOR", expected: "Agenda mea" },
   { name: "sales-agent-dashboard", route: "/admin/dashboard", role: "SALES_AGENT", expected: "Agenda mea" },
   { name: "finance-invoices", route: "/admin/financiar/incasari", role: "FINANCE_OPERATOR", expected: "Facturi clien" },
+  { name: "finance-reconciliation", route: "/admin/financiar/reconciliere", role: "FINANCE_OPERATOR", expected: "Import și reconciliere" },
   { name: "finance-saga-integration", route: "/admin/integrari/saga", role: "FINANCE_OPERATOR", expected: "SAGA" },
   { name: "field-operational", route: "/admin/operational", role: "FIELD_OPERATOR", expected: "Munca mea" },
   { name: "locations", route: "/admin/locatii", role: "COO", expected: "Loca" },
@@ -127,6 +128,12 @@ async function capturePage(page, viewport, cookie) {
   await client.send("Page.navigate", { url: `${baseUrl}${page.route}` });
   await waitForExpression(client, "document.readyState === 'complete'", 30000);
   await wait(1200);
+  if (page.name === "finance-reconciliation") {
+    await client.send("Runtime.evaluate", {
+      expression: `Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim().toUpperCase() === 'IMPORTURI')?.click()`
+    });
+    await wait(300);
+  }
   await client.send("Runtime.evaluate", {
     expression: "location.hash && document.querySelector(location.hash)?.scrollIntoView({ block: 'start' })"
   });

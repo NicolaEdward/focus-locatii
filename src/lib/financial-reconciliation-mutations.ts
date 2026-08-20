@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { BANK_TRANSACTION_CLASSIFICATIONS } from "@/lib/bcr-george-import";
 import type { AuthSession } from "@/lib/auth";
 import { excludedBankClassification, type ReconciliationDirection } from "@/lib/financial-reconciliation";
 import {
@@ -173,8 +174,7 @@ export async function classifyBankTransaction(input: {
   actor: AuthSession;
 }) {
   if (!input.reason.trim()) throw new Error("Motivul clasificarii este obligatoriu.");
-  const allowed = ["customer_receipt_candidate", "supplier_payment_candidate", "card_purchase", "bank_fee", "tax_payment", "internal_transfer", "intercompany_transfer", "other", "needs_review"];
-  if (!allowed.includes(input.classification)) throw new Error("Clasificarea bancara nu este valida.");
+  if (!BANK_TRANSACTION_CLASSIFICATIONS.includes(input.classification as typeof BANK_TRANSACTION_CLASSIFICATIONS[number])) throw new Error("Clasificarea bancara nu este valida.");
   return prisma.$transaction(async (tx) => {
     const existing = await tx.financialBankTransaction.findUnique({ where: { id: input.transactionId } });
     if (!existing) throw new Error("Tranzactia bancara nu exista.");

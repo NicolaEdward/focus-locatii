@@ -66,6 +66,13 @@ const smartbill = loadTsModule(path.join(repoRoot, "src/lib/smartbill-import.ts"
     roundMoney(value) {
       return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
     }
+  },
+  "@/lib/receivable-adjustments": {
+    receivableNetAmount(amount, raw) {
+      const adjustments = Array.isArray(raw?.smartBillAdjustments) ? raw.smartBillAdjustments : [];
+      const total = adjustments.reduce((sum, adjustment) => sum + Number(adjustment?.adjustmentAmount || 0), 0);
+      return { toNumber: () => Math.max(0, Number(amount || 0) - total) };
+    }
   }
 });
 
@@ -237,7 +244,23 @@ const adjustmentApplication = smartbill.calculateSmartBillReceivableAdjustment({
 });
 assert.equal(adjustmentApplication.remainingAmount, 47164.07);
 assert.equal(adjustmentApplication.originalInvoicedAmount, 47283.07);
+assert.equal(adjustmentApplication.netAmount, 47164.07);
+assert.equal(adjustmentApplication.creditDelta, 0);
 assert.equal(existingReceivable.amount, 47283.07);
+
+const paidAdjustmentApplication = smartbill.calculateSmartBillReceivableAdjustment({
+  row: negativeCustomerParsed.rows[0],
+  receivable: { ...existingReceivable, remainingAmount: 0, paidOrCollectedAmount: 47283.07, status: "collected" },
+  now: new Date("2026-06-29T00:00:00.000Z")
+});
+assert.equal(paidAdjustmentApplication.remainingAmount, 0);
+assert.equal(paidAdjustmentApplication.creditDelta, 119, "Un discount după achitarea facturii devine credit client, nu încasare fictivă.");
+const paidAdjustmentMatch = smartbill.findSmartBillAdjustmentMatch(
+  negativeCustomerParsed.rows[0],
+  [{ ...existingReceivable, remainingAmount: 0, paidOrCollectedAmount: 47283.07, status: "collected" }],
+  focusCompany
+);
+assert.equal(paidAdjustmentMatch.kind, "auto", "O factură plătită poate primi storno dacă documentul o referă explicit.");
 
 const multipleAdjustmentMatch = smartbill.findSmartBillAdjustmentMatch(
   { ...negativeCustomerParsed.rows[0], notes: "Storno discount fara referinta", raw: { Observatii: "Storno discount fara referinta" } },
@@ -463,7 +486,8 @@ assert.ok(confirmRouteSource.includes("smartbill-${companyContext.companyCode}-$
 assert.ok(confirmRouteSource.includes("!importableAction(previewRow.proposedAction)"), "SmartBill confirm must skip invalid, review, duplicate and ignored rows.");
 assert.ok(confirmRouteSource.includes('previewRow.proposedAction === "AUTO_LINK_ADJUSTMENT"'), "SmartBill confirm must apply only auto-linked negative adjustments.");
 assert.ok(confirmRouteSource.includes("applySmartBillCustomerAdjustment"), "SmartBill confirm must recheck adjustment links before writing.");
-assert.ok(confirmRouteSource.includes("remainingAmount: application.remainingAmount"), "SmartBill confirm must reduce only the linked remaining amount.");
+assert.ok(confirmRouteSource.includes("synchronizeReceivableLedger(tx, linkedRow.id)"), "SmartBill confirm must recompute the linked balance from payments and adjustments.");
+assert.ok(confirmRouteSource.includes("application.creditDelta > 0"), "SmartBill confirm must preserve discounts after collection as client credit.");
 assert.ok(confirmRouteSource.includes("manualActions"), "SmartBill confirm must accept reviewed manual actions.");
 assert.ok(confirmRouteSource.includes("buildSmartBillConfirmPlan"), "SmartBill confirm must build a deterministic plan before opening the write transaction.");
 assert.ok(confirmRouteSource.includes("validateManualSmartBillAdjustmentLink"), "SmartBill confirm must revalidate manual storno links server-side.");

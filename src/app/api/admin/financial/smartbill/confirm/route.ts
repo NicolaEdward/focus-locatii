@@ -391,6 +391,8 @@ export async function POST(request: NextRequest) {
               summary.skippedUnsafe += 1;
               continue;
             }
+            const linkedIndex = latestReceivables.findIndex((receivable) => receivable.id === applied.linkedReceivableId);
+            if (linkedIndex >= 0) latestReceivables[linkedIndex] = applied.linkedRow;
             latestReceivables.unshift(applied.adjustmentRow);
             summary.createdReceivables += 1;
             summary.updatedReceivables += 1;
@@ -965,19 +967,53 @@ async function applySmartBillCustomerAdjustment(
     data: { ...adjustmentData, legalEntityId: legalEntityId || null, rawRowJson: adjustmentData.rawRowJson as Prisma.InputJsonValue }
   });
   const updatedRaw = appendSmartBillAdjustmentMetadata(linkedRow.rawRowJson, row, adjustment.id, application.adjustmentAmount, application.remainingAmount);
-  const updated = await tx.financialReceivable.update({
+  await tx.financialReceivable.update({
     where: { id: linkedRow.id },
     data: {
-      remainingAmount: application.remainingAmount,
-      status: application.status,
       rawRowJson: updatedRaw as Prisma.InputJsonValue,
       reviewedByUserId: actorId,
       reviewedAt: new Date()
     }
   });
+  if (application.creditDelta > 0 && linkedRow.clientId && linkedRow.companyCode && linkedRow.currency) {
+    await tx.financialClientCredit.create({
+      data: {
+        clientId: linkedRow.clientId,
+        receivableId: adjustment.id,
+        companyName: linkedRow.companyName || companyContext.companyName,
+        companyCode: linkedRow.companyCode,
+        currency: linkedRow.currency,
+        amount: application.creditDelta,
+        remainingAmount: application.creditDelta,
+        reason: `Credit rezultat din ${match.adjustmentKind.toLowerCase()} aplicat facturii ${linkedRow.invoiceNumber || linkedRow.normalizedInvoiceNumber || linkedRow.id}.`,
+        createdByUserId: actorId
+      }
+    });
+  }
+  await synchronizeReceivableLedger(tx, linkedRow.id);
+  const updated = await tx.financialReceivable.findUniqueOrThrow({ where: { id: linkedRow.id } });
   return {
     adjustmentId: adjustment.id,
     linkedReceivableId: updated.id,
+    linkedRow: {
+      id: updated.id,
+      companyName: updated.companyName,
+      companyCode: updated.companyCode,
+      normalizedInvoiceNumber: updated.normalizedInvoiceNumber,
+      invoiceNumber: updated.invoiceNumber,
+      invoiceDate: updated.invoiceDate,
+      dueDate: updated.dueDate,
+      clientId: updated.clientId,
+      partnerId: updated.partnerId,
+      clientName: updated.clientName,
+      currency: updated.currency,
+      amount: updated.invoicedAmount,
+      remainingAmount: updated.remainingAmount,
+      paidOrCollectedAmount: updated.collectedAmount,
+      rawRowJson: updated.rawRowJson,
+      includedInReport: updated.includedInReport,
+      status: updated.status
+    } satisfies SmartBillExistingFinancialRow,
     adjustmentRow: {
       id: adjustment.id,
       companyName: adjustment.companyName,

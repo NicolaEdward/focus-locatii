@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { AuthSession } from "@/lib/auth";
 import { assertReceivablePaymentTransition } from "@/lib/financial-state-machine";
+import { receivableAdjustmentEntries, receivableNetAmount } from "@/lib/receivable-adjustments";
 import { money, receivableStatus } from "@/lib/receivables-domain";
 import { prisma } from "@/lib/prisma";
 
@@ -30,7 +31,7 @@ export async function recordReceivablePayment(input: ReceivablePaymentInput) {
     await bootstrapLegacyReceivablePayment(tx, receivable, input.actor.id);
     const previousCollected = await activeReceivablePaymentTotal(tx, receivable.id);
     const nextCollected = previousCollected.plus(amount);
-    const invoiceAmount = money(receivable.invoicedAmount);
+    const invoiceAmount = receivableNetAmount(receivable.invoicedAmount, receivable.rawRowJson);
     if (nextCollected.greaterThan(invoiceAmount.plus("0.01")) && !input.confirmOverpayment) {
       throw new Error(`Suma depășește soldul cu ${nextCollected.minus(invoiceAmount).toFixed(2)} ${receivable.currency}. Confirmă explicit creditul clientului.`);
     }
@@ -131,7 +132,7 @@ export async function correctReceivablePayment(input: Omit<ReceivablePaymentInpu
     const currentTotal = await activeReceivablePaymentTotal(tx, original.receivableId);
     const totalWithoutOriginal = currentTotal.minus(original.amount);
     const nextTotal = totalWithoutOriginal.plus(amount);
-    const invoiceAmount = money(original.receivable.invoicedAmount);
+    const invoiceAmount = receivableNetAmount(original.receivable.invoicedAmount, original.receivable.rawRowJson);
     if (nextTotal.greaterThan(invoiceAmount.plus("0.01")) && !input.confirmOverpayment) {
       throw new Error(`Corecția produce un credit de ${nextTotal.minus(invoiceAmount).toFixed(2)} ${original.currency}. Confirmă explicit.`);
     }
@@ -213,9 +214,10 @@ async function createCreditDelta(tx: Prisma.TransactionClient, receivable: {
   companyCode: string | null;
   currency: string | null;
   invoicedAmount: Prisma.Decimal | null;
+  rawRowJson: Prisma.JsonValue | null;
 }, paymentId: string, previousCollected: Prisma.Decimal, nextCollected: Prisma.Decimal, actorId: string) {
   if (!receivable.clientId || !receivable.companyCode || !receivable.currency) return;
-  const invoiceAmount = money(receivable.invoicedAmount);
+  const invoiceAmount = receivableNetAmount(receivable.invoicedAmount, receivable.rawRowJson);
   const previousCredit = Prisma.Decimal.max(previousCollected.minus(invoiceAmount), 0);
   const nextCredit = Prisma.Decimal.max(nextCollected.minus(invoiceAmount), 0);
   const creditDelta = nextCredit.minus(previousCredit);
@@ -240,7 +242,7 @@ export async function synchronizeReceivableLedger(tx: Prisma.TransactionClient, 
   const receivable = await tx.financialReceivable.findUnique({ where: { id: receivableId } });
   if (!receivable) throw new Error("Factura nu mai există.");
   const collected = await activeReceivablePaymentTotal(tx, receivableId);
-  const invoiceAmount = money(receivable.invoicedAmount);
+  const invoiceAmount = receivableNetAmount(receivable.invoicedAmount, receivable.rawRowJson);
   const remaining = Prisma.Decimal.max(invoiceAmount.minus(collected), 0);
   const latest = await tx.financialReceivablePayment.findFirst({
     where: { receivableId, status: "active" },
@@ -258,6 +260,7 @@ export async function synchronizeReceivableLedger(tx: Prisma.TransactionClient, 
       needsReview: false
     }
   });
+  await synchronizeAdjustmentCredits(tx, receivable, collected, invoiceAmount);
   if (receivable.billingItemId) {
     await tx.billingItem.update({
       where: { id: receivable.billingItemId },
@@ -269,6 +272,39 @@ export async function synchronizeReceivableLedger(tx: Prisma.TransactionClient, 
         collectionNotes: latest?.notes || null,
         status: remaining.equals(0) ? "collected" : collected.greaterThan(0) ? "partially_collected" : "issued"
       }
+    });
+  }
+}
+
+async function synchronizeAdjustmentCredits(
+  tx: Prisma.TransactionClient,
+  receivable: { id: string; rawRowJson: Prisma.JsonValue | null },
+  collected: Prisma.Decimal,
+  netInvoiceAmount: Prisma.Decimal
+) {
+  const adjustmentIds = receivableAdjustmentEntries(receivable.rawRowJson)
+    .map((entry) => entry.receivableId)
+    .filter((id): id is string => Boolean(id));
+  if (!adjustmentIds.length) return;
+  const [paymentCredits, adjustmentCredits] = await Promise.all([
+    tx.financialClientCredit.findMany({
+      where: { receivableId: receivable.id, sourcePaymentId: { not: null }, status: "available" },
+      select: { remainingAmount: true }
+    }),
+    tx.financialClientCredit.findMany({
+      where: { receivableId: { in: adjustmentIds }, sourcePaymentId: null },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, amount: true }
+    })
+  ]);
+  const paymentCreditTotal = paymentCredits.reduce((total, credit) => total.plus(credit.remainingAmount), money(0));
+  let desiredAdjustmentCredit = Prisma.Decimal.max(collected.minus(netInvoiceAmount).minus(paymentCreditTotal), 0);
+  for (const credit of adjustmentCredits) {
+    const available = Prisma.Decimal.min(credit.amount, desiredAdjustmentCredit);
+    desiredAdjustmentCredit = Prisma.Decimal.max(desiredAdjustmentCredit.minus(available), 0);
+    await tx.financialClientCredit.update({
+      where: { id: credit.id },
+      data: { remainingAmount: available, status: available.greaterThan(0) ? "available" : "cancelled" }
     });
   }
 }

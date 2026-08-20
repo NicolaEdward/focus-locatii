@@ -4,7 +4,17 @@ import { normalizeFiscalCode } from "@/lib/smartbill-import";
 import { money } from "@/lib/receivables-domain";
 import { prisma } from "@/lib/prisma";
 
-const EXCLUDED_CLASSIFICATIONS = ["internal_transfer", "intercompany_transfer", "bank_fee", "tax_payment"];
+const EXCLUDED_CLASSIFICATIONS = [
+  "internal_transfer",
+  "intercompany_transfer",
+  "bank_fee",
+  "tax_payment",
+  "payroll_payment",
+  "employee_payment",
+  "associate_payment",
+  "dividend_payment",
+  "copyright_payment"
+];
 const ACTIVE = "active";
 
 export type ReconciliationDirection = "receivable" | "payable";

@@ -1,6 +1,7 @@
+import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
-import { createBankImportToken, parseBcrGeorgeStatement } from "@/lib/bcr-george-import";
+import { createBankImportToken, parseBankStatement } from "@/lib/bcr-george-import";
 import { emitStructuredLog, observeRoute, setObservabilityRole } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest) {
       if (file.type && !["text/csv", "text/plain", "application/csv", "application/vnd.ms-excel", "application/octet-stream"].includes(file.type.toLowerCase())) {
         return NextResponse.json({ error: "Tipul fisierului nu corespunde unui extras CSV." }, { status: 400, headers: noStoreHeaders });
       }
-      const preview = parseBcrGeorgeStatement(
+      const preview = parseBankStatement(
         Buffer.from(await file.arrayBuffer()),
         file.name,
         String(form.get("companyCode") || "") || null
@@ -32,6 +33,13 @@ export async function POST(request: NextRequest) {
         result[row.classification] = (result[row.classification] || 0) + 1;
         return result;
       }, {});
+      const totals = preview.rows.reduce<Record<string, { debit: Prisma.Decimal; credit: Prisma.Decimal }>>((result, row) => {
+        result[row.currency] ||= { debit: new Prisma.Decimal(0), credit: new Prisma.Decimal(0) };
+        result[row.currency].debit = result[row.currency].debit.plus(row.debitAmount);
+        result[row.currency].credit = result[row.currency].credit.plus(row.creditAmount);
+        return result;
+      }, {});
+      const { rows, ...metadata } = preview;
       emitStructuredLog("info", "bank_statement_preview_completed", {
         operation: "bank_statement.preview",
         role: session.role,
@@ -41,12 +49,32 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json({
         preview: {
-          ...preview,
-          rows: preview.rows.map((row) => ({ ...row, bookedAt: row.bookedAt.toISOString(), valueDate: row.valueDate?.toISOString() || null })),
+          ...metadata,
+          rowCount: rows.length,
+          sampleRows: rows.slice(0, 12).map((row) => ({
+            rowNumber: row.rowNumber,
+            bookedAt: row.bookedAt.toISOString(),
+            currency: row.currency,
+            debitAmount: row.debitAmount,
+            creditAmount: row.creditAmount,
+            description: row.description,
+            classification: row.classification,
+            accountLabel: row.accountLabel
+          })),
           periodStart: preview.periodStart.toISOString(),
           periodEnd: preview.periodEnd.toISOString(),
           issuedAt: preview.issuedAt?.toISOString() || null,
+          accounts: preview.accounts.map((account) => ({
+            ...account,
+            periodStart: account.periodStart.toISOString(),
+            periodEnd: account.periodEnd.toISOString()
+          })),
           counts,
+          totals: Object.entries(totals).map(([currency, value]) => ({
+            currency,
+            debit: value.debit.toFixed(2),
+            credit: value.credit.toFixed(2)
+          })),
           importToken: createBankImportToken(preview)
         }
       }, { headers: noStoreHeaders });

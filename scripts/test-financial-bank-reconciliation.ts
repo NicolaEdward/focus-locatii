@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { Prisma } from "@prisma/client";
-import { parseBcrGeorgeStatement, parseBankMoney } from "../src/lib/bcr-george-import";
+import { createBankImportToken, parseBankStatement, parseBcrGeorgeStatement, parseBankMoney, parseRevolutStatement, verifyBankImportToken } from "../src/lib/bcr-george-import";
 import { scoreReconciliationCandidate } from "../src/lib/financial-reconciliation";
 import { immediatePaymentRuleApplies } from "../src/lib/payables-payment-service";
+import { receivableAdjustmentEntries, receivableAdjustmentTotal, receivableNetAmount, receivableNetRemaining } from "../src/lib/receivable-adjustments";
 import {
   assertSmartBillCompanyMatchesReport,
   findSmartBillDocumentConflict,
@@ -17,6 +18,16 @@ import {
 assert.equal(parseBankMoney("41,377.33"), "41377.33");
 assert.equal(parseBankMoney("1.234,56"), "1234.56");
 assert.throws(() => parseBankMoney("1e12"), /invalida/);
+
+const adjustmentMetadata = { smartBillAdjustments: [
+  { adjustmentReceivableId: "storno-1", adjustmentAmount: "119.00" },
+  { adjustmentReceivableId: "storno-1", adjustmentAmount: "119.00" },
+  { adjustmentReceivableId: "discount-1", adjustmentAmount: "50.00" }
+] };
+assert.equal(receivableAdjustmentTotal(adjustmentMetadata).toFixed(2), "169.00", "Aceeași ajustare nu se aplică de două ori.");
+assert.deepEqual(receivableAdjustmentEntries(adjustmentMetadata).map((entry) => entry.receivableId), ["storno-1", "discount-1"]);
+assert.equal(receivableNetAmount("1000.00", adjustmentMetadata).toFixed(2), "831.00");
+assert.equal(receivableNetRemaining({ invoicedAmount: "1000.00", collectedAmount: "800.00", rawRowJson: adjustmentMetadata }).toFixed(2), "31.00");
 
 const score = scoreReconciliationCandidate({
   transaction: {
@@ -67,6 +78,7 @@ const downloads = path.join(process.env.USERPROFILE || "", "Downloads");
 const supplierFile = path.join(downloads, "Raport_document_furnizori_20_08_2026.xls");
 const issuedFile = path.join(downloads, "Facturi_20_08_2026.xls");
 const bankFile = path.join(downloads, "20260820903249.csv");
+const revolutFile = path.join(downloads, "account-statement_01-Jan-2026_20-Aug-2026 (1).csv");
 
 async function runFixtureTests() {
 if (fs.existsSync(supplierFile)) {
@@ -131,12 +143,49 @@ if (fs.existsSync(bankFile)) {
   assert.equal(new Set(repeatedReference!.map((row) => row.fingerprint)).size, repeatedReference!.length);
   assert.throws(() => parseBcrGeorgeStatement(fs.readFileSync(bankFile), path.basename(bankFile), "FOCUS_MEDIA"), /nu corespunde titularului/i);
 }
+
+if (fs.existsSync(revolutFile)) {
+  const source = fs.readFileSync(revolutFile);
+  assert.throws(() => parseBankStatement(source, path.basename(revolutFile)), /selecteaz[aă] entitatea/i);
+  const parsed = parseRevolutStatement(source, path.basename(revolutFile), "FOCUS_MEDIA");
+  const token = createBankImportToken(parsed);
+  const verified = verifyBankImportToken(token);
+  assert.ok(token.startsWith("v2."), "bank preview token should use the compressed envelope");
+  assert.ok(token.length < JSON.stringify(parsed).length, "compressed token should be smaller than the raw preview");
+  assert.equal(verified.rows.length, parsed.rows.length, "compressed token must preserve all bank rows");
+  assert.equal(parsed.bankProvider, "revolut");
+  assert.equal(parsed.sourceRowCount, 332);
+  assert.equal(parsed.rows.length, 333, "Comisionul de procesare inclus în total este separat de transferul principal.");
+  assert.deepEqual(parsed.accounts.map((account) => [account.label, account.currency, account.rowCount]), [["EUR Main", "EUR", 7], ["RON Main", "RON", 326]]);
+  assert.equal(new Set(parsed.rows.map((row) => row.fingerprint)).size, 333);
+  const counts = parsed.rows.reduce<Record<string, number>>((result, row) => {
+    result[row.classification] = (result[row.classification] || 0) + 1;
+    return result;
+  }, {});
+  assert.equal(counts.bank_fee, 6);
+  assert.equal(counts.supplier_payment_candidate, 132);
+  assert.equal(counts.internal_transfer, 25);
+  assert.equal(counts.intercompany_transfer, 21);
+  assert.equal(counts.payroll_payment, 2);
+  assert.equal(counts.employee_payment, 2);
+  assert.equal(counts.dividend_payment, 1);
+  assert.equal(counts.copyright_payment, 1);
+  const eurTransfer = parsed.rows.find((row) => row.currency === "EUR" && row.debitAmount === "2020.00");
+  const processingFee = parsed.rows.find((row) => row.currency === "EUR" && row.classification === "bank_fee" && row.debitAmount === "23.56");
+  assert.ok(eurTransfer, "Transferul EUR păstrează suma comercială fără comision.");
+  assert.ok(processingFee, "Comisionul de procesare este o mișcare ignorată distinctă.");
+  assert.equal(parsed.accounts.every((account) => account.periodStart.toISOString().slice(0, 10) === "2026-01-01"), true);
+  assert.equal(parsed.accounts.every((account) => account.periodEnd.toISOString().slice(0, 10) === "2026-08-20"), true);
+}
 }
 
 const repoRoot = process.cwd();
 const schemaSource = fs.readFileSync(path.join(repoRoot, "prisma/schema.prisma"), "utf8");
 const mutationSource = fs.readFileSync(path.join(repoRoot, "src/lib/financial-reconciliation-mutations.ts"), "utf8");
+const receivablePaymentSource = fs.readFileSync(path.join(repoRoot, "src/lib/receivables-payment-service.ts"), "utf8");
 const previewSource = fs.readFileSync(path.join(repoRoot, "src/app/api/admin/financial/bank-statements/preview/route.ts"), "utf8");
+const bankConfirmSource = fs.readFileSync(path.join(repoRoot, "src/app/api/admin/financial/bank-statements/confirm/route.ts"), "utf8");
+const importWorkspaceSource = fs.readFileSync(path.join(repoRoot, "src/components/admin/FinancialImportWorkspace.tsx"), "utf8");
 const smartBillConfirmSource = fs.readFileSync(path.join(repoRoot, "src/app/api/admin/financial/smartbill/confirm/route.ts"), "utf8");
 const migrationSource = fs.readFileSync(
   path.join(repoRoot, "prisma/migrations/20260820090000_financial_bank_reconciliation/migration.sql"),
@@ -152,7 +201,17 @@ assert.match(mutationSource, /document\.legalEntityId !== transaction\.legalEnti
 assert.match(mutationSource, /document\.currency !== transaction\.currency/);
 assert.match(mutationSource, /Serializable/);
 assert.match(mutationSource, /supersedePresumedPayablePayments/);
+assert.match(receivablePaymentSource, /receivableNetAmount\(receivable\.invoicedAmount, receivable\.rawRowJson\)/);
+assert.match(receivablePaymentSource, /synchronizeAdjustmentCredits/);
 assert.equal(/recordAudit|auditLog\.(create|update)/.test(previewSource), false, "Preview-ul bancar nu scrie audit sau date de business.");
+assert.match(previewSource, /parseBankStatement/);
+assert.match(bankConfirmSource, /RevolutBusinessStatementImporter/);
+assert.match(bankConfirmSource, /excludedBankClassification\(row\.classification\)/);
+assert.match(importWorkspaceSource, /Revolut Business/);
+assert.match(importWorkspaceSource, /Transfer între conturi proprii/);
+assert.match(importWorkspaceSource, /Drepturi de autor \(CDA\)/);
+assert.match(importWorkspaceSource, /Leagă storno la factură/);
+assert.match(importWorkspaceSource, /linkedFinancialRowId/);
 const receivableSourceUpdate = smartBillConfirmSource.split("function smartBillReceivableUpdateData")[1]?.split("function smartBillPayableUpdateData")[0] || "";
 const payableSourceUpdate = smartBillConfirmSource.split("function smartBillPayableUpdateData")[1]?.split("function inferReportDate")[0] || "";
 assert.doesNotMatch(receivableSourceUpdate, /collectedAmount|remainingAmount|collectedAt|status:/, "Reimportul SmartBill nu poate rescrie registrul de încasări.");

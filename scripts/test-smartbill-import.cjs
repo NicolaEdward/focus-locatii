@@ -468,7 +468,8 @@ assert.ok(confirmRouteSource.includes("manualActions"), "SmartBill confirm must 
 assert.ok(confirmRouteSource.includes("buildSmartBillConfirmPlan"), "SmartBill confirm must build a deterministic plan before opening the write transaction.");
 assert.ok(confirmRouteSource.includes("validateManualSmartBillAdjustmentLink"), "SmartBill confirm must revalidate manual storno links server-side.");
 assert.ok(confirmRouteSource.includes("SKIP_MANUAL"), "SmartBill confirm must support explicit manual skips.");
-assert.ok(confirmRouteSource.includes("maxWait: 10000") && confirmRouteSource.includes("timeout: 30000"), "SmartBill confirm must use an explicit longer interactive transaction timeout.");
+assert.ok(confirmRouteSource.includes("SMARTBILL_TRANSACTION_OPTIONS") && confirmRouteSource.includes("timeout: 120_000"), "SmartBill confirm must allow large reports to finish inside one atomic transaction.");
+assert.ok(confirmRouteSource.includes("financialPartnerCache") && confirmRouteSource.includes("ensureSmartBillFinancialPartner"), "SmartBill confirm must not repeat partner upserts for every invoice of the same partner.");
 assert.ok(confirmRouteSource.includes("transaction_start") && confirmRouteSource.includes("transaction_end"), "SmartBill confirm must log transaction boundaries.");
 const applyAdjustmentSource = confirmRouteSource.slice(confirmRouteSource.indexOf("async function applySmartBillCustomerAdjustment"), confirmRouteSource.indexOf("async function ensureSupplierForSmartBillRow"));
 assert.equal(applyAdjustmentSource.includes("findMany"), false, "SmartBill adjustment application must not re-query all receivables inside every adjustment.");

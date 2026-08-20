@@ -5,7 +5,11 @@ import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { normalizeClientName } from "@/lib/clients";
 import { recalculateFinancialSnapshots } from "@/lib/financial-review";
-import { ensureFinancialLegalEntity, ensureFinancialPartner } from "@/lib/financial-partners";
+import {
+  ensureFinancialLegalEntity,
+  ensureFinancialPartner,
+  financialPartnerIdentityKey
+} from "@/lib/financial-partners";
 import {
   applyImmediatePaymentRule,
   bootstrapLegacyPayablePayment,
@@ -43,6 +47,12 @@ import { emitStructuredLog, requestCorrelationId, safeErrorCode } from "@/lib/ob
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 180;
+
+const SMARTBILL_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 120_000
+} as const;
 export const runtime = "nodejs";
 
 const noStoreHeaders = {
@@ -259,6 +269,7 @@ export async function POST(request: NextRequest) {
       const suppliers: Map<string, SmartBillMatchEntity> = new Map((context.suppliers || []).map((supplier) => [supplier.id, supplier]));
       const clientByIdentity = new Map<string, SmartBillMatchEntity>();
       const supplierByIdentity = new Map<string, SmartBillMatchEntity>();
+      const financialPartnerCache = new Map<string, Awaited<ReturnType<typeof ensureFinancialPartner>>>();
       [...clients.values()].forEach((client) => setIdentityCache(clientByIdentity, client));
       [...suppliers.values()].forEach((supplier) => setIdentityCache(supplierByIdentity, supplier));
       const seenDedupeKeys = new Set<string>();
@@ -409,7 +420,7 @@ export async function POST(request: NextRequest) {
             accountOwnerUserId: client.accountOwnerUserId,
             reviewedByUserId: session.id
           });
-          const partner = await ensureFinancialPartner(tx, {
+          const partner = await ensureSmartBillFinancialPartner(tx, financialPartnerCache, {
             name: row.clientName,
             taxId: row.fiscalCode,
             legalEntityId: legalEntity.id,
@@ -476,7 +487,7 @@ export async function POST(request: NextRequest) {
             supplierId: supplier.id,
             reviewedByUserId: session.id
           });
-          const partner = await ensureFinancialPartner(tx, {
+          const partner = await ensureSmartBillFinancialPartner(tx, financialPartnerCache, {
             name: row.supplierName,
             taxId: row.fiscalCode,
             legalEntityId: legalEntity.id,
@@ -560,10 +571,7 @@ export async function POST(request: NextRequest) {
         }
       });
       return summary;
-    }, {
-      maxWait: 10000,
-      timeout: 30000
-    });
+    }, SMARTBILL_TRANSACTION_OPTIONS);
 
     await recalculateFinancialSnapshots(result.uploadId);
     await recordAudit({
@@ -600,6 +608,19 @@ export async function POST(request: NextRequest) {
       { status: 400, headers: noStoreHeaders }
     );
   }
+}
+
+async function ensureSmartBillFinancialPartner(
+  tx: Prisma.TransactionClient,
+  cache: Map<string, Awaited<ReturnType<typeof ensureFinancialPartner>>>,
+  input: Parameters<typeof ensureFinancialPartner>[1]
+) {
+  const cacheKey = `${input.legalEntityId}:${input.role}:${financialPartnerIdentityKey(input)}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+  const partner = await ensureFinancialPartner(tx, input);
+  cache.set(cacheKey, partner);
+  return partner;
 }
 
 function normalizeManualActions(actions: SmartBillManualAction[]) {

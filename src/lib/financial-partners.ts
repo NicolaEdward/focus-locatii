@@ -48,13 +48,7 @@ export async function ensureFinancialPartner(
 ) {
   const normalizedTaxId = normalizeFiscalCode(input.taxId);
   const normalizedName = normalizeClientName(input.name);
-  const identityKey = normalizedTaxId
-    ? `tax:${normalizedTaxId}`
-    : input.clientId
-      ? `client:${input.clientId}`
-      : input.supplierId
-        ? `supplier:${input.supplierId}`
-        : `unverified:${input.legalEntityId}:${crypto.createHash("sha256").update(normalizedName).digest("hex")}`;
+  const identityKey = financialPartnerIdentityKey(input);
   const partner = await tx.financialPartner.upsert({
     where: { identityKey },
     create: {
@@ -91,6 +85,21 @@ export async function ensureFinancialPartner(
     }
   });
   return partner;
+}
+
+export function financialPartnerIdentityKey(input: {
+  name: string;
+  taxId?: string | null;
+  legalEntityId: string;
+  clientId?: string | null;
+  supplierId?: string | null;
+}) {
+  const normalizedTaxId = normalizeFiscalCode(input.taxId);
+  if (normalizedTaxId) return `tax:${normalizedTaxId}`;
+  if (input.clientId) return `client:${input.clientId}`;
+  if (input.supplierId) return `supplier:${input.supplierId}`;
+  const normalizedName = normalizeClientName(input.name);
+  return `unverified:${input.legalEntityId}:${crypto.createHash("sha256").update(normalizedName).digest("hex")}`;
 }
 
 export async function ensureFinancialPartnerAlias(tx: Tx, input: { legalEntityId: string; partnerId: string; alias: string; source: string; actorId?: string | null }) {

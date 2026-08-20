@@ -138,6 +138,10 @@ const schemaSource = fs.readFileSync(path.join(repoRoot, "prisma/schema.prisma")
 const mutationSource = fs.readFileSync(path.join(repoRoot, "src/lib/financial-reconciliation-mutations.ts"), "utf8");
 const previewSource = fs.readFileSync(path.join(repoRoot, "src/app/api/admin/financial/bank-statements/preview/route.ts"), "utf8");
 const smartBillConfirmSource = fs.readFileSync(path.join(repoRoot, "src/app/api/admin/financial/smartbill/confirm/route.ts"), "utf8");
+const migrationSource = fs.readFileSync(
+  path.join(repoRoot, "prisma/migrations/20260820090000_financial_bank_reconciliation/migration.sql"),
+  "utf8",
+);
 assert.match(schemaSource, /model FinancialBankStatement/);
 assert.match(schemaSource, /model FinancialBankTransaction/);
 assert.match(schemaSource, /model FinancialPartnerRole/);
@@ -155,5 +159,10 @@ assert.doesNotMatch(receivableSourceUpdate, /collectedAmount|remainingAmount|col
 assert.doesNotMatch(payableSourceUpdate, /amountPaid|remainingAmount|paidAt|status:/, "Reimportul SmartBill nu poate rescrie registrul de plăți.");
 assert.match(smartBillConfirmSource, /bootstrapLegacyReceivablePayment\(tx, updated, session\.id\)[\s\S]*synchronizeReceivableLedger\(tx, updated\.id\)/);
 assert.match(smartBillConfirmSource, /bootstrapLegacyPayablePayment\(tx, updated, session\.id\)[\s\S]*synchronizePayableLedger\(tx, updated\.id\)/);
+assert.doesNotMatch(
+  migrationSource,
+  /DEFAULT CHARACTER SET|COLLATE\s+/i,
+  "Tabelele financiare noi trebuie sa mosteneasca charset-ul si collation-ul bazei existente.",
+);
 
 runFixtureTests().then(() => console.log("Financial bank reconciliation tests passed."));

@@ -1,3 +1,6 @@
+-- New tables inherit the database collation so foreign-key columns remain
+-- compatible with both legacy Production and isolated Preview schemas.
+
 -- AlterTable
 ALTER TABLE `portfolio_financial_report_uploads` ADD COLUMN `fileSize` INTEGER NULL,
     ADD COLUMN `importType` VARCHAR(191) NULL,
@@ -56,7 +59,7 @@ CREATE TABLE `portfolio_financial_legal_entities` (
     INDEX `portfolio_financial_legal_entities_normalizedName_idx`(`normalizedName`),
     INDEX `portfolio_financial_legal_entities_active_idx`(`active`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+);
 
 -- Canonical legal entities already represented by companyCode in the existing finance registry.
 INSERT INTO `portfolio_financial_legal_entities`
@@ -100,7 +103,7 @@ CREATE TABLE `portfolio_financial_partners` (
     INDEX `portfolio_financial_partners_taxIdNormalized_idx`(`taxIdNormalized`),
     INDEX `portfolio_financial_partners_normalizedName_idx`(`normalizedName`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+);
 
 -- CreateTable
 CREATE TABLE `portfolio_financial_partner_roles` (
@@ -119,7 +122,7 @@ CREATE TABLE `portfolio_financial_partner_roles` (
     INDEX `portfolio_financial_partner_roles_legalEntityId_role_active_idx`(`legalEntityId`, `role`, `active`),
     UNIQUE INDEX `portfolio_financial_partner_roles_legalEntityId_partnerId_ro_key`(`legalEntityId`, `partnerId`, `role`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+);
 
 -- CreateTable
 CREATE TABLE `portfolio_financial_partner_aliases` (
@@ -138,7 +141,7 @@ CREATE TABLE `portfolio_financial_partner_aliases` (
     INDEX `portfolio_financial_partner_aliases_legalEntityId_normalized_idx`(`legalEntityId`, `normalizedAlias`),
     INDEX `portfolio_financial_partner_aliases_partnerId_idx`(`partnerId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+);
 
 -- CreateTable
 CREATE TABLE `portfolio_financial_bank_accounts` (
@@ -156,7 +159,7 @@ CREATE TABLE `portfolio_financial_bank_accounts` (
     INDEX `portfolio_financial_bank_accounts_ibanNormalized_idx`(`ibanNormalized`),
     UNIQUE INDEX `portfolio_financial_bank_accounts_legalEntityId_ibanNormaliz_key`(`legalEntityId`, `ibanNormalized`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+);
 
 -- CreateTable
 CREATE TABLE `portfolio_financial_bank_statements` (
@@ -179,7 +182,7 @@ CREATE TABLE `portfolio_financial_bank_statements` (
     INDEX `portfolio_financial_bank_statements_legalEntityId_periodStar_idx`(`legalEntityId`, `periodStart`, `periodEnd`),
     INDEX `portfolio_financial_bank_statements_bankAccountId_periodStar_idx`(`bankAccountId`, `periodStart`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+);
 
 -- CreateTable
 CREATE TABLE `portfolio_financial_bank_transactions` (
@@ -219,7 +222,7 @@ CREATE TABLE `portfolio_financial_bank_transactions` (
     INDEX `portfolio_financial_bank_transactions_payerTaxId_idx`(`payerTaxId`),
     INDEX `portfolio_financial_bank_transactions_beneficiaryTaxId_idx`(`beneficiaryTaxId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+);
 
 -- CreateTable
 CREATE TABLE `portfolio_financial_payable_payments` (
@@ -252,7 +255,7 @@ CREATE TABLE `portfolio_financial_payable_payments` (
     INDEX `portfolio_financial_payable_payments_replacesPaymentId_idx`(`replacesPaymentId`),
     INDEX `portfolio_financial_payable_payments_verificationStatus_stat_idx`(`verificationStatus`, `status`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+);
 
 -- CreateTable
 CREATE TABLE `portfolio_supplier_payment_rules` (
@@ -276,7 +279,7 @@ CREATE TABLE `portfolio_supplier_payment_rules` (
 
     INDEX `portfolio_supplier_payment_rules_legalEntityId_supplierId_ac_idx`(`legalEntityId`, `supplierId`, `active`, `priority`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+);
 
 -- CreateIndex
 CREATE INDEX `portfolio_financial_report_uploads_legalEntityId_importType__idx` ON `portfolio_financial_report_uploads`(`legalEntityId`, `importType`, `uploadedAt`);

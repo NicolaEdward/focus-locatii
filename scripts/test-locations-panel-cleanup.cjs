@@ -213,6 +213,9 @@ function salesExportsBelongToFinance() {
   assert(salesReport.includes("salesRowTimingRank"), "sales export should group active/upcoming/past rows");
   assert(!salesReport.includes("listAdminLocations"), "sales export must not depend on the lightweight inventory DTO that omits reservation details");
   assert(salesReport.includes("prisma.location.findMany"), "sales export should load its report dataset directly");
+  assert(salesReport.includes('lifecycleStatus: "ACTIVE"'), "sales export must exclude inactive, archived and maintenance inventory from its denominator");
+  assert(salesReport.includes("isSalesReportInventoryEligible"), "sales export must reuse canonical availability rules for temporary blocks");
+  assert(salesReport.includes("availabilityOverrides"), "sales export must account for interval-based maintenance and commercial blocks");
   assert(salesReport.includes('status: "BOOKED"'), "sales export should include confirmed rentals");
   assert(salesReport.includes("periodStart: { lte: periodEnd }"), "sales export should include rentals that start before the selected range ends");
   assert(salesReport.includes("periodEnd: { gte: periodStart }"), "sales export should include rentals that end after the selected range starts");

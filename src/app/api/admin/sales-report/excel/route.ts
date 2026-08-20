@@ -5,6 +5,7 @@ import { normalizeMediaType } from "@/lib/format";
 import { sortOperationalLocations } from "@/lib/location-order";
 import { prisma } from "@/lib/prisma";
 import { calculateProrata } from "@/lib/prorata";
+import { isSalesReportInventoryEligible } from "@/lib/sales-report-inventory";
 import { createStyledWorkbook, XLSX_STYLES, type StyledCell, type StyledSheet } from "@/lib/styled-xlsx";
 
 export const dynamic = "force-dynamic";
@@ -133,6 +134,8 @@ const salesReportReferenceRank = new Map<string, number>(
 const salesReportLocationSelect = {
   nr: true,
   code: true,
+  status: true,
+  lifecycleStatus: true,
   city: true,
   county: true,
   address: true,
@@ -142,6 +145,14 @@ const salesReportLocationSelect = {
   illum: true,
   rateCard: true,
   rateCardValue: true,
+  availabilityText: true,
+  availableFrom: true,
+  availableUntil: true,
+  bookedFrom: true,
+  bookedUntil: true,
+  blockedReason: true,
+  blockedFrom: true,
+  blockedUntil: true,
   reportingGroupName: true,
   displayOrder: true,
   locationGroupOrder: true,
@@ -149,6 +160,15 @@ const salesReportLocationSelect = {
   directionOrder: true,
   category: { select: { name: true } }
 } satisfies Prisma.LocationSelect;
+
+const salesReportAvailabilityOverrideSelect = {
+  id: true,
+  type: true,
+  reason: true,
+  periodStart: true,
+  periodEnd: true,
+  clearedAt: true
+} satisfies Prisma.LocationAvailabilityOverrideSelect;
 
 const salesReportReservationSelect = {
   status: true,
@@ -164,8 +184,12 @@ const salesReportReservationSelect = {
 
 type SalesReportLocation = Prisma.LocationGetPayload<{ select: typeof salesReportLocationSelect }> & {
   reservations: SalesReportReservation[];
+  availabilityOverrides: SalesReportAvailabilityOverride[];
 };
 type SalesReportReservation = Prisma.ReservationGetPayload<{ select: typeof salesReportReservationSelect }>;
+type SalesReportAvailabilityOverride = Prisma.LocationAvailabilityOverrideGetPayload<{
+  select: typeof salesReportAvailabilityOverrideSelect;
+}>;
 
 export async function GET(request: NextRequest) {
   const { response } = await requirePermission(request, "reports.view");
@@ -297,6 +321,9 @@ export async function GET(request: NextRequest) {
 
 async function listSalesReportLocations(periodStart: Date, periodEnd: Date): Promise<SalesReportLocation[]> {
   const locations = await prisma.location.findMany({
+    where: {
+      lifecycleStatus: "ACTIVE"
+    },
     select: {
       ...salesReportLocationSelect,
       reservations: {
@@ -307,14 +334,37 @@ async function listSalesReportLocations(periodStart: Date, periodEnd: Date): Pro
         },
         select: salesReportReservationSelect,
         orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
+      },
+      availabilityOverrides: {
+        where: {
+          clearedAt: null,
+          periodStart: { lte: periodEnd },
+          OR: [{ periodEnd: null }, { periodEnd: { gte: periodStart } }]
+        },
+        select: salesReportAvailabilityOverrideSelect,
+        orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
       }
     }
   });
 
-  return locations.map((location) => ({
-    ...location,
-    type: normalizeMediaType(location.type, location.category.name, location.address, location.code)
-  }));
+  return locations
+    .filter((location) => isSalesReportInventoryEligible({
+      status: location.status,
+      lifecycleStatus: location.lifecycleStatus,
+      availabilityText: location.availabilityText,
+      availableFrom: location.availableFrom,
+      availableUntil: location.availableUntil,
+      bookedFrom: location.bookedFrom,
+      bookedUntil: location.bookedUntil,
+      blockedReason: location.blockedReason,
+      blockedFrom: location.blockedFrom,
+      blockedUntil: location.blockedUntil,
+      availabilityOverrides: location.availabilityOverrides
+    }, periodStart, periodEnd))
+    .map((location) => ({
+      ...location,
+      type: normalizeMediaType(location.type, location.category.name, location.address, location.code)
+    }));
 }
 
 function salesRow(location: SalesReportLocation, index: number, periodStart: Date, periodEnd: Date) {

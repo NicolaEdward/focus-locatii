@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { normalizeClientName } from "@/lib/clients";
 import { normalizeReceivableInvoiceNumber, receivableRowHash } from "@/lib/receivables-domain";
 import { excelSerialToUtcDate, parseSecureSpreadsheet } from "@/lib/secure-spreadsheet";
+import { canonicalTaxId } from "@/lib/tax-id";
 
 export type ReceivablesCompanyCode = "FOCUS_MEDIA" | "EXCELLENCE_MEDIA" | "FOCUS_BG";
 export type ReceivablesCurrency = "RON" | "EUR";
@@ -26,6 +27,8 @@ export type ReceivablesImportRow = {
   campaignDetails: string | null;
   clientNameRaw: string;
   normalizedClientName: string;
+  clientFiscalCodeRaw: string | null;
+  normalizedClientFiscalCode: string | null;
   rowState: "valid" | "needs_review" | "credit" | "conflict";
   warnings: string[];
   rawRowJson: Record<string, string | number | boolean | null>;
@@ -66,7 +69,7 @@ export type ReceivablesParsedWorkbook = {
   }>;
 };
 
-type HeaderName = "invoiceNumber" | "invoiceDate" | "location" | "campaignDetails" | "clientName" | "dueDate" | "currency" | "invoiceAmount" | "collectedAmount" | "remainingAmount";
+type HeaderName = "invoiceNumber" | "invoiceDate" | "location" | "campaignDetails" | "clientName" | "clientFiscalCode" | "dueDate" | "currency" | "invoiceAmount" | "collectedAmount" | "remainingAmount";
 type HeaderMap = Partial<Record<HeaderName, number>>;
 
 const COMPANY_NAMES: Record<ReceivablesCompanyCode, string> = {
@@ -194,6 +197,8 @@ function parseReceivablesRow(input: {
   const issues: ReceivablesImportIssue[] = [];
   const rawInvoiceNumber = cleanText(source.invoiceNumber);
   const clientNameRaw = cleanText(source.clientName);
+  const clientFiscalCodeRaw = cleanText(source.clientFiscalCode) || null;
+  const normalizedClientFiscalCode = canonicalTaxId(clientFiscalCodeRaw) || null;
   const invoiceAmount = parseMoneyString(source.invoiceAmount);
   const collectedAmount = parseMoneyString(source.collectedAmount) || "0.00";
   const remainingAmount = parseMoneyString(source.remainingAmount);
@@ -234,6 +239,7 @@ function parseReceivablesRow(input: {
     normalizedInvoiceNumber,
     currency,
     normalizedClientName,
+    normalizedClientFiscalCode,
     invoiceAmount,
     collectedAmount,
     remainingAmount,
@@ -259,6 +265,8 @@ function parseReceivablesRow(input: {
     campaignDetails: cleanText(source.campaignDetails) || null,
     clientNameRaw,
     normalizedClientName,
+    clientFiscalCodeRaw,
+    normalizedClientFiscalCode,
     rowState,
     warnings,
     rawRowJson: Object.fromEntries(Object.entries(source).map(([key, value]) => [key, jsonValue(value)]))
@@ -298,6 +306,7 @@ function headerName(value: unknown): HeaderName | null {
   if (text.includes("nr factura") || text === "factura" || text.includes("numar factura")) return "invoiceNumber";
   if (text.includes("detalii campanie") || text.includes("campanie")) return "campaignDetails";
   if (text.includes("locatie")) return "location";
+  if (["cui", "cif", "cod fiscal", "cod fiscal client", "vat", "vat id"].includes(text)) return "clientFiscalCode";
   if (text === "client" || text.includes("denumire client")) return "clientName";
   if (text === "moneda" || text === "currency") return "currency";
   return null;

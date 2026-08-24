@@ -23,6 +23,31 @@ export function normalizeInvoiceNumber(value?: string | null) {
     .trim();
 }
 
+export function invoiceNumberComparisonKey(value?: string | null) {
+  const normalized = normalizeInvoiceNumber(value);
+  const match = normalized.match(/^([a-z]+)0*(\d+)$/);
+  if (!match) return normalized;
+  const numericPart = match[2].replace(/^0+(?=\d)/, "");
+  return `${match[1]}${numericPart}`;
+}
+
+export function invoiceNumbersEquivalent(left?: string | null, right?: string | null) {
+  const leftKey = invoiceNumberComparisonKey(left);
+  const rightKey = invoiceNumberComparisonKey(right);
+  return Boolean(leftKey && rightKey && leftKey === rightKey);
+}
+
+export function invoiceNumberLookupVariants(value?: string | null) {
+  return Array.from(new Set([
+    normalizeInvoiceNumber(value),
+    invoiceNumberComparisonKey(value)
+  ].filter(Boolean)));
+}
+
+export function invoiceNumberLookupPrefix(value?: string | null) {
+  return invoiceNumberComparisonKey(value).match(/^([a-z]+)/)?.[1] || null;
+}
+
 export type ClientOwnershipCheckInput = {
   id: string;
   accountOwnerUserId: string | null;

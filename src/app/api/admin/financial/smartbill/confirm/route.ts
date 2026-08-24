@@ -269,6 +269,7 @@ export async function POST(request: NextRequest) {
       const suppliers: Map<string, SmartBillMatchEntity> = new Map((context.suppliers || []).map((supplier) => [supplier.id, supplier]));
       const clientByIdentity = new Map<string, SmartBillMatchEntity>();
       const supplierByIdentity = new Map<string, SmartBillMatchEntity>();
+      const clientAliasCache = new Map<string, string | null>();
       const financialPartnerCache = new Map<string, Awaited<ReturnType<typeof ensureFinancialPartner>>>();
       [...clients.values()].forEach((client) => setIdentityCache(clientByIdentity, client));
       [...suppliers.values()].forEach((supplier) => setIdentityCache(supplierByIdentity, supplier));
@@ -401,7 +402,7 @@ export async function POST(request: NextRequest) {
             summary.updatedReceivableIds.push(applied.linkedReceivableId);
             continue;
           }
-          const client = await ensureClientForSmartBillRow(tx, row, clients, clientByIdentity, session.id, item);
+          const client = await ensureClientForSmartBillRow(tx, row, clients, clientByIdentity, clientAliasCache, session.id, companyContext.companyCode, item);
           if (!client) {
             summary.skippedUnsafe += 1;
             continue;
@@ -891,13 +892,16 @@ async function ensureClientForSmartBillRow(
   row: SmartBillCustomerInvoiceRow,
   clients: Map<string, SmartBillMatchEntity>,
   identityCache: Map<string, SmartBillMatchEntity>,
+  aliasCache: Map<string, string | null>,
   actorId: string,
+  companyCode: string,
   planItem: SmartBillConfirmPlanItem
 ) {
   if (planItem.action === "MANUAL_MATCH_ENTITY") {
     if (!planItem.entityId) throw new Error("Alege clientul pentru randul SmartBill corectat manual.");
     const entity = clients.get(planItem.entityId);
     if (!entity) throw new Error("Clientul ales pentru corectie manuala nu exista sau nu mai este activ.");
+    await persistSmartBillClientAlias(tx, row, entity, companyCode, actorId, aliasCache);
     return entity;
   }
   if (planItem.action === "MANUAL_CREATE_ENTITY" && row.issues.length) {
@@ -907,7 +911,10 @@ async function ensureClientForSmartBillRow(
   if (planItem.action === "MANUAL_CREATE_ENTITY" && match.kind !== "none") {
     throw new Error("Randul SmartBill are deja o potrivire posibila; alege clientul existent in loc sa creezi unul nou.");
   }
-  if (match.kind === "matched") return match.entity;
+  if (match.kind === "matched") {
+    await persistSmartBillClientAlias(tx, row, match.entity, companyCode, actorId, aliasCache);
+    return match.entity;
+  }
   if (match.kind === "ambiguous") return null;
   const identity = identityKey(row.normalizedFiscalCode, row.clientName);
   const cached = identityCache.get(identity);
@@ -932,6 +939,40 @@ async function ensureClientForSmartBillRow(
   } satisfies SmartBillMatchEntity;
   setIdentityCache(identityCache, entity);
   return entity;
+}
+
+async function persistSmartBillClientAlias(
+  tx: Prisma.TransactionClient,
+  row: SmartBillCustomerInvoiceRow,
+  client: SmartBillMatchEntity,
+  companyCode: string,
+  actorId: string,
+  aliasCache: Map<string, string | null>
+) {
+  if (!row.normalizedFiscalCode || normalizeFiscalCode(client.taxId) !== row.normalizedFiscalCode) return;
+  const normalizedAlias = normalizeClientName(row.clientName);
+  const canonicalName = client.normalizedName || normalizeClientName(client.name);
+  if (!normalizedAlias || normalizedAlias === canonicalName) return;
+  const cacheKey = `${companyCode}|${normalizedAlias}`;
+  if (aliasCache.has(cacheKey)) return;
+  const existing = await tx.financialClientAlias.findUnique({
+    where: { companyCode_normalizedAlias: { companyCode, normalizedAlias } },
+    select: { clientId: true }
+  });
+  if (existing) {
+    aliasCache.set(cacheKey, existing.clientId);
+    return;
+  }
+  await tx.financialClientAlias.create({
+    data: {
+      companyCode,
+      aliasName: row.clientName,
+      normalizedAlias,
+      clientId: client.id,
+      createdByUserId: actorId
+    }
+  });
+  aliasCache.set(cacheKey, client.id);
 }
 
 async function applySmartBillCustomerAdjustment(

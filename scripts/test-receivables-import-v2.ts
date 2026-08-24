@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { hasPermission } from "../src/lib/rbac";
 import {
   matchClientCandidates,
+  invoiceNumbersEquivalent,
   normalizeReceivableInvoiceNumber,
   receivableCanonicalKey,
   receivableLedgerSnapshot,
@@ -22,9 +23,9 @@ appendSheet(workbook, "Focus Media", [
   ["Furnizor", "SUMA"],
   ["Furnizor ignorat", 999],
   ["LISTA ÎNCASĂRI"],
-  ["NR. FACTURĂ", "DATA FACTURĂ", "CLIENT", "DATA SCADENȚEI", "MONEDA", "SUMA FACTURATĂ", "ÎNCASAT", "REST DE ÎNCASAT", "LOCAȚIE", "DETALII CAMPANIE"],
-  ["FSCM 1369 / 01.07.2026", "01.07.2026", "NEW AGE S.R.L.", "31.07.2026", "RON", "4.000,00", "1.000,00", "3.000,00", "B01", "Campanie test"],
-  ["SUBTOTAL", "", "NEW AGE S.R.L.", "", "RON", "4.000,00", "1.000,00", "3.000,00", "", ""]
+  ["NR. FACTURĂ", "DATA FACTURĂ", "CLIENT", "CUI", "DATA SCADENȚEI", "MONEDA", "SUMA FACTURATĂ", "ÎNCASAT", "REST DE ÎNCASAT", "LOCAȚIE", "DETALII CAMPANIE"],
+  ["FSCM 1369 / 01.07.2026", "01.07.2026", "NEW AGE S.R.L.", "RO123456", "31.07.2026", "RON", "4.000,00", "1.000,00", "3.000,00", "B01", "Campanie test"],
+  ["SUBTOTAL", "", "NEW AGE S.R.L.", "RO123456", "", "RON", "4.000,00", "1.000,00", "3.000,00", "", ""]
 ]);
 appendSheet(workbook, "Excellence", [
   ["EXCELLENCE MEDIA PRODUCTION S.R.L."],
@@ -49,6 +50,7 @@ assert.deepEqual(new Set(parsed.rows.map((row) => row.companyCode)), new Set(["F
 assert.equal(parsed.rows.some((row) => row.clientNameRaw === "Furnizor ignorat"), false, "LISTA PLATI must never be imported");
 assert.ok(parsed.declaredTotals.some((total) => total.normalizedClientName === "new age"), "client subtotals must be tracked separately from company totals");
 assert.equal(parsed.rows.find((row) => row.rawInvoiceNumber.startsWith("FSCM"))?.normalizedInvoiceNumber, "fcsm136901072026", "source typo is normalized without losing raw value");
+assert.equal(parsed.rows.find((row) => row.rawInvoiceNumber.startsWith("FSCM"))?.normalizedClientFiscalCode, "123456", "CUI/CIF must be normalized and preserved for deterministic client matching");
 
 const fmbg56 = parsed.rows.find((row) => row.rawInvoiceNumber === "FMBG-56");
 const fmbg59 = parsed.rows.find((row) => row.rawInvoiceNumber === "FMBG-59");
@@ -66,6 +68,8 @@ assert.equal(bgOnly.rows.length, 3, "manual company selection must ignore other 
 assert.equal(bgOnly.issues.some((issue) => issue.type === "company_conflict"), false);
 
 assert.equal(normalizeReceivableInvoiceNumber("FSCM 1369"), "fcsm1369");
+assert.equal(invoiceNumbersEquivalent("EMP0402", "EMP402"), true);
+assert.equal(invoiceNumbersEquivalent("EMP0402", "EMP403"), false);
 assert.equal(
   receivableCanonicalKey({ companyCode: "FOCUS_MEDIA", normalizedInvoiceNumber: "fcsm1369", currency: "RON" }),
   "focus_media|fcsm1369|ron"
@@ -101,7 +105,7 @@ const aliasMatch = matchClientCandidates({
   aliases: [{ companyCode: "FOCUS_MEDIA", normalizedAlias: "new age", clientId: "client-1" }]
 });
 assert.equal(aliasMatch.level, "safe");
-assert.deepEqual(aliasMatch.clientIds, ["client-1"]);
+assert.equal(JSON.stringify(aliasMatch.clientIds), JSON.stringify(["client-1"]));
 const fuzzyMatch = matchClientCandidates({
   clientName: "UNITED MEDIA SERVCES",
   companyCode: "FOCUS_MEDIA",
@@ -109,6 +113,23 @@ const fuzzyMatch = matchClientCandidates({
   aliases: []
 });
 assert.equal(fuzzyMatch.level, "probable", "fuzzy names are proposals, never automatic aliases");
+const fiscalMatch = matchClientCandidates({
+  clientName: "NEW AGE",
+  clientFiscalCode: "RO123456",
+  companyCode: "FOCUS_MEDIA",
+  clients: [{ id: "client-1", companyName: "NEW AGE ADVERTISING", normalizedName: "new age advertising", taxId: "123456" }],
+  aliases: []
+});
+assert.equal(fiscalMatch.level, "safe");
+assert.equal(JSON.stringify(fiscalMatch.clientIds), JSON.stringify(["client-1"]), "a different display name with the same CUI must resolve to the canonical client");
+const fiscalConflict = matchClientCandidates({
+  clientName: "NEW AGE ADVERTISING",
+  clientFiscalCode: "RO999999",
+  companyCode: "FOCUS_MEDIA",
+  clients: [{ id: "client-1", companyName: "NEW AGE ADVERTISING", normalizedName: "new age advertising", taxId: "123456" }],
+  aliases: []
+});
+assert.equal(fiscalConflict.level, "conflict", "a familiar name with a different CUI must never be auto-assigned");
 
 assert.equal(hasPermission("FINANCE_OPERATOR", "finance.upload"), true);
 assert.equal(hasPermission("FINANCE_OPERATOR", "finance.validate"), true);

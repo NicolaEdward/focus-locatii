@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { AuthSession } from "@/lib/auth";
-import { normalizeClientName } from "@/lib/clients";
+import { invoiceNumberLookupPrefix, invoiceNumberLookupVariants, normalizeClientName } from "@/lib/clients";
 import {
   assertFinancialUploadTransition,
   assertReceivableImportRowTransition
@@ -10,6 +10,8 @@ import {
   matchClientCandidates,
   money,
   receivableCanonicalKey,
+  receivableComparisonKey,
+  invoiceNumbersEquivalent,
   receivableStatus,
   reconcileReceivableAmounts,
   shouldKeepExistingReceivableLedger
@@ -20,6 +22,7 @@ import {
   type ReceivablesImportRow
 } from "@/lib/receivables-import-parser";
 import { deriveCampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
+import { canonicalTaxId } from "@/lib/tax-id";
 
 const ACTIVE_PAYMENT_STATUS = "active";
 
@@ -52,10 +55,13 @@ export async function stageReceivablesImport(input: {
   });
   if (duplicate) return { duplicate: true as const, upload: duplicate, preview: await getReceivablesImportPreview(duplicate.id) };
 
+  const invoiceNumberCandidates = Array.from(new Set(parsed.rows.flatMap((row) => invoiceNumberLookupVariants(row.normalizedInvoiceNumber))));
+  const invoiceNumberPrefixes = Array.from(new Set(parsed.rows.map((row) => invoiceNumberLookupPrefix(row.normalizedInvoiceNumber)).filter((value): value is string => Boolean(value))));
+
   const [clients, aliases, existingReceivables] = await Promise.all([
     prisma.clientAccount.findMany({
       where: { status: { notIn: ["merged", "archived"] } },
-      select: { id: true, companyName: true, normalizedName: true, aliases: true, accountOwnerUserId: true },
+      select: { id: true, companyName: true, normalizedName: true, taxId: true, aliases: true, accountOwnerUserId: true },
       orderBy: { companyName: "asc" }
     }),
     prisma.financialClientAlias.findMany({
@@ -64,7 +70,10 @@ export async function stageReceivablesImport(input: {
     prisma.financialReceivable.findMany({
       where: {
         companyCode: { in: Array.from(new Set(parsed.rows.map((row) => row.companyCode))) },
-        normalizedInvoiceNumber: { in: Array.from(new Set(parsed.rows.map((row) => row.normalizedInvoiceNumber).filter(Boolean))) }
+        OR: [
+          { normalizedInvoiceNumber: { in: invoiceNumberCandidates } },
+          ...invoiceNumberPrefixes.map((prefix) => ({ normalizedInvoiceNumber: { startsWith: prefix } }))
+        ]
       },
       select: {
         id: true,
@@ -132,7 +141,12 @@ export async function stageReceivablesImport(input: {
         campaignDetails: row.campaignDetails,
         clientNameRaw: row.clientNameRaw || null,
         normalizedClientName: row.normalizedClientName || null,
-        rawRowJson: { ...row.rawRowJson, warnings: row.warnings } as Prisma.InputJsonValue,
+        rawRowJson: {
+          ...row.rawRowJson,
+          warnings: row.warnings,
+          clientFiscalCodeRaw: row.clientFiscalCodeRaw,
+          normalizedClientFiscalCode: row.normalizedClientFiscalCode
+        } as Prisma.InputJsonValue,
         ...classification
       }))
     });
@@ -318,10 +332,16 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
     assertFinancialUploadTransition(upload.status, "confirmed");
     const blocked = upload.receivableImportRows.filter((row) => !["allocated_auto", "resolved", "ignored"].includes(row.status));
     if (blocked.length) throw new Error(`${blocked.length} rânduri necesită rezolvare înainte de import.`);
+    const invoiceNumberCandidates = Array.from(new Set(upload.receivableImportRows.flatMap((row) => invoiceNumberLookupVariants(row.normalizedInvoiceNumber))));
+    const invoiceNumberPrefixes = Array.from(new Set(upload.receivableImportRows.map((row) => invoiceNumberLookupPrefix(row.normalizedInvoiceNumber)).filter((value): value is string => Boolean(value))));
+    const invoiceNumberWhere = [
+      { normalizedInvoiceNumber: { in: invoiceNumberCandidates } },
+      ...invoiceNumberPrefixes.map((prefix) => ({ normalizedInvoiceNumber: { startsWith: prefix } }))
+    ];
 
     const billingItems = await tx.billingItem.findMany({
       where: {
-        normalizedInvoiceNumber: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.normalizedInvoiceNumber).filter((value): value is string => Boolean(value)))) },
+        OR: invoiceNumberWhere,
         clientId: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.clientId).filter((value): value is string => Boolean(value)))) },
         currency: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.currency).filter((value): value is string => Boolean(value)))) }
       },
@@ -337,7 +357,7 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
     const activeReceivables = await tx.financialReceivable.findMany({
       where: {
         companyCode: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.companyCode))) },
-        normalizedInvoiceNumber: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.normalizedInvoiceNumber).filter((value): value is string => Boolean(value)))) },
+        OR: invoiceNumberWhere,
         currency: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.currency).filter((value): value is string => Boolean(value)))) },
         includedInReport: true
       },
@@ -346,13 +366,29 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
     const activeReceivablesByIdentity = new Map<string, typeof activeReceivables>();
     for (const receivable of activeReceivables) {
       if (!receivable.companyCode || !receivable.normalizedInvoiceNumber || !receivable.currency) continue;
-      const identityKey = receivableCanonicalKey({
+      const identityKey = receivableComparisonKey({
         companyCode: receivable.companyCode,
-        normalizedInvoiceNumber: receivable.normalizedInvoiceNumber,
+        invoiceNumber: receivable.normalizedInvoiceNumber,
         currency: receivable.currency
       });
       activeReceivablesByIdentity.set(identityKey, [...(activeReceivablesByIdentity.get(identityKey) || []), receivable]);
     }
+    const assignedClientIds = Array.from(new Set(upload.receivableImportRows.map((row) => row.clientId).filter((value): value is string => Boolean(value))));
+    const [assignedClients, existingAliases] = await Promise.all([
+      tx.clientAccount.findMany({
+        where: { id: { in: assignedClientIds } },
+        select: { id: true, companyName: true, normalizedName: true, taxId: true }
+      }),
+      tx.financialClientAlias.findMany({
+        where: {
+          companyCode: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.companyCode))) },
+          normalizedAlias: { in: Array.from(new Set(upload.receivableImportRows.map((row) => row.normalizedClientName).filter((value): value is string => Boolean(value)))) }
+        },
+        select: { companyCode: true, normalizedAlias: true, clientId: true }
+      })
+    ]);
+    const assignedClientById = new Map(assignedClients.map((client) => [client.id, client]));
+    const aliasByKey = new Map(existingAliases.map((alias) => [`${alias.companyCode}|${alias.normalizedAlias}`, alias.clientId]));
 
     const result = { alreadyConfirmed: false, created: 0, updated: 0, unchanged: 0, ignored: 0 };
     for (const row of upload.receivableImportRows) {
@@ -363,13 +399,25 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
       if (!row.clientId || !row.normalizedInvoiceNumber || !row.currency || row.invoiceAmount == null) {
         throw new Error(`Rândul ${row.rowNumber} nu are alocarea financiară completă.`);
       }
+      await persistConfirmedFiscalAlias({
+        tx,
+        row,
+        client: assignedClientById.get(row.clientId) || null,
+        aliasByKey,
+        actorId: input.actor.id
+      });
       const canonicalKey = receivableCanonicalKey({
         companyCode: row.companyCode,
         normalizedInvoiceNumber: row.normalizedInvoiceNumber,
         currency: row.currency
       });
+      const comparisonKey = receivableComparisonKey({
+        companyCode: row.companyCode,
+        invoiceNumber: row.normalizedInvoiceNumber,
+        currency: row.currency
+      });
       const billingCandidates = billingItems.filter((item) =>
-        item.normalizedInvoiceNumber === row.normalizedInvoiceNumber &&
+        invoiceNumbersEquivalent(item.normalizedInvoiceNumber, row.normalizedInvoiceNumber) &&
         item.currency === row.currency &&
         item.clientId === row.clientId &&
         item.companyEntity === row.companyName
@@ -380,7 +428,7 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
       const billingItem = billingCandidates[0] || null;
       const linkedCampaignId = row.campaignId || billingItem?.reservation?.campaignId || null;
       const linkedLocationId = row.locationId || billingItem?.reservation?.locationId || null;
-      const activeIdentityMatches = activeReceivablesByIdentity.get(canonicalKey) || [];
+      const activeIdentityMatches = activeReceivablesByIdentity.get(comparisonKey) || [];
       if (activeIdentityMatches.length > 1) {
         throw new Error(`Factura ${row.rawInvoiceNumber || row.normalizedInvoiceNumber} există deja de mai multe ori și necesită reconciliere.`);
       }
@@ -396,7 +444,7 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
         : activeIdentityMatch || await tx.financialReceivable.findFirst({
             where: {
               companyCode: row.companyCode,
-              normalizedInvoiceNumber: row.normalizedInvoiceNumber,
+              normalizedInvoiceNumber: { in: invoiceNumberLookupVariants(row.normalizedInvoiceNumber) },
               currency: row.currency,
               clientId: row.clientId
             },
@@ -453,7 +501,7 @@ export async function confirmReceivablesImport(input: { uploadId: string; actor:
           },
           include: { payments: { where: { status: ACTIVE_PAYMENT_STATUS } } }
         });
-        activeReceivablesByIdentity.set(canonicalKey, [receivable]);
+        activeReceivablesByIdentity.set(comparisonKey, [receivable]);
         result.created += 1;
       } else {
         if (!receivable.canonicalKey) {
@@ -796,7 +844,7 @@ export async function getCustomerInvoiceDashboardData() {
 
 function classifyImportRow(input: {
   row: ReceivablesImportRow;
-  clients: Array<{ id: string; companyName: string; normalizedName: string | null; aliases: unknown; accountOwnerUserId: string | null }>;
+  clients: Array<{ id: string; companyName: string; normalizedName: string | null; taxId: string | null; aliases: unknown; accountOwnerUserId: string | null }>;
   aliases: Array<{ companyCode: string; normalizedAlias: string; clientId: string }>;
   existingReceivables: Array<{ id: string; clientId: string | null; companyCode: string | null; normalizedInvoiceNumber: string | null; currency: string | null; invoicedAmount: Prisma.Decimal | null; collectedAmount: Prisma.Decimal | null; remainingAmount: Prisma.Decimal | null; lastReportDate: Date | null; rawRowJson: Prisma.JsonValue | null; canonicalKey: string | null; includedInReport: boolean; updatedAt: Date; payments: Array<{ amount: Prisma.Decimal }>; _count: { payments: number } }>;
   duplicateInvoiceKeys: Set<string>;
@@ -804,13 +852,25 @@ function classifyImportRow(input: {
   const { row } = input;
   if (row.rowState === "conflict") return classification(row, "conflict", "conflict", 0, "Neconcordanță critică în raport.", null, null, null);
   if (!row.normalizedInvoiceNumber || !row.currency || row.invoiceAmount == null) return classification(row, "manual", "unmatched", 0, "Factura, moneda sau valoarea lipsește.", null, null, null);
-  const invoiceKey = [row.companyCode, row.normalizedInvoiceNumber, row.currency].join("|");
+  const invoiceKey = receivableComparisonKey({
+    companyCode: row.companyCode,
+    invoiceNumber: row.normalizedInvoiceNumber,
+    currency: row.currency
+  });
   if (input.duplicateInvoiceKeys.has(invoiceKey)) return classification(row, "conflict", "conflict", 0, "Factura apare de mai multe ori în același raport.", null, null, null);
 
-  const clientMatch = matchClientCandidates({ clientName: row.clientNameRaw, companyCode: row.companyCode, clients: input.clients, aliases: input.aliases });
+  const clientMatch = matchClientCandidates({
+    clientName: row.clientNameRaw,
+    clientFiscalCode: row.normalizedClientFiscalCode,
+    companyCode: row.companyCode,
+    clients: input.clients,
+    aliases: input.aliases
+  });
   const clientId = clientMatch.clientIds[0] || null;
   const invoiceCandidates = input.existingReceivables.filter((item) =>
-    item.companyCode === row.companyCode && item.normalizedInvoiceNumber === row.normalizedInvoiceNumber && item.currency === row.currency
+    item.companyCode === row.companyCode &&
+    invoiceNumbersEquivalent(item.normalizedInvoiceNumber, row.normalizedInvoiceNumber) &&
+    item.currency === row.currency
   );
   const activeInvoiceCandidates = invoiceCandidates.filter((item) => item.includedInReport);
   if (activeInvoiceCandidates.length > 1) {
@@ -901,10 +961,62 @@ function classification(row: ReceivablesImportRow, status: string, confidenceLev
 function duplicateKeys(rows: ReceivablesImportRow[]) {
   const counts = new Map<string, number>();
   for (const row of rows) {
-    const key = [row.companyCode, row.normalizedInvoiceNumber, row.currency].join("|");
+    const key = receivableComparisonKey({
+      companyCode: row.companyCode,
+      invoiceNumber: row.normalizedInvoiceNumber,
+      currency: row.currency || ""
+    });
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   return new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key));
+}
+
+async function persistConfirmedFiscalAlias(input: {
+  tx: Prisma.TransactionClient;
+  row: {
+    id: string;
+    companyCode: string;
+    clientNameRaw: string | null;
+    normalizedClientName: string | null;
+    rawRowJson: Prisma.JsonValue | null;
+  };
+  client: { id: string; companyName: string; normalizedName: string | null; taxId: string | null } | null;
+  aliasByKey: Map<string, string>;
+  actorId: string;
+}) {
+  const sourceFiscalCode = canonicalTaxId(jsonString(input.row.rawRowJson, "normalizedClientFiscalCode"));
+  if (!input.client || !sourceFiscalCode || canonicalTaxId(input.client.taxId) !== sourceFiscalCode) return;
+  const normalizedAlias = input.row.normalizedClientName || normalizeClientName(input.row.clientNameRaw || "");
+  const canonicalName = input.client.normalizedName || normalizeClientName(input.client.companyName);
+  if (!normalizedAlias || normalizedAlias === canonicalName) return;
+  const key = `${input.row.companyCode}|${normalizedAlias}`;
+  const existingClientId = input.aliasByKey.get(key);
+  if (existingClientId) return;
+  await input.tx.financialClientAlias.create({
+    data: {
+      companyCode: input.row.companyCode,
+      aliasName: input.row.clientNameRaw || normalizedAlias,
+      normalizedAlias,
+      clientId: input.client.id,
+      createdByUserId: input.actorId
+    }
+  });
+  input.aliasByKey.set(key, input.client.id);
+  await input.tx.auditLog.create({
+    data: {
+      userId: input.actorId,
+      action: "receivables.client_alias_confirmed_by_tax_id",
+      entityType: "client_account",
+      entityId: input.client.id,
+      metadata: { importRowId: input.row.id, companyCode: input.row.companyCode, source: "tax_id_match" }
+    }
+  });
+}
+
+function jsonString(value: Prisma.JsonValue | null, key: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = (value as Record<string, unknown>)[key];
+  return typeof candidate === "string" ? candidate : null;
 }
 
 function consolidateHistoricalDuplicates(rows: Array<{

@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { normalizeClientName, normalizeInvoiceNumber } from "@/lib/clients";
+import {
+  invoiceNumberComparisonKey,
+  invoiceNumbersEquivalent,
+  normalizeClientName,
+  normalizeInvoiceNumber
+} from "@/lib/clients";
+import { canonicalTaxId } from "@/lib/tax-id";
 
 export type ReceivableMoney = Prisma.Decimal.Value | null | undefined;
 
@@ -19,11 +25,26 @@ export function receivableCanonicalKey(input: {
   return [input.companyCode, input.normalizedInvoiceNumber, input.currency].map((value) => value.trim().toLowerCase()).join("|");
 }
 
+export function receivableComparisonKey(input: {
+  companyCode: string;
+  invoiceNumber: string;
+  currency: string;
+}) {
+  return [
+    input.companyCode,
+    invoiceNumberComparisonKey(input.invoiceNumber),
+    input.currency
+  ].map((value) => value.trim().toLowerCase()).join("|");
+}
+
+export { invoiceNumberComparisonKey, invoiceNumbersEquivalent };
+
 export function receivableRowHash(input: {
   companyCode: string;
   normalizedInvoiceNumber: string;
   currency: string | null;
   normalizedClientName: string;
+  normalizedClientFiscalCode?: string | null;
   invoiceAmount: ReceivableMoney;
   collectedAmount: ReceivableMoney;
   remainingAmount: ReceivableMoney;
@@ -146,11 +167,32 @@ export function receivableLedgerSnapshot(input: {
 
 export function matchClientCandidates(input: {
   clientName: string;
+  clientFiscalCode?: string | null;
   companyCode: string;
-  clients: Array<{ id: string; companyName: string; normalizedName: string | null; aliases?: unknown }>;
+  clients: Array<{ id: string; companyName: string; normalizedName: string | null; taxId?: string | null; aliases?: unknown }>;
   aliases: Array<{ companyCode: string; normalizedAlias: string; clientId: string }>;
 }) {
   const normalized = normalizeClientName(input.clientName);
+  const normalizedFiscalCode = canonicalTaxId(input.clientFiscalCode);
+  if (normalizedFiscalCode) {
+    const fiscalMatches = input.clients.filter((client) => canonicalTaxId(client.taxId) === normalizedFiscalCode);
+    if (fiscalMatches.length === 1) {
+      return { level: "safe" as const, score: 100, clientIds: [fiscalMatches[0].id], reason: "Client identificat sigur după CUI/CIF." };
+    }
+    if (fiscalMatches.length > 1) {
+      return { level: "conflict" as const, score: 0, clientIds: fiscalMatches.map((client) => client.id), reason: "Mai mulți clienți activi au același CUI/CIF; este necesară reconcilierea datelor." };
+    }
+    const conflictingNames = input.clients.filter((client) => clientNames(client).includes(normalized));
+    if (conflictingNames.length) {
+      return {
+        level: "conflict" as const,
+        score: 0,
+        clientIds: conflictingNames.map((client) => client.id),
+        reason: "Denumirea seamănă cu un client existent, dar CUI/CIF-ul nu coincide. Alocarea automată a fost blocată."
+      };
+    }
+    return { level: "unmatched" as const, score: 0, clientIds: [], reason: "CUI/CIF-ul din raport nu corespunde niciunui client activ." };
+  }
   const exactAlias = input.aliases.find((alias) => alias.companyCode === input.companyCode && alias.normalizedAlias === normalized);
   if (exactAlias) return { level: "safe" as const, score: 100, clientIds: [exactAlias.clientId], reason: "Alias financiar confirmat." };
 

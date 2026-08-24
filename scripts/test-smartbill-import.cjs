@@ -25,6 +25,25 @@ const smartbill = loadTsModule(path.join(repoRoot, "src/lib/smartbill-import.ts"
         .replace(/\b(factura|fact|nr|numar|number|invoice|inv)\b/g, "")
         .replace(/[^a-z0-9]+/g, "")
         .trim();
+    },
+    invoiceNumberComparisonKey(value) {
+      const normalized = String(value || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\b(factura|fact|nr|numar|number|invoice|inv)\b/g, "")
+        .replace(/[^a-z0-9]+/g, "")
+        .trim();
+      const match = normalized.match(/^([a-z]+)0*(\d+)$/);
+      return match ? `${match[1]}${match[2].replace(/^0+(?=\d)/, "")}` : normalized;
+    },
+    invoiceNumbersEquivalent(left, right) {
+      const normalize = (value) => {
+        const normalized = String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+        const match = normalized.match(/^([a-z]+)0*(\d+)$/);
+        return match ? `${match[1]}${match[2].replace(/^0+(?=\d)/, "")}` : normalized;
+      };
+      return Boolean(normalize(left) && normalize(left) === normalize(right));
     }
   },
   "@/lib/company-entities": {
@@ -202,6 +221,15 @@ assert.equal(smartbill.matchSmartBillEntity(customerParsed.rows[0], clients).ent
 assert.equal(smartbill.matchSmartBillEntity(customerParsed.rows[1], clients).kind, "none");
 assert.equal(smartbill.matchSmartBillEntity(supplierParsed.rows[0], suppliers).entity.id, "supplier-1");
 assert.equal(smartbill.matchSmartBillEntity(customerParsed.rows[0], [...clients, { id: "client-2", name: "Alt", normalizedName: "alt", taxId: "15116098" }]).kind, "ambiguous");
+const fiscalNameVariant = { ...customerParsed.rows[0], clientName: "BEST ADV CONSULT", dedupeKey: "fiscal-name-variant" };
+const fiscalNameVariantPreview = smartbill.buildSmartBillPreview({
+  parsed: { ...customerParsed, rows: [fiscalNameVariant], invalidRows: [] },
+  fileName: "Facturi_alias_cui.xls",
+  companyContext: focusCompany,
+  context: { clients },
+  includeToken: false
+});
+assert.match(fiscalNameVariantPreview.rows[0].warning, /păstrată ca alias/, "a name variant matched by CUI must be explained and preserved as an alias after confirmation.");
 
 const existingReceivable = {
   id: "receivable-1",
@@ -223,6 +251,37 @@ const existingReceivable = {
   status: "overdue"
 };
 assert.equal(smartbill.findSmartBillDuplicate(customerParsed.rows[0], [existingReceivable], focusCompany).id, "receivable-1");
+const legacyZeroPaddingDuplicate = {
+  ...existingReceivable,
+  id: "receivable-legacy-number",
+  invoiceNumber: "EMP373",
+  normalizedInvoiceNumber: "emp373",
+  invoiceDate: null,
+  amount: 48268.88,
+  entityTaxId: "15116098"
+};
+const zeroPaddedSource = {
+  ...customerParsed.rows[0],
+  invoiceNumber: "EMP0373",
+  normalizedInvoiceNumber: "emp0373",
+  issueDate: new Date("2026-07-01T00:00:00.000Z"),
+  totalAmount: 48268.88
+};
+assert.equal(
+  smartbill.findSmartBillDuplicate(zeroPaddedSource, [legacyZeroPaddingDuplicate], focusCompany).id,
+  "receivable-legacy-number",
+  "EMP0373 and EMP373 with the same CUI, currency and amount are the same invoice even when the legacy date is missing."
+);
+assert.equal(
+  smartbill.findSmartBillDuplicate(zeroPaddedSource, [{ ...legacyZeroPaddingDuplicate, invoiceDate: new Date("2026-06-01T00:00:00.000Z") }], focusCompany),
+  null,
+  "two explicit conflicting dates must not be silently deduplicated."
+);
+assert.equal(
+  smartbill.findSmartBillDuplicate(zeroPaddedSource, [{ ...legacyZeroPaddingDuplicate, entityTaxId: "999999" }], focusCompany),
+  null,
+  "equivalent invoice numbers must never cross client CUI boundaries."
+);
 assert.equal(smartbill.isSmartBillSourceDuplicate(existingReceivable, customerParsed.rows[0].dedupeKey), false);
 const otherCompanyReceivable = { ...existingReceivable, id: "receivable-other-company", companyName: "Excellence Media", companyCode: "EXCELLENCE_MEDIA" };
 assert.equal(smartbill.findSmartBillDuplicate(customerParsed.rows[0], [otherCompanyReceivable], focusCompany), null);
@@ -268,6 +327,63 @@ const multipleAdjustmentMatch = smartbill.findSmartBillAdjustmentMatch(
   focusCompany
 );
 assert.equal(multipleAdjustmentMatch.kind, "review");
+const exactAdjustmentMatch = smartbill.findSmartBillAdjustmentMatch(
+  { ...negativeCustomerParsed.rows[0], notes: null, raw: {}, totalAmount: -1000 },
+  [
+    { ...existingReceivable, id: "receivable-exact", invoiceNumber: "EMP0375", normalizedInvoiceNumber: "emp0375", amount: 1000, remainingAmount: 1000 },
+    { ...existingReceivable, id: "receivable-other", invoiceNumber: "EMP0374", normalizedInvoiceNumber: "emp0374", amount: 2500, remainingAmount: 2500 }
+  ],
+  focusCompany
+);
+assert.equal(exactAdjustmentMatch.kind, "auto");
+assert.equal(exactAdjustmentMatch.linkedRow.id, "receivable-exact", "an exact storno amount must select the unique invoice for the same CUI/company/currency.");
+const paidExactAdjustmentMatch = smartbill.findSmartBillAdjustmentMatch(
+  { ...negativeCustomerParsed.rows[0], notes: null, raw: {}, totalAmount: -1000 },
+  [{ ...existingReceivable, id: "receivable-paid-exact", invoiceNumber: "EMP0375", normalizedInvoiceNumber: "emp0375", amount: 1000, remainingAmount: 0, paidOrCollectedAmount: 1000, status: "collected" }],
+  focusCompany
+);
+assert.equal(paidExactAdjustmentMatch.kind, "auto", "a full storno of a paid invoice must create client credit instead of leaving the invoice open.");
+const grossInvoiceRow = {
+  ...customerParsed.rows[0],
+  invoiceNumber: "EMP0393",
+  normalizedInvoiceNumber: "emp0393",
+  totalAmount: 41805.11,
+  dedupeKey: "gross-emp0393"
+};
+const partialStornoRow = {
+  ...negativeCustomerParsed.rows[0],
+  invoiceNumber: "EMP0394",
+  normalizedInvoiceNumber: "emp0394",
+  totalAmount: -3800.46,
+  notes: null,
+  raw: {},
+  dedupeKey: "storno-emp0394"
+};
+const legacyNetInvoice = {
+  ...existingReceivable,
+  id: "legacy-net-emp393",
+  invoiceNumber: "EMP393",
+  normalizedInvoiceNumber: "emp393",
+  invoiceDate: null,
+  amount: 38004.65,
+  remainingAmount: 38004.65
+};
+const netRepresentation = smartbill.findSmartBillNetRepresentation(
+  grossInvoiceRow,
+  [legacyNetInvoice],
+  [grossInvoiceRow, partialStornoRow],
+  focusCompany
+);
+assert.equal(netRepresentation.existing.id, "legacy-net-emp393");
+const netRepresentationPreview = smartbill.buildSmartBillPreview({
+  parsed: { ...customerParsed, rows: [grossInvoiceRow, partialStornoRow], invalidRows: [] },
+  fileName: "Facturi_net_storno.xls",
+  companyContext: focusCompany,
+  context: { clients, receivables: [legacyNetInvoice] },
+  includeToken: false
+});
+assert.equal(netRepresentationPreview.summary.duplicateCount, 2, "a legacy net invoice must not be duplicated by a gross invoice plus its separate storno.");
+assert.equal(netRepresentationPreview.rows.every((row) => row.proposedAction === "DUPLICATE"), true);
 const tooLargeAdjustmentMatch = smartbill.findSmartBillAdjustmentMatch(
   { ...negativeCustomerParsed.rows[0], totalAmount: -999999 },
   [existingReceivable],
@@ -440,11 +556,11 @@ if (fs.existsSync(realCustomerFile)) {
   assert.equal(realCustomerParsed.rows.filter((row) => !row.issues.length).length, 11, "Real SmartBill customer file must keep 11 valid rows.");
   assert.equal(realCustomerPreview.summary.invalidCount, 0, "Report total/footer rows must not enter the import preview.");
   assert.equal(realCustomerPreview.rows.filter((row) => row.totalAmount < 0).length, 3, "Real SmartBill customer file must keep three negative adjustment rows.");
-  assert.equal(realCustomerPreview.summary.autoLinkedAdjustmentCount, 2, "Kepi negative rows must auto-link to the same-report open invoice.");
-  assert.equal(realCustomerPreview.summary.adjustmentNeedsReviewCount, 1, "Rentea negative row must stay in review.");
+  assert.equal(realCustomerPreview.summary.autoLinkedAdjustmentCount, 3, "Kepi adjustments and the exact Rentea storno must auto-link safely.");
+  assert.equal(realCustomerPreview.summary.adjustmentNeedsReviewCount, 0, "A unique full storno with the same CUI, company, currency and amount must not remain outside the ledger.");
   assert.equal(realCustomerPreview.rows.find((row) => row.documentNumber === "EMP0364").linkedDocumentNumber, "EMP0367");
   assert.equal(realCustomerPreview.rows.find((row) => row.documentNumber === "EMP0368").linkedDocumentNumber, "EMP0367");
-  assert.equal(realCustomerPreview.rows.find((row) => row.documentNumber === "EMP0365").proposedAction, "ADJUSTMENT_NEEDS_REVIEW");
+  assert.equal(realCustomerPreview.rows.find((row) => row.documentNumber === "EMP0365").linkedDocumentNumber, "EMP0366");
   assert.equal(wrongTypeCustomerParsed.rows.length, 0, "Wrong report type must not manufacture supplier documents from a customer report.");
 }
 

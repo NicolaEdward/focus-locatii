@@ -63,6 +63,7 @@ export const BANK_TRANSACTION_CLASSIFICATIONS = [
   "payroll_payment",
   "employee_payment",
   "associate_payment",
+  "owner_madalin_payment",
   "dividend_payment",
   "copyright_payment",
   "internal_transfer",
@@ -710,6 +711,7 @@ function classifyRevolutTransaction(input: {
   const credit = isCredit(input.signedAmount);
   const text = normalizeText([input.transactionType, input.description, input.reference].filter(Boolean).join(" "));
   if (input.transactionType === "FEE" || /comision|taxa procesare|processing fee|abonament revolut/.test(text)) return "bank_fee";
+  if (isMadalinStanBankActivity(input.payerName, input.beneficiaryName, input.description)) return "owner_madalin_payment";
   if (input.transactionType === "EXCHANGE" || /\bmain\b.*\b(?:ron|eur)\b.*\bmain\b/.test(text)) return "internal_transfer";
   if (/bugetul de stat|trezorer|anaf|impozit|taxe si contributii/.test(text)) return "tax_payment";
   if (/\bcda\b|drepturi de autor|contract de drepturi|\bdr\.?\s*autor\b|\bdrept\s+autor\b/.test(text)) return "copyright_payment";
@@ -746,6 +748,13 @@ function normalizeBankParty(value: unknown) {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function isMadalinStanBankActivity(...values: unknown[]) {
+  return values.some((value) => {
+    const normalized = normalizeBankParty(value);
+    return /\bmadalin(?: marian)? stan\b/.test(normalized) || /\bstan madalin(?: marian)?\b/.test(normalized);
+  });
 }
 
 function revolutAccountKey(label: string, currency: string, iban: string | null) {
@@ -842,6 +851,7 @@ export function classifyBankTransaction(input: BankTransactionClassificationInpu
   const text = normalizeText([input.description, input.paymentDetails].filter(Boolean).join(" "));
   if (debit && credit) return "needs_review";
   if (String(input.transactionType || "").toLowerCase() === "fee" || /^(incasare\s+)?comision|administrare pachet|mentcard/.test(text)) return "bank_fee";
+  if (isMadalinStanBankActivity(input.payerName, input.beneficiaryName, input.description)) return "owner_madalin_payment";
   if (/tranzactie comerciant|apple pay|locatie:/.test(text)) return "card_purchase";
   if (/bugetul de stat|trezorer|trez\d/.test(text)) return "tax_payment";
   if (/\bcda\b|drepturi de autor|contract de drepturi|\bdr\.?\s*autor\b|\bdrept\s+autor\b/.test(text)) return "copyright_payment";

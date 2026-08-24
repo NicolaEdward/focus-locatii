@@ -12,6 +12,7 @@ export const INFORMATIONAL_BANK_CLASSIFICATIONS = [
   "payroll_payment",
   "employee_payment",
   "associate_payment",
+  "owner_madalin_payment",
   "dividend_payment",
   "copyright_payment"
 ] as const;

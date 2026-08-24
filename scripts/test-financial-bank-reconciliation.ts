@@ -62,6 +62,23 @@ assert.equal(classifyBankTransaction({
   transactionType: "card",
   description: "Apple Pay, Tranzactie comerciant. Comision: 0 RON"
 }), "card_purchase", "Textul Comision: 0 dintr-o plata cu cardul nu transforma plata in comision bancar.");
+assert.equal(classifyBankTransaction({
+  ...bankClassificationBase,
+  debitAmount: "735.51",
+  creditAmount: "0.00",
+  transactionType: "card",
+  payerName: "Madalin-Marian Stan",
+  beneficiaryName: "Mol 91312 Bucuresti",
+  description: "Mol 91312 Bucuresti"
+}), "owner_madalin_payment", "Platile facute de Madalin Marian Stan au clasificare informativa dedicata.");
+assert.equal(classifyBankTransaction({
+  ...bankClassificationBase,
+  debitAmount: "8000.00",
+  creditAmount: "0.00",
+  payerName: "FOCUS MEDIA OUTDOOR SRL",
+  beneficiaryName: "Stan Madalin Marian",
+  description: "Decontare plata drepturi de autor"
+}), "owner_madalin_payment", "Ordinea inversata a numelui este recunoscuta in aceeasi sectiune dedicata.");
 
 const adjustmentMetadata = { smartBillAdjustments: [
   { adjustmentReceivableId: "storno-1", adjustmentAmount: "119.00" },
@@ -207,13 +224,14 @@ if (fs.existsSync(revolutFile)) {
     return result;
   }, {});
   assert.equal(counts.bank_fee, 6);
-  assert.equal(counts.supplier_payment_candidate, 96);
+  assert.equal(counts.supplier_payment_candidate, 92);
   assert.equal(counts.internal_transfer, 34);
   assert.equal(counts.intercompany_transfer, 14);
   assert.equal(counts.payroll_payment, 2);
   assert.equal(counts.employee_payment, 2);
-  assert.equal(counts.dividend_payment, 1);
-  assert.equal(counts.copyright_payment, 35);
+  assert.equal(counts.owner_madalin_payment, 29);
+  assert.equal(counts.dividend_payment || 0, 0);
+  assert.equal(counts.copyright_payment, 30);
   const eurTransfer = parsed.rows.find((row) => row.currency === "EUR" && row.debitAmount === "2020.00");
   const processingFee = parsed.rows.find((row) => row.currency === "EUR" && row.classification === "bank_fee" && row.debitAmount === "23.56");
   assert.ok(eurTransfer, "Transferul EUR păstrează suma comercială fără comision.");

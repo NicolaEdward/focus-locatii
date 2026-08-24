@@ -102,6 +102,7 @@
     "measure:receivables-workspace": "tsx scripts/measure-receivables-workspace.ts",
     "test:smartbill-import": "node scripts/test-smartbill-import.cjs",
     "test:financial-reconciliation": "tsx scripts/test-financial-bank-reconciliation.ts",
+    "maintenance:classify-bank-transactions": "tsx scripts/reclassify-bank-transactions.ts",
     "test:spreadsheet-security": "tsx scripts/test-secure-spreadsheet-imports.ts",
     "test:finance-consistency": "node scripts/test-finance-consistency.cjs",
     "test:saga-shadow": "tsx scripts/test-saga-shadow.ts",

@@ -4,7 +4,7 @@ import { normalizeFiscalCode } from "@/lib/smartbill-import";
 import { money } from "@/lib/receivables-domain";
 import { prisma } from "@/lib/prisma";
 
-const EXCLUDED_CLASSIFICATIONS = [
+export const INFORMATIONAL_BANK_CLASSIFICATIONS = [
   "internal_transfer",
   "intercompany_transfer",
   "bank_fee",
@@ -14,7 +14,8 @@ const EXCLUDED_CLASSIFICATIONS = [
   "associate_payment",
   "dividend_payment",
   "copyright_payment"
-];
+] as const;
+const NEEDS_RECONCILIATION_STATUSES = ["unmatched", "partial", "conflict"];
 const ACTIVE = "active";
 
 export type ReconciliationDirection = "receivable" | "payable";
@@ -91,9 +92,15 @@ export async function listFinancialReconciliation(input: {
 }) {
   const take = Math.min(Math.max(input.take || 30, 1), 50);
   const page = Math.max(input.page || 1, 1);
+  const needsReconciliation = input.status === "needs_reconciliation";
   const where: Prisma.FinancialBankTransactionWhereInput = {
     ...(input.legalEntityId ? { legalEntityId: input.legalEntityId } : {}),
-    ...(input.status ? { reconciliationStatus: input.status } : {}),
+    ...(needsReconciliation
+      ? {
+          reconciliationStatus: { in: NEEDS_RECONCILIATION_STATUSES },
+          classification: { notIn: [...INFORMATIONAL_BANK_CLASSIFICATIONS] }
+        }
+      : input.status ? { reconciliationStatus: input.status } : {}),
     ...(input.classification ? { classification: input.classification } : {}),
     ...(input.from || input.to ? { bookedAt: { ...(input.from ? { gte: input.from } : {}), ...(input.to ? { lte: input.to } : {}) } } : {}),
     ...(input.query ? {
@@ -228,7 +235,8 @@ export async function listFinancialReconciliation(input: {
       .sort((left, right) => right.score - left.score)
       .slice(0, 8) : [];
     const ambiguousTop = scored.length > 1 && scored[0].score === scored[1].score;
-    const suggestionStatus = !direction || EXCLUDED_CLASSIFICATIONS.includes(transaction.classification)
+    const informational = excludedBankClassification(transaction.classification);
+    const suggestionStatus = !direction || informational
       ? "ignored"
       : !scored.length
         ? "unmatched"
@@ -253,7 +261,7 @@ export async function listFinancialReconciliation(input: {
       debitAmount: decimalString(transaction.debitAmount),
       creditAmount: decimalString(transaction.creditAmount),
       allocatedAmount: allocatedAmount.toFixed(2),
-      availableAmount: Prisma.Decimal.max(amount.minus(allocatedAmount), 0).toFixed(2),
+      availableAmount: informational ? "0.00" : Prisma.Decimal.max(amount.minus(allocatedAmount), 0).toFixed(2),
       description: transaction.description,
       documentReference: transaction.documentReference,
       payerName: transaction.payerName,
@@ -261,9 +269,10 @@ export async function listFinancialReconciliation(input: {
       merchantName: transaction.merchantName,
       classification: transaction.classification,
       reconciliationStatus: transaction.reconciliationStatus,
+      informational,
       direction,
       suggestionStatus,
-      suggestions: scored,
+      suggestions: informational ? [] : scored,
       allocations
     };
   });
@@ -312,7 +321,13 @@ export async function financialReconciliationSummary(input: { legalEntityId?: st
       by: ["legalEntityId", "currency", "classification"], where: transactionWhere,
       _count: { _all: true }, _sum: { debitAmount: true, creditAmount: true }
     }),
-    prisma.financialBankTransaction.count({ where: { ...transactionWhere, reconciliationStatus: { in: ["unmatched", "partial", "conflict"] } } })
+    prisma.financialBankTransaction.count({
+      where: {
+        ...transactionWhere,
+        reconciliationStatus: { in: NEEDS_RECONCILIATION_STATUSES },
+        classification: { notIn: [...INFORMATIONAL_BANK_CLASSIFICATIONS] }
+      }
+    })
   ]);
   const customerPartners = new Set(partnerRoles.filter((role) => role.role === "customer").map((role) => role.partnerId));
   const supplierPartners = new Set(partnerRoles.filter((role) => role.role === "supplier").map((role) => role.partnerId));
@@ -333,7 +348,7 @@ export async function financialReconciliationSummary(input: { legalEntityId?: st
 }
 
 export function excludedBankClassification(classification: string) {
-  return EXCLUDED_CLASSIFICATIONS.includes(classification);
+  return INFORMATIONAL_BANK_CLASSIFICATIONS.includes(classification as typeof INFORMATIONAL_BANK_CLASSIFICATIONS[number]);
 }
 
 function uniqueCombinations(values: Array<{ legalEntityId: string; currency: string }>) {

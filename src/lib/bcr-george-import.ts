@@ -202,7 +202,8 @@ function parseBcrGeorgeStatementRows(input: Buffer, fileName: string, parsed: st
       credit,
       description,
       details,
-      currentTaxId: detectedEntity.taxId
+      currentTaxId: detectedEntity.taxId,
+      currentCompanyCode: detectedEntity.code
     });
     const documentReference = cleanCell(source[map.documentReference]) || null;
     const openingBalance = nullableMoney(source[map.openingBalance]);
@@ -711,7 +712,7 @@ function classifyRevolutTransaction(input: {
   if (input.transactionType === "FEE" || /comision|taxa procesare|processing fee|abonament revolut/.test(text)) return "bank_fee";
   if (input.transactionType === "EXCHANGE" || /\bmain\b.*\b(?:ron|eur)\b.*\bmain\b/.test(text)) return "internal_transfer";
   if (/bugetul de stat|trezorer|anaf|impozit|taxe si contributii/.test(text)) return "tax_payment";
-  if (/\bcda\b|drepturi de autor|contract de drepturi/.test(text)) return "copyright_payment";
+  if (/\bcda\b|drepturi de autor|contract de drepturi|\bdr\.?\s*autor\b|\bdrept\s+autor\b/.test(text)) return "copyright_payment";
   if (/dividend/.test(text)) return "dividend_payment";
   if (/salariu|salarii|avans salarial|indemnizatie/.test(text)) return "payroll_payment";
   if (/decont angajat|cheltuieli angajat|avans spre decont|restituire angajat/.test(text)) return "employee_payment";
@@ -731,7 +732,11 @@ function companyCodeForBankParty(value: string | null) {
   return companyEntities.find((entity) => {
     const legalName = normalizeBankParty(entity.legalName);
     const shortName = normalizeBankParty(entity.value);
-    return normalized === legalName || normalized === shortName || normalized.includes(legalName) || legalName.includes(normalized);
+    return normalized === legalName
+      || normalized === shortName
+      || normalized.includes(legalName)
+      || legalName.includes(normalized)
+      || normalized.includes(shortName);
   })?.code || null;
 }
 
@@ -815,27 +820,74 @@ function party(description: string, label: "Platitor" | "Beneficiar") {
   return { name, iban: iban ? normalizedIban(iban) : null, taxId: normalizeFiscalCode(tax) };
 }
 
-function classifyTransaction(input: { debit: string; credit: string; description: string; details: ReturnType<typeof parseDescription>; currentTaxId: string | null }) {
-  const debit = input.debit !== "0.00";
-  const credit = input.credit !== "0.00";
-  const text = normalizeText(input.description);
+export type BankTransactionClassificationInput = {
+  debitAmount: string;
+  creditAmount: string;
+  description: string;
+  paymentDetails?: string | null;
+  transactionType?: string | null;
+  payerName?: string | null;
+  payerIban?: string | null;
+  payerTaxId?: string | null;
+  beneficiaryName?: string | null;
+  beneficiaryIban?: string | null;
+  beneficiaryTaxId?: string | null;
+  currentTaxId?: string | null;
+  currentCompanyCode: string;
+};
+
+export function classifyBankTransaction(input: BankTransactionClassificationInput): BankTransactionClassification {
+  const debit = input.debitAmount !== "0.00";
+  const credit = input.creditAmount !== "0.00";
+  const text = normalizeText([input.description, input.paymentDetails].filter(Boolean).join(" "));
   if (debit && credit) return "needs_review";
-  if (input.details.transactionType === "fee" || /^(incasare\s+)?comision|administrare pachet|mentcard/.test(text)) return "bank_fee";
+  if (String(input.transactionType || "").toLowerCase() === "fee" || /^(incasare\s+)?comision|administrare pachet|mentcard/.test(text)) return "bank_fee";
   if (/tranzactie comerciant|apple pay|locatie:/.test(text)) return "card_purchase";
   if (/bugetul de stat|trezorer|trez\d/.test(text)) return "tax_payment";
-  if (/\bcda\b|drepturi de autor|contract de drepturi/.test(text)) return "copyright_payment";
+  if (/\bcda\b|drepturi de autor|contract de drepturi|\bdr\.?\s*autor\b|\bdrept\s+autor\b/.test(text)) return "copyright_payment";
   if (/dividend/.test(text)) return "dividend_payment";
   if (/salariu|salarii|avans salarial|indemnizatie/.test(text)) return "payroll_payment";
   if (/decont angajat|cheltuieli angajat|avans spre decont|restituire angajat/.test(text)) return "employee_payment";
   if (/imprumut asociat|restituire asociat|aport asociat|plata asociat/.test(text)) return "associate_payment";
-  const ownTax = normalizeFiscalCode(input.currentTaxId);
-  const sameTax = ownTax && (input.details.payerTaxId === ownTax || input.details.beneficiaryTaxId === ownTax);
-  if (/conturi proprii/.test(text) || (input.details.payerTaxId && input.details.payerTaxId === input.details.beneficiaryTaxId) || (sameTax && /card\s/.test(text))) return "internal_transfer";
-  const otherEntity = companyEntities.map((entity) => entity.taxId).filter(Boolean).find((taxId) => taxId !== ownTax && (input.details.payerTaxId === taxId || input.details.beneficiaryTaxId === taxId));
-  if (otherEntity) return "intercompany_transfer";
+
+  const counterpartyName = credit ? input.payerName : input.beneficiaryName;
+  const counterpartyTaxId = normalizeFiscalCode(credit ? input.payerTaxId : input.beneficiaryTaxId);
+  const counterpartyCompanyCode = companyCodeForBankParty(counterpartyName || null);
+  const ownTaxId = normalizeFiscalCode(input.currentTaxId);
+  if (counterpartyCompanyCode === input.currentCompanyCode || (ownTaxId && counterpartyTaxId === ownTaxId)) return "internal_transfer";
+  if (counterpartyCompanyCode && counterpartyCompanyCode !== input.currentCompanyCode) return "intercompany_transfer";
+  const otherEntityTaxId = companyEntities
+    .find((entity) => entity.taxId && entity.taxId !== ownTaxId && entity.taxId === counterpartyTaxId)?.taxId;
+  if (otherEntityTaxId) return "intercompany_transfer";
+  if (/conturi proprii|fonduri proprii|sold propriu|virament automat din cont|initiere schimb valutar/.test(text)) return "internal_transfer";
   if (credit) return "customer_receipt_candidate";
   if (debit) return "supplier_payment_candidate";
   return "other";
+}
+
+function classifyTransaction(input: {
+  debit: string;
+  credit: string;
+  description: string;
+  details: ReturnType<typeof parseDescription>;
+  currentTaxId: string | null;
+  currentCompanyCode: string;
+}) {
+  return classifyBankTransaction({
+    debitAmount: input.debit,
+    creditAmount: input.credit,
+    description: input.description,
+    paymentDetails: input.details.paymentDetails,
+    transactionType: input.details.transactionType,
+    payerName: input.details.payerName,
+    payerIban: input.details.payerIban,
+    payerTaxId: input.details.payerTaxId,
+    beneficiaryName: input.details.beneficiaryName,
+    beneficiaryIban: input.details.beneficiaryIban,
+    beneficiaryTaxId: input.details.beneficiaryTaxId,
+    currentTaxId: input.currentTaxId,
+    currentCompanyCode: input.currentCompanyCode
+  });
 }
 
 function parseBucharestDateTime(dateValue: string, timeValue: string) {

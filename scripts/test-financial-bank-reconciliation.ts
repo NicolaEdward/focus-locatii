@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { Prisma } from "@prisma/client";
-import { createBankImportToken, parseBankStatement, parseBcrGeorgeStatement, parseBankMoney, parseRevolutStatement, verifyBankImportToken } from "../src/lib/bcr-george-import";
+import { classifyBankTransaction, createBankImportToken, parseBankStatement, parseBcrGeorgeStatement, parseBankMoney, parseRevolutStatement, verifyBankImportToken } from "../src/lib/bcr-george-import";
 import { scoreReconciliationCandidate } from "../src/lib/financial-reconciliation";
 import { immediatePaymentRuleApplies } from "../src/lib/payables-payment-service";
 import { receivableAdjustmentEntries, receivableAdjustmentTotal, receivableNetAmount, receivableNetRemaining } from "../src/lib/receivable-adjustments";
@@ -18,6 +18,50 @@ import {
 assert.equal(parseBankMoney("41,377.33"), "41377.33");
 assert.equal(parseBankMoney("1.234,56"), "1234.56");
 assert.throws(() => parseBankMoney("1e12"), /invalida/);
+
+const bankClassificationBase = {
+  debitAmount: "0.00",
+  creditAmount: "1000.00",
+  description: "Transfer bancar",
+  currentTaxId: "40766474",
+  currentCompanyCode: "FOCUS_MEDIA"
+};
+assert.equal(classifyBankTransaction({
+  ...bankClassificationBase,
+  payerName: "FOCUS MEDIA OUTDOOR S.R.L.",
+  paymentDetails: "Fonduri proprii"
+}), "internal_transfer", "Transferul Revolut-BCR al aceleiasi firme este informativ.");
+assert.equal(classifyBankTransaction({
+  ...bankClassificationBase,
+  payerName: "EXCELLENCE MEDIA PRODUCTION S.R.L.",
+  paymentDetails: "Ctr imprumut"
+}), "intercompany_transfer", "Imprumutul intre firmele grupului este transfer intercompany.");
+assert.equal(classifyBankTransaction({
+  ...bankClassificationBase,
+  payerName: null,
+  description: "Virament automat din cont RO00TEST pentru recuperare creante restante produs RO00DEST"
+}), "internal_transfer", "Viramentul automat intre subconturile bancii nu cere reconciliere comerciala.");
+assert.equal(classifyBankTransaction({
+  ...bankClassificationBase,
+  debitAmount: "2500.00",
+  creditAmount: "0.00",
+  beneficiaryName: "PERSOANA TEST",
+  paymentDetails: "Dr autor"
+}), "copyright_payment", "Abrevierea uzuala dr autor este clasificata CDA.");
+assert.equal(classifyBankTransaction({
+  ...bankClassificationBase,
+  debitAmount: "2500.00",
+  creditAmount: "0.00",
+  beneficiaryName: "FIRMA EXTERNA SRL",
+  paymentDetails: "Ctr imprumut"
+}), "supplier_payment_candidate", "Un imprumut extern nu este declarat automat transfer intre firmele grupului.");
+assert.equal(classifyBankTransaction({
+  ...bankClassificationBase,
+  debitAmount: "100.00",
+  creditAmount: "0.00",
+  transactionType: "card",
+  description: "Apple Pay, Tranzactie comerciant. Comision: 0 RON"
+}), "card_purchase", "Textul Comision: 0 dintr-o plata cu cardul nu transforma plata in comision bancar.");
 
 const adjustmentMetadata = { smartBillAdjustments: [
   { adjustmentReceivableId: "storno-1", adjustmentAmount: "119.00" },
@@ -163,13 +207,13 @@ if (fs.existsSync(revolutFile)) {
     return result;
   }, {});
   assert.equal(counts.bank_fee, 6);
-  assert.equal(counts.supplier_payment_candidate, 132);
-  assert.equal(counts.internal_transfer, 25);
-  assert.equal(counts.intercompany_transfer, 21);
+  assert.equal(counts.supplier_payment_candidate, 96);
+  assert.equal(counts.internal_transfer, 34);
+  assert.equal(counts.intercompany_transfer, 14);
   assert.equal(counts.payroll_payment, 2);
   assert.equal(counts.employee_payment, 2);
   assert.equal(counts.dividend_payment, 1);
-  assert.equal(counts.copyright_payment, 1);
+  assert.equal(counts.copyright_payment, 35);
   const eurTransfer = parsed.rows.find((row) => row.currency === "EUR" && row.debitAmount === "2020.00");
   const processingFee = parsed.rows.find((row) => row.currency === "EUR" && row.classification === "bank_fee" && row.debitAmount === "23.56");
   assert.ok(eurTransfer, "Transferul EUR păstrează suma comercială fără comision.");
@@ -186,6 +230,9 @@ const receivablePaymentSource = fs.readFileSync(path.join(repoRoot, "src/lib/rec
 const previewSource = fs.readFileSync(path.join(repoRoot, "src/app/api/admin/financial/bank-statements/preview/route.ts"), "utf8");
 const bankConfirmSource = fs.readFileSync(path.join(repoRoot, "src/app/api/admin/financial/bank-statements/confirm/route.ts"), "utf8");
 const importWorkspaceSource = fs.readFileSync(path.join(repoRoot, "src/components/admin/FinancialImportWorkspace.tsx"), "utf8");
+const reconciliationWorkspaceSource = fs.readFileSync(path.join(repoRoot, "src/components/admin/FinancialReconciliationWorkspace.tsx"), "utf8");
+const reconciliationSource = fs.readFileSync(path.join(repoRoot, "src/lib/financial-reconciliation.ts"), "utf8");
+const reclassificationSource = fs.readFileSync(path.join(repoRoot, "scripts/reclassify-bank-transactions.ts"), "utf8");
 const smartBillConfirmSource = fs.readFileSync(path.join(repoRoot, "src/app/api/admin/financial/smartbill/confirm/route.ts"), "utf8");
 const migrationSource = fs.readFileSync(
   path.join(repoRoot, "prisma/migrations/20260820090000_financial_bank_reconciliation/migration.sql"),
@@ -212,6 +259,12 @@ assert.match(importWorkspaceSource, /Transfer între conturi proprii/);
 assert.match(importWorkspaceSource, /Drepturi de autor \(CDA\)/);
 assert.match(importWorkspaceSource, /Leagă storno la factură/);
 assert.match(importWorkspaceSource, /linkedFinancialRowId/);
+assert.match(reconciliationWorkspaceSource, /Plăți și încasări de alocat/);
+assert.match(reconciliationWorkspaceSource, /ignored: "informativă"/);
+assert.match(reconciliationSource, /classification: \{ notIn: \[\.\.\.INFORMATIONAL_BANK_CLASSIFICATIONS\] \}/);
+assert.match(reclassificationSource, /receivablePayments: \{ none: \{ status: ACTIVE \} \}/);
+assert.match(reclassificationSource, /payablePayments: \{ none: \{ status: ACTIVE \} \}/);
+assert.match(reclassificationSource, /financial\.bank_transaction_auto_classified/);
 const receivableSourceUpdate = smartBillConfirmSource.split("function smartBillReceivableUpdateData")[1]?.split("function smartBillPayableUpdateData")[0] || "";
 const payableSourceUpdate = smartBillConfirmSource.split("function smartBillPayableUpdateData")[1]?.split("function inferReportDate")[0] || "";
 assert.doesNotMatch(receivableSourceUpdate, /collectedAmount|remainingAmount|collectedAt|status:/, "Reimportul SmartBill nu poate rescrie registrul de încasări.");

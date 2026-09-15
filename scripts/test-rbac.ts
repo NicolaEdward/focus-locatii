@@ -16,7 +16,7 @@ assert.equal(hasPermission("SALES_DIRECTOR", "proposals.approve"), true);
 assert.equal(hasPermission("SALES_DIRECTOR", "leads.view"), true);
 assert.equal(hasPermission("SALES_DIRECTOR", "leads.manage"), true);
 assert.equal(hasPermission("SALES_DIRECTOR", "inventory.create"), true);
-assert.equal(hasPermission("SALES_DIRECTOR", "inventory.manage"), false);
+assert.equal(hasPermission("SALES_DIRECTOR", "inventory.manage"), true);
 assert.equal(hasPermission("SALES_AGENT", "leads.view.own"), true);
 assert.equal(hasPermission("SALES_AGENT", "leads.manage.own"), true);
 assert.equal(hasPermission("COO", "leads.view"), true);

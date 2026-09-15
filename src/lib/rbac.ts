@@ -130,6 +130,7 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "campaigns.view",
     "inventory.view",
     "inventory.create",
+    "inventory.manage",
     "reservations.view",
     "reservations.manage",
     "reports.view"

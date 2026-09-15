@@ -10,10 +10,13 @@ for (const role of USER_ROLES) {
 assert.equal(hasPermission("SUPER_ADMIN", "users.manage"), true);
 assert.equal(hasPermission("SALES_AGENT", "users.manage"), false);
 assert.equal(hasPermission("SALES_AGENT", "inventory.manage"), false);
+assert.equal(hasPermission("SALES_AGENT", "inventory.create"), false);
 assert.equal(hasPermission("SALES_AGENT", "reservations.manage.own"), true);
 assert.equal(hasPermission("SALES_DIRECTOR", "proposals.approve"), true);
 assert.equal(hasPermission("SALES_DIRECTOR", "leads.view"), true);
 assert.equal(hasPermission("SALES_DIRECTOR", "leads.manage"), true);
+assert.equal(hasPermission("SALES_DIRECTOR", "inventory.create"), true);
+assert.equal(hasPermission("SALES_DIRECTOR", "inventory.manage"), false);
 assert.equal(hasPermission("SALES_AGENT", "leads.view.own"), true);
 assert.equal(hasPermission("SALES_AGENT", "leads.manage.own"), true);
 assert.equal(hasPermission("COO", "leads.view"), true);
@@ -27,6 +30,7 @@ assert.equal(isSellerCapableRole("D_CEO"), false);
 assert.equal(hasPermission("D_CEO", "leads.view"), true);
 assert.equal(hasPermission("D_CEO", "finance.view"), true);
 assert.equal(hasPermission("D_CEO", "inventory.manage"), false);
+assert.equal(hasPermission("D_CEO", "inventory.create"), false);
 assert.equal(hasPermission("D_CEO", "finance.manage"), false);
 assert.equal(hasPermission("D_CEO", "campaigns.operate"), false);
 assert.equal(hasPermission("D_CEO", "users.manage"), false);
@@ -78,4 +82,4 @@ assert.equal(canTransitionReservation("COMPLETED" as never, "RESERVED"), false);
 assert.equal(allowedReservationTransitions("RESERVED", "SALES_AGENT").includes("BOOKED"), false);
 assert.equal(allowedReservationTransitions("RESERVED", "SALES_DIRECTOR").includes("BOOKED"), true);
 
-console.log(JSON.stringify({ ok: true, roles: USER_ROLES, checks: 62 }, null, 2));
+console.log(JSON.stringify({ ok: true, roles: USER_ROLES, checks: 66 }, null, 2));

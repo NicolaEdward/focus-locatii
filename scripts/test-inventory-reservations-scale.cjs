@@ -30,6 +30,8 @@ function main() {
 
   assert(dashboard.includes("InventoryList"), "dashboard must compose the extracted inventory list");
   assert(dashboard.includes("ReservationList"), "dashboard must compose the extracted reservation list");
+  assert(dashboard.includes('["inventory.create", "inventory.manage"]'), "location creation UI must use the granular create permission");
+  assert(dashboard.includes("editing === null ? canCreateLocations : canManageLocations"), "create-only users must not gain edit access");
   assert(dashboard.includes("LazyReservationWorkspace"), "legacy reservation editor must remain available behind a lazy boundary");
   assert(!dashboard.includes('import { AdminReservationsPanel }'), "the 3951-line workspace must not enter the initial dashboard chunk");
   assert(lazyWorkspace.includes("dynamic("), "legacy reservation workspace must be code-split");
@@ -54,6 +56,8 @@ function main() {
   assert(reservations.includes('setScope("history")'), "history must load only after the user opens it");
   assert(!reservationRoute.includes("documents"), "reservation list route must not return operational proof metadata");
   assert(locationRoute.includes('requirePermission(request, "inventory.view")'), "inventory list API must enforce RBAC");
+  const publicLocationRoute = read("src", "app", "api", "locations", "route.ts");
+  assert(publicLocationRoute.includes('requireAnyPermission(request, ["inventory.create", "inventory.manage"])'), "location creation API must allow the granular create permission");
   assert(reservationLocationsRoute.includes('requirePermission(request, "inventory.view")'), "reservation location options must enforce RBAC");
   assert(reservationRoute.includes('requireAnyPermission(request, ["reservations.view", "reservations.view.own"])'), "reservation list API must enforce RBAC");
   assert(reservations.includes('value="HOLD_ACTIVE"'), "technical HOLD/RESERVED statuses must have one business filter");

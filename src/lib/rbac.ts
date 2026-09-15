@@ -36,6 +36,7 @@ export const PERMISSIONS = [
   "campaigns.manage",
   "campaigns.operate",
   "inventory.view",
+  "inventory.create",
   "inventory.manage",
   "reservations.view",
   "reservations.view.own",
@@ -128,6 +129,7 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     "proposals.reject",
     "campaigns.view",
     "inventory.view",
+    "inventory.create",
     "reservations.view",
     "reservations.manage",
     "reports.view"
@@ -239,6 +241,7 @@ const permissionLabels: Record<Permission, Omit<PermissionDefinition, "id">> = {
   "campaigns.manage": { label: "Administrare campanii", category: "Campanii", description: "Poate crea si modifica campanii.", mutating: true },
   "campaigns.operate": { label: "Executie campanii", category: "Campanii", description: "Poate opera workflow-uri asociate campaniilor.", mutating: true },
   "inventory.view": { label: "Vizualizare inventar", category: "Inventar", description: "Poate consulta inventarul si disponibilitatea.", mutating: false },
+  "inventory.create": { label: "Creare locatii", category: "Inventar", description: "Poate adauga locatii noi fara a modifica inventarul existent.", mutating: true },
   "inventory.manage": { label: "Administrare inventar", category: "Inventar", description: "Poate modifica locatii si blocaje comerciale.", mutating: true },
   "reservations.view": { label: "Vizualizare rezervari", category: "Rezervari", description: "Poate consulta toate rezervarile autorizate.", mutating: false },
   "reservations.view.own": { label: "Vizualizare rezervari proprii", category: "Rezervari", description: "Poate consulta rezervarile proprii.", mutating: false },

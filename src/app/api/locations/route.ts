@@ -41,14 +41,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const [{ requirePermission }, { createLocation }, { prisma }, { recordAudit }, { serializeLocation }] = await Promise.all([
+  const [{ requireAnyPermission }, { createLocation }, { prisma }, { recordAudit }, { serializeLocation }] = await Promise.all([
     import("@/lib/auth"),
     import("@/lib/location-mutations"),
     import("@/lib/prisma"),
     import("@/lib/audit"),
     import("@/lib/locations")
   ]);
-  const { session, response } = await requirePermission(request, "inventory.manage");
+  const { session, response } = await requireAnyPermission(request, ["inventory.create", "inventory.manage"]);
   if (response || !session) return response;
 
   const body = await request.json();

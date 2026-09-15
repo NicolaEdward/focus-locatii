@@ -60,6 +60,7 @@ export function AdminDashboard({
   const [feedback, setFeedback] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [loadingEditor, setLoadingEditor] = useState(false);
   const canManageLocations = hasPermission(session.role, "inventory.manage");
+  const canCreateLocations = hasAnyPermission(session.role, ["inventory.create", "inventory.manage"]);
   const canManageReservations = hasAnyPermission(session.role, ["reservations.manage", "reservations.manage.own"]);
 
   useEffect(() => {
@@ -106,7 +107,7 @@ export function AdminDashboard({
             <p className="mt-2 max-w-2xl text-sm text-slate-400">Gestioneaza inventarul, ocuparea si detaliile locatiilor. Selectia comerciala si exportul de disponibilitate se fac din Selector oferta.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {canManageLocations ? <button className="focus-button" type="button" onClick={() => setEditing(null)}><Plus size={18} /> Adauga locatie</button> : null}
+            {canCreateLocations ? <button className="focus-button" type="button" onClick={() => setEditing(null)}><Plus size={18} /> Adauga locatie</button> : null}
             <Link className="focus-button secondary" href="/admin/selectie-locatii" prefetch={false}><ListChecks size={18} /> Deschide Selector oferta</Link>
             {canManageLocations ? <LocationToolsMenu /> : null}
           </div>
@@ -148,7 +149,7 @@ export function AdminDashboard({
       </section>
 
       {loadingEditor ? <OverlayLoading label="Se incarca detaliile complete..." /> : null}
-      {canManageLocations && editing !== undefined ? (
+      {editing !== undefined && (editing === null ? canCreateLocations : canManageLocations) ? (
         <LocationEditor
           location={editing}
           categories={categories}

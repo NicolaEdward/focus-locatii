@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const mysql = require('mysql2/promise');
 const { identity } = require('./database-backup.cjs');
+const { resolvePortablePlan } = require('./remediation-collation-plan.cjs');
 const manifestPath = path.join(__dirname, 'remediation-schema.json');
 const hash = (x) => crypto.createHash('sha256').update(x).digest('hex');
 const quote = (x) => { if (!/^portfolio_[a-z0-9_]+$/.test(x)) throw new Error('SCHEMA_IDENTIFIER_REJECTED'); return '`' + x + '`'; };
@@ -86,19 +87,29 @@ async function run({ generate = false, apply = false } = {}) {
     await db.query('SET SESSION default_storage_engine = InnoDB');
     const [[lock]] = await db.execute("SELECT GET_LOCK('focus-remediation-schema-v1',10) locked"); if (Number(lock.locked) !== 1) throw new Error('SCHEMA_LOCK_BUSY'); locked = true;
     const before = await counts(db), initial = {};
+    async function readParents() {
+      const names = [...new Set(Object.values(manifest.tables || {}).flatMap(spec => spec.foreignKeys.map(fk => fk.targetTable)))].filter(name => !validated.tables.includes(name)).sort();
+      const parents = {};
+      for (const name of names) parents[name] = await shape(db, source.name, name);
+      return parents;
+    }
+    const parents = generate ? {} : await readParents();
+    const plan = generate ? { tables: manifest.tables || {}, parsed: validated.parsed, adaptations: [], resolvedPlanSha256: null, parentMetadataSha256: null } : resolvePortablePlan({ manifest, parsed: validated.parsed, parentShapes: parents, databaseFingerprint: source.fingerprint });
+    const expectedTables = plan.tables;
+    if (apply && !generate && process.env.REMEDIATION_RESOLVED_PLAN_SHA256 !== plan.resolvedPlanSha256) throw new Error('EXACT_RESOLVED_SCHEMA_PLAN_REQUIRED');
     for (const table of validated.tables) {
       const existing = await shape(db, source.name, table); initial[table] = existing;
       if (!generate && existing) {
-        const expected = manifest.tables[table];
+        const expected = expectedTables[table];
         // A previous DDL attempt may have created a table before later FKs.
         if (!expected || stable(existing.storage) !== stable(expected.storage) || stable(existing.columns) !== stable(expected.columns) || existing.indexes.some((index) => !expected.indexes.some((v) => stable(v) === stable(index))) || existing.foreignKeys.some((fk) => !expected.foreignKeys.some((v) => stable(v) === stable(fk)))) throw new Error('EXISTING_ADDITIVE_TABLE_SCHEMA_MISMATCH');
       }
     }
     // Reject incompatible historical parent definitions before the first DDL.
     if (!generate) for (const table of validated.tables) {
-      const spec = manifest.tables[table];
+      const spec = expectedTables[table];
       for (const fk of spec.foreignKeys) {
-        const parent = manifest.tables[fk.targetTable] || await shape(db, source.name, fk.targetTable);
+        const parent = expectedTables[fk.targetTable] || parents[fk.targetTable];
         const from = spec.columns.find((c) => c.name === fk.columnName), to = parent?.columns.find((c) => c.name === fk.targetColumn);
         if (!parent || parent.storage?.engine !== 'InnoDB' || !from || !to || from.type !== to.type || from.charsetName !== to.charsetName || from.collationName !== to.collationName || !parent.indexes.some((i) => i.columnName === fk.targetColumn && Number(i.sequence) === 1)) {
           console.log(JSON.stringify({ event:'remediation_foreign_key_preflight', childTable:table, childColumn:fk.columnName, parentTable:fk.targetTable, parentColumn:fk.targetColumn, expected:from ? {type:from.type,charset:from.charsetName,collation:from.collationName}:null, actual:to ? {type:to.type,charset:to.charsetName,collation:to.collationName,engine:parent.storage?.engine}:null }));
@@ -106,7 +117,11 @@ async function run({ generate = false, apply = false } = {}) {
         }
       }
     }
-    if (apply || generate) for (const s of validated.parsed) {
+    if (apply && !generate) {
+      const refreshed = resolvePortablePlan({ manifest, parsed: validated.parsed, parentShapes: await readParents(), databaseFingerprint: source.fingerprint });
+      if (refreshed.resolvedPlanSha256 !== plan.resolvedPlanSha256) throw new Error('FOREIGN_KEY_PARENT_CHANGED_AFTER_PLAN');
+    }
+    if (apply || generate) for (const s of plan.parsed) {
       if (s.kind === 'create') { if (!initial[s.table]) await db.query(s.sql); }
       else {
         const existing = await shape(db, source.name, s.table);
@@ -117,14 +132,14 @@ async function run({ generate = false, apply = false } = {}) {
     for (const table of validated.tables) {
       tables[table] = await shape(db, source.name, table);
       if (!tables[table]) pending.push(table);
-      else if (!generate && stable(tables[table]) !== stable(manifest.tables[table])) throw new Error('FINAL_ADDITIVE_SCHEMA_MISMATCH');
+      else if (!generate && stable(tables[table]) !== stable(expectedTables[table])) throw new Error('FINAL_ADDITIVE_SCHEMA_MISMATCH');
     }
     const after = await counts(db);
     // Counts can legitimately change while users work. SQL restrictions are the
     // no-DML guarantee; drift is evidence to review, never a false rollback.
     const concurrentCountDrift = stable(before) !== stable(after);
     if (generate) fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, migrations: files.map(({ path,sha256 }) => ({path,sha256})), tables }, null, 2) + '\n');
-    return { event: 'remediation_schema', ok: true, applied: Boolean(apply || generate), databaseFingerprint: source.fingerprint, additiveTableCount: validated.tables.length, pending, before, after, concurrentCountDrift, schemaSha256: hash(stable(tables)) };
+    return { event: 'remediation_schema', ok: true, applied: Boolean(apply || generate), databaseFingerprint: source.fingerprint, additiveTableCount: validated.tables.length, pending, before, after, concurrentCountDrift, schemaSha256: hash(stable(tables)), adaptations: plan.adaptations, resolvedPlanSha256: plan.resolvedPlanSha256, parentMetadataSha256: plan.parentMetadataSha256 };
   } finally { if (locked) await db.query("SELECT RELEASE_LOCK('focus-remediation-schema-v1')").catch(() => {}); await db.end(); }
 }
 if (require.main === module) run({ generate: process.argv.includes('--generate-manifest'), apply: process.argv.includes('--apply') }).then((r) => console.log(JSON.stringify(r))).catch((e) => { console.error(JSON.stringify({ event: 'remediation_schema', ok: false, code: /^[A-Z][A-Z0-9_]+$/.test(e.message || '') ? e.message : /^ER_[A-Z_]+$/.test(e.code || '') ? e.code : 'SCHEMA_CHECK_FAILED' })); process.exitCode = 1; });

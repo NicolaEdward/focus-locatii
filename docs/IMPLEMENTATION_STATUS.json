@@ -10,13 +10,14 @@
       "finding_ids": [],
       "depends_on": [],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-remediation-schema.cjs",
         "scripts/test-remediation-history.ts"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T01",
@@ -29,14 +30,15 @@
         "T00"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-reservation-remediation.cjs",
         "scripts/test-location-private-read.ts",
         "scripts/test-client-atomic-mutations.ts"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T02",
@@ -50,14 +52,15 @@
         "T00"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-reservation-remediation.cjs",
         "scripts/test-reservation-integrity.cjs",
         "scripts/test-dooh-static-capacity.ts"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T03",
@@ -73,13 +76,14 @@
         "T02"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-reservation-remediation.cjs",
         "scripts/test-campaign-commercial-summary.ts"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T04",
@@ -95,13 +99,14 @@
         "T00"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-auth-remediation.ts",
         "scripts/test-auth-hardening.ts"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T05",
@@ -117,7 +122,7 @@
         "T00"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-media-boundaries.ts",
         "scripts/test-data-import-hardening.ts",
@@ -125,7 +130,8 @@
         "scripts/test-database-connection-policy.ts"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T06",
@@ -140,13 +146,14 @@
         "T00"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-finance-remediation.ts",
         "scripts/test-financial-bank-reconciliation.ts"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T07",
@@ -162,14 +169,15 @@
         "T06"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-finance-remediation.ts",
         "scripts/test-crm-command-outcomes.ts",
         "scripts/test-commercial-workbench.ts"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T08",
@@ -183,14 +191,15 @@
         "T06"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-finance-plan-and-alerts.ts",
         "scripts/test-notifications.cjs",
         "scripts/test-reservation-remediation.cjs"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T09",
@@ -203,12 +212,13 @@
         "T00"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-data-import-hardening.ts"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T10",
@@ -227,13 +237,14 @@
         "T00"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/release/smoke-ui-regressions.cjs",
         "scripts/release/capture-role-pages.cjs"
       ],
       "activation_gates": [],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "available"
     },
     {
       "id": "T11",
@@ -248,7 +259,7 @@
         "T00"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-transactional-audit.ts",
         "scripts/test-operations-controls.ts",
@@ -261,7 +272,8 @@
         "Register a real production backup and isolated restore receipt; synthetic proofs do not certify production recovery.",
         "Verify external monitoring delivery with the infrastructure provider."
       ],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "requires_owner_configuration_or_external_evidence"
     },
     {
       "id": "T12",
@@ -277,7 +289,7 @@
         "T06"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-finance-plan-and-alerts.ts",
         "scripts/test-commercial-workbench.ts"
@@ -286,7 +298,8 @@
         "Choose and authorize the fiscal issuer/ERP before connecting real issuance.",
         "Approve financial/commercial policies and manually reconcile historical inconsistencies."
       ],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "requires_owner_configuration_or_external_evidence"
     },
     {
       "id": "T13",
@@ -301,7 +314,7 @@
         "T03"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-commercial-workbench.ts",
         "scripts/test-dooh-static-capacity.ts"
@@ -310,7 +323,8 @@
         "Verify actual digital inventory and playback sources.",
         "An ad-server connector needs its real API contract and credentials; current playback evidence is explicitly human-verified."
       ],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "requires_owner_configuration_or_external_evidence"
     },
     {
       "id": "T14",
@@ -335,7 +349,7 @@
         "T12"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/test-commercial-workbench.ts",
         "scripts/test-crm-command-outcomes.ts"
@@ -344,7 +358,8 @@
         "Approve model/provider, region, retention, budget, scopes and contact channels before enabling optional adapters.",
         "Generation and outbound are disabled by default; no actual customer contact or provider spend has occurred."
       ],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "requires_owner_configuration_or_external_evidence"
     },
     {
       "id": "T15",
@@ -361,7 +376,7 @@
         "T14"
       ],
       "code_status": "implemented",
-      "release_status": "awaiting_final_release_verification",
+      "release_status": "published_verified",
       "verification_scripts": [
         "scripts/evaluate-sales-pilot.ts",
         "scripts/test-commercial-workbench.ts"
@@ -370,13 +385,14 @@
         "Preregister cohort/thresholds and collect real observations over the commercial maturity period.",
         "Seller replacement is NOT_ESTABLISHED; synthetic evaluator fixtures are not performance evidence."
       ],
-      "historical_data_policy": "no_automatic_corrections"
+      "historical_data_policy": "no_automatic_corrections",
+      "activation_status": "framework_available_real_pilot_not_run"
     }
   ],
   "new_findings_addressed": [
     {
       "id": "SEC-INFRA-001",
-      "status": "confirmed_fixed_in_code_pending_production_verification",
+      "status": "confirmed_fixed_and_production_verified",
       "description": "Remote database certificate verification was disabled. All remote application and release connections now validate the provider CA supplied by the owner.",
       "test": "scripts/test-database-connection-policy.ts"
     },
@@ -397,17 +413,60 @@
     "consolidated_regression": "artifacts/remediation/results.json",
     "interactive_ui": "artifacts/ui-final-interactive/manifest.json",
     "new_routes_visual": "artifacts/ui-final-new-routes/manifest.json",
-    "existing_routes_visual": "/workspace/work/implementation/ui/artifacts/ui-capture-full/manifest.json",
     "unique_visual_combinations": 292,
     "interactive_checks_passed": 50,
     "synthetic_backup_fidelity_rows": 17006,
     "dependency_advisories": 0,
-    "final_release": "artifacts/release/final-evidence.json"
+    "final_release": "artifacts/release/final-evidence.json",
+    "ci": {
+      "url": "https://github.com/NicolaEdward/focus-locatii/actions/runs/43448296005",
+      "run_id": 43448296005,
+      "status": "success",
+      "source_commit": "d231c2e3804b8d7e93ba9dc1297f4c24346d4fdb",
+      "captures": 292,
+      "interactive_checks": 50,
+      "capture_artifact": "https://github.com/NicolaEdward/focus-locatii/actions/runs/43448296005/artifacts/14049064645",
+      "interactive_artifact": "https://github.com/NicolaEdward/focus-locatii/actions/runs/43448296005/artifacts/14048844869"
+    },
+    "consolidated_suites_passed": 48,
+    "production_http": "artifacts/release/published-http-checks.json"
   },
   "production_mutation_boundaries": [
     "Additive reviewed CREATE TABLE/new-table FK migrations only.",
     "No historical client/reservation/financial fixes.",
     "No customer communications, real AI calls, fiscal issuance or bank operations.",
     "No claim that production backup/restore or seller replacement is proven."
-  ]
+  ],
+  "release": {
+    "state": "published_and_verified",
+    "production_url": "https://locatii.focusmedia.ro",
+    "production_deployment_id": "dpl_CMRbHWcS1eRxcgUqMc3LWVu6LZn2",
+    "production_deployment_url": "https://focus-locatii-16hsuyq8g-edward-s-projects23.vercel.app",
+    "source_commit": "ff5c052cc395fdf428b758dc2e90d53ed9a0e580",
+    "source_main_merge": "136d073022e75c36d44fba7c8060defc911a84d8",
+    "pull_request": "https://github.com/NicolaEdward/focus-locatii/pull/2",
+    "ci": {
+      "url": "https://github.com/NicolaEdward/focus-locatii/actions/runs/43448296005",
+      "run_id": 43448296005,
+      "status": "success",
+      "source_commit": "d231c2e3804b8d7e93ba9dc1297f4c24346d4fdb",
+      "captures": 292,
+      "interactive_checks": 50,
+      "capture_artifact": "https://github.com/NicolaEdward/focus-locatii/actions/runs/43448296005/artifacts/14049064645",
+      "interactive_artifact": "https://github.com/NicolaEdward/focus-locatii/actions/runs/43448296005/artifacts/14048844869"
+    }
+  },
+  "verification_limits": [
+    "No authenticated production reservation/payment write was performed.",
+    "The original connection closure was not reproduced; safe read retry and unknown-write outcome handling are verified.",
+    "Synthetic backup/restore proofs do not certify provider-native production recovery or off-site retention.",
+    "Provider/ERP/ad-server activation and a real mature sales pilot remain controlled business steps.",
+    "Visual checks are targeted measurements, not WCAG certification."
+  ],
+  "historical_review_required": {
+    "read_only_inventory_completed": true,
+    "automatic_corrections": false,
+    "private_artifact": "artifacts/release/production-history-inventory.json",
+    "interpretation": "Aggregate exceptions require source-document and business review; metrics do not establish fraud or losses."
+  }
 }

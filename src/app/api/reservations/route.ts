@@ -7,7 +7,8 @@ import {
   listReservationWorkspace
 } from "@/lib/reservations";
 import { recordAudit } from "@/lib/audit";
-import { observeRoute, setObservabilityRole } from "@/lib/observability";
+import { emitStructuredLog, observeRoute, setObservabilityRole } from "@/lib/observability";
+import { isClosedDatabaseConnection } from "@/lib/database-read-retry";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -69,6 +70,16 @@ export async function POST(request: NextRequest) {
         { status: 201, headers: noStoreHeaders }
       );
     } catch (error) {
+      if (isClosedDatabaseConnection(error)) {
+        emitStructuredLog("error", "reservation_database_connection_closed", { errorCode: "P1017" });
+        return NextResponse.json(
+          {
+            error: "Conexiunea cu baza de date a fost intrerupta. Verifica lista rezervarilor inainte de a incerca din nou.",
+            code: "RESERVATION_DATABASE_CONNECTION_CLOSED"
+          },
+          { status: 503, headers: noStoreHeaders }
+        );
+      }
       return NextResponse.json(
         { error: error instanceof Error ? error.message : "Rezervarea nu a putut fi salvata." },
         { status: 400, headers: noStoreHeaders }

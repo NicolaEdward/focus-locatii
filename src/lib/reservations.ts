@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { retryClosedConnectionRead } from "@/lib/database-read-retry";
 import { loadAvailabilityDecisions } from "@/lib/availability-service";
 import {
   effectiveBlockingReservationWhere,
@@ -1229,10 +1230,15 @@ async function loadAndValidateRentalContext(
   campaignId: string,
   db: ReservationDbClient = prisma
 ) {
-  const [clientAccount, campaign] = await Promise.all([
+  const readContext = () => Promise.all([
     db.clientAccount.findUnique({ where: { id: clientId } }),
     db.campaign.findUnique({ where: { id: campaignId } })
   ]);
+  // A transaction that loses its connection must fail as a unit. Only retry
+  // the standalone validation reads used before creating the reservation.
+  const [clientAccount, campaign] = await (db === prisma
+    ? retryClosedConnectionRead(readContext)
+    : readContext());
   if (!clientAccount || ["archived", "merged"].includes(clientAccount.status)) {
     throw new Error("Clientul selectat nu exista sau este arhivat.");
   }

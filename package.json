@@ -103,6 +103,7 @@
     "audit:smartbill-storno-preview": "node scripts/audit-smartbill-storno-preview.cjs",
     "measure:receivables-workspace": "tsx scripts/measure-receivables-workspace.ts",
     "test:smartbill-import": "node scripts/test-smartbill-import.cjs",
+    "test:smartbill-reimport-ledger": "tsx scripts/test-smartbill-reimport-ledger.ts",
     "test:financial-reconciliation": "tsx scripts/test-financial-bank-reconciliation.ts",
     "maintenance:classify-bank-transactions": "tsx scripts/reclassify-bank-transactions.ts",
     "maintenance:classify-madalin-bank-activity": "tsx scripts/reclassify-madalin-bank-activity.ts",

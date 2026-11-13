@@ -38,6 +38,8 @@ const pages = [
   { name: "sales-director-dashboard", route: "/admin/dashboard", role: "SALES_DIRECTOR", expected: "Agenda mea" },
   { name: "sales-agent-dashboard", route: "/admin/dashboard", role: "SALES_AGENT", expected: "Agenda mea" },
   { name: "finance-invoices", route: "/admin/financiar/incasari", role: "FINANCE_OPERATOR", expected: "Facturi clien" },
+  { name: "finance-invoices-to-issue", route: "/admin/financiar/facturi-de-emis", role: "FINANCE_OPERATOR", expected: "Facturi de emis" },
+  { name: "finance-campaign-allocations", route: "/admin/financiar/alocari", role: "FINANCE_OPERATOR", expected: "Alocări de facturi" },
   { name: "finance-reconciliation", route: "/admin/financiar/reconciliere", role: "FINANCE_OPERATOR", expected: "Import și reconciliere" },
   { name: "finance-saga-integration", route: "/admin/integrari/saga", role: "FINANCE_OPERATOR", expected: "SAGA" },
   { name: "field-operational", route: "/admin/operational", role: "FIELD_OPERATOR", expected: "Munca mea" },
@@ -49,6 +51,9 @@ const pages = [
   { name: "sales-campaigns", route: "/admin/campanii", role: "SALES_AGENT", expected: "Campanii" },
   { name: "sales-reservations", route: "/admin/locatii", role: "SALES_AGENT", expected: "Loca" },
   { name: "crm", route: "/admin/crm", role: "SALES_AGENT", expected: "CRM" },
+  { name: "commercial-quotes", route: "/admin/commercial-quotes", role: "COO", expected: "Oferte comerciale și aprobări" },
+  { name: "dooh-capacity", route: "/admin/dooh", role: "COO", expected: "Capacitate DOOH" },
+  { name: "ai-copilot-pilot", route: "/admin/ai", role: "COO", expected: "Copilot și pilot AI" },
   { name: "operational", route: "/admin/operational", role: "COO", expected: "Workspace operational" },
   { name: "suppliers", route: "/admin/furnizori", role: "COO", expected: "Furnizori" },
   { name: "finance-suppliers", route: "/admin/furnizori", role: "FINANCE_OPERATOR", expected: "Furnizori" },
@@ -57,6 +62,7 @@ const pages = [
   { name: "users", route: "/admin/utilizatori", role: "COO", expected: "Utilizatori" },
   { name: "ownership-integrity", route: "/admin/integritate-date", role: "COO", expected: "Integritate ownership" },
   { name: "account-security", route: "/admin/securitate", role: "COO", expected: "Securitate si sesiuni" },
+  { name: "operations-control", route: "/admin/operations-control", role: "COO", expected: "Control operațional" },
   { name: "public-locations", route: "/locatii", expected: "loca" }
 ];
 

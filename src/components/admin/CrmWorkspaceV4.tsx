@@ -525,7 +525,13 @@ function isWorkspaceData(value: unknown): value is WorkspaceData {
     && Array.isArray(payload.records.actions) && Array.isArray(payload.records.prospects) && Array.isArray(payload.records.opportunities)
     && [summary.activeProspects, summary.activeOpportunities, summary.overdue, summary.dueToday, summary.missingAction, summary.wonThisMonth].every((item) => Number.isFinite(item))
     && summary.forecastByLevel && typeof summary.forecastByLevel === "object"
+    && [summary.forecastByLevel.pipeline, summary.forecastByLevel.possible, summary.forecastByLevel.commit].every(isCurrencyMap)
     && [payload.pagination.page, payload.pagination.limit, payload.pagination.total, payload.pagination.pages].every((item) => Number.isFinite(item)));
+}
+
+function isCurrencyMap(value: unknown): value is Record<string, number> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && Object.values(value).every((amount) => typeof amount === "number" && Number.isFinite(amount)));
 }
 
 function readInitialUrlState() {

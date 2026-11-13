@@ -67,7 +67,7 @@ function installCrmFixture(mode) {
     const many = window.__crmAuditMode === "many";
     const empty = window.__crmAuditMode === "empty";
     const prospects = many ? Array.from({ length: 24 }, (_, index) => ({ kind: "prospect", id: `ui-synthetic-${index}`, companyId: `company-${index}`, companyName: `Firmă sintetică ${index} ` + "Nume foarte lung pentru verificarea reflow ".repeat(8), industry: "Descriere sintetică ".repeat(40), status: "new", statusLabel: "Nou", priority: "normal", contactState: "new", version: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01", nextAction: null })) : [];
-    return { view, perspective: "team", records: { actions: [], prospects, opportunities: [] }, pagination: { page: 1, limit: 24, total: prospects.length, pages: 1 }, summary: { activeProspects: prospects.length, activeOpportunities: empty ? 0 : 1, overdue: 0, dueToday: 0, missingAction: 0, wonThisMonth: 0, forecastByLevel: { pipeline: {}, possible: empty ? {} : { EUR: 4000 }, commit: {} } } };
+    return { view, perspective: "team", records: { actions: [], prospects, opportunities: [] }, pagination: { page: 1, limit: 24, total: prospects.length, pages: 1 }, summary: { activeProspects: prospects.length, activeOpportunities: empty ? 0 : 1, overdue: 0, dueToday: 0, missingAction: 0, wonThisMonth: 0, forecastByLevel: window.__crmAuditMode === "invalid" ? {} : { pipeline: {}, possible: empty ? {} : { EUR: 4000 }, commit: {} } } };
   };
   window.fetch = function(input, options) {
     const requestUrl = typeof input === "string" ? input : input.url;
@@ -143,12 +143,12 @@ async function workspaceChecks() {
       } finally { client.close(); }
     }
     for (const width of [320, 390, 1440]) {
-      for (const mode of ["loading", "error", "empty", "many"]) {
+      for (const mode of ["loading", "error", "invalid", "empty", "many"]) {
         const client = await openPage(mode === "many" ? "/admin/crm?view=prospecting" : "/admin/crm", width, theme, mode);
         try {
-          await waitForExpression(client, `!!document.querySelector('[data-crm-snapshot=${mode === "many" || mode === "empty" ? "ready" : mode}]')`);
+          await waitForExpression(client, `!!document.querySelector('[data-crm-snapshot=${mode === "many" || mode === "empty" ? "ready" : mode === "invalid" ? "error" : mode}]')`);
           const values = await evaluate(client, "Array.from(document.querySelectorAll('[data-crm-metric-value]')).map(e=>e.textContent.trim())");
-          if (mode === "loading" || mode === "error") assert.ok(values.every((value) => value === "—"), `${mode}: unknown metrics must not show zero`);
+          if (mode === "loading" || mode === "error" || mode === "invalid") assert.ok(values.every((value) => value === "—"), `${mode}: unknown metrics must not show zero`);
           if (mode === "empty") assert.ok(values.every((value) => value === "0"), "Valid zero must remain distinguishable.");
           await audit(client, `crm/${theme}/${width}/${mode}`);
           await screenshot(client, `crm-${theme}-${width}-${mode}`);
@@ -156,7 +156,7 @@ async function workspaceChecks() {
             await evaluate(client, "window.__resolveCrmAudit()");
             await waitForExpression(client, "!!document.querySelector('[data-crm-snapshot=ready]')");
           }
-          if (mode === "error") {
+          if (mode === "error" || mode === "invalid") {
             await evaluate(client, "window.__crmAuditMode='ready';Array.from(document.querySelectorAll('button')).find(e=>e.textContent==='Reîncearcă').click()");
             await waitForExpression(client, "!!document.querySelector('[data-crm-snapshot=ready]')");
           }
@@ -234,7 +234,7 @@ async function main() {
   await menuChecks();
   await workspaceChecks();
   await sharedModalChecks();
-  fs.writeFileSync(path.join(output, "manifest.json"), JSON.stringify({ passed: true, synthetic: true, baseUrl: base, browserBypassesCspForDev: process.env.UI_TEST_BROWSER_BYPASS_CSP === "true", coverage: ["menu-hit-targets", "structural-reflow", "targeted-text-contrast", "modal-name-focus-stack-busy", "crm-loading-error-empty-long-data"], fullWcagCertification: false, checks: evidence }, null, 2));
+  fs.writeFileSync(path.join(output, "manifest.json"), JSON.stringify({ passed: true, synthetic: true, baseUrl: base, browserBypassesCspForDev: process.env.UI_TEST_BROWSER_BYPASS_CSP === "true", coverage: ["menu-hit-targets", "structural-reflow", "targeted-text-contrast", "modal-name-focus-stack-busy", "crm-loading-error-malformed-empty-long-data"], fullWcagCertification: false, checks: evidence }, null, 2));
   console.log(JSON.stringify({ passed: true, checks: evidence.length, output }));
 }
 

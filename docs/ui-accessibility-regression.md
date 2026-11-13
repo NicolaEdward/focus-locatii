@@ -36,7 +36,7 @@ not submit a business mutation.
 
 Coverage includes all admin disclosure groups at 320, 390, 768, 1024, 1279, 1280,
 1366 and 1440 pixels; structural reflow at 320/390/768/1366/1440; CRM snapshots
-at loading/error/valid zero/24 long records, in both themes; measured semantic
+at loading/error/malformed success/valid zero/24 long records, in both themes; measured semantic
 contrast; dialog naming, Tab/Shift+Tab, opener restoration, nested dialogs and a
 busy child. The nested fixture mounts the actual shared component in a temporary
 local server, with no application test route shipped to production. A deliberately

@@ -215,7 +215,8 @@
     "simulation:lifecycle": "node scripts/simulation/browser-lifecycle.cjs",
     "test:operational-patch-concurrency": "tsx scripts/test-operational-patch-concurrency.ts",
     "test:invoice-document-upload": "node scripts/test-invoice-document-upload.cjs",
-    "test:quote-owned-hold-revision": "tsx scripts/test-quote-owned-hold-revision.ts"
+    "test:quote-owned-hold-revision": "tsx scripts/test-quote-owned-hold-revision.ts",
+    "test:private-read-cache": "node scripts/test-private-read-cache.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

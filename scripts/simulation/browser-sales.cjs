@@ -130,6 +130,9 @@ async function scenario(id, fn) {
 }
 function required(key) { if (!input[key]) { const error = new Error(`Fixture browser input '${key}' is missing; scenario cannot be honestly exercised.`); error.unsupported = true; throw error; } return input[key]; }
 async function responseAfter(page, match, command) { const [response] = await Promise.all([page.waitForResponse(response => response.url().includes('/api/') && match(response), { timeout: 30000 }), command()]); const payload = await response.json().catch(() => null); if (response.status() >= 400) throw new Error(`UI command failed (${response.status()}): ${payload?.error || new URL(response.url()).pathname}`); await settle(page); return payload; }
+// Session validation binds browser cookies to the browser user agent. Keep
+// supporting read-only preconditions in that same authenticated context.
+async function browserGet(page, url) { return page.evaluate(async address => { const response = await fetch(address, { cache: 'no-store' }); return { status: response.status, payload: await response.json() }; }, url); }
 async function waitInventory(page) { await page.getByText('Se caută în întreg inventarul…', { exact: true }).waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {}); await page.waitForTimeout(450); }
 async function waitAvailability(page) { await page.getByText(/Se verifică disponibilitatea|Verificam disponibilitatea|Verificare disponibilitate/).first().waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {}); await page.waitForTimeout(500); }
 
@@ -242,9 +245,9 @@ async function revisionRoundTrip() {
   const { page } = await authenticated('seller');
   const heldReservationId = report.observed_created.reservationIds?.[0] || input.revisionReservationId;
   if (heldReservationId) {
-    const verified = await page.request.get(base + '/api/reservations/' + encodeURIComponent(heldReservationId));
-    assert.equal(verified.status(), 200, 'The authenticated owner cannot read the existing HOLD used by this regression.');
-    const body = await verified.json(); const held = body.reservation;
+    const verified = await browserGet(page, base + '/api/reservations/' + encodeURIComponent(heldReservationId));
+    assert.equal(verified.status, 200, 'The authenticated owner cannot read the existing HOLD used by this regression.');
+    const body = verified.payload; const held = body.reservation;
     if (held?.status !== 'HOLD' || !held.holdExpiresAt || Date.parse(held.holdExpiresAt) <= Date.now()) {
       const error = new Error('REGRESSION_PRECONDITION_REQUIRES_ACTIVE_OWN_HOLD_NOT_BOOKED_OR_EXPIRED'); error.unsupported = true; throw error;
     }
@@ -282,9 +285,9 @@ async function revisionRoundTrip() {
     const revision = revised?.result?.revision;
     report.revision_result = { quoteId, latestRevision: revised?.result?.quote?.latestRevision, quoteRevisionId: revision?.id, periodStart: revision?.payload?.periodStart, periodEnd: revision?.payload?.periodEnd, locationIds: revision?.payload?.lines?.map(line => line.locationId), ownerAccountAlias: 'sellerA', negotiatedMonthlyRate: changed };
     if (heldReservationId) {
-      const rentalsResponse = await page.request.get(base + '/api/reservations?view=workspace');
-      assert.equal(rentalsResponse.status(), 200);
-      const rentals = await rentalsResponse.json();
+      const rentalsResponse = await browserGet(page, base + '/api/reservations?view=workspace');
+      assert.equal(rentalsResponse.status, 200);
+      const rentals = rentalsResponse.payload;
       const sameCampaign = (rentals.reservations || []).filter(row => row.campaignId === (report.observed_created.campaignId || input.revisionCampaignId));
       assert.equal(sameCampaign.length, 1, 'A map-only proposal revision changed the number of this campaign\'s rentals.');
       assert.equal(sameCampaign[0].id, heldReservationId); assert.equal(sameCampaign[0].status, 'HOLD');

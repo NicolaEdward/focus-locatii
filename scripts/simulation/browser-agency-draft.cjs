@@ -105,7 +105,7 @@ async function agencyDraft() {
   assert.equal(printed.status(), 200);
   const paper = page.getByRole("article", { name: "Oferta comercială pentru tipărire", exact: true });
   const printText = await paper.innerText();
-  assert.ok(printText.includes("Client contractual / facturat") && printText.includes(state.immutablePayload.clientName));
+  assert.ok(/client contractual \/ facturat/i.test(printText) && printText.includes(state.immutablePayload.clientName));
   assert.ok(printText.includes("Agenție intermediară: " + state.immutablePayload.campaignParties.agency.name));
   assert.ok(printText.includes("Beneficiar final: " + state.immutablePayload.campaignParties.endClient.name));
   assert.ok(printText.includes(state.payloadHash) && printText.includes("Ciornă — necesită validare"));

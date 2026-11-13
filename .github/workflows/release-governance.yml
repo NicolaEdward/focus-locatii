@@ -128,6 +128,7 @@ jobs:
       - name: Practical OOH company regressions
         run: |
           pnpm run test:simulation-isolation
+          pnpm run test:private-read-cache
           pnpm run test:simulation-fixture-guard
           pnpm run test:commercial-options
           pnpm run test:quote-owned-hold-revision

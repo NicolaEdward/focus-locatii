@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const noStoreHeaders = {
-  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"
+  "Cache-Control": "private, no-store, no-cache, must-revalidate, proxy-revalidate",
+  Vary: "Cookie"
 };
 
 const availabilitySchema = z.object({
@@ -31,7 +32,10 @@ export async function POST(request: NextRequest) {
     budgetKey: "selector_availability_api"
   }, async () => {
     const { session, response } = await requirePermission(request, "inventory.view");
-    if (response || !session) return response;
+    if (response || !session) {
+      if (response) for (const [key, value] of Object.entries(noStoreHeaders)) response.headers.set(key, value);
+      return response;
+    }
     setObservabilityRole(session.role);
 
     try {

@@ -11,7 +11,10 @@ const headers = { "Cache-Control": "private, no-store", Vary: "Cookie" };
 
 export async function GET(request: NextRequest, context: Context) {
   const { session, response } = await requireAnyPermission(request, ["finance.view"]);
-  if (response || !session) return response;
+  if (response || !session) {
+    if (response) for (const [key, value] of Object.entries(headers)) response.headers.set(key, value);
+    return response;
+  }
   try {
     const { id } = await context.params;
     const invoiceAccess = await resolveDocumentAccess({ financialReceivableId: id });

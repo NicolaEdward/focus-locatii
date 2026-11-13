@@ -125,6 +125,12 @@ async function menuChecks() {
         await press(client, "Escape");
         await waitForExpression(client, "document.querySelector('[data-admin-mobile-menu-trigger]').getAttribute('aria-expanded')==='false' && !document.querySelector('nav.admin-nav').getClientRects().length");
         assert.equal(await evaluate(client, "document.activeElement===document.querySelector('[data-admin-mobile-menu-trigger]')"), true, "Closing mobile navigation must restore the visible Meniu trigger.");
+        await press(client, "Enter");
+        await waitForExpression(client, "document.querySelector('[data-admin-mobile-menu-trigger]').getAttribute('aria-expanded')==='true'");
+        await evaluate(client, "document.querySelector('nav.admin-nav a[href=\"/admin/onboarding\"]').focus()");
+        await press(client, "Enter");
+        await waitForExpression(client, "location.pathname==='/admin/onboarding' && document.querySelector('[data-admin-mobile-menu-trigger]')?.getAttribute('aria-expanded')==='false'");
+        assert.equal(await evaluate(client, "!!document.querySelector('nav.admin-nav').getClientRects().length"), false, "Choosing a destination closes the mobile menu on the new page.");
       }
       evidence.push({ context: `menus/${width}`, passed: true });
     } finally { client.close(); }

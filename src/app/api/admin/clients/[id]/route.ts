@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
-import { recordAudit } from "@/lib/audit";
-import { normalizeClientName } from "@/lib/clients";
-import { prisma } from "@/lib/prisma";
-import { assertClientCanBeArchived } from "@/lib/ownership-integrity";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
+import { normalizeClientName, withAuthorizedClientMutation, assertClientEditable, ClientMutationError } from "@/lib/clients";
 import { resolveRequiredSalesOwner } from "@/lib/seller-users";
 import { getClientOverview } from "@/lib/client-campaign-workspaces";
 
@@ -50,67 +48,72 @@ export async function PATCH(request: NextRequest, context: Context) {
 
   try {
     const input = patchSchema.parse(await request.json());
-    const existing = await prisma.clientAccount.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json({ error: "Clientul nu exista." }, { status: 404, headers: noStoreHeaders });
-    }
-    if (session.role === "SALES_AGENT" && existing.accountOwnerUserId !== session.id) {
-      return NextResponse.json({ error: "Poti edita doar clientii tai." }, { status: 403, headers: noStoreHeaders });
-    }
-    if (session.role === "SALES_AGENT" && input.accountOwnerUserId && input.accountOwnerUserId !== session.id) {
-      return NextResponse.json({ error: "Nu poti schimba account owner-ul." }, { status: 403, headers: noStoreHeaders });
-    }
-    if (input.status === "archived" && existing.status !== "archived") {
-      await assertClientCanBeArchived(id);
-    }
-    if (input.accountOwnerUserId !== undefined && input.accountOwnerUserId !== existing.accountOwnerUserId) {
-      if (!input.ownerChangeReason?.trim()) {
-        return NextResponse.json({ error: "Motivul schimbarii owner-ului este obligatoriu." }, { status: 400, headers: noStoreHeaders });
+    return await withAuthorizedClientMutation(session, [id], async (tx) => {
+      const existing = await tx.clientAccount.findUnique({ where: { id } });
+      if (!existing) {
+        return NextResponse.json({ error: "Clientul nu exista." }, { status: 404, headers: noStoreHeaders });
       }
-      await resolveRequiredSalesOwner(session, input.accountOwnerUserId);
-    }
+      assertClientEditable(existing, session);
+      if (session.role === "SALES_AGENT" && input.accountOwnerUserId && input.accountOwnerUserId !== session.id) {
+        return NextResponse.json({ error: "Nu poti schimba account owner-ul." }, { status: 403, headers: noStoreHeaders });
+      }
+      if (input.status === "archived" && existing.status !== "archived") {
+        const [campaigns, reservations, receivables] = await Promise.all([
+          tx.campaign.count({ where: { clientId: id, archivedAt: null, status: { not: "archived" } } }),
+          tx.reservation.count({ where: { clientId: id, status: { in: ["HOLD", "RESERVED", "BOOKED"] }, periodEnd: { gte: new Date() } } }),
+          tx.financialReceivable.count({ where: { clientId: id, includedInReport: true, remainingAmount: { gt: 0 } } })
+        ]);
+        if (campaigns || reservations || receivables) throw new ClientMutationError(`Clientul are dependente active (campanii ${campaigns}, rezervari ${reservations}, facturi deschise ${receivables}) si nu poate fi arhivat.`, 400);
+      }
+      if (input.accountOwnerUserId !== undefined && input.accountOwnerUserId !== existing.accountOwnerUserId) {
+        if (!input.ownerChangeReason?.trim()) {
+          return NextResponse.json({ error: "Motivul schimbarii owner-ului este obligatoriu." }, { status: 400, headers: noStoreHeaders });
+        }
+        if (!input.accountOwnerUserId) throw new ClientMutationError("Alege un vanzator responsabil.", 400);
+        await resolveRequiredSalesOwner(session, input.accountOwnerUserId, tx);
+      }
 
-    const updated = await prisma.clientAccount.update({
-      where: { id },
-      data: {
-        ...(input.companyName !== undefined ? {
-          companyName: input.companyName,
-          normalizedName: normalizeClientName(input.companyName)
-        } : {}),
-        ...(input.taxId !== undefined ? { taxId: input.taxId } : {}),
-        ...(input.clientType !== undefined ? { clientType: input.clientType } : {}),
-        ...(input.registryNumber !== undefined ? { registryNumber: input.registryNumber } : {}),
-        ...(input.billingAddress !== undefined ? { billingAddress: input.billingAddress } : {}),
-        ...(input.generalEmail !== undefined ? { generalEmail: input.generalEmail } : {}),
-        ...(input.generalPhone !== undefined ? { generalPhone: input.generalPhone } : {}),
-        ...(input.website !== undefined ? { website: input.website } : {}),
-        ...(input.status !== undefined ? { status: input.status } : {}),
-        ...(input.accountOwnerUserId !== undefined ? { accountOwnerUserId: input.accountOwnerUserId } : {}),
-        ...(input.notes !== undefined ? { notes: input.notes } : {})
-      },
-      include: { accountOwner: { select: { id: true, name: true, email: true, role: true } } }
+      const updated = await tx.clientAccount.update({
+        where: { id },
+        data: {
+          ...(input.companyName !== undefined ? {
+            companyName: input.companyName,
+            normalizedName: normalizeClientName(input.companyName)
+          } : {}),
+          ...(input.taxId !== undefined ? { taxId: input.taxId } : {}),
+          ...(input.clientType !== undefined ? { clientType: input.clientType } : {}),
+          ...(input.registryNumber !== undefined ? { registryNumber: input.registryNumber } : {}),
+          ...(input.billingAddress !== undefined ? { billingAddress: input.billingAddress } : {}),
+          ...(input.generalEmail !== undefined ? { generalEmail: input.generalEmail } : {}),
+          ...(input.generalPhone !== undefined ? { generalPhone: input.generalPhone } : {}),
+          ...(input.website !== undefined ? { website: input.website } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.accountOwnerUserId !== undefined ? { accountOwnerUserId: input.accountOwnerUserId } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes } : {})
+        },
+        include: { accountOwner: { select: { id: true, name: true, email: true, role: true } } }
+      });
+
+      await recordTransactionalAudit(tx, {
+        actor: session,
+        action: "client.update",
+        entityType: "client_account",
+        entityId: id,
+        metadata: {
+          changedOwner: input.accountOwnerUserId !== undefined && input.accountOwnerUserId !== existing.accountOwnerUserId,
+          previousOwnerUserId: existing.accountOwnerUserId,
+          nextOwnerUserId: updated.accountOwnerUserId,
+          ownerChangeReason: input.ownerChangeReason || null,
+          companyName: updated.companyName
+        },
+      });
+
+      return NextResponse.json({ client: updated }, { headers: noStoreHeaders });
     });
-
-    await recordAudit({
-      actor: session,
-      action: "client.update",
-      entityType: "client_account",
-      entityId: id,
-      metadata: {
-        changedOwner: input.accountOwnerUserId !== undefined && input.accountOwnerUserId !== existing.accountOwnerUserId,
-        previousOwnerUserId: existing.accountOwnerUserId,
-        nextOwnerUserId: updated.accountOwnerUserId,
-        ownerChangeReason: input.ownerChangeReason || null,
-        companyName: updated.companyName
-      },
-      request
-    });
-
-    return NextResponse.json({ client: updated }, { headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Clientul nu a putut fi salvat." },
-      { status: 400, headers: noStoreHeaders }
+      { status: error instanceof ClientMutationError ? error.status : 400, headers: noStoreHeaders }
     );
   }
 }

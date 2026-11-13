@@ -1,6 +1,53 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, ClientAccount } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { AuthSession } from "@/lib/auth";
+import { hasAnyPermission } from "@/lib/rbac";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
+import { resolveRequiredSalesOwner } from "@/lib/seller-users";
+
+export class ClientMutationError extends Error {
+  constructor(message: string, readonly status = 403) { super(message); }
+}
+
+export async function lockClientAccounts(tx: Prisma.TransactionClient, ids: string[]) {
+  for (const id of [...new Set(ids)].sort()) {
+    await tx.$queryRaw`SELECT id FROM portfolio_client_accounts WHERE id = ${id} FOR UPDATE`;
+  }
+}
+
+/** Revalidate the authenticated principal and locked portfolio in the write transaction. */
+export async function withAuthorizedClientMutation<T>(
+  actor: AuthSession | null | undefined,
+  clientIds: string[],
+  command: (tx: Prisma.TransactionClient, actor: AuthSession) => Promise<T>
+) {
+  if (!actor) throw new ClientMutationError("Autentificare necesara.", 401);
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM portfolio_users WHERE id = ${actor.id} FOR UPDATE`;
+    const current = await tx.user.findUnique({ where: { id: actor.id }, select: { active: true, role: true, tokenVersion: true } });
+    if (!current?.active || current.role !== actor.role || current.tokenVersion !== actor.tokenVersion) {
+      throw new ClientMutationError("Datele contului s-au schimbat. Reia autentificarea.", 401);
+    }
+    if (!hasAnyPermission(actor.role, ["clients.manage", "clients.manage.own"])) {
+      throw new ClientMutationError("Nu ai permisiunea necesara.");
+    }
+    if (actor.sessionId) {
+      await tx.$queryRaw`SELECT id FROM portfolio_auth_sessions WHERE id = ${actor.sessionId} FOR UPDATE`;
+      if (!await tx.authSessionRecord.findFirst({ where: { id: actor.sessionId, userId: actor.id, revokedAt: null, expiresAt: { gt: new Date() } }, select: { id: true } })) {
+        throw new ClientMutationError("Sesiunea a fost revocata. Reia autentificarea.", 401);
+      }
+    }
+    await lockClientAccounts(tx, clientIds);
+    return command(tx, actor);
+  }, { isolationLevel: "ReadCommitted" });
+}
+
+export function assertClientEditable(client: { accountOwnerUserId: string | null; status: string }, actor: AuthSession) {
+  if (client.status === "merged") throw new ClientMutationError("Clientul a fost combinat. Actualizeaza lista clientilor.", 409);
+  if (actor.role === "SALES_AGENT" && client.accountOwnerUserId !== actor.id) {
+    throw new ClientMutationError("Poti edita doar clientii tai.");
+  }
+}
 
 export function normalizeClientName(value: string) {
   return value
@@ -61,9 +108,9 @@ export function hasClientOwnershipConflict(
   return Boolean(client.accountOwnerUserId && client.accountOwnerUserId !== actor.id);
 }
 
-export async function findExistingClientAccountByNormalizedName(companyName: string) {
+export async function findExistingClientAccountByNormalizedName(companyName: string, db: typeof prisma | Prisma.TransactionClient = prisma) {
   const normalizedName = normalizeClientName(companyName);
-  const existing = await prisma.clientAccount.findFirst({
+  const existing = await db.clientAccount.findFirst({
     where: {
       normalizedName,
       status: { notIn: ["merged", "archived"] }
@@ -72,12 +119,12 @@ export async function findExistingClientAccountByNormalizedName(companyName: str
   });
   if (existing) return existing;
 
-  const merged = await prisma.clientAccount.findFirst({
+  const merged = await db.clientAccount.findFirst({
     where: { normalizedName, status: "merged", mergedIntoClientId: { not: null } },
     select: { mergedIntoClientId: true }
   });
   if (!merged?.mergedIntoClientId) return null;
-  return prisma.clientAccount.findUnique({ where: { id: merged.mergedIntoClientId } });
+  return db.clientAccount.findUnique({ where: { id: merged.mergedIntoClientId } });
 }
 
 export async function findOrCreateClientAccount(input: {
@@ -87,31 +134,47 @@ export async function findOrCreateClientAccount(input: {
   email?: string | null;
   phone?: string | null;
   accountOwnerUserId?: string | null;
-}, actor?: AuthSession | null) {
+}, actor?: AuthSession | null, transaction?: Prisma.TransactionClient): Promise<ClientAccount | null> {
+  if (!transaction) return withAuthorizedClientMutation(actor, input.clientId ? [input.clientId] : [], (tx, currentActor) => findOrCreateClientAccount(input, currentActor, tx));
+  if (!actor) throw new ClientMutationError("Autentificare necesara.", 401);
+  const tx = transaction;
   if (input.clientId) {
-    const existing = await prisma.clientAccount.findUnique({ where: { id: input.clientId } });
-    if (existing) return existing;
+    const existing = await tx.clientAccount.findUnique({ where: { id: input.clientId } });
+    if (existing) {
+      await lockClientAccounts(tx, [existing.id]);
+      const current = await tx.clientAccount.findUniqueOrThrow({ where: { id: existing.id } });
+      assertClientEditable(current, actor);
+      if (hasClientOwnershipConflict(current, actor)) throw new ClientMutationError("Clientul exista deja la alt owner.", 409);
+      return current;
+    }
   }
   const companyName = (input.companyName || input.contactName || "").trim();
   if (!companyName) return null;
   const normalizedName = normalizeClientName(companyName);
-  const existing = await findExistingClientAccountByNormalizedName(companyName);
-  if (existing) return existing;
+  const existing = await findExistingClientAccountByNormalizedName(companyName, tx);
+  if (existing) {
+    await lockClientAccounts(tx, [existing.id]);
+    const current = await tx.clientAccount.findUniqueOrThrow({ where: { id: existing.id } });
+    assertClientEditable(current, actor);
+    if (hasClientOwnershipConflict(current, actor)) throw new ClientMutationError("Clientul exista deja la alt owner.", 409);
+    return current;
+  }
 
-  const client = await prisma.clientAccount.create({
+  const owner = await resolveRequiredSalesOwner(actor, input.accountOwnerUserId, tx);
+  const client = await tx.clientAccount.create({
     data: {
       companyName,
       normalizedName,
       generalEmail: input.email || null,
       generalPhone: input.phone || null,
-      accountOwnerUserId: input.accountOwnerUserId || actor?.id || null,
+      accountOwnerUserId: owner.id,
       createdByUserId: actor?.id || null,
       status: "active"
     }
   });
 
   if (input.contactName && input.contactName !== companyName) {
-    await prisma.clientContact.create({
+    await tx.clientContact.create({
       data: {
         clientId: client.id,
         name: input.contactName,
@@ -121,6 +184,7 @@ export async function findOrCreateClientAccount(input: {
       }
     });
   }
+  await recordTransactionalAudit(tx, { actor, action: "client.create", entityType: "client_account", entityId: client.id, metadata: { companyName, accountOwnerUserId: client.accountOwnerUserId } });
   return client;
 }
 
@@ -135,13 +199,15 @@ export async function validAccountOwners() {
 export async function mergeClientAccounts(input: {
   primaryClientId: string;
   duplicateClientId: string;
+  reason?: string | null;
 }, actor?: AuthSession | null) {
   assertClientMergeAllowed(actor);
   if (input.primaryClientId === input.duplicateClientId) {
     throw new Error("Alege doi clienti diferiti.");
   }
 
-  return prisma.$transaction(async (tx) => {
+  return withAuthorizedClientMutation(actor, [input.primaryClientId, input.duplicateClientId], async (tx, currentActor) => {
+    assertClientMergeAllowed(currentActor);
     const [primary, duplicate] = await Promise.all([
       tx.clientAccount.findUnique({ where: { id: input.primaryClientId } }),
       tx.clientAccount.findUnique({ where: { id: input.duplicateClientId } })
@@ -149,6 +215,8 @@ export async function mergeClientAccounts(input: {
     if (!primary || !duplicate) {
       throw new Error("Unul dintre clienti nu exista.");
     }
+
+    if (primary.status === "merged" || duplicate.status === "merged") throw new ClientMutationError("Un client a fost deja combinat. Actualizeaza previzualizarea.", 409);
 
     const duplicateCampaigns = await tx.campaign.findMany({
       where: { clientId: duplicate.id },
@@ -247,7 +315,7 @@ export async function mergeClientAccounts(input: {
       }
     });
 
-    return {
+    const result = {
       primary,
       duplicate,
       counts: {
@@ -264,6 +332,8 @@ export async function mergeClientAccounts(input: {
         documents: documents.count
       }
     };
+    await recordTransactionalAudit(tx, { actor: currentActor, action: "client.merge", entityType: "client_account", entityId: primary.id, metadata: { primaryClientId: primary.id, duplicateClientId: duplicate.id, duplicateName: duplicate.companyName, reason: input.reason || null, counts: result.counts } });
+    return result;
   });
 }
 

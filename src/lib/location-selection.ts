@@ -59,13 +59,12 @@ export async function listLocationSelectionLocations(
   session: AuthSession
 ): Promise<LocationSelectionResponse> {
   const where = selectionWhere(filters);
-  const rows = await prisma.location.findMany({
-    where,
-    select: selectionLocationSelect,
-    orderBy: selectionOrderBy(filters.sort),
-    take: 500
-  });
-  const locations = rows.map((row) => serializeSelectionLocation(row, session));
+  const [rows, commercialPolicy] = await Promise.all([
+    prisma.location.findMany({ where, select: selectionLocationSelect, orderBy: selectionOrderBy(filters.sort), take: 500 }),
+    canSeeCommercialPrices(session) ? prisma.commercialPolicy.findUnique({ where: { id: "default" }, select: { rateCardCurrency: true } }) : Promise.resolve(null)
+  ]);
+  const verifiedCurrency = commercialPolicy && ["RON", "EUR"].includes(commercialPolicy.rateCardCurrency) ? commercialPolicy.rateCardCurrency : null;
+  const locations = rows.map((row) => serializeSelectionLocation(row, session, verifiedCurrency));
   const filtered = applyClientSafeFilters(locations, filters);
 
   return {
@@ -82,7 +81,7 @@ export function companyEntityOptions() {
   return companyEntities.map((entity) => ({ value: entity.value, label: entity.label }));
 }
 
-function serializeSelectionLocation(row: SelectionLocationRow, session: AuthSession): LocationSelectionLocationDTO {
+function serializeSelectionLocation(row: SelectionLocationRow, session: AuthSession, verifiedCurrency: string | null): LocationSelectionLocationDTO {
   const type = normalizeMediaType(row.type, row.category.name, row.address, row.code);
   const regularImages = row.images.filter((image) => !isProductionSketchImage(image));
   const productionSketch = row.images.find(isProductionSketchImage);
@@ -113,7 +112,7 @@ function serializeSelectionLocation(row: SelectionLocationRow, session: AuthSess
     publicDescription: selectionDescription(row),
     suggestedBasePrice: canSeePrices ? row.rateCardValue : null,
     rateCard: canSeePrices ? row.rateCard : null,
-    currency: canSeePrices && row.rateCardValue != null ? "EUR" : null,
+    currency: canSeePrices && row.rateCardValue != null ? verifiedCurrency : null,
     updatedAt: row.updatedAt.toISOString()
   };
 }

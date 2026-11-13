@@ -525,6 +525,7 @@ function Quotes({
   const [versionId, setVersionId] = useState<string | null>(null);
   const [acceptanceKey, setAcceptanceKey] = useState(uuid),
     [draftKey, setDraftKey] = useState(uuid);
+  const listedQuotes = data.quotePage?.ids ? data.quotes.filter((quote) => data.quotePage!.ids.includes(quote.id)) : data.quotes;
   const q = data.quotes.find((x) => x.id === selected),
     revision = q?.revisions.find((r) => r.id === versionId) || q?.revisions[0];
   return (
@@ -566,16 +567,16 @@ function Quotes({
         <h2 className="text-lg font-black text-white">Ofertele mele și istoricul comercial</h2>
         <form className="mt-3 flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); onBrowse({ q: search, page: 1 }); }}>
           <div className="min-w-0 flex-1"><Field label="Caută în toate ofertele"><input className={inputClass} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Client, campanie sau ID ofertă" /></Field></div>
-          <Field label="Stare"><select className={inputClass} value={query.state} onChange={(event) => onBrowse({ state: event.target.value, page: 1 })}><option value="">Toate</option><option value="draft">Ciornă</option><option value="accepted">Acceptată</option><option value="rejected">Respinsă</option><option value="cancelled">Anulată</option></select></Field>
+          <Field label="Stare"><select className={inputClass} value={query.state} onChange={(event) => onBrowse({ state: event.target.value, page: 1 })}><option value="">Toate</option><option value="draft">Ciornă</option><option value="accepted">Acceptată</option><option value="rejected">Respinsă</option></select></Field>
           <button type="submit" className="focus-button secondary">Caută</button>
         </form>
-        {!data.quotes.length ? (
+        {!listedQuotes.length ? (
           <p className="mt-3 text-slate-300">
             Nu există oferte în portofoliul autorizat.
           </p>
         ) : (
           <div className="mt-3 grid min-w-0 gap-2">
-            {(data.quotePage?.ids ? data.quotes.filter((quote) => data.quotePage!.ids.includes(quote.id)) : data.quotes).map((quote) => (
+            {listedQuotes.map((quote) => (
               <button
                 key={quote.id}
                 type="button"

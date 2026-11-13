@@ -108,7 +108,7 @@ export function CommercialQuoteEditor({ data, quote, run, busy, onSaved }: { dat
   const missingLocations = selected.filter((id) => !locations.some((row) => row.id === id));
   const selectedRows = selected.flatMap((id) => locations.find((row) => row.id === id) || []);
   const unavailable = validPeriod ? selected.filter((id) => availability[id]?.state !== "AVAILABLE") : [];
-  const totalMonthly = selectedRows.reduce((sum, row) => sum + Number(rates[row.id] ?? row.rateCardValue ?? 0), 0);
+  const totalMonthly = selectedRows.reduce((sum, row) => sum + Number(String(rates[row.id] ?? row.rateCardValue ?? 0).replace(",", ".")), 0);
   const blocked = !clientId || !campaign || !campaign.currency || campaign.currency !== data.policy?.rateCardCurrency || !campaign.companyEntity || entity !== campaign.companyEntity || !validPeriod || !selected.length || selected.length > 50 || checking || Boolean(availabilityError) || unavailable.length > 0 || missingLocations.length > 0;
 
   function changeClient(id: string) { setClientId(id); setCampaignId(""); const selectedClient = data.clients.find((row) => row.id === id); setRecipient(selectedClient?.primaryContact?.email || selectedClient?.generalEmail || ""); }

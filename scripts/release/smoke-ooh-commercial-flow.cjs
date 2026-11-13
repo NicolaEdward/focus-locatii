@@ -142,7 +142,7 @@ async function login(role) {
     await prisma.category.deleteMany({ where: { id: ids.category } });
     await prisma.auditLog.deleteMany({ where: { userId: { in: [ids.seller, ids.manager] } } });
     await prisma.user.deleteMany({ where: { id: { in: [ids.seller, ids.manager] } } });
-    if (policyCreated) await prisma.commercialPolicy.deleteMany({ where: { id: "default" } });
+    await prisma.commercialPolicy.deleteMany({ where: { id: "default", approvedByUserId: ids.manager } });
     await prisma.$disconnect();
   }
 })().catch((error) => { console.error(error.stack || error.message); process.exitCode = 1; });

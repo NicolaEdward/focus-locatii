@@ -4,6 +4,7 @@ import type { AuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { recordTransactionalAudit } from "@/lib/transactional-audit";
 import { approvedSourcePath, canonicalDocumentValue, canonicalSourcePath, documentHash, DocumentAuditError, ingestSchema, mayManageDocumentAudit, mayReadDocumentAudit, reviewSchema, safeBaseReference, sourceSchema } from "@/lib/document-source-domain";
+import { AssistantOAuthError, authenticateAssistantBearer } from "@/lib/assistant-oauth";
 
 export const documentAuditHeaders = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 const options = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 5000, timeout: 30000 };
@@ -202,33 +203,54 @@ export async function reviewDocumentFacts(raw: unknown, actor: AuthSession) {
 
 export async function getDocumentAuditSummary(actor: AuthSession) {
   await assertDocumentAuditReader(actor);
-  const now = new Date();
-  const [sources, totalDocuments, missingFiles, statuses, reviewTime, audit, reservationsChanged, inventoryChanged, clientsChanged, invoicesChanged, uploadsChanged] = await Promise.all([
-    prisma.documentAuditSource.findMany({ select: { id: true, state: true, lastCompletedScanAt: true, lastIngestAt: true, maxStaleHours: true } }),
-    prisma.sourceDocument.count(), prisma.sourceDocument.count({ where: { state: "missing" } }),
-    prisma.$queryRaw<Array<{ extractionStatus: string; reviewState: string; total: bigint }>>`SELECT v.extractionStatus, COALESCE(r.state, 'pending') reviewState, COUNT(*) total FROM portfolio_source_documents d JOIN portfolio_source_document_versions v ON v.id = d.currentVersionId AND v.documentId = d.id LEFT JOIN portfolio_document_fact_reviews r ON r.documentVersionId = v.id AND r.version = v.reviewVersion WHERE d.state = 'present' GROUP BY v.extractionStatus, r.state`,
-    prisma.documentFactReview.aggregate({ _max: { reviewedAt: true } }),
-    prisma.documentAuditRun.findFirst({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, asOf: true, scopeComplete: true, counts: true, limitations: true } }),
-    prisma.reservation.aggregate({ _max: { updatedAt: true } }), prisma.location.aggregate({ _max: { updatedAt: true } }),
-    prisma.clientAccount.aggregate({ _max: { updatedAt: true } }), prisma.financialReceivable.aggregate({ _max: { updatedAt: true } }),
-    prisma.financialReportUpload.aggregate({ _max: { updatedAt: true } }),
-  ]);
-  const active = sources.filter((source) => source.state === "active");
-  const syncRequired = active.filter((source) => !source.lastCompletedScanAt).length;
-  const staleSources = active.filter((source) => source.lastCompletedScanAt && now.getTime() - source.lastCompletedScanAt.getTime() > source.maxStaleHours * 3600000).length;
-  const needsOcr = statuses.filter((row) => row.extractionStatus === "needs_ocr").reduce((n, row) => n + Number(row.total), 0);
-  const unavailableText = statuses.filter((row) => ["extraction_unavailable", "metadata_only"].includes(row.extractionStatus)).reduce((n, row) => n + Number(row.total), 0);
-  const pendingReviewDocuments = statuses.filter((row) => row.reviewState !== "verified").reduce((n, row) => n + Number(row.total), 0);
-  const businessChangedAfterReport = Boolean(audit && [reservationsChanged, inventoryChanged, clientsChanged, invoicesChanged, uploadsChanged].some((result) => result._max.updatedAt && result._max.updatedAt > audit.asOf));
-  const reportMayBeStale = Boolean(audit && (businessChangedAfterReport || sources.some((source) => source.lastIngestAt && source.lastIngestAt > audit.asOf) || (reviewTime._max.reviewedAt && reviewTime._max.reviewedAt > audit.asOf)));
-  const count = audit?.counts && typeof audit.counts === "object" && !Array.isArray(audit.counts) ? audit.counts as Record<string, unknown> : null;
-  const reviewedScopeClear = Boolean(audit?.scopeComplete && !reportMayBeStale && count?.documents && count.differences === 0 && count.needsReview === 0 && !pendingReviewDocuments && !missingFiles);
-  const state = !sources.length ? "unconfigured" : !active.length ? "paused" : syncRequired ? "sync_required" : staleSources ? "stale" : !audit || reportMayBeStale ? "audit_required" : reviewedScopeClear ? "within_reviewed_scope" : "review_required";
-  return { asOf: now.toISOString(), configured: sources.length > 0, state, sourceCount: sources.length, activeSources: active.length, syncRequired, staleSources, indexedDocuments: totalDocuments, missingFiles, pendingReviewDocuments, needsOcrDocuments: needsOcr, metadataOnlyOrUnavailableDocuments: unavailableText, reportMayBeStale, businessChangedAfterReport,
-    lastCompletedScanAt: active.filter((source) => source.lastCompletedScanAt).map((source) => source.lastCompletedScanAt!.toISOString()).sort()[0] || null,
-    latestAudit: audit ? { ...audit, asOf: audit.asOf.toISOString() } : null,
-    automaticBusinessCorrections: false, coverage: "Numai referințele sincronizate și faptele confirmate explicit. Lipsa diferențelor nu dovedește că toate contractele firmei sunt în aplicație. Numărul documentelor din index nu este inventarul complet al NAS-ului.",
-  };
+  return readDocumentAuditSummarySnapshot();
+}
+
+/** A distinct server-only entry point, not a caller-controlled reader bypass.
+ * OAuth validates the real current user and persisted grant/source session on
+ * both sides of the read. Only its explicit offline consent may outlive the
+ * source session's natural expiry; revocation/deletion still denies access. */
+export async function getDocumentAuditSummaryForAssistant(authorization: string) {
+  const before = await authenticateAssistantBearer(authorization);
+  if (!before.scopes.includes("documents.read") || !mayReadDocumentAudit(before.actor.role)) throw new AssistantOAuthError("insufficient_scope", "Delegarea nu permite auditul documentelor nealocate.", 403);
+  const summary = await readDocumentAuditSummarySnapshot();
+  const after = await authenticateAssistantBearer(authorization);
+  if (after.grant.id !== before.grant.id || !after.scopes.includes("documents.read") || !mayReadDocumentAudit(after.actor.role)) throw new AssistantOAuthError("insufficient_scope", "Permisiunile auditului documentar s-au schimbat.", 403);
+  return summary;
+}
+
+async function readDocumentAuditSummarySnapshot() {
+  return prisma.$transaction(async (tx) => {
+    const now = new Date();
+    // Establish the read view before issuing the remaining independent reads.
+    const sources = await tx.documentAuditSource.findMany({ select: { id: true, state: true, lastCompletedScanAt: true, lastIngestAt: true, maxStaleHours: true, activeScanId: true } });
+    const [totalDocuments, missingFiles, statuses, reviewTime, audit, reservationsChanged, inventoryChanged, clientsChanged, invoicesChanged, uploadsChanged] = await Promise.all([
+      tx.sourceDocument.count(), tx.sourceDocument.count({ where: { state: "missing" } }),
+      tx.$queryRaw<Array<{ extractionStatus: string; reviewState: string; total: bigint }>>`SELECT v.extractionStatus, COALESCE(r.state, 'pending') reviewState, COUNT(*) total FROM portfolio_source_documents d JOIN portfolio_source_document_versions v ON v.id = d.currentVersionId AND v.documentId = d.id LEFT JOIN portfolio_document_fact_reviews r ON r.documentVersionId = v.id AND r.version = v.reviewVersion WHERE d.state = 'present' GROUP BY v.extractionStatus, r.state`,
+      tx.documentFactReview.aggregate({ _max: { reviewedAt: true } }),
+      tx.documentAuditRun.findFirst({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, asOf: true, scopeComplete: true, counts: true, limitations: true } }),
+      tx.reservation.aggregate({ _max: { updatedAt: true } }), tx.location.aggregate({ _max: { updatedAt: true } }),
+      tx.clientAccount.aggregate({ _max: { updatedAt: true } }), tx.financialReceivable.aggregate({ _max: { updatedAt: true } }),
+      tx.financialReportUpload.aggregate({ _max: { updatedAt: true } }),
+    ]);
+    const active = sources.filter((source) => source.state === "active");
+    const pendingScanSources = active.filter((source) => source.activeScanId).length;
+    const syncRequired = active.filter((source) => !source.lastCompletedScanAt || source.activeScanId).length;
+    const staleSources = active.filter((source) => source.lastCompletedScanAt && now.getTime() - source.lastCompletedScanAt.getTime() > source.maxStaleHours * 3600000).length;
+    const needsOcr = statuses.filter((row) => row.extractionStatus === "needs_ocr").reduce((n, row) => n + Number(row.total), 0);
+    const unavailableText = statuses.filter((row) => ["extraction_unavailable", "metadata_only"].includes(row.extractionStatus)).reduce((n, row) => n + Number(row.total), 0);
+    const pendingReviewDocuments = statuses.filter((row) => row.reviewState !== "verified").reduce((n, row) => n + Number(row.total), 0);
+    const businessChangedAfterReport = Boolean(audit && [reservationsChanged, inventoryChanged, clientsChanged, invoicesChanged, uploadsChanged].some((result) => result._max.updatedAt && result._max.updatedAt > audit.asOf));
+    const reportMayBeStale = Boolean(audit && (businessChangedAfterReport || sources.some((source) => source.lastIngestAt && source.lastIngestAt > audit.asOf) || (reviewTime._max.reviewedAt && reviewTime._max.reviewedAt > audit.asOf)));
+    const count = audit?.counts && typeof audit.counts === "object" && !Array.isArray(audit.counts) ? audit.counts as Record<string, unknown> : null;
+    const reviewedScopeClear = Boolean(audit?.scopeComplete && !reportMayBeStale && count?.documents && count.differences === 0 && count.needsReview === 0 && !pendingReviewDocuments && !missingFiles);
+    const state = !sources.length ? "unconfigured" : !active.length ? "paused" : syncRequired ? "sync_required" : staleSources ? "stale" : !audit || reportMayBeStale ? "audit_required" : reviewedScopeClear ? "within_reviewed_scope" : "review_required";
+    return { asOf: now.toISOString(), configured: sources.length > 0, state, sourceCount: sources.length, activeSources: active.length, pendingScanSources, syncRequired, staleSources, indexedDocuments: totalDocuments, missingFiles, pendingReviewDocuments, needsOcrDocuments: needsOcr, metadataOnlyOrUnavailableDocuments: unavailableText, reportMayBeStale, businessChangedAfterReport,
+      lastCompletedScanAt: active.filter((source) => source.lastCompletedScanAt).map((source) => source.lastCompletedScanAt!.toISOString()).sort()[0] || null,
+      latestAudit: audit ? { ...audit, asOf: audit.asOf.toISOString() } : null,
+      automaticBusinessCorrections: false, coverage: "Numai referințele sincronizate și faptele confirmate explicit. Lipsa diferențelor nu dovedește că toate contractele firmei sunt în aplicație. Numărul documentelor din index nu este inventarul complet al NAS-ului.",
+    };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 5000, timeout: 30000 });
 }
 
 export async function getDocumentAuditWorkspace(actor: AuthSession, cursor?: string | null) {

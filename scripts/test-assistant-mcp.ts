@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createConnection } from "mysql2/promise";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -33,6 +34,16 @@ import {
 import { POST as tokenPost } from "../src/app/api/assistant/oauth/token/route";
 import { POST as consentPost } from "../src/app/api/assistant/oauth/consent/route";
 import { POST as connectionsPost } from "../src/app/api/admin/assistant-connections/route";
+import {
+  confirmRetentionCleanup,
+  getOperationsControls,
+  previewRetentionCleanup,
+  updateOperationsPolicy,
+} from "../src/lib/operations-controls";
+import {
+  getDocumentAuditSummary,
+  getDocumentAuditSummaryForAssistant,
+} from "../src/lib/document-source-service";
 
 loadEnvFile();
 assertSyntheticEnvironment();
@@ -647,6 +658,209 @@ async function main() {
     authenticateAssistantBearer(`Bearer ${sessionTokens.access_token}`),
   );
   checks++;
+  const snapshotSource = await prisma.documentAuditSource.create({
+    data: {
+      label: tag,
+      lastCompletedScanAt: new Date(),
+      allowedPathPrefixes: ["Contracts"],
+      ownerUserId: admin.id,
+      ownerTokenVersion: admin.tokenVersion,
+    },
+  });
+  const baselineSummary = await getDocumentAuditSummary(admin);
+  await prisma.documentAuditSource.update({
+    where: { id: snapshotSource.id },
+    data: {
+      activeScanId: "synthetic-abandoned-scan",
+      activeScanStartedAt: new Date(Date.now() - 3600000),
+      activeScanObservedAt: new Date(Date.now() - 3600000),
+      activeScanLeaseUntil: new Date(Date.now() - 1000),
+    },
+  });
+  const incompleteSummary = await getDocumentAuditSummary(admin);
+  check(
+    incompleteSummary.state === "sync_required" &&
+      incompleteSummary.pendingScanSources ===
+        baselineSummary.pendingScanSources + 1 &&
+      incompleteSummary.syncRequired === baselineSummary.syncRequired + 1,
+    "An abandoned scan cannot reuse a previous complete scan to imply current verified coverage",
+  );
+  await prisma.documentAuditSource.update({
+    where: { id: snapshotSource.id },
+    data: {
+      activeScanId: null,
+      activeScanStartedAt: null,
+      activeScanObservedAt: null,
+      activeScanLeaseUntil: null,
+    },
+  });
+  const locker = await createConnection(process.env.DATABASE_URL!);
+  let blockedSummary: ReturnType<typeof getDocumentAuditSummary> | undefined;
+  try {
+    await locker.query("LOCK TABLES portfolio_source_documents WRITE");
+    blockedSummary = getDocumentAuditSummary(admin);
+    void blockedSummary.catch(() => undefined);
+    let waiting = false;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const [rows] = await locker.query(
+        "SELECT ID FROM INFORMATION_SCHEMA.PROCESSLIST WHERE INFO LIKE '%SELECT%portfolio_source_documents%' AND STATE LIKE '%lock%'",
+      );
+      if ((rows as unknown[]).length) {
+        waiting = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(
+      waiting,
+      "Snapshot test must pause the actual summary count query after its first consistent read",
+    );
+    const documentId = `${tag}-snapshot`;
+    await locker.execute(
+      "INSERT INTO portfolio_source_documents (id,sourceId,pathHash,relativePath,displayName,documentType,state,lastScanId,lastSeenAt) VALUES (?,?,?,?,?,'unknown','present','synthetic-snapshot',NOW(3))",
+      [
+        documentId,
+        snapshotSource.id,
+        createHash("sha256").update(documentId).digest("hex"),
+        "Contracts/snapshot.pdf",
+        "snapshot.pdf",
+      ],
+    );
+    await locker.query("UNLOCK TABLES");
+    check(
+      (await blockedSummary).indexedDocuments ===
+        baselineSummary.indexedDocuments,
+      "Document summary keeps one real MySQL repeatable-read snapshot during concurrent insert",
+    );
+    check(
+      (await getDocumentAuditSummary(admin)).indexedDocuments ===
+        baselineSummary.indexedDocuments + 1,
+      "A subsequent snapshot sees the committed document",
+    );
+  } finally {
+    await locker.query("UNLOCK TABLES").catch(() => undefined);
+    await locker.end();
+    await blockedSummary?.catch(() => undefined);
+  }
+  const documentsClient = await registerAssistantClient(
+    {
+      name: "Synthetic document checker",
+      redirectUris: [callback],
+      scopes: ["documents.read"],
+      confidential: true,
+    },
+    admin,
+  );
+  const documentsTokens = await exchange(
+    documentsClient,
+    await consent(documentsClient.id, admin, "documents.read offline_access"),
+  );
+  const ordinaryDocumentsTokens = await exchange(
+    documentsClient,
+    await consent(documentsClient.id, admin, "documents.read"),
+  );
+  const inventoryOnlyAdminTokens = await exchange(
+    client,
+    await consent(client.id, admin, "inventory.read"),
+  );
+  await assert.rejects(() =>
+    getDocumentAuditSummaryForAssistant(
+      `Bearer ${inventoryOnlyAdminTokens.access_token}`,
+    ),
+  );
+  await prisma.authSessionRecord.update({
+    where: { id: admin.sessionId },
+    data: { expiresAt: new Date(Date.now() - 1000) },
+  });
+  await assert.rejects(
+    () => getDocumentAuditSummary(admin),
+    "Ordinary document UI reader must keep its natural-session-expiry check",
+  );
+  await assert.rejects(
+    () =>
+      getDocumentAuditSummaryForAssistant(
+        `Bearer ${ordinaryDocumentsTokens.access_token}`,
+      ),
+    "Non-offline document grant must expire with source session",
+  );
+  const documentSummary = await getDocumentAuditSummaryForAssistant(
+    `Bearer ${documentsTokens.access_token}`,
+  );
+  check(
+    typeof documentSummary.state === "string" &&
+      !JSON.stringify(documentSummary).includes("relativePath"),
+    "Offline document summary remains minimal after natural source-session expiry",
+  );
+  const maintainer = await actor("SUPER_ADMIN", "retention-maintainer");
+  const controls = await getOperationsControls();
+  const {
+    version: policyVersion,
+    configured: policyConfigured,
+    ...policy
+  } = controls.policy;
+  void policyConfigured;
+  await updateOperationsPolicy(
+    {
+      expectedVersion: policyVersion,
+      policy: { ...policy, sessionRetentionDays: 30 },
+    },
+    maintainer,
+  );
+  const oldSessionId = `${tag}-obsolete-session`;
+  await prisma.authSessionRecord.create({
+    data: {
+      id: oldSessionId,
+      userId: admin.id,
+      expiresAt: new Date(Date.now() - 40 * 86400000),
+    },
+  });
+  const cleanup = await previewRetentionCleanup(maintainer);
+  await confirmRetentionCleanup(cleanup.previewToken, maintainer);
+  check(
+    !(await prisma.authSessionRecord.findUnique({
+      where: { id: oldSessionId },
+    })),
+    "Approved retention cleanup removes obsolete unreferenced sessions",
+  );
+  check(
+    !!(await prisma.authSessionRecord.findUnique({
+      where: { id: admin.sessionId },
+    })),
+    "Minimum production retention preserves naturally expired source sessions throughout seven-day delegation",
+  );
+  check(
+    !!(await getDocumentAuditSummaryForAssistant(
+      `Bearer ${documentsTokens.access_token}`,
+    )),
+    "Offline document checks still work after actual preview/confirm retention cleanup",
+  );
+  const documentSdk = await sdk(documentsTokens.access_token);
+  check(
+    (await documentSdk.listTools()).tools.map((tool) => tool.name).join(",") ===
+      "document_audit_status",
+    "Document consent exposes only its one typed tool",
+  );
+  const documentTool = await documentSdk.callTool({
+    name: "document_audit_status",
+    arguments: {},
+  });
+  check(
+    !documentTool.isError && !!documentTool.structuredContent,
+    "Real document summary works through official MCP client with offline delegation",
+  );
+  await documentSdk.close();
+  await prisma.authSessionRecord.update({
+    where: { id: admin.sessionId },
+    data: { revokedAt: new Date() },
+  });
+  await assert.rejects(
+    () =>
+      getDocumentAuditSummaryForAssistant(
+        `Bearer ${documentsTokens.access_token}`,
+      ),
+    "Offline document helper still rejects revoked source sessions",
+  );
+  checks++;
   const bounded = new Request(base, {
     method: "POST",
     body: "x".repeat(40000),
@@ -665,6 +879,16 @@ async function main() {
 main()
   .finally(async () => {
     const ids = actors.map((a) => a.id);
+    const documentSources = await prisma.documentAuditSource.findMany({
+      where: { ownerUserId: { in: ids } },
+      select: { id: true },
+    });
+    await prisma.sourceDocument.deleteMany({
+      where: { sourceId: { in: documentSources.map((source) => source.id) } },
+    });
+    await prisma.documentAuditSource.deleteMany({
+      where: { id: { in: documentSources.map((source) => source.id) } },
+    });
     const grants = await prisma.assistantOAuthGrant.findMany({
         where: { userId: { in: ids } },
         select: { id: true },

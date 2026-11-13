@@ -15,6 +15,7 @@ import { reservationDetailsWhere } from "@/lib/reservation-read-access";
 import { listReceivableRegistry } from "@/lib/receivables-workspace-service";
 import { getOperationsControls } from "@/lib/operations-controls";
 import { recordTransactionalAudit } from "@/lib/transactional-audit";
+import { getDocumentAuditSummaryForAssistant } from "@/lib/document-source-service";
 type Context = Awaited<ReturnType<typeof authenticateAssistantBearer>>;
 const textQuery = z.string().trim().max(120).default("");
 const cursor = z.string().max(191).optional();
@@ -466,14 +467,7 @@ export function createAssistantMcp(context: Context, authorization: string) {
     "Verifică dacă sursa documentară este conectată. Nu pretinde că NAS-ul este disponibil și nu deduce realitatea contractuală din absența documentelor.",
     "documents.read",
     {},
-    async () => ({
-      configured: false,
-      status: "SOURCE_NOT_CONNECTED",
-      contractsVerified: false,
-      invoicesVerified: false,
-      message:
-        "Sursa NAS și registrul documentar trebuie conectate și verificate înaintea auditului contractelor reale.",
-    }),
+    async () => getDocumentAuditSummaryForAssistant(authorization),
   );
   return server;
 }

@@ -1,3 +1,4 @@
+import { reservationMutationFailure } from "@/lib/reservation-amendments";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import {
@@ -80,10 +81,8 @@ export async function POST(request: NextRequest) {
           { status: 503, headers: noStoreHeaders }
         );
       }
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "Rezervarea nu a putut fi salvata." },
-        { status: error instanceof Error && "status" in error && error.status === 403 ? 403 : 400, headers: noStoreHeaders }
-      );
+      const failure = reservationMutationFailure(error, "Rezervarea nu a putut fi salvată.");
+      return NextResponse.json(failure.body, { status: failure.status, headers: noStoreHeaders });
     }
   });
 }

@@ -25,7 +25,7 @@ import { isDigitalLocationType } from "@/lib/location-medium";
 import { bookingPeriodsConflict } from "@/lib/availability";
 import { emitStructuredLog } from "@/lib/observability";
 import { resolveSellerForMutation } from "@/lib/seller-users";
-import { paymentTermDays } from "@/lib/billing";
+import { paymentTermOptions, billingRules, billingFrequencies } from "@/lib/billing";
 import { syncCampaignCommercialSummary } from "@/lib/campaigns/campaign-commercial-summary";
 import { companyEntityOrThrow, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
@@ -170,8 +170,8 @@ const optionalInt = z.preprocess((value) => {
   if (value === undefined) return undefined;
   if (value === "" || value == null) return null;
   const parsed = Number(value);
-  return Number.isInteger(parsed) ? parsed : null;
-}, z.number().int().nullable().optional());
+  return parsed;
+}, z.number().int().min(0).nullable().optional());
 
 export const reservationInputSchema = z.object({
   locationId: z.string().trim().min(1).nullable().optional(),
@@ -598,7 +598,6 @@ export async function listOperationReservations(session: AuthSession) {
 }
 
 export async function createReservation(input: unknown, actor?: AuthSession | null) {
-  await expireStaleHolds();
   const initial = normalizeReservationInput(reservationInputSchema.parse(input));
   assertReservationInitialStatus(initial.status, actor?.role);
   if (initial.contractGroupId) throw new ReservationPermissionError("Grupurile sunt generate de server; nu poti adauga o rezervare unui grup furnizat manual.");
@@ -631,7 +630,7 @@ export async function createReservation(input: unknown, actor?: AuthSession | nu
   const reservations = await prisma.$transaction(async (tx) => {
     await lockReservationLocationsForWrite(tx, locationIds);
     const currentContext = parsed.status === "BOOKED" ? await loadAndValidateRentalContext(parsed.clientId!, parsed.campaignId!, tx, actor) : null;
-    const currentInput = withBillingDefaults(parsed, currentContext);
+    const currentInput = withValidatedBookingTerms(parsed, currentContext);
     const currentReservationData = baseReservationData(currentInput, currentContext);
     for (const locationId of locationIds) {
       await assertCanonicalReservationAvailabilityForWrite(tx, locationId, parsed.periodStart, parsed.periodEnd, parsed.status);
@@ -751,6 +750,7 @@ export async function createApprovedAgentHold(
       quoted.currency !== context.campaign.currency || companyEntityOrThrow(quoted.companyEntity) !== companyEntityOrThrow(context.campaign.companyEntity || ""))) {
     throw new Error("Termenii ofertei nu corespund locațiilor, monedei sau firmei campaniei aprobate.");
   }
+  if (quoted) validatedBookingTerms(quoted, context.campaign);
   const quoteProvenance = quoted ? `Ofertă comercială aprobată · versiune ${quoted.quoteRevisionId}` : null;
   const prior = await tx.reservation.findMany({ where: { externalId: { in: externalIds } }, include: reservationInclude });
   if (prior.length) {
@@ -837,6 +837,7 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
       const members = await tx.reservation.count({ where: { contractGroupId: existing.contractGroupId } });
       if (members > 1) throw new Error("Modifică prețul din editarea întregului contract grupat, păstrând explicit chiriile celorlalte amplasamente.");
     }
+    assertConfirmedTermsCorrection(parsed, existing, nextStatusForClient, actor);
     const patchData = reservationPatchData(parsed, rentalContext, nextStatusForClient, existing);
     if (!existing.contractGroupId && ["amount", "monthlyRentShare", "monthlyRentTotal"].some((key) => parsed[key as "amount"] !== undefined)) {
       const rent = proposedReservationRent(parsed, existing);
@@ -874,6 +875,7 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
     }
 
     await logRentalCorrection(tx, existing, updated, actor?.id || null);
+    await logConfirmedTermsCorrection(tx, parsed, existing, updated, actor);
     if (campaignCommercialSummaryAffected(parsed)) {
       const affectedCampaignIds = new Set(
         [existing.campaignId, updated.campaignId].filter((campaignId): campaignId is string => Boolean(campaignId))
@@ -915,10 +917,13 @@ export async function updateReservationGroupStatus(
         assertReservationTransition(reservation.status as ReservationDTO["status"], status, actor.role);
       }
       if (status === "BOOKED") {
-        if (reservation.status !== "BOOKED") assertReservationInitialStatus("BOOKED", actor?.role);
-        assertBookedPrice(status, reservation.amount ?? reservation.monthlyRentShare ?? reservation.monthlyRentTotal);
-        const context = await resolveRentalContextForUpdate({ status: "BOOKED" }, reservation, tx, rentalContextCache, actor);
-        contexts.set(reservation.id, context);
+        if (reservation.status !== "BOOKED") {
+          assertReservationInitialStatus("BOOKED", actor?.role);
+          assertBookedPrice(status, reservation.amount ?? reservation.monthlyRentShare ?? reservation.monthlyRentTotal);
+          const context = await resolveRentalContextForUpdate({ status: "BOOKED" }, reservation, tx, rentalContextCache, actor);
+          if (context) { assertConfirmedContractEntity(reservation, context.campaign); validatedBookingTerms(reservation, context.campaign); }
+          contexts.set(reservation.id, context);
+        }
       }
       await assertCanonicalReservationAvailabilityForWrite(
         tx,
@@ -937,11 +942,7 @@ export async function updateReservationGroupStatus(
         status,
         updatedAt: new Date(Math.max(Date.now(), reservation.updatedAt.getTime() + 1)),
         ...(status === "BOOKED" ? {
-          currency: normalizeCurrency(reservation.currency || context?.campaign.currency),
-          paymentTermType: reservation.paymentTermType || context?.campaign.paymentTermType || "30_days",
-          paymentTermDays: reservation.paymentTermDays ?? context?.campaign.paymentTermDays ?? 30,
-          billingRule: reservation.billingRule || context?.campaign.billingRule || "manual_per_contract",
-          billingFrequency: reservation.billingFrequency || context?.campaign.billingFrequency || "monthly",
+          ...(reservation.status !== "BOOKED" && context ? validatedBookingTerms(reservation, context.campaign) : {}),
           invoiceGenerationMode: "manual",
           neutralizationDate: reservation.neutralizationDate || reservation.periodEnd,
           ...(context ? {
@@ -1044,6 +1045,7 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
       if (item.reservation.status !== "BOOKED" || isCommercialReservationPatch(rowInput)) {
         assertBookedPrice(item.nextStatusForClient, proposedReservationRent(rowInput, item.reservation));
       }
+      assertConfirmedTermsCorrection(rowInput, item.reservation, item.nextStatusForClient, actor);
       const patchData = reservationPatchData(rowInput, item.rentalContext, item.nextStatusForClient, item.reservation);
       if (parsed.productionNotes !== undefined) {
         patchData.productionNotes = splitDecorationCostForGroup(
@@ -1080,6 +1082,7 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
       }
 
       await logRentalCorrection(tx, item.reservation, updatedReservation, actor?.id || null);
+      await logConfirmedTermsCorrection(tx, rowInput, item.reservation, updatedReservation, actor);
     }
     if (campaignCommercialSummaryAffected(parsed)) {
       const affectedCampaignIds = new Set(
@@ -1660,17 +1663,51 @@ function campaignCommercialSummaryAffected(input: ReturnType<typeof reservationP
   ].some((field) => input[field as keyof typeof input] !== undefined);
 }
 
-function withBillingDefaults<T extends ReturnType<typeof reservationInputSchema.parse>>(input: T, rentalContext: RentalContext) {
+type BookingTerms = { currency?: string | null; paymentTermType?: string | null; paymentTermDays?: number | null; billingRule?: string | null; billingFrequency?: string | null };
+function validatedBookingTerms(input: BookingTerms, campaign: BookingTerms) {
+  const currency = input.currency || campaign.currency;
+  const paymentTermType = input.paymentTermType || campaign.paymentTermType;
+  const fixedDays: Record<string, number> = { advance: 0, "7_days": 7, "15_days": 15, "30_days": 30, "45_days": 45 };
+  // Choosing a named term explicitly determines its number of days. A changed
+  // term must not inherit the previous campaign's contradictory number.
+  const inheritedDays = input.paymentTermType && input.paymentTermType !== campaign.paymentTermType ? null : campaign.paymentTermDays;
+  const days = input.paymentTermDays ?? inheritedDays ?? fixedDays[paymentTermType || ""];
+  const billingRule = input.billingRule || campaign.billingRule;
+  const billingFrequency = input.billingFrequency || campaign.billingFrequency;
+  if (!["RON", "EUR"].includes(currency || "") || !paymentTermType || !paymentTermOptions.includes(paymentTermType as never) || days == null || !Number.isInteger(days) || days < 0 || days > 3650 ||
+      (fixedDays[paymentTermType] !== undefined && days !== fixedDays[paymentTermType]) ||
+      !billingRule || !billingRules.includes(billingRule as never) || !billingFrequency || !billingFrequencies.includes(billingFrequency as never)) {
+    throw new Error("Confirmarea cere moneda, termenul de plată în zile, regula și frecvența de facturare stabilite explicit în contract sau campanie. Nu se aplică automat 30 de zile ori facturare lunară.");
+  }
+  return { currency: currency!, paymentTermType, paymentTermDays: days, billingRule, billingFrequency };
+}
+
+function withValidatedBookingTerms<T extends ReturnType<typeof reservationInputSchema.parse>>(input: T, rentalContext: RentalContext) {
   if (input.status !== "BOOKED") return input;
-  return {
-    ...input,
-    currency: normalizeCurrency(input.currency || rentalContext?.campaign.currency),
-    paymentTermType: input.paymentTermType || rentalContext?.campaign.paymentTermType || "30_days",
-    paymentTermDays: paymentTermDays(input.paymentTermType || rentalContext?.campaign.paymentTermType || "30_days", input.paymentTermDays ?? (input.paymentTermType ? null : rentalContext?.campaign.paymentTermDays)),
-    billingRule: input.billingRule || rentalContext?.campaign.billingRule || "manual_per_contract",
-    billingFrequency: input.billingFrequency || rentalContext?.campaign.billingFrequency || "monthly",
-    invoiceGenerationMode: input.invoiceGenerationMode || "manual"
-  };
+  assertConfirmedContractEntity(input, rentalContext?.campaign || {});
+  return { ...input, ...validatedBookingTerms(input, rentalContext?.campaign || {}), invoiceGenerationMode: input.invoiceGenerationMode || "manual" };
+}
+
+function assertConfirmedContractEntity(input: { contractCompany?: string | null }, campaign: { companyEntity?: string | null }) {
+  const entity = normalizeCompanyEntity(campaign.companyEntity);
+  if (!entity) throw new Error("Confirmarea cere firma contractantă validată în dosarul campaniei. Completează firma campaniei înainte de închiriere.");
+  if (input.contractCompany && normalizeCompanyEntity(input.contractCompany) !== entity) throw new Error("Firma contractului trebuie să corespundă firmei validate în dosarul campaniei. Verifică documentul și campania înainte de confirmare.");
+}
+
+function assertConfirmedTermsCorrection(input: ReturnType<typeof reservationPatchSchema.parse>, existing: BookingTerms & { status: string; periodStart: Date }, nextStatus: string, actor?: AuthSession | null) {
+  if (existing.status !== "BOOKED" || nextStatus !== "BOOKED" || !["paymentTermType", "paymentTermDays", "billingRule", "billingFrequency"].some((field) => input[field as keyof BookingTerms] !== undefined && input[field as keyof BookingTerms] !== existing[field as keyof BookingTerms])) return;
+  assertReservationInitialStatus("BOOKED", actor?.role);
+  if (input.amendmentMode !== "correction" || !input.amendmentReference || input.amendmentEffectiveDate?.getTime() !== existing.periodStart.getTime()) {
+    throw new Error("Corectarea termenilor de plată sau facturare confirmați cere o corecție documentată de la prima zi a contractului. Pentru termeni noi de la altă dată, folosește o perioadă contractuală distinctă.");
+  }
+  validatedBookingTerms({ ...existing, ...input }, {});
+}
+
+async function logConfirmedTermsCorrection(tx: Prisma.TransactionClient, input: ReturnType<typeof reservationPatchSchema.parse>, previous: BookingTerms & { status: string; id: string }, next: BookingTerms & { status: string }, actor?: AuthSession | null) {
+  const fields = ["paymentTermType", "paymentTermDays", "billingRule", "billingFrequency"] as const;
+  if (previous.status !== "BOOKED" || next.status !== "BOOKED" || !fields.some((field) => previous[field] !== next[field])) return;
+  await recordTransactionalAudit(tx, { actor, action: "reservation.billing_terms.corrected", entityType: "reservation", entityId: previous.id,
+    metadata: { reference: input.amendmentReference, effectiveDate: input.amendmentEffectiveDate?.toISOString(), previous: Object.fromEntries(fields.map((field) => [field, previous[field]])), next: Object.fromEntries(fields.map((field) => [field, next[field]])) } });
 }
 
 function selectedLocationIds(input: { locationId?: string | null; locationIds?: string[] | null }) {
@@ -1720,11 +1757,11 @@ function baseReservationData(input: ReturnType<typeof reservationInputSchema.par
     clientPhone: rentalContext.client.generalPhone,
     campaignName: rentalContext.campaign.campaignName,
     contractCompany: normalizeCompanyEntity(rentalContext.campaign.companyEntity) || null,
-    currency: normalizeCurrency(reservationData.currency || rentalContext.campaign.currency),
-    paymentTermType: reservationData.paymentTermType || rentalContext.campaign.paymentTermType || "30_days",
-    paymentTermDays: reservationData.paymentTermDays ?? rentalContext.campaign.paymentTermDays ?? 30,
-    billingRule: reservationData.billingRule || rentalContext.campaign.billingRule || "manual_per_contract",
-    billingFrequency: reservationData.billingFrequency || rentalContext.campaign.billingFrequency || "monthly",
+    currency: reservationData.currency,
+    paymentTermType: reservationData.paymentTermType,
+    paymentTermDays: reservationData.paymentTermDays,
+    billingRule: reservationData.billingRule,
+    billingFrequency: reservationData.billingFrequency,
     invoiceGenerationMode: "manual"
   };
 }
@@ -1756,15 +1793,17 @@ function reservationPatchData(
     delete data.clientEmail;
     delete data.clientPhone;
     delete data.campaignName;
-    if (rentalContext) {
-      const alreadyBooked = existing.status === "BOOKED";
-      data.currency = normalizeCurrency((data.currency as string) || (alreadyBooked ? existing.currency : null) || rentalContext.campaign.currency);
-      data.paymentTermType = data.paymentTermType || (alreadyBooked ? existing.paymentTermType : null) || rentalContext.campaign.paymentTermType || "30_days";
-      const inheritedDays = input.paymentTermType ? null : (alreadyBooked ? existing.paymentTermDays : null) ?? rentalContext.campaign.paymentTermDays;
-      data.paymentTermDays = paymentTermDays(String(data.paymentTermType), (data.paymentTermDays as number | null | undefined) ?? inheritedDays);
-      data.billingRule = data.billingRule || (alreadyBooked ? existing.billingRule : null) || rentalContext.campaign.billingRule || "manual_per_contract";
-      data.billingFrequency = data.billingFrequency || (alreadyBooked ? existing.billingFrequency : null) || rentalContext.campaign.billingFrequency || "monthly";
+    if (rentalContext && existing.status !== "BOOKED") {
+      assertConfirmedContractEntity({ contractCompany: input.contractCompany ?? existing.contractCompany }, rentalContext.campaign);
+      Object.assign(data, validatedBookingTerms({
+        currency: input.currency ?? existing.currency,
+        paymentTermType: input.paymentTermType ?? existing.paymentTermType,
+        paymentTermDays: input.paymentTermDays ?? existing.paymentTermDays,
+        billingRule: input.billingRule ?? existing.billingRule,
+        billingFrequency: input.billingFrequency ?? existing.billingFrequency
+      }, rentalContext.campaign));
     }
+
     if (input.neutralizationDate === undefined && (input.periodEnd !== undefined || !existing.neutralizationDate)) {
       data.neutralizationDate = input.periodEnd || existing.periodEnd;
     }
@@ -1973,10 +2012,6 @@ export function splitDecorationCostForGroup(
   const remainder = totalCents % count;
   const share = (baseCents + (locationIndex < remainder ? 1 : 0)) / 100;
   return withOperationCost(notes, "decoration", share, cost.currency);
-}
-
-function normalizeCurrency(value?: string | null): "RON" | "EUR" {
-  return value === "RON" ? "RON" : "EUR";
 }
 
 function serializeReservation(

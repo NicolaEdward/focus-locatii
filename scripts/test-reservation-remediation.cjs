@@ -37,7 +37,7 @@ async function main() {
   const category = await prisma.category.create({ data: { name: tag, slug: tag } }); made.categories.push(category.id);
   const a = await makeUser("SALES_AGENT", "-a"), b = await makeUser("SALES_AGENT", "-b"), coo = await makeUser("COO", "-coo");
   const client = await prisma.clientAccount.create({ data: { companyName: tag, normalizedName: tag, status: "active", accountOwnerUserId: a.id } }); made.clients.push(client.id);
-  const campaign = await prisma.campaign.create({ data: { clientId: client.id, campaignName: tag, status: "active", currency: "RON", paymentTermType: "7_days", paymentTermDays: 7, sellerUserId: a.id, accountOwnerUserId: a.id } }); made.campaigns.push(campaign.id);
+  const campaign = await prisma.campaign.create({ data: { clientId: client.id, campaignName: tag, status: "active", companyEntity: "Focus Media", currency: "RON", paymentTermType: "7_days", paymentTermDays: 7, billingRule: "manual_per_contract", billingFrequency: "monthly", sellerUserId: a.id, accountOwnerUserId: a.id } }); made.campaigns.push(campaign.id);
   const foreignClient = await prisma.clientAccount.create({ data: { companyName: tag + "-foreign", normalizedName: tag + "-foreign", status: "active", accountOwnerUserId: b.id } }); made.clients.push(foreignClient.id);
   const foreignCampaign = await prisma.campaign.create({ data: { clientId: foreignClient.id, campaignName: tag + "-foreign", status: "active", sellerUserId: b.id, accountOwnerUserId: b.id } }); made.campaigns.push(foreignCampaign.id);
   const locations = await Promise.all(Array.from({ length: 14 }, () => makeLocation(category)));
@@ -158,7 +158,7 @@ async function main() {
   await service.updateReservation(firstAgentHold[0].id, { amount: 100 }, coo);
   const confirmed = await service.updateReservationGroupStatus(firstAgentHold[0].id, "BOOKED", coo);
   assert.equal(confirmed[0].currency, "RON"); assert.equal(confirmed[0].paymentTermDays, 7, "HOLD confirmation inherits the campaign terms");
-  const customized = await service.updateReservation(confirmed[0].id, { currency: "EUR", paymentTermType: "custom_days", paymentTermDays: 42 }, coo);
+  const customized = await service.updateReservation(confirmed[0].id, { currency: "EUR", paymentTermType: "custom", paymentTermDays: 42 }, coo);
   const noteOnly = await service.updateReservation(customized.id, { notes: "synthetic follow-up" }, coo);
   assert.equal(noteOnly.currency, "EUR"); assert.equal(noteOnly.paymentTermDays, 42, "note-only updates retain explicit existing BOOKED terms");
   console.log(JSON.stringify({ ok: true, cases: ["group ownership", "group internal collisions", "group notes immutable fields and audit rollback", "concurrent updates", "inclusive dates", "booking role/price", "campaign terms", "cents allocation", "inquiry claim and null clears", "historical archive", "audit rollback", "DOOH classification", "approved agent HOLD idempotency"] }, null, 2));

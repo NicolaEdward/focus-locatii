@@ -4,6 +4,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { NextRequest, NextResponse } from "next/server";
 import { isClosedDatabaseConnection, retryClosedConnectionRead } from "../src/lib/database-read-retry";
+import { reservationMutationFailure } from "../src/lib/reservation-amendments";
 
 async function main() {
   const closed = Object.assign(new Error("Server has closed the connection."), { code: "P1017" });
@@ -52,7 +53,8 @@ async function reservationRouteDoesNotReplayWrites(closed: Error) {
       setObservabilityRole: () => {},
       emitStructuredLog: (...args: unknown[]) => logs.push(args)
     },
-    "@/lib/database-read-retry": { isClosedDatabaseConnection }
+    "@/lib/database-read-retry": { isClosedDatabaseConnection },
+    "@/lib/reservation-amendments": { reservationMutationFailure }
   };
   const exported: { POST?: (request: NextRequest) => Promise<NextResponse> } = {};
   runInNewContext(compiled.outputText, { Error, exports: exported, require: (name: string) => {

@@ -63,6 +63,9 @@ export function amendedPriceIntervals(input: {
   const nextStart = day(input.nextStart), nextEnd = day(input.nextEnd), effective = day(input.effectiveFrom);
   if (nextStart > nextEnd || effective < nextStart || effective > nextEnd) throw new Error("Data efectivă trebuie să fie în perioada contractuală propusă.");
   if (!Number.isFinite(input.nextRent) || input.nextRent <= 0 || !["RON", "EUR"].includes(input.nextCurrency)) throw new Error("Actul adițional cere o chirie pozitivă și o monedă validă.");
+  if (input.mode === "amendment" && (input.previousCurrency !== input.nextCurrency || input.segments.some((segment) => segment.currency !== input.nextCurrency))) {
+    throw new ReservationConflictError("Schimbarea monedei de la o dată intermediară cere închiderea perioadei vechi și un contract distinct în moneda nouă. Pentru o monedă introdusă greșit în întreaga perioadă, folosește corecția documentată de la prima zi; nu se presupune un curs valutar.");
+  }
   const reference = input.reference.trim();
   if (reference.length < 3) throw new Error("Introdu numărul actului adițional sau referința documentului justificativ.");
   const source = (input.segments.length ? input.segments : [{ effectiveFrom: start, effectiveTo: end, monthlyRent: input.previousRent, currency: input.previousCurrency }])

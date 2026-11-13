@@ -47,10 +47,10 @@ export function ReservationCommercialContext({ clientId, sellerUserId, companyEn
 
   return <details className="rounded-lg border border-focus-line p-3 md:col-span-2">
     <summary className="cursor-pointer text-sm font-bold text-focus-yellow">Lipsește clientul sau campania? Completează aici</summary>
-    <p className="mt-2 text-xs text-slate-400">Selecția și perioada închirierii rămân salvate în acest formular. Verificăm clienții existenți înainte de creare.</p>
+    <p className="mt-2 text-xs text-slate-400">Selecția și perioada închirierii rămân salvate în acest formular. Verificăm clienții existenți înainte de creare. Pentru o campanie nouă, alege mai întâi firma și moneda din formular.</p>
     <div className="mt-3 grid gap-3 sm:grid-cols-2">
       <div className="grid gap-2 text-sm"><label htmlFor={`${inputId}-client`}>Numele firmei</label><input id={`${inputId}-client`} className="focus-input" value={companyName} maxLength={191} onChange={(event) => setCompanyName(event.target.value)} /><button type="button" className="focus-button secondary" disabled={busy || companyName.trim().length < 2} onClick={() => void create("client")}>Creează / selectează client</button></div>
-      <div className="grid gap-2 text-sm"><label htmlFor={`${inputId}-campaign`}>Numele campaniei</label><input id={`${inputId}-campaign`} className="focus-input" value={campaignName} maxLength={191} onChange={(event) => setCampaignName(event.target.value)} /><button type="button" className="focus-button secondary" disabled={busy || !clientId || campaignName.trim().length < 2 || !companyEntity} onClick={() => void create("campaign")}>Creează campanie ciornă</button></div>
+      <div className="grid gap-2 text-sm"><label htmlFor={`${inputId}-campaign`}>Numele campaniei</label><input id={`${inputId}-campaign`} className="focus-input" value={campaignName} maxLength={191} onChange={(event) => setCampaignName(event.target.value)} /><button type="button" className="focus-button secondary" disabled={busy || !clientId || campaignName.trim().length < 2 || !companyEntity || !currency} onClick={() => void create("campaign")}>Creează campanie ciornă</button></div>
     </div>
     {error ? <p role="alert" className="mt-3 text-sm text-red-200">{error}</p> : null}
     {message ? <p role="status" className="mt-3 text-sm text-emerald-200">{message}</p> : null}

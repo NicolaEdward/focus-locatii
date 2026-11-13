@@ -22,7 +22,7 @@ async function main() {
   }));
   const [coo, seller, foreign] = users;
   const client = await prisma.clientAccount.create({ data: { companyName: tag, normalizedName: tag, status: "active", accountOwnerUserId: seller.id, generalEmail: "verified@example.invalid" } }); made.clients.push(client.id);
-  const campaign = await prisma.campaign.create({ data: { campaignName: tag, clientId: client.id, sellerUserId: seller.id, accountOwnerUserId: seller.id, currency: "EUR", companyEntity: "Focus Media", paymentTermDays: 14, status: "planned" } }); made.campaigns.push(campaign.id);
+  const campaign = await prisma.campaign.create({ data: { campaignName: tag, clientId: client.id, sellerUserId: seller.id, accountOwnerUserId: seller.id, currency: "EUR", companyEntity: "Focus Media", paymentTermType: "custom", paymentTermDays: 14, billingRule: "monthly_after_service", billingFrequency: "monthly", status: "planned" } }); made.campaigns.push(campaign.id);
   for (let i = 0; i < 8; i++) { const location = await prisma.location.create({ data: { categoryId: category.id, code: `${tag}-${i}`, showInPublic: false, city: "Synthetic" } }); made.locations.push(location.id); }
   const hold = (locationId: string) => createReservation({ locationId, status: "HOLD", clientName: tag, periodStart: "2090-01-01", periodEnd: "2090-03-31" }, seller);
   const booked = (locationIds: string[], extra: Record<string, unknown> = {}) => createReservation({ locationIds, status: "BOOKED", clientId: client.id, campaignId: campaign.id, sellerUserId: seller.id, monthlyRentTotal: 100 * locationIds.length, periodStart: "2090-01-01", periodEnd: "2090-03-31", currency: "EUR", ...extra }, coo);
@@ -42,17 +42,24 @@ async function main() {
   await assert.rejects(() => updateReservation(rental.id, { amount: 200, expectedUpdatedAt: rental.updatedAt }, coo), /data efectivă/);
   assert.equal((await prisma.reservation.findUniqueOrThrow({ where: { id: rental.id } })).amount, 100);
   assert.equal(await prisma.rentalPriceSegment.count({ where: { rentalId: rental.id } }), countBefore);
-  const amended = await updateReservation(rental.id, { amount: 200, monthlyRentShare: 200, currency: "RON", expectedUpdatedAt: rental.updatedAt, amendmentEffectiveDate: "2090-02-01", amendmentReference: "Synthetic signed addendum 1", amendmentMode: "amendment" }, coo);
-  assert.deepEqual(amended.priceSegments?.map((s) => [s.effectiveFrom.slice(0, 10), s.effectiveTo?.slice(0, 10), s.monthlyRent, s.currency]), [["2090-01-01", "2090-01-31", 100, "EUR"], ["2090-02-01", "2090-03-31", 200, "RON"]]);
+  const beforeCurrencyChange = await prisma.rentalPriceSegment.findMany({ where: { rentalId: rental.id }, orderBy: { id: "asc" } });
+  await assert.rejects(() => updateReservation(rental.id, { amount: 200, monthlyRentShare: 200, currency: "RON", expectedUpdatedAt: rental.updatedAt, amendmentEffectiveDate: "2090-02-01", amendmentReference: "Currency change cannot infer FX", amendmentMode: "amendment" }, coo), /contract distinct în moneda nouă/);
+  assert.equal((await prisma.reservation.findUniqueOrThrow({ where: { id: rental.id } })).currency, "EUR");
+  assert.equal((await prisma.reservation.findUniqueOrThrow({ where: { id: rental.id } })).amount, 100);
+  assert.deepEqual(await prisma.rentalPriceSegment.findMany({ where: { rentalId: rental.id }, orderBy: { id: "asc" } }), beforeCurrencyChange);
+  assert.equal(await prisma.rentalChangeLog.count({ where: { rentalId: rental.id, action: "contract_amendment" } }), 0);
+  passed("a mixed-currency amendment rolls back atomically instead of creating an unbillable contract");
+  const amended = await updateReservation(rental.id, { amount: 200, monthlyRentShare: 200, currency: "EUR", expectedUpdatedAt: rental.updatedAt, amendmentEffectiveDate: "2090-02-01", amendmentReference: "Synthetic signed addendum 1", amendmentMode: "amendment" }, coo);
+  assert.deepEqual(amended.priceSegments?.map((s) => [s.effectiveFrom.slice(0, 10), s.effectiveTo?.slice(0, 10), s.monthlyRent, s.currency]), [["2090-01-01", "2090-01-31", 100, "EUR"], ["2090-02-01", "2090-03-31", 200, "EUR"]]);
   assert.equal(amended.updatedAt, (await prisma.reservation.findUniqueOrThrow({ where: { id: amended.id } })).updatedAt.toISOString());
-  passed("effective-date and currency amendments preserve prior contractual prices");
+  passed("effective-date price amendments preserve prior contractual prices");
   const note = await updateReservation(amended.id, { notes: "follow up", expectedUpdatedAt: amended.updatedAt }, seller);
   assert.equal(note.clientEmail, "verified@example.invalid");
   assert.deepEqual(note.priceSegments, amended.priceSegments);
   passed("notes-only edits preserve verified contacts and price history");
   await assert.rejects(() => updateReservation(note.id, { amount: 250, expectedUpdatedAt: note.updatedAt, amendmentEffectiveDate: "2090-03-01", amendmentReference: "Unauthorized price", amendmentMode: "amendment" }, seller), code(403));
   const trimmed = await updateReservation(note.id, { periodEnd: "2090-02-28", expectedUpdatedAt: note.updatedAt, amendmentEffectiveDate: "2090-02-28", amendmentReference: "Synthetic signed early end", amendmentMode: "amendment" }, coo);
-  assert.deepEqual(trimmed.priceSegments?.map((s) => [s.effectiveFrom.slice(0, 10), s.effectiveTo?.slice(0, 10), s.monthlyRent, s.currency]), [["2090-01-01", "2090-01-31", 100, "EUR"], ["2090-02-01", "2090-02-28", 200, "RON"]]);
+  assert.deepEqual(trimmed.priceSegments?.map((s) => [s.effectiveFrom.slice(0, 10), s.effectiveTo?.slice(0, 10), s.monthlyRent, s.currency]), [["2090-01-01", "2090-01-31", 100, "EUR"], ["2090-02-01", "2090-02-28", 200, "EUR"]]);
   const extended = await updateReservation(trimmed.id, { periodEnd: "2090-04-30", expectedUpdatedAt: trimmed.updatedAt, amendmentEffectiveDate: "2090-03-01", amendmentReference: "Synthetic signed extension", amendmentMode: "amendment" }, coo);
   assert.equal(extended.priceSegments?.at(-1)?.effectiveTo?.slice(0, 10), "2090-04-30");
   assert.equal(extended.priceSegments?.at(-1)?.monthlyRent, 200);
@@ -88,8 +95,7 @@ async function main() {
   assert.equal(await prisma.rentalChangeLog.count({ where: { rentalId: audited.id, action: "contract_amendment" } }), 0);
   passed("audit failure rolls back reservation, price segments and amendment log");
   const pricedHoldInput = { locationIds: [made.locations[6]], periodStart: day("2090-06-01"), periodEnd: day("2090-06-30"), clientId: client.id, campaignId: campaign.id, ownerUserId: seller.id, requestKey: `${tag}-quoted-hold`, holdExpiresAt: new Date(Date.now() + 3_600_000), quotedTerms: { currency: "EUR" as const, companyEntity: "Focus Media", quoteRevisionId: `${tag}-revision`, lines: [{ locationId: made.locations[6], monthlyRate: "123.45" }] } };
-  // Earlier amendment fixtures made the campaign mixed-currency, so restore an explicit
-  // source-currency fixture before testing independent quote-to-hold preservation.
+  // Keep an explicit source-currency fixture for independent quote-to-hold preservation.
   await prisma.campaign.update({ where: { id: campaign.id }, data: { currency: "EUR" } });
   const pricedHolds = await prisma.$transaction((tx) => createApprovedAgentHold(tx, pricedHoldInput, coo), reservationWriteTransactionOptions);
   assert.equal(pricedHolds[0].amount, 123.45);
@@ -109,6 +115,28 @@ async function main() {
   assert.equal(repaired.amount, 456); assert.equal(repaired.monthlyRentShare, 456); assert.equal(repaired.monthlyRentTotal, 456);
   assert.equal(repaired.priceSegments?.[0].monthlyRent, 456);
   passed("a documented original contract can repair a legacy unpriced rental explicitly");
+  assert.equal(repaired.paymentTermType, null); assert.equal(repaired.paymentTermDays, null); assert.equal(repaired.billingRule, null); assert.equal(repaired.billingFrequency, null);
+  const missingTerms = await prisma.campaign.create({ data: { clientId: client.id, campaignName: `${tag}-missing-terms`, companyEntity: "Focus Media", currency: "EUR", status: "planned", sellerUserId: seller.id, accountOwnerUserId: seller.id } }); made.campaigns.push(missingTerms.id);
+  const missingTermsInput = { locationId: made.locations[0], clientId: client.id, campaignId: missingTerms.id, sellerUserId: seller.id, status: "BOOKED", amount: 100, periodStart: "2091-01-01", periodEnd: "2091-01-31" };
+  await assert.rejects(() => createReservation(missingTermsInput, coo), /stabilite explicit/);
+  assert.equal(await prisma.reservation.count({ where: { campaignId: missingTerms.id } }), 0);
+  await assert.rejects(() => createReservation({ ...missingTermsInput, currency: "EUR", paymentTermType: "7_days", paymentTermDays: 30, billingRule: "upfront_on_contract", billingFrequency: "once" }, coo), /stabilite explicit/);
+  await assert.rejects(() => createReservation({ ...missingTermsInput, currency: "EUR", paymentTermType: "not-a-term", paymentTermDays: 0, billingRule: "upfront_on_contract", billingFrequency: "once" }, coo), /stabilite explicit/);
+  const [explicitTerms] = await createReservation({ ...missingTermsInput, currency: "EUR", paymentTermType: "advance", paymentTermDays: 0, billingRule: "upfront_on_contract", billingFrequency: "once" }, coo);
+  assert.equal(explicitTerms.paymentTermDays, 0); assert.equal(explicitTerms.billingFrequency, "once");
+  await assert.rejects(() => updateReservation(explicitTerms.id, { paymentTermDays: 42, paymentTermType: "custom", expectedUpdatedAt: explicitTerms.updatedAt }, coo), /corecție documentată/);
+  const correctedTerms = await updateReservation(explicitTerms.id, { paymentTermDays: 42, paymentTermType: "custom", expectedUpdatedAt: explicitTerms.updatedAt, amendmentMode: "correction", amendmentEffectiveDate: "2091-01-01", amendmentReference: "Original payment term verified" }, coo);
+  assert.equal(correctedTerms.paymentTermDays, 42);
+  assert.equal(await prisma.auditLog.count({ where: { entityId: explicitTerms.id, action: "reservation.billing_terms.corrected" } }), 1);
+  const currencyCorrected = await updateReservation(correctedTerms.id, { currency: "RON", expectedUpdatedAt: correctedTerms.updatedAt, amendmentMode: "correction", amendmentEffectiveDate: "2091-01-01", amendmentReference: "Wrongly entered original currency" }, coo);
+  assert.equal(currencyCorrected.currency, "RON"); assert.deepEqual(currencyCorrected.priceSegments?.map((segment) => segment.currency), ["RON"]);
+  passed("new confirmations require explicit terms; unrelated legacy corrections invent no payment policy");
+  await prisma.campaign.update({ where: { id: missingTerms.id }, data: { companyEntity: null } });
+  await assert.rejects(() => createReservation({ ...missingTermsInput, periodStart: "2091-02-01", periodEnd: "2091-02-28", currency: "EUR", paymentTermType: "advance", paymentTermDays: 0, billingRule: "upfront_on_contract", billingFrequency: "once" }, coo), /firma contractantă validată/);
+  const [unverifiedEntityHold] = await createReservation({ locationId: made.locations[0], clientName: tag, status: "HOLD", periodStart: "2091-02-01", periodEnd: "2091-02-28" }, seller);
+  await assert.rejects(() => updateReservation(unverifiedEntityHold.id, { clientId: client.id, campaignId: missingTerms.id, status: "BOOKED", amount: 100, currency: "EUR", paymentTermType: "advance", paymentTermDays: 0, billingRule: "upfront_on_contract", billingFrequency: "once", expectedUpdatedAt: unverifiedEntityHold.updatedAt }, coo), /firma contractantă validată/);
+  assert.equal((await prisma.reservation.findUniqueOrThrow({ where: { id: unverifiedEntityHold.id } })).status, "HOLD");
+  passed("new booking and hold confirmation require a validated campaign entity without defaulting Focus Media");
   const corrected = amendedPriceIntervals({ previousStart: day("2090-01-01"), previousEnd: day("2090-03-31"), nextStart: day("2090-01-01"), nextEnd: day("2090-03-31"), previousRent: 100, previousCurrency: "EUR", nextRent: 123, nextCurrency: "EUR", segments: [], effectiveFrom: day("2090-01-01"), reference: "Verified correction", mode: "correction" });
   assert.equal(corrected[0].monthlyRent, 123);
   assert.equal(await prisma.rentalChangeLog.count({ where: { rentalId: rental.id, action: "contract_amendment" } }), 3);

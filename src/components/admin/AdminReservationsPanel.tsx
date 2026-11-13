@@ -231,14 +231,14 @@ const emptyForm: ReservationForm = {
   salesperson: "",
   sellerUserId: "",
   monthlyRentTotal: "",
-  currency: "EUR",
-  paymentTermType: "30_days",
-  paymentTermDays: "30",
+  currency: "",
+  paymentTermType: "",
+  paymentTermDays: "",
   customPaymentTermNote: "",
-  billingRule: "month_start",
-  billingDayOfMonth: "1",
+  billingRule: "",
+  billingDayOfMonth: "",
   customBillingDate: "",
-  billingFrequency: "monthly",
+  billingFrequency: "",
   invoiceGenerationMode: "manual",
   billingNotes: "",
   needsDecoration: false,
@@ -314,6 +314,7 @@ export function AdminReservationsPanel({
   const [sellers, setSellers] = useState<SellerUser[]>([]);
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
+  const [campaignChoicesVersion, setCampaignChoicesVersion] = useState(0);
   const [editCampaigns, setEditCampaigns] = useState<CampaignOption[]>([]);
   const [clientSearch, setClientSearch] = useState("");
   const [editClientSearch, setEditClientSearch] = useState("");
@@ -462,7 +463,7 @@ export function AdminReservationsPanel({
     return () => {
       cancelled = true;
     };
-  }, [form.clientId]);
+  }, [form.clientId, campaignChoicesVersion]);
 
   useEffect(() => {
     if (!editForm?.clientId) {
@@ -800,7 +801,8 @@ export function AdminReservationsPanel({
         locationId: form.locationIds[0],
         amount: form.monthlyRentTotal,
         locationIds: form.locationIds,
-        invoiceGenerationMode: "manual"
+        invoiceGenerationMode: "manual",
+        currency: form.currency || null
       };
       const response = await fetch("/api/reservations", {
         method: "POST",
@@ -887,14 +889,14 @@ export function AdminReservationsPanel({
         amount: numberInputValue(reservation.amount),
         monthlyRentTotal: numberInputValue(reservation.monthlyRentTotal),
         monthlyRentShare: numberInputValue(reservation.monthlyRentShare),
-        currency: reservation.currency || "EUR",
-        paymentTermType: reservation.paymentTermType || "30_days",
-        paymentTermDays: numberInputValue(reservation.paymentTermDays ?? 30),
+        currency: reservation.currency || "",
+        paymentTermType: reservation.paymentTermType || "",
+        paymentTermDays: numberInputValue(reservation.paymentTermDays),
         customPaymentTermNote: reservation.customPaymentTermNote || "",
-        billingRule: reservation.billingRule || "month_start",
-        billingDayOfMonth: numberInputValue(reservation.billingDayOfMonth ?? 1),
+        billingRule: reservation.billingRule || "",
+        billingDayOfMonth: numberInputValue(reservation.billingDayOfMonth),
         customBillingDate: dateInputValue(reservation.customBillingDate),
-        billingFrequency: reservation.billingFrequency || "monthly",
+        billingFrequency: reservation.billingFrequency || "",
         invoiceGenerationMode: reservation.invoiceGenerationMode || "manual",
         billingNotes: reservation.billingNotes || "",
         periodStart: dateInputValue(reservation.periodStart),
@@ -994,7 +996,7 @@ export function AdminReservationsPanel({
             delete body.monthlyRentShare;
           }
         }
-        if (reservation.status === "BOOKED" && ["amount", "monthlyRentShare", "monthlyRentTotal", "currency", "periodStart", "periodEnd", "groupRentShares"].some((key) => key in body)) {
+        if (reservation.status === "BOOKED" && ["amount", "monthlyRentShare", "monthlyRentTotal", "currency", "periodStart", "periodEnd", "groupRentShares", "paymentTermType", "paymentTermDays", "billingRule", "billingFrequency"].some((key) => key in body)) {
           body.amendmentEffectiveDate = editForm.amendmentEffectiveDate;
           body.amendmentReference = editForm.amendmentReference;
           body.amendmentMode = editForm.amendmentMode;
@@ -1553,12 +1555,12 @@ export function AdminReservationsPanel({
                       setForm({
                         ...form,
                         campaignId,
-                        contractCompany: normalizeCompanyEntity(campaign?.companyEntity) || form.contractCompany,
-                        currency: campaign?.currency || form.currency,
-                        paymentTermType: campaign?.paymentTermType || form.paymentTermType,
-                        paymentTermDays: campaign?.paymentTermDays != null ? String(campaign.paymentTermDays) : form.paymentTermDays,
-                        billingRule: campaign?.billingRule || form.billingRule,
-                        billingFrequency: campaign?.billingFrequency || form.billingFrequency
+                        contractCompany: normalizeCompanyEntity(campaign?.companyEntity) || "",
+                        currency: campaign?.currency || "",
+                        paymentTermType: campaign?.paymentTermType || "",
+                        paymentTermDays: campaign?.paymentTermDays != null ? String(campaign.paymentTermDays) : "",
+                        billingRule: campaign?.billingRule || "",
+                        billingFrequency: campaign?.billingFrequency || ""
                       });
                     }}
                   >
@@ -1569,6 +1571,7 @@ export function AdminReservationsPanel({
                       </option>
                     ))}
                   </SelectField>
+                  {selectedCampaign && !normalizeCompanyEntity(selectedCampaign.companyEntity) ? <div role="alert" className="text-sm text-amber-200 md:col-span-2"><p>Firma contractantă lipsește din campanie. <a className="underline" href={`/admin/campanii?campaignId=${encodeURIComponent(selectedCampaign.id)}`} target="_blank" rel="noopener noreferrer">Completează dosarul campaniei</a>, apoi reîncarcă datele înainte de confirmare. Formularul închirierii rămâne deschis.</p><button type="button" className="focus-button secondary mt-2" onClick={() => setCampaignChoicesVersion((value) => value + 1)}>Reîncarcă datele campaniei</button></div> : null}
                   <ReservationCommercialContext clientId={form.clientId} sellerUserId={form.sellerUserId || session.id} companyEntity={form.contractCompany} currency={form.currency}
                     onClient={(client) => { setClients((current) => [...current.filter((row) => row.id !== client.id), client]); setForm((current) => ({ ...current, clientId: client.id, campaignId: "" })); }}
                     onCampaign={(campaign) => { setCampaigns((current) => [...current.filter((row) => row.id !== campaign.id), campaign]); setForm((current) => ({ ...current, campaignId: campaign.id })); }} />
@@ -1587,6 +1590,7 @@ export function AdminReservationsPanel({
               <InputField label="Numar contract / IO" value={form.contractNumber} onChange={(contractNumber) => setForm({ ...form, contractNumber })} />
               <InputField label={`Chirie lunara totala ${form.currency} + TVA`} value={form.monthlyRentTotal} onChange={(monthlyRentTotal) => setForm({ ...form, monthlyRentTotal })} />
               <SelectField label="Moneda contract" value={form.currency} onChange={(currency) => setForm({ ...form, currency })}>
+                <option value="">Alege moneda verificată</option>
                 <option value="EUR">EUR</option>
                 <option value="RON">RON</option>
               </SelectField>
@@ -1619,8 +1623,9 @@ export function AdminReservationsPanel({
                   ) : null}
                 </div>
               ) : null}
-              <AdvancedSection title="Setari facturare / optional">
+              <AdvancedSection title={form.status === "BOOKED" ? "Termeni contractuali obligatorii" : "Termeni comerciali opționali pentru HOLD"} expanded={form.status === "BOOKED"}>
                 <SelectField label="Termen plata" value={form.paymentTermType} onChange={(paymentTermType) => setForm({ ...form, paymentTermType, paymentTermDays: defaultPaymentTermDays(paymentTermType, form.paymentTermDays) })}>
+                  <option value="">Alege termenul din contract</option>
                   <option value="advance">Plata in avans / 0 zile</option>
                   <option value="7_days">7 zile</option>
                   <option value="15_days">15 zile</option>
@@ -1630,6 +1635,7 @@ export function AdminReservationsPanel({
                 </SelectField>
                 <InputField label="Zile termen plata" value={form.paymentTermDays} onChange={(paymentTermDays) => setForm({ ...form, paymentTermDays, paymentTermType: "custom" })} />
                 <SelectField label="Regula facturare" value={form.billingRule} onChange={(billingRule) => setForm({ ...form, billingRule, billingFrequency: defaultBillingFrequency(billingRule, form.billingFrequency) })}>
+                  <option value="">Alege regula din contract</option>
                   <option value="month_start">La inceputul lunii</option>
                   <option value="month_end">La finalul lunii</option>
                   <option value="campaign_start">La inceputul campaniei</option>
@@ -1642,6 +1648,7 @@ export function AdminReservationsPanel({
                   <option value="manual_per_contract">Manual / conform contract</option>
                 </SelectField>
                 <SelectField label="Frecventa facturare" value={form.billingFrequency} onChange={(billingFrequency) => setForm({ ...form, billingFrequency })}>
+                  <option value="">Alege frecvența contractuală</option>
                   <option value="monthly">Lunar</option>
                   <option value="once">Integral o singura data</option>
                   <option value="custom">Personalizat</option>
@@ -2820,9 +2827,10 @@ function ReservationEditDialog({
           )}
           {versionConflict ? <div role="alert" className="rounded-lg border border-amber-400 p-3 md:col-span-2"><p>Contractul s-a schimbat. Datele tale nu au fost suprascrise. Reîncarcă versiunea actuală înainte de o nouă salvare.</p><button className="focus-button secondary mt-2" type="button" onClick={onReload}>Reîncarcă versiunea actuală</button></div> : null}
           {form.applyToGroup && groupReservations.length > 1 ? <div className="grid gap-3 rounded-lg border border-focus-line p-4 md:col-span-2"><p className="text-sm font-bold">Distribuție contractuală pe amplasamente — fără împărțire egală automată</p>{groupReservations.map((row) => <InputField key={row.id} label={`${row.locationCode || row.id} · chirie lunară ${form.currency}`} value={form.groupRentShares[row.id] || ""} onChange={(value) => onChange((current) => current ? { ...current, groupRentShares: { ...current.groupRentShares, [row.id]: value }, monthlyRentTotal: String(Math.round(Object.entries({ ...current.groupRentShares, [row.id]: value }).reduce((sum, [, rent]) => sum + (moneyInputValue(rent) || 0), 0) * 100) / 100) } : current)} />)}</div> : <InputField label={`Chirie lunara pe cod ${form.currency} + TVA`} value={form.amount} onChange={(value) => updateField("amount", value)} />}
-          {isBookedRental ? <div className="grid gap-3 rounded-lg border border-focus-line p-4 md:col-span-2"><p className="text-sm font-bold">Modificarea chiriei, monedei sau perioadei necesită document justificativ. Tarifele anterioare datei efective se păstrează.</p><SelectField label="Tip modificare contractuală" value={form.amendmentMode} onChange={(value) => updateField("amendmentMode", value as "amendment" | "correction")}><option value="amendment">Act adițional de la data efectivă</option><option value="correction">Corecție documentată a întregii perioade</option></SelectField><InputField type="date" label="Data efectivă a modificării" value={form.amendmentEffectiveDate} onChange={(value) => updateField("amendmentEffectiveDate", value)} /><InputField label="Număr act adițional / referință document" value={form.amendmentReference} onChange={(value) => updateField("amendmentReference", value)} /></div> : null}
+          {isBookedRental ? <div className="grid gap-3 rounded-lg border border-focus-line p-4 md:col-span-2"><p className="text-sm font-bold">Modificarea chiriei, monedei sau perioadei necesită document justificativ. Tarifele anterioare datei efective se păstrează. Termenii de plată/facturare se pot corecta documentat de la prima zi; o regulă nouă de la altă dată cere o perioadă contractuală distinctă.</p><SelectField label="Tip modificare contractuală" value={form.amendmentMode} onChange={(value) => updateField("amendmentMode", value as "amendment" | "correction")}><option value="amendment">Act adițional de la data efectivă</option><option value="correction">Corecție documentată a întregii perioade</option></SelectField><InputField type="date" label="Data efectivă a modificării" value={form.amendmentEffectiveDate} onChange={(value) => updateField("amendmentEffectiveDate", value)} /><InputField label="Număr act adițional / referință document" value={form.amendmentReference} onChange={(value) => updateField("amendmentReference", value)} /></div> : null}
           <InputField label={`Chirie lunara totala grup ${form.currency} + TVA`} value={form.monthlyRentTotal} onChange={(value) => updateField("monthlyRentTotal", value)} />
           <SelectField label="Moneda contract" value={form.currency} onChange={(value) => updateField("currency", value)}>
+            <option value="">Monedă nevalidată</option>
             <option value="EUR">EUR</option>
             <option value="RON">RON</option>
           </SelectField>
@@ -2877,6 +2885,7 @@ function ReservationEditDialog({
           <EditFinancialPreview preview={financialPreview} />
           <AdvancedSection title="Setari facturare / optional">
             <SelectField label="Termen plata" value={form.paymentTermType} onChange={(value) => onChange((current) => current ? { ...current, paymentTermType: value, paymentTermDays: defaultPaymentTermDays(value, current.paymentTermDays) } : current)}>
+              <option value="">Termen nevalidat</option>
               <option value="advance">Plata in avans / 0 zile</option>
               <option value="7_days">7 zile</option>
               <option value="15_days">15 zile</option>
@@ -2886,6 +2895,7 @@ function ReservationEditDialog({
             </SelectField>
             <InputField label="Zile termen plata" value={form.paymentTermDays} onChange={(value) => onChange((current) => current ? { ...current, paymentTermDays: value, paymentTermType: "custom" } : current)} />
             <SelectField label="Regula facturare" value={form.billingRule} onChange={(value) => onChange((current) => current ? { ...current, billingRule: value, billingFrequency: defaultBillingFrequency(value, current.billingFrequency) } : current)}>
+              <option value="">Regulă nevalidată</option>
               <option value="month_start">La inceputul lunii</option>
               <option value="month_end">La finalul lunii</option>
               <option value="campaign_start">La inceputul campaniei</option>
@@ -2898,6 +2908,7 @@ function ReservationEditDialog({
               <option value="manual_per_contract">Manual / conform contract</option>
             </SelectField>
             <SelectField label="Frecventa facturare" value={form.billingFrequency} onChange={(value) => updateField("billingFrequency", value)}>
+              <option value="">Frecvență nevalidată</option>
               <option value="monthly">Lunar</option>
               <option value="once">Integral o singura data</option>
               <option value="custom">Personalizat</option>
@@ -3723,7 +3734,8 @@ function SelectField({
   );
 }
 
-function AdvancedSection({ title, children }: { title: string; children: React.ReactNode }) {
+function AdvancedSection({ title, children, expanded = false }: { title: string; children: React.ReactNode; expanded?: boolean }) {
+  if (expanded) return <section className="md:col-span-2 rounded-lg border border-focus-line bg-focus-navy/35 p-3"><h3 className="text-sm font-black uppercase text-focus-yellow">{title}</h3><div className="mt-3 grid gap-3 md:grid-cols-2">{children}</div></section>;
   return (
     <details className="md:col-span-2 rounded-lg border border-focus-line bg-focus-navy/35 p-3">
       <summary className="cursor-pointer text-sm font-black uppercase text-focus-yellow">{title}</summary>
@@ -3964,13 +3976,13 @@ function defaultPaymentTermDays(type: string, current: string) {
     "30_days": "30",
     "45_days": "45"
   };
-  return map[type] || current || "30";
+  return map[type] ?? current ?? "";
 }
 
 function defaultBillingFrequency(rule: string, current: string) {
   if (["month_start", "month_end", "monthly_in_advance", "monthly_after_service"].includes(rule)) return "monthly";
   if (["campaign_start", "campaign_end", "upfront_on_contract", "upfront_before_campaign_start", "fixed_custom_date"].includes(rule)) return "once";
-  return current || "monthly";
+  return current || "";
 }
 
 function isReservationFormDirty(form: ReservationForm, initialForm: ReservationForm) {

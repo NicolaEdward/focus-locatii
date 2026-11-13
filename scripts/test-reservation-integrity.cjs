@@ -316,7 +316,7 @@ async function setup() {
       status: "active",
       accountOwnerUserId: agent.id,
       sellerUserId: agent.id,
-      currency: "EUR"
+      currency: "EUR", companyEntity: "Focus Media", paymentTermType: "30_days", paymentTermDays: 30, billingRule: "manual_per_contract", billingFrequency: "monthly"
     }
   });
   created.campaigns.push(campaign.id);

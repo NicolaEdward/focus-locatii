@@ -17,6 +17,5 @@ outputs/
 __pycache__/
 *.pyc
 .reconciliation-job/
-.evidence-job-output/
 
 .vercel

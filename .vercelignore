@@ -12,6 +12,5 @@ __pycache__/
 artifacts/
 backups/
 .reconciliation-job/
-.evidence-job-output/
 .pnpm-store/
 coverage/

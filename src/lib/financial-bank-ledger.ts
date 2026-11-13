@@ -3,6 +3,24 @@ import { money } from "@/lib/receivables-domain";
 
 import { excludedBankClassification } from "@/lib/financial-reconciliation";
 
+export function bankAllocationStatus(input: {
+  classification: string;
+  creditAmount: Prisma.Decimal.Value | null;
+  debitAmount: Prisma.Decimal.Value | null;
+  allocatedAmount: Prisma.Decimal.Value | null;
+}) {
+  const allocated = money(input.allocatedAmount);
+  const credit = money(input.creditAmount);
+  const amount = credit.greaterThan(0) ? credit : money(input.debitAmount);
+  return excludedBankClassification(input.classification)
+    ? "ignored"
+    : allocated.lessThanOrEqualTo(0)
+      ? "unmatched"
+      : allocated.greaterThanOrEqualTo(amount)
+        ? "matched"
+        : "partial";
+}
+
 export async function activeBankAllocationTotal(
   tx: Prisma.TransactionClient,
   transactionId: string,
@@ -31,16 +49,10 @@ export async function synchronizeBankTransaction(
   });
   if (!transaction) throw new Error("Tranzacția bancară nu mai există.");
   const allocated = await activeBankAllocationTotal(tx, transactionId);
-  const amount = transaction.creditAmount.greaterThan(0)
-    ? transaction.creditAmount
-    : transaction.debitAmount;
-  const status = excludedBankClassification(transaction.classification)
-    ? "ignored"
-    : allocated.lessThanOrEqualTo(0)
-      ? "unmatched"
-      : allocated.greaterThanOrEqualTo(amount)
-        ? "matched"
-        : "partial";
+  const status = bankAllocationStatus({
+    ...transaction,
+    allocatedAmount: allocated,
+  });
   await tx.financialBankTransaction.update({
     where: { id: transactionId },
     data: { reconciliationStatus: status },

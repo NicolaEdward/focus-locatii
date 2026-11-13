@@ -69,7 +69,6 @@ const reservationInclude = {
   documents: {
     where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active" },
     orderBy: { uploadedAt: "desc" as const },
-    take: 40,
     select: {
       id: true,
       fileName: true,
@@ -126,7 +125,6 @@ const reservationOperationalInclude = {
   documents: {
     where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active" },
     orderBy: { uploadedAt: "desc" as const },
-    take: 40,
     select: {
       id: true,
       fileName: true,
@@ -2186,6 +2184,8 @@ function serializeReservation(
           uploadedByName: document.uploadedBy?.name || null,
           kind: notes?.kind || "decoration",
           taskId: notes?.taskId || null,
+          operationTaskId: notes?.operationTaskId || null,
+          isBaseTask: notes?.isBaseTask,
           downloadUrl: operationalProofDownloadPath(document.id)
         };
       })

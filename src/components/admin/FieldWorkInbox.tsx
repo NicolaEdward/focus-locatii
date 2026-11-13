@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, Camera, CheckCircle2, Clock3, MapPin, Play, Trash2, Upload } from "lucide-react";
 import type { OperationalAssignmentTaskDto } from "@/lib/operational-assignment";
 import { EscapeCloseHandler } from "@/hooks/use-escape-close";
+import { prepareOperationalProofUpload } from "@/lib/operational-proof-upload-client";
+import { validateOperationalProofFile } from "@/lib/operational-proof";
 
 type PreviewFile = { file: File; url: string };
 
@@ -25,8 +27,13 @@ export function FieldWorkInbox({ initialTasks }: { initialTasks: OperationalAssi
 
   function chooseFiles(nextFiles: FileList | null) {
     if (!nextFiles) return;
-    const next = [...nextFiles].map((file) => ({ file, url: URL.createObjectURL(file) }));
-    setFiles((current) => [...current, ...next].slice(0, 10));
+    try {
+      const selected = [...nextFiles].slice(0, Math.max(0, 10 - (target?.proofPhotos.length || 0) - files.length));
+      selected.forEach(validateOperationalProofFile);
+      const next = selected.map((file) => ({ file, url: URL.createObjectURL(file) }));
+      setFiles((current) => [...current, ...next]);
+      setMessage(null);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Fotografiile nu pot fi citite."); }
   }
 
   function removeFile(index: number) {
@@ -73,21 +80,22 @@ export function FieldWorkInbox({ initialTasks }: { initialTasks: OperationalAssi
     setBusyId(target.operationTaskId);
     setMessage(null);
     try {
+      const uploadFiles = await prepareOperationalProofUpload(files.map((item) => item.file));
       const form = new FormData();
       form.set("operationTaskId", target.operationTaskId);
       form.set("reservationId", target.reservationId);
       form.set("kind", target.kind === "NEUTRALIZATION" ? "neutralization" : "decoration");
       if (target.legacyTaskId) form.set("taskId", target.legacyTaskId);
       if (note.trim()) form.set("completionNote", note.trim());
-      for (const item of files) form.append("files", item.file);
+      for (const file of uploadFiles) form.append("files", file);
       const response = await fetch("/api/admin/operational/tasks/complete", { method: "POST", body: form });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Lucrarea nu a putut fi finalizata.");
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload || payload.status !== "DONE") throw new Error(payload?.error || (response.status === 413 ? "Fotografiile sunt prea mari. Alege mai puține și reîncearcă." : "Lucrarea nu a putut fi finalizata."));
       setTasks((current) => current.map((item) => item.operationTaskId === target.operationTaskId
         ? { ...item, status: "DONE", completedAt: new Date().toISOString(), proofPhotos: payload.proofPhotos || item.proofPhotos }
         : item));
       closeCompletion();
-      setMessage("Lucrarea a fost marcata ca finalizata.");
+      setMessage("Lucrarea a fost finalizată. Fotografiile au fost optimizate și salvate.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Lucrarea nu a putut fi finalizata.");
     } finally {
@@ -155,6 +163,7 @@ export function FieldWorkInbox({ initialTasks }: { initialTasks: OperationalAssi
             <p className="mt-2 text-sm text-slate-300">Pozele sunt pastrate 30 de zile si nu apar public.</p>
             <label className="mt-5 flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-600 p-5 text-center text-sm font-bold text-white">
               <Upload className="mb-2 h-7 w-7 text-focus-yellow" />Adauga poze JPG, PNG sau WebP
+              <span className="mb-2 block text-xs font-normal text-slate-300">Maximum 10 MB per original. Fotografiile sunt optimizate automat pentru trimitere, până la 3,5 MB în total.</span>
               <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ""; }} />
             </label>
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">

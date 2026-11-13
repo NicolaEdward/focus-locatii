@@ -148,6 +148,8 @@ export type OperationProofPhotoDTO = {
   uploadedByName: string | null;
   kind: "decoration" | "neutralization";
   taskId: string | null;
+  operationTaskId?: string | null;
+  isBaseTask?: boolean;
   downloadUrl: string;
 };
 

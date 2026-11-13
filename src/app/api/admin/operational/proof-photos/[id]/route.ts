@@ -59,7 +59,8 @@ export async function GET(request: NextRequest, context: Context) {
         session,
         reservationId: document.reservation.id,
         kind: proofNotes.kind,
-        legacyTaskId: proofNotes.taskId
+        legacyTaskId: proofNotes.taskId,
+        operationTaskId: proofNotes.operationTaskId,
       }))
     : canViewOperationalProofPhoto(session, document.reservation);
   if (!canView) {

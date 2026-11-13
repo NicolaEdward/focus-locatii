@@ -55,6 +55,7 @@ import { reservationBusinessStatusLabel, summarizeReservationOccupancy } from "@
 import { companyEntities, normalizeCompanyEntity } from "@/lib/company-entities";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS } from "@/lib/operation-schedule";
 import { OPERATIONAL_PROOF_MAX_FILES_PER_TASK, canCompleteOperationalReservation, canRescheduleOperationalReservation } from "@/lib/operational-proof";
+import { prepareOperationalProofUpload } from "@/lib/operational-proof-upload-client";
 import { calculateProrata } from "@/lib/prorata";
 import {
   buildDecorationBillingReport,
@@ -1195,21 +1196,21 @@ export function AdminReservationsPanel({
     body.set("kind", completionTarget.type);
     if (completionTarget.taskId) body.set("taskId", completionTarget.taskId);
     if (completionNote.trim()) body.set("completionNote", completionNote.trim());
-    for (const file of completionFiles) body.append("files", file);
-
     try {
+      const uploadFiles = await prepareOperationalProofUpload(completionFiles);
+      for (const file of uploadFiles) body.append("files", file);
       const response = await fetch("/api/admin/operational/tasks/complete", {
         method: "POST",
         body
       });
-      const payload = await response.json();
+      const payload = await response.json().catch(() => null);
 
-      if (!response.ok) {
-        setError(payload.error || "Lucrarea nu a putut fi finalizata.");
+      if (!response.ok || !payload || payload.status !== "DONE") {
+        setError(payload?.error || (response.status === 413 ? "Fotografiile sunt prea mari. Alege mai puține și reîncearcă." : "Lucrarea nu a putut fi finalizata."));
         return;
       }
 
-      setReservations((current) => current.map((reservation) => (reservation.id === completionTarget.reservation.id ? payload.reservation : reservation)));
+      if (payload.reservation) setReservations((current) => current.map((reservation) => (reservation.id === completionTarget.reservation.id ? payload.reservation : reservation)));
       router.refresh();
       setMessage(
         completionFiles.length
@@ -2341,7 +2342,7 @@ function OperationCompletionDialog({
             }}
           />
           <span className="mt-2 block text-xs font-bold text-slate-400">
-            JPG, PNG sau WebP, maximum 10 MB per poza. Mai poti adauga {remainingPhotoSlots} poza/poze la aceasta lucrare.
+            JPG, PNG sau WebP, maximum 10 MB per fotografie originală. Fotografiile sunt optimizate automat înainte de trimitere, în limita totală de 3,5 MB. Mai poți adăuga {remainingPhotoSlots} fotografii pentru această lucrare.
           </span>
         </label>
 
@@ -3676,7 +3677,7 @@ function OperationRescheduleDialog({
 }
 
 function proofPhotosForTask(reservation: ReservationDTO, kind: OperationKind, taskId?: string | null) {
-  return (reservation.operationProofPhotos || []).filter((photo) => photo.kind === kind && (photo.taskId || null) === (taskId || null));
+  return (reservation.operationProofPhotos || []).filter((photo) => photo.kind === kind && (photo.taskId || null) === (taskId || null) && (taskId || photo.isBaseTask !== false));
 }
 
 function PanelButton({

@@ -62,7 +62,6 @@ const assignmentReservationSelect = {
   documents: {
     where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active" },
     orderBy: { uploadedAt: "desc" as const },
-    take: 40,
     select: {
       id: true,
       fileName: true,
@@ -451,14 +450,18 @@ export async function fieldCanAccessOperationalProof(input: {
   reservationId: string;
   kind: "decoration" | "neutralization";
   legacyTaskId?: string | null;
+  operationTaskId?: string | null;
 }) {
   if (input.session.role !== "FIELD_OPERATOR" || !operationalAssignmentEnabled()) return false;
   const task = await findOperationalTaskForWork({
     reservationId: input.reservationId,
     kind: input.kind,
-    legacyTaskId: input.legacyTaskId
+    legacyTaskId: input.legacyTaskId,
+    operationTaskId: input.operationTaskId,
   });
   if (!task || task.assignedToUserId !== input.session.id) return false;
+  if (task.reservationId !== input.reservationId || task.legacyTaskId !== (input.legacyTaskId || null)
+    || (input.kind === "neutralization" ? task.kind !== "NEUTRALIZATION" : !["DECORATION", "REDECORATION"].includes(task.kind))) return false;
   const reservation = await prisma.reservation.findUnique({ where: { id: input.reservationId }, select: { status: true } });
   return reservation?.status === "BOOKED";
 }
@@ -532,7 +535,8 @@ function toAssignmentTaskDto(reservation: AssignmentReservation, draft: Operatio
   const proofPhotos = reservation.documents.flatMap((document) => {
     if (!isOperationalProofActive(document)) return [];
     const notes = parseOperationalProofNotes(document.notes);
-    if (!notes || notes.kind !== operationKind(draft.kind) || (notes.taskId || null) !== (draft.legacyTaskId || null)) return [];
+    if (!notes || notes.kind !== operationKind(draft.kind)) return [];
+    if (notes.operationTaskId ? notes.operationTaskId !== relational?.id : (notes.taskId || null) !== (draft.legacyTaskId || null) || (draft.kind === "REDECORATION" && !draft.legacyTaskId)) return [];
     return [{
       id: document.id,
       fileName: document.fileName,

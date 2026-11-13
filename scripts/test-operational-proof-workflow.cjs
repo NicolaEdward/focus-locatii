@@ -67,7 +67,8 @@ function completionRouteIsScopedAndDoesNotCreateReservations() {
   assert(source.includes('"dashboard.operations.view"'), "field installer operational permission should be supported");
   assert(source.includes("canCompleteOperationalReservation"), "completion API must enforce scoped operational access");
   assert(source.includes("client: { select:") && source.includes("accountOwnerUserId: true"), "completion API must load client owner for seller access checks");
-  assert(source.includes("validateOperationalProofFile"), "completion API must validate uploaded files");
+  const imageValidation = read("src", "lib", "operational-proof-image.ts");
+  assert(source.includes("prepareOperationalProofImage") && imageValidation.includes("validateOperationalProofFile"), "completion API must validate and decode uploaded image bytes");
   assert(source.includes("clientDocument.create"), "proof photos should be stored as internal documents");
   assert(source.includes("withOperationCompletion"), "base operation completion should use operation metadata");
   assert(source.includes("withOperationTaskCompletion"), "extra task completion should use operation metadata");
@@ -171,8 +172,9 @@ function sellerDashboardShowsScopedProofPhotos() {
   assert(dashboard.includes("OPERATIONAL_PROOF_DOCUMENT_TYPE"), "sales dashboard should count only operational proof documents");
   assert(dashboard.includes("proofPhotoCount: row._count.documents"), "sales dashboard should expose a lightweight proof count");
   assert(!dashboard.includes("operationalProofDownloadPath"), "sales dashboard must not preload proof-photo URLs");
-  assert(commandCenter.includes("row.proofPhotoCount"), "sales dashboard should render proof photo availability");
-  assert(commandCenter.includes("poze dovadă"), "seller dashboard should clearly label proof photos");
+  const queue = read("src", "components", "admin", "SalesWorkQueue.tsx");
+  assert(commandCenter.includes("SalesWorkQueue") && queue.includes("item.context"), "sales dashboard should render operational evidence through its unified queue");
+  assert(dashboard.includes("poze dovadă"), "seller agenda should clearly label proof photo availability");
 }
 
 function operationalDateDelayWorkflowIsAudited() {

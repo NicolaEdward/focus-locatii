@@ -4,6 +4,7 @@ import { normalizeClientName } from "@/lib/clients";
 import { moneyNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
+import { getWorkspaceFinanceSummary } from "@/lib/workspace-finance-summary";
 import {
   activeCampaignBookingWhere,
   campaignEffectiveStatusWhere,
@@ -133,23 +134,27 @@ export type WorkspaceDocument = {
 };
 
 export type FinanceSummary = {
-  invoicedRon: number;
-  invoicedEur: number;
-  collectedRon: number;
-  collectedEur: number;
-  remainingRon: number;
-  remainingEur: number;
-  overdueRon: number;
-  overdueEur: number;
-  openCount: number;
+  invoicedRon: number | null;
+  invoicedEur: number | null;
+  collectedRon: number | null;
+  collectedEur: number | null;
+  remainingRon: number | null;
+  remainingEur: number | null;
+  overdueRon: number | null;
+  overdueEur: number | null;
+  openCount: number | null;
+  source: "invoice-ledger" | "campaign-invoice-allocations";
+  dataQualityReasons: string[];
+  unattributedInvoiceCount: number;
+  unknownCurrencyCount: number;
   rows: Array<{
     id: string;
     invoiceNumber: string | null;
     dueDate: string | null;
     currency: string;
-    invoiced: number;
-    collected: number;
-    remaining: number;
+    invoiced: number | null;
+    collected: number | null;
+    remaining: number | null;
     status: string;
   }>;
 };
@@ -578,7 +583,7 @@ export async function getCampaignDocuments(session: AuthSession, campaignId: str
 
 export async function getCampaignFinanceSummary(session: AuthSession, campaignId: string): Promise<FinanceSummary> {
   await assertCampaignAccessById(session, campaignId);
-  return financeSummary({ campaignId });
+  return getWorkspaceFinanceSummary({ OR: [{ campaignId }, { campaignAllocations: { some: { campaignId, status: "active" } } }] }, campaignId);
 }
 
 export async function getClientMergePreview(session: AuthSession, primaryClientId: string, duplicateClientId: string) {
@@ -646,55 +651,7 @@ function assertCampaignReadAccess(session: AuthSession, campaign: { sellerUserId
 }
 
 async function financeSummary(where: Prisma.FinancialReceivableWhereInput): Promise<FinanceSummary> {
-  const now = new Date();
-  const baseWhere: Prisma.FinancialReceivableWhereInput = { ...where, includedInReport: true, needsReview: false };
-  const [rows, totals, overdue, openCount] = await Promise.all([
-    prisma.financialReceivable.findMany({
-      where: baseWhere,
-      select: { id: true, invoiceNumber: true, dueDate: true, currency: true, invoicedAmount: true, collectedAmount: true, remainingAmount: true, status: true },
-      orderBy: [{ dueDate: "asc" }, { updatedAt: "desc" }],
-      take: 50
-    }),
-    prisma.financialReceivable.groupBy({
-      by: ["currency"], where: baseWhere,
-      _sum: { invoicedAmount: true, collectedAmount: true, remainingAmount: true }
-    }),
-    prisma.financialReceivable.groupBy({
-      by: ["currency"], where: { AND: [baseWhere, { remainingAmount: { gt: 0 }, dueDate: { lt: now } }] },
-      _sum: { remainingAmount: true }
-    }),
-    prisma.financialReceivable.count({ where: { AND: [baseWhere, { remainingAmount: { gt: 0 } }] } })
-  ]);
-  const result: FinanceSummary = {
-    invoicedRon: 0, invoicedEur: 0, collectedRon: 0, collectedEur: 0,
-    remainingRon: 0, remainingEur: 0, overdueRon: 0, overdueEur: 0, openCount, rows: []
-  };
-  for (const row of totals) {
-    if (row.currency === "EUR") {
-      result.invoicedEur = moneyNumber(row._sum.invoicedAmount);
-      result.collectedEur = moneyNumber(row._sum.collectedAmount);
-      result.remainingEur = moneyNumber(row._sum.remainingAmount);
-    } else {
-      result.invoicedRon += moneyNumber(row._sum.invoicedAmount);
-      result.collectedRon += moneyNumber(row._sum.collectedAmount);
-      result.remainingRon += moneyNumber(row._sum.remainingAmount);
-    }
-  }
-  for (const row of overdue) {
-    if (row.currency === "EUR") result.overdueEur = moneyNumber(row._sum.remainingAmount);
-    else result.overdueRon += moneyNumber(row._sum.remainingAmount);
-  }
-  for (const row of rows) {
-    const currency = row.currency === "EUR" ? "EUR" : "RON";
-    const invoiced = moneyNumber(row.invoicedAmount);
-    const collected = moneyNumber(row.collectedAmount);
-    const remaining = moneyNumber(row.remainingAmount);
-    result.rows.push({
-      id: row.id, invoiceNumber: row.invoiceNumber, dueDate: row.dueDate?.toISOString() || null,
-      currency, invoiced, collected, remaining, status: row.status
-    });
-  }
-  return result;
+  return getWorkspaceFinanceSummary(where);
 }
 
 function serializeDocument(row: {

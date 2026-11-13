@@ -67,7 +67,7 @@ function validateRequestKey(key: string) {
     throw new Error("Cheia operației este invalidă.");
 }
 
-async function invoiceCapacity(tx: Prisma.TransactionClient, id: string) {
+export async function invoiceCapacity(tx: Prisma.TransactionClient, id: string) {
   const invoice = await tx.financialReceivable.findUnique({ where: { id } });
   if (
     !invoice ||

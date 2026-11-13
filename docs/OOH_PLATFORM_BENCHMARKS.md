@@ -82,3 +82,23 @@ boundaries and contract-share rounding; `scripts/test-segmented-billing-plan.ts`
 checks the actual MySQL join, idempotence, future draft refresh and rollback after
 an historical conflict. Their results must be recorded in the final release
 report, not assumed merely because the scripts exist.
+
+A second mismatch existed between the client/campaign workspace and the explicit
+financial-allocation report. The former treated a direct campaign link as the
+entire invoice value and did not include invoices allocated to another campaign.
+The corrected campaign preview uses active gross allocations. A 1,000 RON
+invoice allocated 600/400 appears as those two amounts, not 1,000/0. Partial cash
+on a shared invoice is not assigned using an invented proportion; its campaign
+balance remains unknown until supported by a receipt-allocation policy. Fully
+paid or wholly unpaid documents have exact allocated-share outcomes. Invalid
+allocations after a storno remain unverified.
+
+Client totals retain canonical invoice/storno/cash calculations and preserve
+the actual currency. Unsupported or missing currencies are flagged and excluded
+from RON/EUR totals. Every eligible row contributes through bounded database
+pages, while the workspace preview stays limited to 50 rows.
+
+`scripts/test-workspace-finance-attribution.ts` exercises those cases against
+synthetic MySQL, including foreign-seller access refusal and totals spanning
+more than one database page. No historic invoice, receipt or allocation is
+changed merely by reading the corrected summary.

@@ -119,5 +119,8 @@ function positiveRent(value: Rent) {
 }
 function day(value: Date | string) {
   const parsed = value instanceof Date ? value : new Date(value);
-  return Number.isFinite(parsed.getTime()) ? new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate())) : null;
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const normalized = new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(value) && normalized.toISOString().slice(0, 10) !== value.slice(0, 10)) return null;
+  return normalized;
 }

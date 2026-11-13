@@ -190,15 +190,59 @@ async function policy(db: Db = prisma) {
   return p;
 }
 
-export async function commercialWorkspace(actor: AuthSession) {
+export const commercialWorkspaceQuerySchema = z.object({
+  q: z.string().trim().max(120).optional(),
+  state: z.enum(["draft", "accepted", "rejected"]).optional(),
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  quoteId: id.optional(),
+  revisionPage: z.coerce.number().int().min(1).max(100000).default(1),
+  revisionPageSize: z.coerce.number().int().min(1).max(100).default(20),
+}).strict();
+
+export async function commercialWorkspace(actor: AuthSession, rawQuery: unknown = {}) {
   requireSales(actor);
+  const query = commercialWorkspaceQuerySchema.parse(rawQuery);
   const global = hasGlobalDataAccess(actor.role);
-  const quotes = await prisma.commercialQuote.findMany({
-    where: global ? {} : { ownerUserId: actor.id },
-    orderBy: { updatedAt: "desc" },
-    take: 100,
-    include: { revisions: { orderBy: { revision: "desc" }, take: 20 } },
-  });
+  const scope: Prisma.CommercialQuoteWhereInput = global ? {} : { ownerUserId: actor.id };
+  const nameMatches = query.q ? await Promise.all([
+    prisma.clientAccount.findMany({ where: { companyName: { contains: query.q }, ...(global ? {} : { accountOwnerUserId: actor.id }) }, select: { id: true } }),
+    prisma.campaign.findMany({ where: { campaignName: { contains: query.q }, ...(global ? {} : { sellerUserId: actor.id }) }, select: { id: true } }),
+  ]) : [[], []];
+  const where: Prisma.CommercialQuoteWhereInput = {
+    ...scope,
+    ...(query.state ? { state: query.state } : {}),
+    ...(query.q ? { OR: [
+      { id: { contains: query.q } },
+      { clientId: { in: nameMatches[0].map((row) => row.id) } },
+      { campaignId: { in: nameMatches[1].map((row) => row.id) } },
+    ] } : {}),
+  };
+  const [totalQuotes, listedQuotes] = await Promise.all([
+    prisma.commercialQuote.count({ where }),
+    prisma.commercialQuote.findMany({
+      where,
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      skip: (query.page - 1) * query.pageSize,
+      take: query.pageSize,
+      include: { revisions: { orderBy: { revision: "desc" }, take: query.revisionPageSize } },
+    }),
+  ]);
+  let selectedRevisionPage: { quoteId: string; page: number; pageSize: number; total: number; totalPages: number; ids: string[] } | null = null;
+  let quotes = listedQuotes;
+  if (query.quoteId) {
+    const selected = await prisma.commercialQuote.findFirst({
+      where: { AND: [scope, { id: query.quoteId }] },
+      include: { revisions: { orderBy: { revision: "desc" }, skip: (query.revisionPage - 1) * query.revisionPageSize, take: query.revisionPageSize } },
+    });
+    if (!selected) throw new CommercialError("NOT_FOUND", "Oferta nu există sau nu îți este alocată.", 404);
+    const total = await prisma.quoteRevision.count({ where: { quoteId: selected.id } });
+    selectedRevisionPage = { quoteId: selected.id, page: query.revisionPage, pageSize: query.revisionPageSize, total, totalPages: Math.max(1, Math.ceil(total / query.revisionPageSize)), ids: selected.revisions.map((row) => row.id) };
+    // Always include the latest revision for safe editing, even while viewing an old page.
+    const latest = query.revisionPage > 1 ? await prisma.quoteRevision.findUnique({ where: { quoteId_revision: { quoteId: selected.id, revision: selected.latestRevision } } }) : null;
+    if (latest && !selected.revisions.some((row) => row.id === latest.id)) selected.revisions.unshift(latest);
+    quotes = [...listedQuotes.filter((row) => row.id !== selected.id), selected];
+  }
   const revisionIds = quotes.flatMap((q) => q.revisions.map((r) => r.id));
   const [
     p,
@@ -217,8 +261,8 @@ export async function commercialWorkspace(actor: AuthSession) {
         status: { notIn: ["archived", "merged"] },
         ...(global ? {} : { accountOwnerUserId: actor.id }),
       },
-      select: { id: true, companyName: true },
-      take: 200,
+      select: { id: true, companyName: true, generalEmail: true, contacts: { select: { name: true, email: true, phone: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }], take: 1 } },
+      take: 500,
       orderBy: { companyName: "asc" },
     }),
     prisma.campaign.findMany({
@@ -226,8 +270,8 @@ export async function commercialWorkspace(actor: AuthSession) {
         archivedAt: null,
         ...(global ? {} : { sellerUserId: actor.id }),
       },
-      select: { id: true, clientId: true, campaignName: true, currency: true },
-      take: 200,
+      select: { id: true, clientId: true, campaignName: true, currency: true, companyEntity: true, paymentTermType: true, paymentTermDays: true, startDate: true, endDate: true },
+      take: 500,
       orderBy: { campaignName: "asc" },
     }),
     prisma.crmOpportunity.findMany({
@@ -344,13 +388,16 @@ export async function commercialWorkspace(actor: AuthSession) {
     }),
   ]);
   return {
+    userId: actor.id,
+    quotePage: { page: query.page, pageSize: query.pageSize, total: totalQuotes, totalPages: Math.max(1, Math.ceil(totalQuotes / query.pageSize)), ids: listedQuotes.map((row) => row.id) },
+    revisionPage: selectedRevisionPage,
     documents,
     delegatableOwners,
     commandTraces,
     playbackProofs,
     policy: p,
     quotes,
-    clients,
+    clients: clients.map(({ contacts, ...client }) => ({ ...client, primaryContact: contacts[0] || null })),
     campaigns,
     opportunities,
     locations,
@@ -619,6 +666,11 @@ const quoteSchema = z
     campaignId: id,
     opportunityId: id.optional(),
     locationIds: z.array(id).min(1).max(50),
+    linePrices: z.array(z.object({
+      locationId: id,
+      monthlyRate: z.string().regex(/^(?:0|[1-9]\d{0,8})(?:\.\d{1,2})?$/, "Prețul lunar trebuie să fie un număr pozitiv cu maximum două zecimale.").refine((value) => new Prisma.Decimal(value).gt(0)),
+      reason: z.string().trim().min(3).max(500),
+    }).strict()).max(50).optional(),
     ...period,
     recipient: z.string().email().max(254),
     companyEntity: z.string().trim().min(1).max(80),
@@ -632,7 +684,11 @@ async function createQuoteInTransaction(
   db: Db,
   principalId: string | null = null,
 ) {
+  await assertCurrentCommercialActor(db, actor);
   const input = quoteSchema.parse(raw);
+  const pricedIds = (input.linePrices || []).map((line) => line.locationId);
+  if (new Set(pricedIds).size !== pricedIds.length || pricedIds.some((locationId) => !input.locationIds.includes(locationId)))
+    throw new CommercialError("INVALID_LINE_PRICES", "Prețurile negociate trebuie să corespundă unor locații distincte din ofertă.");
   const intentHash = commercialHash(input),
     key =
       "quote:" +
@@ -702,6 +758,9 @@ async function createQuoteInTransaction(
       "Agentul poate folosi numai propriul portofoliu.",
       404,
     );
+  const quoteCompanyEntity = companyEntityOrThrow(input.companyEntity);
+  if (!campaign.companyEntity || companyEntityOrThrow(campaign.companyEntity) !== quoteCompanyEntity)
+    throw new CommercialError("COMPANY_ENTITY_MISMATCH", "Firma contractantă a ofertei trebuie să corespundă firmei validate în campanie.", 409);
   if (!["RON", "EUR"].includes(campaign.currency || ""))
     throw new CommercialError(
       "CURRENCY_REQUIRED",
@@ -738,7 +797,7 @@ async function createQuoteInTransaction(
   if (availability.rows.some((r) => !r.available))
     throw new CommercialError(
       "AVAILABILITY_CONFLICT",
-      "Locațiile nu sunt complet disponibile; pentru DOOH folosește contractul de capacitate.",
+      "Locațiile selectate nu sunt complet disponibile în perioada ofertei. Verifică amplasamentele marcate cu conflict.",
       409,
     );
   const locations = await db.location.findMany({
@@ -759,14 +818,21 @@ async function createQuoteInTransaction(
         "PRICE_UNVERIFIED",
         "Fiecare amplasament cere un preț lunar valid în inventar.",
       );
-    const monthly = new Prisma.Decimal(location.rateCardValue)
-      .toDecimalPlaces(2)
-      .toFixed(2);
+    const listed = new Prisma.Decimal(location.rateCardValue).toDecimalPlaces(2);
+    const proposed = input.linePrices?.find((line) => line.locationId === locationId);
+    const monthly = proposed ? new Prisma.Decimal(proposed.monthlyRate).toFixed(2) : listed.toFixed(2);
+    const pricingApprovalRequired = !listed.equals(monthly);
     return {
       locationId,
       code: location.code,
       city: location.city,
+      listMonthlyRate: listed.toFixed(2),
       monthlyRate: monthly,
+      discountBps: listed.minus(monthly).dividedBy(listed).times(10000).toDecimalPlaces(0).toNumber(),
+      pricingReason: pricingApprovalRequired ? proposed!.reason : null,
+      // No automatic discount threshold is assumed. All changed prices are bound
+      // to the version's existing mandatory manager approval for send/HOLD.
+      pricingApprovalRequired,
       ...quoteMoney(monthly, from, to, p.vatRateBps, p.vatTreatment),
       priceSource: {
         type: "Location.rateCardValue",
@@ -778,7 +844,8 @@ async function createQuoteInTransaction(
   const total = (key: "net" | "tax" | "gross") =>
     lines.reduce((s, l) => s.plus(l[key]), new Prisma.Decimal(0)).toFixed(2);
   const payload = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    pricingApprovalRequired: lines.some((line) => line.pricingApprovalRequired),
     companyEntity: companyEntityOrThrow(input.companyEntity),
     clientId: client.id,
     clientName: client.companyName,
@@ -866,6 +933,7 @@ async function createQuoteInTransaction(
     revision: revision.revision,
     payloadHash: revision.payloadHash,
     principalId,
+    pricingApprovalRequired: payload.pricingApprovalRequired,
   });
   return { quote, revision, availability, replayed: false };
 }

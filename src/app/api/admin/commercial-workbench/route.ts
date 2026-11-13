@@ -7,6 +7,7 @@ import {
   executeCommercialHold,
   readCommercialReceipt,
   commercialWorkspace,
+  commercialWorkspaceQuerySchema,
   commercialAvailability,
   saveCommercialPolicy,
   issueAgentPrincipal,
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
       : pilotId
         ? await salesPilotReport(pilotId, session)
         : {
-            ...(await commercialWorkspace(session)),
+            ...(await commercialWorkspace(session, commercialWorkspaceQuerySchema.parse(Object.fromEntries([...request.nextUrl.searchParams.entries()].filter(([key]) => ["q", "state", "page", "pageSize", "quoteId", "revisionPage", "revisionPageSize"].includes(key)))))),
             doohBookings: await listDoohBookings(session),
           };
     return NextResponse.json(result, { headers: commercialNoStoreHeaders });

@@ -278,8 +278,11 @@ function sourceArchitectureRules() {
   assert(handoff.includes("idempotencyKey: input.idempotencyKey"), "handoff must append an idempotent event");
   assert(handoff.includes("CLIENT_ACCOUNT_HANDOFF_CONFIRMED"));
   assert(handoff.includes("CAMPAIGN_HANDOFF_CONFIRMED"));
-  assert(!handoff.includes("tx.clientAccount.create"), "handoff must not create ClientAccount automatically");
-  assert(!handoff.includes("tx.campaign.create"), "handoff must not create Campaign automatically");
+  const finalHandoff = handoff.slice(handoff.indexOf("export async function recordCrmHandoff("));
+  assert(!finalHandoff.includes("tx.clientAccount.create"), "final won handoff must not create ClientAccount automatically");
+  assert(!finalHandoff.includes("tx.campaign.create"), "final won handoff must not create Campaign automatically");
+  assert(handoff.includes("export async function prepareCrmCommercialDraft"), "pre-sale dossier preparation is an explicit separate command");
+  assert(handoff.includes('status: "draft"') && handoff.includes("totalContractValue: null"), "pre-sale preparation must not fabricate a won contract value");
   assert(!handoff.includes("reservation.create"), "handoff must not create reservations");
   assert(handoffRoute.includes('action: "crm.v4.handoff.confirm"'), "handoff confirmation must be audited");
   assert(notifications.includes("prisma.crmNextAction.findMany"));

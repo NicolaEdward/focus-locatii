@@ -1,4 +1,9 @@
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
+import { commercialHash } from "@/lib/commercial-workbench-core";
+import { companyEntityOrThrow } from "@/lib/company-entities";
+import { resolveRequiredSalesOwner } from "@/lib/seller-users";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
 import type { AuthSession } from "@/lib/auth";
 import { normalizeClientName } from "@/lib/clients";
 import { crmCurrentOpportunityValue } from "@/lib/crm-domain";
@@ -64,7 +69,7 @@ export async function getCrmHandoffProposal(opportunityId: string, actor: AuthSe
     : null;
   const contact = opportunity.company.contacts[0] || null;
   const warnings = [
-    ...(opportunity.stage !== "won" ? ["Handoff-ul devine disponibil numai dupa castigarea oportunitatii."] : []),
+    ...(opportunity.stage !== "won" ? ["Poți pregăti oferta fără a câștiga oportunitatea. Confirmarea predării finale rămâne disponibilă după câștigare."] : []),
     ...(!opportunity.company.taxId ? ["Firma CRM nu are CUI; verifica manual deduplicarea clientului."] : []),
     ...(!contact ? ["Firma CRM nu are persoana de contact."] : []),
     ...(!hasGlobalCrmAccess(actor) && existingClient?.accountOwnerUserId !== actor.id
@@ -76,6 +81,7 @@ export async function getCrmHandoffProposal(opportunityId: string, actor: AuthSe
     opportunityId: opportunity.id,
     version: opportunity.version,
     ready: opportunity.stage === "won",
+    canPrepareOffer: ["opportunity", "quoted", "negotiation", "contracting", "won"].includes(opportunity.stage),
     stage: opportunity.stage,
     company: {
       name: opportunity.company.name,
@@ -96,6 +102,122 @@ export async function getCrmHandoffProposal(opportunityId: string, actor: AuthSe
     existingCampaign,
     warnings
   };
+}
+
+const prepareDraftSchema = z.object({
+  opportunityId: z.string().trim().min(1).max(191),
+  version: z.number().int().nonnegative(),
+  idempotencyKey: z.string().trim().min(8).max(191),
+  currency: z.enum(["RON", "EUR"]),
+  companyEntity: z.string().trim().min(1).max(80),
+}).strict();
+
+/** Pre-sale association is not a win, an accepted contract or a reservation. */
+export async function prepareCrmCommercialDraft(raw: unknown, actor: AuthSession) {
+  assertCanManage(actor);
+  if (!hasAnyPermission(actor.role, ["clients.manage", "clients.manage.own"])) throw new CrmDomainError("Nu poți pregăti dosarul comercial.", "CRM_FORBIDDEN", 403);
+  const input = prepareDraftSchema.parse(raw);
+  const companyEntity = companyEntityOrThrow(input.companyEntity);
+  const intentHash = commercialHash({ ...input, companyEntity });
+  const key = "crm.prepare:" + commercialHash({ actorId: actor.id, requestKey: input.idempotencyKey });
+  return prisma.$transaction(async (tx) => {
+    await assertLiveDraftActor(tx, actor);
+    await tx.$queryRaw`SELECT id FROM portfolio_crm_opportunities WHERE id = ${input.opportunityId} FOR UPDATE`;
+    const opportunity = await tx.crmOpportunity.findUnique({
+      where: { id: input.opportunityId },
+      include: { company: { include: { contacts: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }], take: 1 } } } },
+    });
+    if (!opportunity || (!hasGlobalCrmManageAccess(actor) && opportunity.ownerId !== actor.id)) throw new CrmDomainError("Oportunitatea nu există sau nu îți este alocată.", "CRM_NOT_FOUND", 404);
+    const prior = await tx.crmEvent.findUnique({ where: { idempotencyKey: key } });
+    if (prior) {
+      const metadata = jsonRecord(prior.metadata);
+      if (prior.actorUserId !== actor.id || prior.opportunityId !== opportunity.id || metadata.intentHash !== intentHash) throw new CrmDomainError("Cheia a fost folosită pentru o altă pregătire comercială.", "CRM_IDEMPOTENCY_CONFLICT", 409);
+      return currentDraftResult(tx, opportunity.id, opportunity.version, metadata, actor, opportunity.ownerId, true);
+    }
+    if (opportunity.version !== input.version) throw new CrmDomainError("Oportunitatea s-a schimbat. Reîncarcă dosarul înainte de ofertare.", "CRM_VERSION_CONFLICT", 409);
+    if (!["opportunity", "quoted", "negotiation", "contracting", "won"].includes(opportunity.stage)) throw new CrmDomainError("Reia explicit oportunitatea înainte de a pregăti o ofertă.", "CRM_STAGE_CONFLICT", 409);
+    const seller = await resolveRequiredSalesOwner(actor, opportunity.ownerId, tx);
+    const previousDraft = await tx.crmEvent.findFirst({ where: { opportunityId: opportunity.id, type: "COMMERCIAL_DRAFT_PREPARED" }, orderBy: [{ occurredAt: "desc" }, { id: "desc" }] });
+    if (previousDraft) {
+      const metadata = jsonRecord(previousDraft.metadata);
+      if (metadata.currency !== input.currency || metadata.companyEntity !== companyEntity) throw new CrmDomainError("Dosarul comercial există deja cu alți termeni. Modifică explicit campania existentă.", "CRM_DRAFT_TERMS_CONFLICT", 409);
+      const result = await currentDraftResult(tx, opportunity.id, opportunity.version, metadata, actor, seller.id, true);
+      // Preserve this second intention too so its later retry cannot be repurposed.
+      await createDraftEvent(tx, opportunity, actor, { ...metadata, intentHash }, key);
+      return result;
+    }
+    await tx.$queryRaw`SELECT id FROM portfolio_crm_companies WHERE id = ${opportunity.companyId} FOR UPDATE`;
+    const normalizedName = normalizeClientName(opportunity.company.name);
+    if (!normalizedName) throw new CrmDomainError("Numele firmei nu poate identifica un client.");
+    const taxIds = taxIdSearchValues(opportunity.company.taxId);
+    // Serializable protects the indexed identity gap even when no client exists.
+    // Other client creation paths cannot insert the same identity during this read.
+    const candidates = await tx.clientAccount.findMany({
+      where: { mergedIntoClientId: null, status: { notIn: ["merged", "archived"] }, OR: [{ normalizedName }, ...(taxIds.length ? [{ taxId: { in: taxIds } }] : [])] },
+      orderBy: { id: "asc" },
+    });
+    if (candidates.length > 1) throw new CrmDomainError("Există mai mulți clienți posibili. Un manager trebuie să rezolve identitatea înainte de ofertare.", "CRM_DUPLICATE_CLIENT", 409);
+    let client = candidates[0];
+    if (client) {
+      if (client.accountOwnerUserId !== seller.id) throw new CrmDomainError("Clientul există la alt responsabil sau nu este alocat. Cere alocarea explicită, fără a crea un duplicat.", "CRM_CLIENT_OWNER_CONFLICT", 409);
+      if (client.taxId && opportunity.company.taxId && !taxIdsMatch(client.taxId, opportunity.company.taxId)) throw new CrmDomainError("Numele corespunde unui client cu alt CUI. Verifică identitatea înainte de ofertare.", "CRM_HANDOFF_TARGET_MISMATCH", 409);
+    } else {
+      const contact = opportunity.company.contacts[0];
+      client = await tx.clientAccount.create({ data: {
+        companyName: opportunity.company.name,
+        normalizedName,
+        taxId: opportunity.company.taxId,
+        website: opportunity.company.website,
+        generalEmail: contact?.email || null,
+        generalPhone: contact?.phone || null,
+        accountOwnerUserId: seller.id,
+        createdByUserId: actor.id,
+        status: "prospect",
+      } });
+      if (contact) await tx.clientContact.create({ data: { clientId: client.id, name: contact.name, email: contact.email, phone: contact.phone, isPrimary: true } });
+      await recordTransactionalAudit(tx, { actor, action: "client.create.from_crm_draft", entityType: "client_account", entityId: client.id, metadata: { opportunityId: opportunity.id } });
+    }
+    const matches = await tx.campaign.findMany({ where: { clientId: client.id, campaignName: opportunity.name, archivedAt: null, status: { notIn: ["cancelled", "archived"] } }, orderBy: { id: "asc" } });
+    if (matches.length > 1) throw new CrmDomainError("Există mai multe campanii cu același nume. Alege și clarifică dosarul existent.", "CRM_DUPLICATE_CAMPAIGN", 409);
+    let campaign = matches[0];
+    if (campaign && (campaign.sellerUserId !== seller.id || campaign.currency !== input.currency || campaign.companyEntity !== companyEntity)) throw new CrmDomainError("Campania existentă are alt responsabil, monedă sau firmă contractantă. Verifică dosarul existent.", "CRM_DRAFT_TERMS_CONFLICT", 409);
+    if (!campaign) {
+      campaign = await tx.campaign.create({ data: {
+        clientId: client.id, campaignName: opportunity.name, status: "draft", currency: input.currency,
+        companyEntity, sellerUserId: seller.id, accountOwnerUserId: seller.id, createdByUserId: actor.id,
+        startDate: opportunity.desiredPeriodStart, endDate: opportunity.desiredPeriodEnd,
+        totalContractValue: null, paymentTermType: "30_days", paymentTermDays: 30, billingRule: "manual_per_contract", billingFrequency: "monthly",
+      } });
+      await recordTransactionalAudit(tx, { actor, action: "campaign.create.from_crm_draft", entityType: "campaign", entityId: campaign.id, metadata: { opportunityId: opportunity.id, contractualValue: null } });
+    }
+    const metadata = { clientId: client.id, campaignId: campaign.id, currency: input.currency, companyEntity, intentHash, crmStageUnchanged: opportunity.stage };
+    await createDraftEvent(tx, opportunity, actor, metadata, key);
+    return currentDraftResult(tx, opportunity.id, opportunity.version, metadata, actor, seller.id, false);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 10000, timeout: 20000 });
+}
+
+async function createDraftEvent(tx: Prisma.TransactionClient, opportunity: { id: string; companyId: string; sourceProspectId: string | null }, actor: AuthSession, metadata: Record<string, unknown>, key: string) {
+  const event = await tx.crmEvent.create({ data: { companyId: opportunity.companyId, prospectId: opportunity.sourceProspectId, opportunityId: opportunity.id, actorUserId: actor.id, type: "COMMERCIAL_DRAFT_PREPARED", source: "CRM_COMMERCIAL_DRAFT", summary: "Dosarul pentru ofertare a fost pregătit fără confirmarea vânzării.", metadata: jsonValue(metadata), idempotencyKey: key } });
+  await recordTransactionalAudit(tx, { actor, action: "crm.commercial_draft.committed", entityType: "crm_opportunity", entityId: opportunity.id, metadata: { eventId: event.id, clientId: metadata.clientId, campaignId: metadata.campaignId } });
+}
+
+async function currentDraftResult(tx: Prisma.TransactionClient, opportunityId: string, version: number, metadata: Record<string, unknown>, actor: AuthSession, ownerId: string | null, repeated: boolean) {
+  const clientId = typeof metadata.clientId === "string" ? metadata.clientId : "";
+  const campaignId = typeof metadata.campaignId === "string" ? metadata.campaignId : "";
+  const campaign = await tx.campaign.findFirst({ where: { id: campaignId, clientId, sellerUserId: ownerId, archivedAt: null, status: { notIn: ["archived", "cancelled"] }, client: { accountOwnerUserId: ownerId, status: { notIn: ["archived", "merged"] } } }, select: { id: true } });
+  if (!campaign || (!hasGlobalCrmManageAccess(actor) && ownerId !== actor.id)) throw new CrmDomainError("Portofoliul dosarului s-a schimbat. Reîncarcă și verifică alocarea.", "CRM_DRAFT_PORTFOLIO_CHANGED", 409);
+  const params = new URLSearchParams({ clientId, campaignId, opportunityId });
+  return { clientId, campaignId, opportunityId, version, repeated, href: "/admin/commercial-quotes?" + params };
+}
+
+async function assertLiveDraftActor(tx: Prisma.TransactionClient, actor: AuthSession) {
+  await tx.$queryRaw`SELECT id FROM portfolio_users WHERE id = ${actor.id} FOR UPDATE`;
+  const current = await tx.user.findUnique({ where: { id: actor.id }, select: { active: true, role: true, tokenVersion: true } });
+  if (!current?.active || current.role !== actor.role || current.tokenVersion !== actor.tokenVersion || actor.exp * 1000 <= Date.now()) throw new CrmDomainError("Sesiunea sau drepturile s-au schimbat.", "CRM_ACTOR_STALE", 403);
+  if (actor.sessionId) {
+    await tx.$queryRaw`SELECT id FROM portfolio_auth_sessions WHERE id = ${actor.sessionId} FOR UPDATE`;
+    if (!await tx.authSessionRecord.findFirst({ where: { id: actor.sessionId, userId: actor.id, revokedAt: null, expiresAt: { gt: new Date() } }, select: { id: true } })) throw new CrmDomainError("Sesiunea a fost revocată.", "CRM_ACTOR_STALE", 403);
+  }
 }
 
 export async function recordCrmHandoff(input: {

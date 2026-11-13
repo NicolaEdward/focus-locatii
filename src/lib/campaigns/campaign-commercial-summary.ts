@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { calculateProrata } from "@/lib/prorata";
+import { amountForPriceIntervals, combinePriceIntervals, getValidatedPriceIntervals, type RentalPriceSegmentInput, type PriceInterval } from "@/lib/segmented-billing";
 
 export const CAMPAIGN_COMMERCIAL_SUMMARY_SOURCE = "BOOKED_RESERVATIONS" as const;
 
@@ -14,6 +14,7 @@ export type CampaignCommercialReservation = {
   monthlyRentTotal?: number | null;
   contractGroupId?: string | null;
   currency?: string | null;
+  priceSegments?: RentalPriceSegmentInput[];
 };
 
 export type CampaignCommercialSummary = {
@@ -46,35 +47,46 @@ export function deriveCampaignCommercialSummary(
 
   const totals = { RON: new Prisma.Decimal(0), EUR: new Prisma.Decimal(0) };
   const dataQualityReasons = new Set<string>();
-  const monthlyGroups = new Map<string, { monthlyRent: Prisma.Decimal; currency: "RON" | "EUR"; periodStart: Date; periodEnd: Date }>();
+  const monthlyGroups = new Map<string, PriceInterval[][]>();
 
-  for (const reservation of booked) {
+  for (const [index, reservation] of booked.entries()) {
     const monthlyRent = canonicalMonthlyRent(reservation);
     const currency = canonicalCurrency(reservation.currency);
     if (!currency) {
       dataQualityReasons.add("BOOKED_CURRENCY_MISSING");
       continue;
     }
-    if (monthlyRent == null || monthlyRent <= 0) {
+    if (!reservation.priceSegments?.length && (monthlyRent == null || monthlyRent <= 0)) {
       dataQualityReasons.add("BOOKED_MONTHLY_RENT_MISSING");
       continue;
     }
-    // Prorate a shared contractual period once, after summing persisted row
-    // shares. Rounding each face first can create a cent on partial months.
-    const key = `${reservation.contractGroupId || `single:${monthlyGroups.size}`}|${currency}|${reservation.periodStart.toISOString()}|${reservation.periodEnd.toISOString()}`;
-    const group = monthlyGroups.get(key);
-    if (group) group.monthlyRent = group.monthlyRent.plus(monthlyRent);
-    else monthlyGroups.set(key, { monthlyRent: new Prisma.Decimal(monthlyRent), currency, periodStart: reservation.periodStart, periodEnd: reservation.periodEnd });
+    const schedule = getValidatedPriceIntervals({
+      periodStart: reservation.periodStart,
+      periodEnd: reservation.periodEnd,
+      monthlyAmount: monthlyRent || 0,
+      currency,
+    }, reservation.priceSegments);
+    if (!schedule.valid) {
+      for (const reason of schedule.reasons) dataQualityReasons.add(reason);
+      continue;
+    }
+    // Shares can change on different dates per face. Sum their interval schedules
+    // before rounding the aggregate once for each contractual calendar month.
+    const key = `${reservation.contractGroupId || `single:${index}`}|${currency}`;
+    const group = monthlyGroups.get(key) || [];
+    group.push(schedule.intervals);
+    monthlyGroups.set(key, group);
   }
-  for (const group of monthlyGroups.values()) {
-    const prorata = calculateProrata(group.monthlyRent.toNumber(), group.periodStart, group.periodEnd, group.periodStart, group.periodEnd);
-    totals[group.currency] = totals[group.currency].plus(prorata.amount);
+  for (const schedules of monthlyGroups.values()) {
+    const combined = combinePriceIntervals(schedules);
+    if (!combined.length) continue;
+    const amount = amountForPriceIntervals(combined, combined[0].periodStart, combined[combined.length - 1].periodEnd);
+    totals[combined[0].currency] = totals[combined[0].currency].plus(amount);
   }
 
   const currencies = (["RON", "EUR"] as const).filter((currency) => totals[currency].gt(0));
   if (currencies.length > 1) dataQualityReasons.add("MIXED_CAMPAIGN_CURRENCIES");
-  const hasIncompleteCommercialData = dataQualityReasons.has("BOOKED_CURRENCY_MISSING")
-    || dataQualityReasons.has("BOOKED_MONTHLY_RENT_MISSING");
+  const hasIncompleteCommercialData = dataQualityReasons.size > 0;
 
   return {
     source: CAMPAIGN_COMMERCIAL_SUMMARY_SOURCE,
@@ -113,6 +125,9 @@ export async function syncCampaignCommercialSummary(
     where: { id: campaignId },
     select: {
       currency: true,
+      status: true,
+      startDate: true,
+      endDate: true,
       reservations: {
         where: { status: "BOOKED" },
         select: {
@@ -123,7 +138,8 @@ export async function syncCampaignCommercialSummary(
           monthlyRentShare: true,
           monthlyRentTotal: true,
           contractGroupId: true,
-          currency: true
+          currency: true,
+          priceSegments: { select: { effectiveFrom: true, effectiveTo: true, monthlyRent: true, currency: true }, orderBy: { effectiveFrom: "asc" } }
         }
       }
     }
@@ -134,9 +150,11 @@ export async function syncCampaignCommercialSummary(
   await client.campaign.update({
     where: { id: campaignId },
     data: {
-      startDate: summary.periodStart,
-      endDate: summary.periodEnd,
-      currency: summary.currency,
+      startDate: summary.bookedReservationCount || campaign.status !== "draft" ? summary.periodStart : campaign.startDate,
+      endDate: summary.bookedReservationCount || campaign.status !== "draft" ? summary.periodEnd : campaign.endDate,
+      // A proposal currency is not a booked value. Keep the explicit choice
+      // before the first BOOKED; otherwise use only the canonical booked unit.
+      currency: summary.bookedReservationCount ? summary.currency : canonicalCurrency(campaign.currency),
       totalContractValue: summary.totalContractValue == null
         ? null
         : new Prisma.Decimal(summary.totalContractValue)

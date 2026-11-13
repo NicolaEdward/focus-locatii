@@ -42,6 +42,14 @@ async function main() {
     const recipientHash = tokenHash(payload.recipient);
     const approval = await prisma.commercialApproval.create({ data: { revisionId: revision.id, action: "send_quote", state: "approved", payloadHash: commercialHash({ revisionHash: revision.payloadHash, action: "send_quote", recipientHash, holdExpiresAt: null }), recipientHash, requestedByUserId: seller.id, approvedByUserId: manager.id, expiresAt } });
     assert.equal((await getCommercialQuotePrint(quote.id, revision.id, seller, now)).state, "approved");
+    const customPayload = { ...payload, billingRule: "fixed_custom_date", billingFrequency: "custom" };
+    const customHash = commercialHash(customPayload);
+    await prisma.campaign.update({ where: { id: campaign.id }, data: { billingRule: "fixed_custom_date", billingFrequency: "custom" } });
+    await prisma.quoteRevision.update({ where: { id: revision.id }, data: { payload: customPayload, payloadHash: customHash } });
+    await prisma.commercialApproval.update({ where: { id: approval.id }, data: { payloadHash: commercialHash({ revisionHash: customHash, action: "send_quote", recipientHash, holdExpiresAt: null }) } });
+    assert.equal((await getCommercialQuotePrint(quote.id, revision.id, seller, now)).state, "draft", "a custom calendar without its dates is not represented as fully validated");
+    await prisma.campaign.update({ where: { id: campaign.id }, data: { billingRule: payload.billingRule, billingFrequency: payload.billingFrequency } });
+    await prisma.quoteRevision.update({ where: { id: revision.id }, data: { payload, payloadHash: revision.payloadHash } });
     await prisma.commercialApproval.update({ where: { id: approval.id }, data: { payloadHash: commercialHash("tampered") } });
     assert.equal((await getCommercialQuotePrint(quote.id, revision.id, seller, now)).state, "draft", "unbound approval cannot label a printed offer approved");
     await prisma.commercialApproval.update({ where: { id: approval.id }, data: { payloadHash: commercialHash({ revisionHash: revision.payloadHash, action: "send_quote", recipientHash, holdExpiresAt: null }) } });
@@ -65,7 +73,7 @@ async function main() {
     await rejected(() => getCommercialQuotePrint(quote.id, revision.id, seller, now), "QUOTE_PRINT_INTEGRITY");
     await prisma.quoteRevision.update({ where: { id: revision.id }, data: { totalGross: 96.8, payloadHash: commercialHash("corrupt") } });
     await rejected(() => getCommercialQuotePrint(quote.id, revision.id, seller, now), "QUOTE_PRINT_INTEGRITY");
-    console.log(JSON.stringify({ ok: true, groups: 10, assertions: 20, scope: "authenticated immutable quote printing, private portfolios, exact approval proof, policy and term drift, historical labels and financial integrity" }));
+    console.log(JSON.stringify({ ok: true, groups: 11, scope: "authenticated immutable quote printing, private portfolios, exact approval proof, custom calendar, policy and term drift, historical labels and financial integrity" }));
   } finally {
     if (ids.quote) {
       const revisions = await prisma.quoteRevision.findMany({ where: { quoteId: ids.quote }, select: { id: true } });

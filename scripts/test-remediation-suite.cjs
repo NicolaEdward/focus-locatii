@@ -7,7 +7,7 @@ const url = new URL(process.env.DATABASE_URL || 'invalid:');
 if (!['ci','test','preview'].includes(process.env.APP_ENV) || process.env.VERCEL_ENV === 'production' || process.env.ALLOW_SYNTHETIC_SEED !== 'true' || !['127.0.0.1','localhost'].includes(url.hostname) || !/^\/focus_(preview|test)_/.test(url.pathname)) throw new Error('Remediation tests require an isolated local synthetic database');
 const suites = [
   'test-rbac.ts','test-user-management.ts','test-auth-hardening.ts','test-auth-remediation.ts',
-  'test-client-atomic-mutations.ts','test-crm-command-outcomes.ts','test-location-mutation-transactions.ts','test-location-private-read.ts',
+  'test-client-atomic-mutations.ts','test-crm-command-outcomes.ts','test-location-mutation-transactions.ts','test-location-private-read.ts','test-inventory-availability-summary.ts','test-occupancy-summary-ui.cjs',
   'test-transactional-audit.ts','test-reservation-read-access.ts','test-d-ceo-mutation-inventory.ts',
   'test-availability.cjs','test-reservation-remediation.cjs','test-reservation-integrity.cjs',
   'test-reservation-route-safety.cjs','test-reservation-lifecycle.cjs','test-ownership-integrity.ts',
@@ -18,7 +18,7 @@ const suites = [
   'test-receivables-reconciliation.ts','test-billing.cjs','test-finance-consistency.cjs',
   'test-commercial-workbench.ts','test-dooh-static-capacity.ts','test-operations-controls.ts','test-backup-restore.cjs','test-backup-hardening.cjs',
   'test-remediation-schema.cjs','test-remediation-collation-plan.cjs','test-database-connection-policy.ts','test-remediation-history.ts','test-database-read-retry.ts','test-release-governance.cjs','test-observability.ts',
-  'test-admin-route-links.cjs','test-notifications.cjs','test-operations-rbac.cjs','test-dependency-policy.cjs'
+  'test-admin-route-links.cjs','test-dashboard-command-centers.cjs','test-notifications.cjs','test-operations-rbac.cjs','test-dependency-policy.cjs'
 ];
 const selected = process.env.REMEDIATION_TEST_FILTER ? suites.filter((s) => s.includes(process.env.REMEDIATION_TEST_FILTER)) : suites;
 if (!selected.length) throw new Error('No matching remediation test');

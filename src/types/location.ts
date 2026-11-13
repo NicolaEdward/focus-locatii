@@ -314,11 +314,28 @@ export type ReservationPageDTO = {
   hasPreviousPage: boolean;
 };
 
+export type InventoryAvailabilitySummaryDTO = {
+  asOf: string;
+  dateKey: string;
+  timeZone: "Europe/Bucharest";
+  activeLocations: number;
+  staticLocations: number;
+  digitalLocations: number;
+  maintenanceLocations: number;
+  freeToday: number;
+  occupiedToday: number;
+  heldToday: number;
+  blockedToday: number;
+  unknownToday: number;
+};
+
 export type OccupancySummaryDTO = {
   activeHolds: number;
   occupiedNow: number;
   upcoming: number;
   activeOrUpcoming: number;
+  /** Global location availability, separate from the actor's reservation rows. */
+  inventory?: InventoryAvailabilitySummaryDTO | null;
 };
 
 export type CategoryDTO = {

@@ -75,7 +75,7 @@ function main() {
   assert(lifecycleDomain.includes('RESERVED: "HOLD"'), "RESERVED must be displayed as HOLD");
   assert(lifecycleDomain.includes("activeOrUpcoming: input.occupiedNow + input.activeHolds + input.upcoming"), "occupancy total must reconcile from mutually exclusive cards");
   assert(reservationsService.includes('{ status: "BOOKED", periodStart: { gt: today }'), "future reservation count must exclude HOLD rows already shown separately");
-  assert(occupancySummary.includes('"Rezervari viitoare"') && occupancySummary.includes('"Total blocante"'), "occupancy labels must explain the reconciled categories");
+  assert(occupancySummary.includes('"Libere azi"') && occupancySummary.includes("inventory?.freeToday") && !occupancySummary.includes("value: summary.activeOrUpcoming"), "location availability must be separate from current/future reservation-row counts");
   assert(lazyWorkspace.includes("initialOccupancySummary"), "workspace must receive the canonical occupancy summary");
   assert(read("src", "app", "api", "reservations", "route.ts").includes('view === "occupancy-summary"'), "mutations must refresh a compact occupancy summary");
 

@@ -36,7 +36,7 @@ assert(
 assert(executiveService.includes("prisma.financialReceivable.findMany"), "executive finance must use the canonical invoice registry");
 assert(executiveService.includes("includedInReport: true") && executiveService.includes("needsReview: false"), "executive finance must use validated invoices");
 assert(executiveService.includes("isEffectiveHold"), "executive HOLD counts must use effective expiry");
-assert(executiveService.includes("decideAvailability"), "executive inventory must use canonical availability");
+assert(executiveService.includes("inventoryAvailabilityBucket(location, snapshotStorageDate, snapshotNow)"), "executive inventory must delegate to the shared canonical availability bucket");
 assert(executiveService.includes("sum !== partition.total"), "inventory categories must be disjoint and exhaustive");
 assert(!executiveService.includes("prisma.mediaPlan"), "executive dashboard must not query inactive Media Plan");
 assert(!executiveService.includes(".create(") && !executiveService.includes(".update(") && !executiveService.includes(".delete("), "Executive Overview load must remain read-only");

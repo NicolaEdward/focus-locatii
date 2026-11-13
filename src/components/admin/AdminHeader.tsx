@@ -78,7 +78,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
               {canViewClients ? <AdminMenuLink href="/admin/clienti" active={isActiveAdminPath(pathname, "/admin/clienti")} icon={<Building2 size={17} />} label="Clienti" /> : null}
               {canViewCampaigns ? <AdminMenuLink href="/admin/campanii" active={isActiveAdminPath(pathname, "/admin/campanii")} icon={<BriefcaseBusiness size={17} />} label="Campanii in Clienti" /> : null}
               {canViewCommercialTools ? <AdminMenuLink href="/admin/commercial-quotes" active={isActiveAdminPath(pathname, "/admin/commercial-quotes")} icon={<FileSpreadsheet size={17} />} label="Oferte comerciale" /> : null}
-              {canViewCommercialTools ? <AdminMenuLink href="/admin/dooh" active={isActiveAdminPath(pathname, "/admin/dooh")} icon={<MapPin size={17} />} label="DOOH" /> : null}
+              {canViewCommercialTools && process.env.NEXT_PUBLIC_DOOH_ENABLED === "true" ? <AdminMenuLink href="/admin/dooh" active={isActiveAdminPath(pathname, "/admin/dooh")} icon={<MapPin size={17} />} label="DOOH" /> : null}
               {canViewCommercialTools ? <AdminMenuLink href="/admin/ai" active={isActiveAdminPath(pathname, "/admin/ai")} icon={<Users size={17} />} label="Copilot și pilot AI" /> : null}
             </AdminNavMenu>
           ) : null}

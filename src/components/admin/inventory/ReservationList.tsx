@@ -41,11 +41,12 @@ export function ReservationList({
   const [scope, setScope] = useState<"active" | "history">(initialFilters.scope);
   const [page, setPage] = useState(initialPage.page);
   const [loading, setLoading] = useState(false);
+  const [manualRefresh, setManualRefresh] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const firstRequest = useRef(true);
 
   useEffect(() => {
-    if (firstRequest.current && refreshToken === 0) {
+    if (firstRequest.current && refreshToken === 0 && manualRefresh === 0) {
       firstRequest.current = false;
       return;
     }
@@ -62,6 +63,7 @@ export function ReservationList({
         const response = await fetch(`/api/admin/reservations?${params}`, { cache: "no-store", signal: controller.signal });
         const payload = await response.json().catch(() => null);
         if (!response.ok) throw new Error(payload?.error || "Rezervarile nu au putut fi incarcate.");
+        if (!payload?.page || !Array.isArray(payload.page.items) || !payload.summary || typeof payload.summary !== "object") throw new Error("Răspunsul rezervărilor este incomplet. Datele anterioare sunt păstrate.");
         setResult(payload.page);
         setSummary(payload.summary);
         if (payload.page.page !== page) setPage(payload.page.page);
@@ -75,7 +77,7 @@ export function ReservationList({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [page, query, refreshToken, result.pageSize, scope, status]);
+  }, [manualRefresh, page, query, refreshToken, result.pageSize, scope, status]);
 
   function changeFilter(update: () => void) {
     setPage(1);
@@ -84,7 +86,7 @@ export function ReservationList({
 
   return (
     <div className="grid gap-4">
-      <OccupancySummary summary={summary} />
+      <OccupancySummary summary={summary} loading={loading} error={error} onRefresh={() => setManualRefresh((current) => current + 1)} />
       <div className="focus-card grid gap-4 rounded-lg p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><p className="text-xs font-black uppercase text-focus-yellow">Ocupare curenta si viitoare</p><h3 className="font-display text-2xl font-black uppercase text-white">Rezervari si HOLD-uri</h3></div>

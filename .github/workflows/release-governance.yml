@@ -102,6 +102,8 @@ jobs:
           node scripts/test-remediation-collation-plan.cjs
           node node_modules/tsx/dist/cli.mjs scripts/test-remediation-history.ts
           node node_modules/tsx/dist/cli.mjs scripts/test-dooh-static-capacity.ts
+          node node_modules/tsx/dist/cli.mjs scripts/test-inventory-availability-summary.ts
+          node scripts/test-occupancy-summary-ui.cjs
       - run: pnpm prisma validate
       - run: pnpm run build
       - name: Start production server
@@ -111,12 +113,23 @@ jobs:
       - run: pnpm run smoke:roles
       - name: Interactive UI regressions
         run: node scripts/release/smoke-ui-regressions.cjs
+      - name: Occupancy summary browser states
+        run: node scripts/release/smoke-occupancy-summary.cjs
+        env:
+          OCCUPANCY_UI_BASE_URL: http://localhost:3000
       - run: pnpm run smoke:capture
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: role-smoke-screenshots
           path: artifacts/release-screenshots
+          if-no-files-found: warn
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: occupancy-summary-browser-states
+          path: artifacts/occupancy-ui
           if-no-files-found: warn
           retention-days: 14
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

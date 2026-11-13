@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { recordTransactionalAudit } from "@/lib/transactional-audit";
 import { retryClosedConnectionRead } from "@/lib/database-read-retry";
 import { loadAvailabilityDecisions } from "@/lib/availability-service";
+import { getInventoryAvailabilitySummary } from "@/lib/inventory-availability-summary";
+import { hasPermission } from "@/lib/rbac";
+import { bucharestBusinessDateKey, dateKeyAsStorageDate } from "@/lib/dashboard/executive/time";
 import {
   effectiveBlockingReservationWhere,
   effectiveHoldWhere,
@@ -357,21 +360,25 @@ export async function getReservationOccupancySummary(
   actor?: AuthSession | null,
   now = new Date()
 ): Promise<OccupancySummaryDTO> {
-  const today = startOfUtcDay(now);
+  const today = dateKeyAsStorageDate(bucharestBusinessDateKey(now));
+  const tomorrow = new Date(today.getTime() + 86_400_000);
   const accessWhere = reservationAccessWhere(actor);
-  const [activeHolds, occupiedNow, upcoming] = await Promise.all([
+  const [activeHolds, occupiedNow, upcoming, inventory] = await Promise.all([
     prisma.reservation.count({
       where: combineReservationWhere(accessWhere, effectiveHoldWhere(now), { periodEnd: { gte: today } })
     }),
     prisma.reservation.count({
-      where: combineReservationWhere(accessWhere, { status: "BOOKED", periodStart: { lte: today }, periodEnd: { gte: today } })
+      where: combineReservationWhere(accessWhere, { status: "BOOKED", periodStart: { lt: tomorrow }, periodEnd: { gte: today } })
     }),
     prisma.reservation.count({
-      where: combineReservationWhere(accessWhere, { status: "BOOKED", periodStart: { gt: today }, periodEnd: { gte: today } })
-    })
+      where: combineReservationWhere(accessWhere, { status: "BOOKED", periodStart: { gte: tomorrow }, periodEnd: { gte: today } })
+    }),
+    actor && hasPermission(actor.role, "inventory.view")
+      ? getInventoryAvailabilitySummary({ now })
+      : Promise.resolve(null)
   ]);
 
-  return occupancySummaryFromCounts({ activeHolds, occupiedNow, upcoming });
+  return { ...occupancySummaryFromCounts({ activeHolds, occupiedNow, upcoming }), inventory };
 }
 
 function reservationListWhere(

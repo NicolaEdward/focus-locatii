@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { unstable_cache } from "next/cache";
 import type { AuthSession } from "@/lib/auth";
-import { decideAvailability } from "@/lib/availability";
+import { inventoryAvailabilityBucket } from "@/lib/inventory-availability-summary";
 import {
   campaignEffectiveStatusWhere,
   deriveCampaignEffectiveStatus
@@ -35,6 +35,7 @@ import {
 import {
   addDateKeyDays,
   bucharestDayBounds,
+  bucharestBusinessDateKey,
   dateKeyAsStorageDate,
   daysBetween
 } from "@/lib/dashboard/executive/time";
@@ -51,7 +52,7 @@ const activeTaskStatuses = ["NEW", "IN_PROGRESS"] as const;
 
 const cachedOverview = unstable_cache(
   async (scope: ExecutiveScope) => queryExecutiveOverview(scope),
-  ["executive-overview-v4"],
+  ["executive-overview-v5"],
   { revalidate: EXECUTIVE_REVALIDATE_SECONDS, tags: ["executive-overview"] }
 );
 
@@ -124,7 +125,9 @@ export async function queryExecutiveOverview(
           { reservation: { is: { campaign: { is: { companyEntity: { in: selectedEntityValues } } } } } }
         ]
       };
-  const holdWhere = effectiveHoldWhere(snapshotBounds.start);
+  const inventoryNow = scope.snapshotDate === bucharestBusinessDateKey(now) ? now : snapshotBounds.start;
+  const snapshotStorageEndExclusive = new Date(snapshotStorageDate.getTime() + 86_400_000);
+  const holdWhere = effectiveHoldWhere(inventoryNow);
 
   const [
     openReceivables,
@@ -135,7 +138,8 @@ export async function queryExecutiveOverview(
     assignmentCoverage,
     crmOpportunities,
     crmOpenActions,
-    todayTaskDetails
+    todayTaskDetails,
+    digitalProfiles
   ] = await Promise.all([
     prisma.financialReceivable.findMany({
       where: {
@@ -203,6 +207,7 @@ export async function queryExecutiveOverview(
     prisma.location.findMany({
       select: {
         id: true,
+        type: true,
         lifecycleStatus: true,
         status: true,
         availabilityText: true,
@@ -217,7 +222,7 @@ export async function queryExecutiveOverview(
           where: {
             AND: [
               { OR: [{ status: "BOOKED" }, holdWhere] },
-              { periodStart: { lte: snapshotStorageDate } },
+              { periodStart: { lt: snapshotStorageEndExclusive } },
               { periodEnd: { gte: snapshotStorageDate } }
             ]
           },
@@ -226,7 +231,7 @@ export async function queryExecutiveOverview(
         availabilityOverrides: {
           where: {
             clearedAt: null,
-            periodStart: { lte: snapshotStorageDate },
+            periodStart: { lt: snapshotStorageEndExclusive },
             OR: [{ periodEnd: null }, { periodEnd: { gte: snapshotStorageDate } }]
           },
           select: { id: true, type: true, reason: true, periodStart: true, periodEnd: true, clearedAt: true }
@@ -327,7 +332,8 @@ export async function queryExecutiveOverview(
           },
           orderBy: [{ scheduledFor: "asc" }, { id: "asc" }]
         })
-      : Promise.resolve([])
+      : Promise.resolve([]),
+    prisma.doohProfile.findMany({ select: { locationId: true } })
   ]);
 
   const campaignDecisions = campaigns.map((campaign) => ({
@@ -346,7 +352,8 @@ export async function queryExecutiveOverview(
     .filter((risk): risk is ExecutiveCampaignRisk => Boolean(risk))
     .sort(riskSort);
 
-  const sharedInventory = buildInventoryPartition(locations, snapshotStorageDate, snapshotBounds.start);
+  const digitalLocationIds = new Set(digitalProfiles.map((profile) => profile.locationId));
+  const sharedInventory = buildInventoryPartition(locations.map((location) => ({ ...location, hasDoohProfile: digitalLocationIds.has(location.id) })), snapshotStorageDate, inventoryNow);
   const inventoryFilterApplies = scope.entitySelection === "ALL";
   const inventory = inventoryFilterApplies ? sharedInventory : emptyInventoryPartition();
   const collectionsThisMonth = groupPayments(periodPayments, scope);
@@ -400,7 +407,7 @@ export async function queryExecutiveOverview(
       stale: false,
       timeZone: scope.timeZone,
       contractVersion: scope.contractVersion,
-      queryBudget: 15,
+      queryBudget: 16,
       source: "CANONICAL_LIVE"
     },
     entities: EXECUTIVE_ENTITIES.map(({ code, label }) => ({ code, label })),
@@ -514,6 +521,8 @@ function campaignRisk(
 export function buildInventoryPartition(
   locations: Array<{
     id: string;
+    type?: string | null;
+    hasDoohProfile?: boolean;
     lifecycleStatus: string;
     status: string;
     availabilityText: string | null;
@@ -549,9 +558,13 @@ export function buildInventoryPartition(
   };
 
   for (const location of locations) {
-    const hasBooked = location.reservations.some((reservation) => reservation.status === "BOOKED");
-    const activeHolds = location.reservations.filter((reservation) => isEffectiveHold(reservation, snapshotNow));
-    partition.activeBookedReservations += location.reservations.filter((reservation) => reservation.status === "BOOKED").length;
+    const dateKey = snapshotStorageDate.toISOString().slice(0, 10);
+    const currentReservations = location.reservations.filter((reservation) =>
+      reservation.periodStart.toISOString().slice(0, 10) <= dateKey && reservation.periodEnd.toISOString().slice(0, 10) >= dateKey
+    );
+    const hasBooked = currentReservations.some((reservation) => reservation.status === "BOOKED");
+    const activeHolds = currentReservations.filter((reservation) => isEffectiveHold(reservation, snapshotNow));
+    partition.activeBookedReservations += currentReservations.filter((reservation) => reservation.status === "BOOKED").length;
     partition.activeHoldReservations += activeHolds.length;
 
     if (location.lifecycleStatus === "INACTIVE") {
@@ -570,18 +583,15 @@ export function buildInventoryPartition(
       continue;
     }
 
-    const decision = decideAvailability({
-      ...location,
-      periodStart: snapshotStorageDate,
-      periodEnd: snapshotStorageDate,
-      now: snapshotNow
-    });
-    if (hasBooked) partition.booked += 1;
-    else if (activeHolds.length) partition.hold += 1;
-    else if (decision.reasons.some((reason) =>
-      ["OVERRIDE_COMMERCIAL_BLOCK", "OVERRIDE_MAINTENANCE", "OVERRIDE_INTERNAL_HOLD", "LEGACY_MANUAL_BLOCK"].includes(reason.code)
-    )) partition.manualUnavailable += 1;
-    else if (decision.isBookable) partition.available += 1;
+    const bucket = inventoryAvailabilityBucket(location, snapshotStorageDate, snapshotNow);
+    if (bucket === "DIGITAL") {
+      // Digital capacity is not a free full-location OOH support. The existing
+      // executive DTO places it outside eligible static stock, under unknown.
+      partition.unknown += 1;
+    } else if (bucket === "OCCUPIED") partition.booked += 1;
+    else if (bucket === "HELD") partition.hold += 1;
+    else if (bucket === "BLOCKED") partition.manualUnavailable += 1;
+    else if (bucket === "FREE") partition.available += 1;
     else partition.unknown += 1;
   }
 

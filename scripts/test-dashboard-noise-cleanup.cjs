@@ -153,9 +153,11 @@ function dashboardLabelsAreClearRomanian() {
   assert(!financial.includes("Needs Review"), "finance dashboard tab should be Romanian");
   assert(financial.includes("Necesita verificare"), "finance dashboard should use clearer review label");
 
-  const clientCampaigns = read("src", "components", "admin", "ClientCampaignsWorkspace.tsx");
-  assert(!clientCampaigns.includes("Accounts OOH"), "client workspace title should not use mixed English label");
-  assert(clientCampaigns.includes("Clienti si campanii OOH"), "client workspace title should be clear Romanian");
+  const clients = read("src", "components", "admin", "client-campaigns", "ClientsWorkspace.tsx");
+  const campaigns = read("src", "components", "admin", "client-campaigns", "CampaignsWorkspace.tsx");
+  assert(!clients.includes("Accounts OOH"), "client workspace title should not use mixed English label");
+  assert(/title="Clien[țt]i"/.test(clients), "current client workspace should name the client domain");
+  assert(campaigns.includes('title="Campanii"'), "current campaign workspace should name the campaign domain");
 }
 
 function dashboardInventoryAndProblemsStayConsistent() {

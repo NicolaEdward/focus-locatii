@@ -16,6 +16,7 @@ const { findChrome, waitForChrome, createTarget, connect, waitForExpression, wai
 const outDir = path.resolve(process.cwd(), process.env.CAPTURE_OUT_DIR || "artifacts/release-screenshots");
 const workflowChecks = process.env.CAPTURE_WORKFLOW_CHECKS === "true";
 const performanceRuns = Math.max(1, Math.min(10, Number(process.env.CAPTURE_PERFORMANCE_RUNS || 1)));
+const doohEnabled = process.env.NEXT_PUBLIC_DOOH_ENABLED === "true";
 const themes = String(process.env.CAPTURE_THEMES || "light,dark").split(",").map((theme) => theme.trim()).filter((theme) => ["light", "dark"].includes(theme));
 if (!themes.length) throw new Error("CAPTURE_THEMES must include light or dark.");
 if (!password) throw new Error("PREVIEW_TEST_PASSWORD lipsește.");
@@ -52,8 +53,17 @@ const pages = [
   { name: "sales-reservations", route: "/admin/locatii", role: "SALES_AGENT", expected: "Loca" },
   { name: "crm", route: "/admin/crm", role: "SALES_AGENT", expected: "CRM" },
   { name: "commercial-quotes", route: "/admin/commercial-quotes", role: "COO", expected: "Oferte comerciale și aprobări" },
-  { name: "dooh-capacity", route: "/admin/dooh", role: "COO", expected: "Capacitate DOOH" },
-  { name: "ai-copilot-pilot", route: "/admin/ai", role: "COO", expected: "Copilot și pilot AI" },
+  { name: "dooh-capacity", route: "/admin/dooh", role: "COO", expected: doohEnabled ? "Capacitate DOOH" : "Selector oferta OOH", expectedPath: doohEnabled ? "/admin/dooh" : "/admin/selectie-locatii" },
+  { name: "ai-copilot-pilot", route: "/admin/ai", role: "COO", expected: "Administrare AI", expectedPath: "/admin/ai" },
+  { name: "sales-ai-legacy-redirect", route: "/admin/ai", role: "SALES_AGENT", expected: "Conexiuni ChatGPT", expectedPath: "/admin/assistant-connections" },
+  { name: "commercial-settings", route: "/admin/commercial-settings", role: "COO", expected: "Reguli comerciale", expectedPath: "/admin/commercial-settings" },
+  { name: "contract-control", route: "/admin/control-contractual", role: "COO", expected: "Control contractual", expectedPath: "/admin/control-contractual" },
+  { name: "sales-contract-control", route: "/admin/control-contractual", role: "SALES_AGENT", expected: "Control contractual", expectedPath: "/admin/control-contractual" },
+  { name: "onboarding-sales", route: "/admin/onboarding", role: "SALES_AGENT", expected: "De la oportunitate la campanie executată", expectedPath: "/admin/onboarding" },
+  { name: "onboarding-finance", route: "/admin/onboarding", role: "FINANCE_OPERATOR", expected: "Primii pași în financiar", expectedPath: "/admin/onboarding" },
+  { name: "onboarding-field", route: "/admin/onboarding", role: "FIELD_OPERATOR", expected: "Primii pași în execuție", expectedPath: "/admin/onboarding" },
+  { name: "onboarding-management", route: "/admin/onboarding", role: "COO", expected: "Pune echipa și fluxurile în ordine", expectedPath: "/admin/onboarding" },
+  { name: "onboarding-executive", route: "/admin/onboarding", role: "D_CEO", expected: "Cum urmărești activitatea firmei", expectedPath: "/admin/onboarding" },
   { name: "operational", route: "/admin/operational", role: "COO", expected: "Workspace operational" },
   { name: "suppliers", route: "/admin/furnizori", role: "COO", expected: "Furnizori" },
   { name: "finance-suppliers", route: "/admin/furnizori", role: "FINANCE_OPERATOR", expected: "Furnizori" },
@@ -146,6 +156,10 @@ async function capturePage(page, viewport, cookie, theme) {
   await waitForExpression(client, "document.readyState === 'complete'", 30000);
   if (page.role) await waitForExpression(client, "!!document.querySelector('nav.admin-nav')?.getClientRects().length", 90000);
   await wait(1200);
+  if (page.expectedPath) {
+    const pathResult = await client.send("Runtime.evaluate", { expression: "location.pathname", returnByValue: true });
+    if (pathResult.result?.value !== page.expectedPath) throw new Error(`${page.name}/${viewport.name} reached ${pathResult.result?.value}; expected ${page.expectedPath}.`);
+  }
   if (page.name === "finance-reconciliation") {
     await client.send("Runtime.evaluate", {
       expression: `Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim().toUpperCase() === 'IMPORTURI')?.click()`

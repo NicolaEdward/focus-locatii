@@ -14,6 +14,7 @@ export default async function DoohPage() {
     ])
   )
     redirect("/admin/dashboard");
+  if (process.env.NEXT_PUBLIC_DOOH_ENABLED !== "true") redirect("/admin/selectie-locatii");
   return (
     <>
       <AdminHeader session={session} />

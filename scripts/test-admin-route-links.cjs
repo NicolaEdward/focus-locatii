@@ -51,7 +51,7 @@ assert.match(header, /hasAdministrativeMenu \? "Administrare" : "Cont"/, "Admini
 assert.match(header, /label="Campanii"/, "Campaign work and contractual control should have their own domain.");
 assert.match(header, /href="\/admin\/onboarding"/, "Every employee should have a reachable role-specific work guide.");
 assert.equal(header.includes("Campanii in Clienti"), false, "Obsolete combined-workspace wording should not be visible.");
-assert.match(header, /canManageCommercialPolicy \? <AdminMenuLink href="\/admin\/ai"/, "AI administration must stay outside the ordinary seller workflow.");
+assert.match(header, /canManageAi \? <AdminMenuLink href="\/admin\/ai"/, "AI administration must stay outside the ordinary seller workflow.");
 assert.match(header, /href="\/admin\/integrari\/saga"/, "AdminHeader should expose SAGA only through the integrations settings context.");
 assert.match(header, /href="\/admin\/operational"/, "AdminHeader should expose a dedicated Operational workspace.");
 assert.match(header, /session\.role === "FIELD_OPERATOR"/, "AdminHeader should treat field operators as a restricted navigation role.");

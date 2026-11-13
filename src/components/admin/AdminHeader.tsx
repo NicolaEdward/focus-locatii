@@ -48,7 +48,8 @@ export function AdminHeader({ session }: { session: AuthSession }) {
   const canViewClients = hasAnyPermission(session.role, ["clients.view", "clients.view.own", "campaigns.view", "campaigns.view.own", "finance.view"]);
   const canViewCampaigns = hasAnyPermission(session.role, ["campaigns.view", "campaigns.view.own", "finance.view"]);
   const canViewCommercialTools = hasAnyPermission(session.role, ["reservations.view", "reservations.view.own"]);
-  const canManageCommercialPolicy = ["COO", "SUPER_ADMIN", "SALES_DIRECTOR"].includes(session.role);
+  const canManageCommercialPolicy = ["COO", "SUPER_ADMIN"].includes(session.role);
+  const canManageAi = ["COO", "SUPER_ADMIN", "SALES_DIRECTOR"].includes(session.role);
   const canManageOperationsControl = ["COO", "SUPER_ADMIN"].includes(session.role);
   const canViewDocumentAudit = ["COO", "SUPER_ADMIN", "D_CEO"].includes(session.role);
   const canViewFinance = hasPermission(session.role, "finance.view");
@@ -117,7 +118,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
               {canViewSaga ? <AdminMenuLink href="/admin/integrari/saga" active={isActiveAdminPath(pathname, "/admin/integrari/saga")} icon={<Cable size={17} />} label="Integrari / SAGA" /> : null}
               {canManageOperationsControl ? <AdminMenuLink href="/admin/operations-control" active={isActiveAdminPath(pathname, "/admin/operations-control")} icon={<ShieldCheck size={17} />} label="Control operațional" /> : null}
               {canManageCommercialPolicy ? <AdminMenuLink href="/admin/commercial-settings" active={isActiveAdminPath(pathname, "/admin/commercial-settings")} icon={<CircleDollarSign size={17} />} label="Reguli comerciale și TVA" /> : null}
-              {canManageCommercialPolicy ? <AdminMenuLink href="/admin/ai" active={isActiveAdminPath(pathname, "/admin/ai")} icon={<Users size={17} />} label="Administrare agent AI" /> : null}
+              {canManageAi ? <AdminMenuLink href="/admin/ai" active={isActiveAdminPath(pathname, "/admin/ai")} icon={<Users size={17} />} label="Administrare agent AI" /> : null}
               {!isFieldOperator ? <AdminMenuLink href="/admin/assistant-connections" active={isActiveAdminPath(pathname, "/admin/assistant-connections")} icon={<KeyRound size={17} />} label="Conexiunea ChatGPT" /> : null}
               {canViewDocumentAudit ? <AdminMenuLink href="/admin/document-audit" active={isActiveAdminPath(pathname, "/admin/document-audit")} icon={<FileSpreadsheet size={17} />} label="Audit documente NAS" /> : null}
             </AdminNavMenu>

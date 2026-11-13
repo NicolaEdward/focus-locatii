@@ -45,9 +45,9 @@ async function main() {
       try {
         const caPath = originalUrl.searchParams.get("sslcert");
         strict = await mysql.createConnection({ host: originalUrl.hostname, port: Number(originalUrl.port || 3306), user: decodeURIComponent(originalUrl.username), password: decodeURIComponent(originalUrl.password), database,
-          ssl: { rejectUnauthorized: true, ...(process.env.DATABASE_CA_PEM ? { ca: process.env.DATABASE_CA_PEM } : caPath ? { ca: require("node:fs").readFileSync(caPath) } : {}) }, connectTimeout: 10000 });
+          ssl: { rejectUnauthorized: true, verifyIdentity: true, ...(process.env.DATABASE_CA_PEM ? { ca: process.env.DATABASE_CA_PEM } : caPath ? { ca: require("node:fs").readFileSync(caPath) } : {}) }, connectTimeout: 10000 });
         await strict.query("SELECT 1");
-        console.log(JSON.stringify({ event: "database_strict_tls_probe", ok: true, databaseFingerprint }));
+        console.log(JSON.stringify({ event: "database_strict_tls_probe", ok: true, serverIdentityVerified: true, databaseFingerprint }));
       } catch {
         console.error(JSON.stringify({ event: "database_strict_tls_probe", ok: false, databaseFingerprint, code: "PROVIDER_CA_VERIFICATION_REQUIRED" }));
         throw new Error("PROVIDER_CA_VERIFICATION_REQUIRED");

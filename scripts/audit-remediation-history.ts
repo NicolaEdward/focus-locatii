@@ -109,7 +109,7 @@ export async function withReadOnlyInventorySnapshot<T>(
     password: decodeURIComponent(source.url.password),
     database: source.database,
     ssl: remote
-      ? { rejectUnauthorized: true, ...(process.env.DATABASE_CA_PEM ? { ca: process.env.DATABASE_CA_PEM } : ca ? { ca: readFileSync(ca) } : {}) }
+      ? { rejectUnauthorized: true, verifyIdentity: true, ...(process.env.DATABASE_CA_PEM ? { ca: process.env.DATABASE_CA_PEM } : ca ? { ca: readFileSync(ca) } : {}) }
       : undefined,
     supportBigNumbers: true,
     bigNumberStrings: true,

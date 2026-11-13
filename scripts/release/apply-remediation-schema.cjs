@@ -79,7 +79,7 @@ async function run({ generate = false, apply = false } = {}) {
   }
   const remote = !['127.0.0.1','localhost','::1'].includes(source.u.hostname);
   const ca = process.env.REMEDIATION_MYSQL_CA_FILE || source.u.searchParams.get('sslcert');
-  const db = await mysql.createConnection({ host: source.u.hostname, port: Number(source.u.port || 3306), user: decodeURIComponent(source.u.username), password: decodeURIComponent(source.u.password), database: source.name, ssl: remote ? { rejectUnauthorized: true, ...(process.env.DATABASE_CA_PEM ? { ca: process.env.DATABASE_CA_PEM } : ca ? { ca: fs.readFileSync(ca) } : {}) } : undefined, supportBigNumbers: true, bigNumberStrings: true, multipleStatements: false });
+  const db = await mysql.createConnection({ host: source.u.hostname, port: Number(source.u.port || 3306), user: decodeURIComponent(source.u.username), password: decodeURIComponent(source.u.password), database: source.name, ssl: remote ? { rejectUnauthorized: true, verifyIdentity: true, ...(process.env.DATABASE_CA_PEM ? { ca: process.env.DATABASE_CA_PEM } : ca ? { ca: fs.readFileSync(ca) } : {}) } : undefined, supportBigNumbers: true, bigNumberStrings: true, multipleStatements: false });
   let locked = false;
   try {
     await db.query('SET SESSION lock_wait_timeout = 10');

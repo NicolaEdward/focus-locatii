@@ -59,7 +59,7 @@ function connection(value, withoutDatabase = false) {
   return mysql.createConnection({
     host: hostname(u), port: Number(u.port || 3306), user: decodeURIComponent(u.username), password: decodeURIComponent(u.password),
     database: withoutDatabase ? undefined : name,
-    ssl: !isLocal(u) ? { rejectUnauthorized: true, ...(process.env.DATABASE_CA_PEM ? { ca: process.env.DATABASE_CA_PEM } : ca ? { ca: fs.readFileSync(ca) } : {}) } : undefined,
+    ssl: !isLocal(u) ? { rejectUnauthorized: true, verifyIdentity: true, ...(process.env.DATABASE_CA_PEM ? { ca: process.env.DATABASE_CA_PEM } : ca ? { ca: fs.readFileSync(ca) } : {}) } : undefined,
     supportBigNumbers: true, bigNumberStrings: true, dateStrings: true, jsonStrings: true,
     charset: "utf8mb4", multipleStatements: false, connectTimeout: 10000
   });

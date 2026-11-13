@@ -7,10 +7,14 @@ import {
   applyBankEvidenceOperation, bankEvidenceOperationSchema, bankEvidenceTransactionOptions,
   hashBankEvidenceOperation, verifyBankEvidenceSource,
 } from "../../src/lib/bank-evidence-executor";
+import {
+  applyContractMetadataOperation, contractMetadataOperationSchema, contractMetadataTransactionOptions,
+  hashContractMetadataOperation, verifyContractMetadataSource,
+} from "../../src/lib/contract-metadata-evidence";
 
 // A bank-only job does not load or activate invoice mutation code.
 async function invoiceExecutor() {
-  const modulePath = "../../src/lib/invoice-evidence-executor";
+  const modulePath = "../../src/lib/invoice-evidence-reconciliation";
   return import(modulePath);
 }
 
@@ -20,7 +24,7 @@ const jobSchema = z.object({
   sourceSnapshotHash: sha, runId: z.string().regex(/^[A-Za-z0-9_.:-]{1,128}$/),
   ownerAuthorization: z.literal("owner-uploaded-documents-2026-11-13"),
   createdAt: z.string().datetime(), expiresAt: z.string().datetime(),
-  sources: z.array(z.object({ sha256: sha, fileName: z.string().min(1).max(255), companyCode: z.enum(["FOCUS_MEDIA", "EXCELLENCE_MEDIA", "FOCUS_BG"]), bytesBase64: z.string().max(12 * 1024 * 1024) }).strict()).min(1).max(8),
+  sources: z.array(z.object({ sha256: sha, fileName: z.string().min(1).max(255), companyCode: z.enum(["FOCUS_MEDIA", "EXCELLENCE_MEDIA", "FOCUS_BG", "MIXED"]), bytesBase64: z.string().max(12 * 1024 * 1024) }).strict()).min(1).max(8),
   operations: z.array(z.object({ approvedOperationHash: sha, operation: z.record(z.string(), z.unknown()) }).strict()).min(1).max(1500),
 }).strict();
 
@@ -45,11 +49,13 @@ async function main() {
   const { job, mode, manifestHash } = guard();
   const bankSources = new Map<string, ReturnType<typeof verifyBankEvidenceSource>>();
   const invoiceSources = new Map<string, unknown>();
+  const contractSources = new Map<string, ReturnType<typeof verifyContractMetadataSource>>();
   const invoice = job.sources.some(source => /\.xlsx?$/i.test(source.fileName)) ? await invoiceExecutor() : null;
   for (const source of job.sources) {
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(source.bytesBase64) || /[\\/]/.test(source.fileName)) throw Error("EVIDENCE_JOB_SOURCE_INVALID");
     const bytes = Buffer.from(source.bytesBase64, "base64");
-    const input = { bytes, fileName: source.fileName, expectedHash: source.sha256, companyCode: source.companyCode };
+    if (/\.docx$/i.test(source.fileName)) { contractSources.set(source.sha256, verifyContractMetadataSource({ bytes, expectedHash: source.sha256 })); continue; }
+    const input = { bytes, fileName: source.fileName, expectedHash: source.sha256, companyCode: z.enum(["FOCUS_MEDIA", "EXCELLENCE_MEDIA", "FOCUS_BG"]).parse(source.companyCode) };
     if (/\.csv$/i.test(source.fileName)) bankSources.set(source.sha256, verifyBankEvidenceSource(input));
     else if (/\.xlsx?$/i.test(source.fileName) && invoice) invoiceSources.set(source.sha256, await invoice.verifyInvoiceEvidenceSource(input));
     else throw Error("EVIDENCE_JOB_SOURCE_UNSUPPORTED");
@@ -58,9 +64,10 @@ async function main() {
   for (const item of job.operations) {
     const op = item.operation;
     const bank = op.kind === "bank.import-statement";
-    const calculated = bank ? hashBankEvidenceOperation(bankEvidenceOperationSchema.parse(op)) : invoice?.hashInvoiceEvidenceOperation(op);
+    const contract = op.kind === "reservation.fill-missing-contract-number";
+    const calculated = bank ? hashBankEvidenceOperation(bankEvidenceOperationSchema.parse(op)) : contract ? hashContractMetadataOperation(op) : invoice?.hashInvoiceEvidenceOperation(op);
     if (calculated !== item.approvedOperationHash) throw Error("EVIDENCE_JOB_OPERATION_NOT_APPROVED");
-    if (!(bank ? bankSources.has(String(op.sourceHash)) : invoiceSources.has(String(op.sourceSha256)))) throw Error("EVIDENCE_JOB_SOURCE_NOT_APPROVED");
+    if (!(bank ? bankSources.has(String(op.sourceHash)) : contract ? contractSources.has(String(op.source_sha256)) : invoiceSources.has(String(op.sourceSha256)))) throw Error("EVIDENCE_JOB_SOURCE_NOT_APPROVED");
   }
   const client = prisma;
   let completed = 0;
@@ -73,6 +80,10 @@ async function main() {
         result = await client.$transaction(tx => applyBankEvidenceOperation(tx, bankEvidenceOperationSchema.parse(op), {
           mode, manifestHash, approvedOperationHash: item.approvedOperationHash, runId: job.runId, source: bankSources.get(String(op.sourceHash))!,
         }), bankEvidenceTransactionOptions);
+      } else if (op.kind === "reservation.fill-missing-contract-number") {
+        result = await client.$transaction(tx => applyContractMetadataOperation(tx, contractMetadataOperationSchema.parse(op), {
+          mode, manifestHash, approvedOperationHash: item.approvedOperationHash, runId: job.runId, source: contractSources.get(String(op.source_sha256))!,
+        }), contractMetadataTransactionOptions);
       } else {
         result = await invoice!.executeInvoiceEvidenceOperation(op, {
           mode, manifestHash, approvedOperationHash: item.approvedOperationHash, runId: job.runId, source: invoiceSources.get(String(op.sourceSha256))!,

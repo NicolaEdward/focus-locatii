@@ -15,7 +15,7 @@
     },
     {
       "path": "prisma/migrations/20261113190000_document_source_audit/migration.sql",
-      "sha256": "a4fda43f2c237d08f9cb998df15227b32264bbe0e8af54d542c663ce62f76e34"
+      "sha256": "565c51d9c63826b44cfa814a465e30014b77a677b1b54001cb6e828555fa083f"
     }
   ],
   "tables": {
@@ -4059,6 +4059,46 @@
           "name": "updatedAt",
           "type": "datetime(3)",
           "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "activeScanId",
+          "type": "varchar(128)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "activeScanLeaseUntil",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "activeScanObservedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "activeScanStartedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
           "defaultValue": null,
           "extra": "",
           "charsetName": null,

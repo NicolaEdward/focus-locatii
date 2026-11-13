@@ -248,9 +248,9 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     </label>
   );
 }
-function Submit({ busy, children }: { busy: boolean; children: ReactNode }) {
+function Submit({ busy, disabled = false, children }: { busy: boolean; disabled?: boolean; children: ReactNode }) {
   return (
-    <button type="submit" className="focus-button mt-2" disabled={busy}>
+    <button type="submit" className="focus-button mt-2" disabled={busy || disabled}>
       {busy ? "Se verifică…" : children}
     </button>
   );
@@ -773,7 +773,7 @@ function Quotes({
                 className={inputClass}
               />
             </Field>
-            <Submit busy={busy || termsMissing}>Cere aprobare HOLD</Submit>
+            <Submit busy={busy} disabled={termsMissing}>Cere aprobare HOLD</Submit>
           </form>
           <p className="mt-3 text-sm text-slate-300">
             Crearea HOLD și BOOKED nu rezultă automat din acceptarea ofertei.

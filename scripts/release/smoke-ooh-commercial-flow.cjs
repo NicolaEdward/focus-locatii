@@ -114,10 +114,12 @@ async function login(role) {
     const revised = await prisma.quoteRevision.findUniqueOrThrow({ where: { quoteId_revision: { quoteId, revision: 2 } } });
     assert.equal(revised.payload.lines[0].monthlyRate, "70.50");
     assert.equal(revised.payload.recipient, "reviewed-recipient@example.invalid");
+    await page.getByText("Se încarcă datele comerciale…", { exact: true }).waitFor({ state: "hidden" });
     await page.screenshot({ path: path.join(out, "negotiated-offer-desktop.png"), fullPage: true });
     await page.getByLabel("Caută în toate ofertele", { exact: true }).fill(tag);
     await page.getByRole("button", { name: "Caută", exact: true }).click();
     await page.getByRole("navigation", { name: "Paginare oferte", exact: true }).getByText(/1 oferte/).waitFor();
+    await page.getByText("Se încarcă datele comerciale…", { exact: true }).waitFor({ state: "hidden" });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: path.join(out, "negotiated-offer-mobile.png"), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, "Mobile layout overflows the viewport.");

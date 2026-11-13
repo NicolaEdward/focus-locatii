@@ -3,6 +3,8 @@ import { normalizeClientName, normalizeInvoiceNumber, validAccountOwners } from 
 import { moneyNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
+import { receivableNetAmount, receivableNetRemaining } from "@/lib/receivable-adjustments";
+import { receivableStatus } from "@/lib/receivables-domain";
 
 export type ClientCampaignsData = {
   clients: ClientCampaignSummary[];
@@ -418,8 +420,9 @@ export async function getClientCampaignsData(session: AuthSession, query = ""): 
       generalEmail: row.client?.generalEmail || null,
       generalPhone: row.client?.generalPhone || null
     });
-    const remaining = moneyNumber(row.remainingAmount);
-    const currency = row.currency || "RON";
+    const remaining = moneyNumber(receivableNetRemaining(row));
+    const currency = row.currency;
+    const status = receivableStatus({ invoiceAmount: receivableNetAmount(row.invoicedAmount, row.rawRowJson), collectedAmount: row.collectedAmount, dueDate: row.dueDate });
     const receivable: ClientReceivableRow = {
       id: row.id,
       clientId: row.clientId,
@@ -431,15 +434,15 @@ export async function getClientCampaignsData(session: AuthSession, query = ""): 
       location: row.location,
       clientName: row.clientName,
       dueDate: row.dueDate?.toISOString() || null,
-      amount: moneyNumber(row.invoicedAmount),
+      amount: moneyNumber(receivableNetAmount(row.invoicedAmount, row.rawRowJson)),
       collected: moneyNumber(row.collectedAmount),
       remaining,
       currency,
-      status: row.status,
+      status,
       collectedAt: row.collectedAt?.toISOString() || null,
       paymentMethod: row.paymentMethod,
       collectionNotes: row.collectionNotes,
-      archived: ["collected", "paid", "cancelled", "archived", "excluded"].includes(row.status) || remaining <= 0
+      archived: ["cancelled", "archived", "excluded"].includes(row.status) || remaining <= 0
     };
     group.receivables.push(receivable);
     flatInvoices.push(receivable);

@@ -1,3 +1,4 @@
+import { receivableNetAmount, receivableNetRemaining } from "@/lib/receivable-adjustments";
 import { prisma } from "@/lib/prisma";
 import { moneyNumber, type MoneyInput } from "@/lib/money";
 
@@ -8,7 +9,7 @@ export async function getFinancialDashboardData() {
   const inSevenDays = addDays(now, 7);
   const inThirtyDays = addDays(now, 30);
 
-  const [latestUpload, activeUpload, recentUploads, smartBillUploads] = await Promise.all([
+  const [latestUpload, activeUpload, recentUploads, smartBillUploads, canonicalUpload] = await Promise.all([
     prisma.financialReportUpload.findFirst({
       include: { uploadedBy: { select: { name: true, email: true } } },
       orderBy: { uploadedAt: "desc" }
@@ -30,11 +31,15 @@ export async function getFinancialDashboardData() {
       where: { status: "confirmed", fileHash: { startsWith: "smartbill-" } },
       include: { uploadedBy: { select: { name: true, email: true } } },
       orderBy: { uploadedAt: "desc" },
-      take: 50
+    }),
+    prisma.financialReportUpload.findFirst({
+      where: { status: "confirmed", receivables: { some: { canonicalKey: { not: null } } } },
+      include: { uploadedBy: { select: { name: true, email: true } } },
+      orderBy: { uploadedAt: "desc" }
     })
   ]);
 
-  const dashboardUpload = activeUpload || smartBillUploads[0] || null;
+  const dashboardUpload = activeUpload || smartBillUploads[0] || canonicalUpload || null;
   if (!dashboardUpload) {
     return emptyFinancialDashboard(latestUpload, recentUploads);
   }
@@ -64,8 +69,9 @@ export async function getFinancialDashboardData() {
     })
   ]);
 
+  const netReceivables = receivables.map((row) => ({ ...row, originalInvoicedAmount: row.invoicedAmount, invoicedAmount: receivableNetAmount(row.invoicedAmount, row.rawRowJson), remainingAmount: receivableNetRemaining(row) }));
   const clearPayables = payables.filter((row) => !row.needsReview && row.includedInReport && row.currency);
-  const clearReceivables = receivables.filter((row) => !row.needsReview && row.includedInReport && row.currency);
+  const clearReceivables = netReceivables.filter((row) => !row.needsReview && row.includedInReport && row.currency);
   const payableOpen = clearPayables.filter((row) => moneyNumber(row.remainingAmount) > 0);
   const receivableOpen = clearReceivables.filter((row) => moneyNumber(row.remainingAmount) > 0);
   const overduePayables = payableOpen.filter((row) => row.dueDate && row.dueDate < now);
@@ -79,6 +85,11 @@ export async function getFinancialDashboardData() {
   const needsReviewPayables = payables.filter((row) => row.needsReview || !row.currency);
   const needsReviewReceivables = receivables.filter((row) => row.needsReview || !row.currency);
 
+  const reportCurrencies = new Set([...clearReceivables, ...clearPayables].map(row => row.currency).filter(Boolean));
+  // Scalar compatibility fields have a value only for one currency. There is no
+  // implicit RON/EUR exchange rate; consumers use the explicit currency fields.
+  const singleCurrency = reportCurrencies.size <= 1;
+  const scalar = (value: number) => singleCurrency ? value : null;
   return {
     hasActiveReport: true,
     todayReportLoaded: [activeUpload, ...smartBillUploads].filter(isDefined).some((upload) => sameReportDay(upload.reportDate, now)),
@@ -86,17 +97,17 @@ export async function getFinancialDashboardData() {
     activeUpload: serializeUpload(dashboardUpload),
     uploads: recentUploads.map(serializeUpload).filter(isDefined),
     kpis: {
-      totalReceivable: sum(clearReceivables, "invoicedAmount"),
-      totalPayable: sum(clearPayables, "amountToPay"),
-      netCashPosition: roundMoney(sum(clearReceivables, "remainingAmount") - sum(clearPayables, "remainingAmount")),
-      dueToday: roundMoney(sum(dueTodayReceivables, "remainingAmount") + sum(dueTodayPayables, "remainingAmount")),
-      overdue: roundMoney(sum(overdueReceivables, "remainingAmount") + sum(overduePayables, "remainingAmount")),
-      dueNext7Days: roundMoney(sum(dueSoonReceivables, "remainingAmount") + sum(dueSoonPayables, "remainingAmount")),
-      dueNext30Days: roundMoney(sum(dueThirtyReceivables, "remainingAmount") + sum(dueThirtyPayables, "remainingAmount")),
-      totalCollected: sum(clearReceivables, "collectedAmount"),
-      totalPaid: sum(clearPayables, "amountPaid"),
-      remainingReceivable: sum(clearReceivables, "remainingAmount"),
-      remainingPayable: sum(clearPayables, "remainingAmount"),
+      totalReceivable: scalar(sum(clearReceivables, "invoicedAmount")),
+      totalPayable: scalar(sum(clearPayables, "amountToPay")),
+      netCashPosition: scalar(roundMoney(sum(clearReceivables, "remainingAmount") - sum(clearPayables, "remainingAmount"))),
+      dueToday: scalar(roundMoney(sum(dueTodayReceivables, "remainingAmount") + sum(dueTodayPayables, "remainingAmount"))),
+      overdue: scalar(roundMoney(sum(overdueReceivables, "remainingAmount") + sum(overduePayables, "remainingAmount"))),
+      dueNext7Days: scalar(roundMoney(sum(dueSoonReceivables, "remainingAmount") + sum(dueSoonPayables, "remainingAmount"))),
+      dueNext30Days: scalar(roundMoney(sum(dueThirtyReceivables, "remainingAmount") + sum(dueThirtyPayables, "remainingAmount"))),
+      totalCollected: scalar(sum(clearReceivables, "collectedAmount")),
+      totalPaid: scalar(sum(clearPayables, "amountPaid")),
+      remainingReceivable: scalar(sum(clearReceivables, "remainingAmount")),
+      remainingPayable: scalar(sum(clearPayables, "remainingAmount")),
       totalReceivableRon: sumCurrency(clearReceivables, "invoicedAmount", "RON"),
       totalReceivableEur: sumCurrency(clearReceivables, "invoicedAmount", "EUR"),
       totalPayableRon: sumCurrency(clearPayables, "amountToPay", "RON"),
@@ -185,16 +196,18 @@ function buildCompanyRows(payables: CompanyPayableRow[], receivables: CompanyRec
     const companyReceivables = receivables.filter((row) => (row.companyCode || row.companyName) === companyKey);
     const companyName = companyReceivables[0]?.companyName || companyPayables[0]?.companyName || companyKey;
     const companyCode = companyReceivables[0]?.companyCode || companyPayables[0]?.companyCode || null;
+    const currencies = new Set([...companyReceivables, ...companyPayables].map(row => row.currency).filter(Boolean));
+    const scalar = (value: number) => currencies.size <= 1 ? value : null;
     return {
       id: companyCode || companyName,
       companyName,
       companyCode,
-      totalPayable: sum(companyPayables, "amountToPay"),
-      totalPaid: sum(companyPayables, "amountPaid"),
-      remainingPayable: sum(companyPayables, "remainingAmount"),
-      totalReceivable: sum(companyReceivables, "invoicedAmount"),
-      totalCollected: sum(companyReceivables, "collectedAmount"),
-      remainingReceivable: sum(companyReceivables, "remainingAmount"),
+      totalPayable: scalar(sum(companyPayables, "amountToPay")),
+      totalPaid: scalar(sum(companyPayables, "amountPaid")),
+      remainingPayable: scalar(sum(companyPayables, "remainingAmount")),
+      totalReceivable: scalar(sum(companyReceivables, "invoicedAmount")),
+      totalCollected: scalar(sum(companyReceivables, "collectedAmount")),
+      remainingReceivable: scalar(sum(companyReceivables, "remainingAmount")),
       totalPayableRon: sumCurrency(companyPayables, "amountToPay", "RON"),
       totalPayableEur: sumCurrency(companyPayables, "amountToPay", "EUR"),
       totalPaidRon: sumCurrency(companyPayables, "amountPaid", "RON"),

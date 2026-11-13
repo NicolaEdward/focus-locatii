@@ -166,6 +166,9 @@ model Location {
   operationTasks OperationTask[]
   financialImportRows FinancialReceivableImportRow[]
 
+  financialAllocations FinancialInvoiceAllocation[]
+  financialCosts FinancialCampaignCost[]
+
   @@index([categoryId])
   @@index([status])
   @@index([lifecycleStatus])
@@ -259,6 +262,9 @@ model Reservation {
   priceSegments RentalPriceSegment[]
   changeLogs RentalChangeLog[]
   operationTasks OperationTask[]
+
+  financialAllocations FinancialInvoiceAllocation[]
+  financialCosts FinancialCampaignCost[]
 
   @@index([locationId])
   @@index([clientId])
@@ -363,6 +369,12 @@ model User {
   authRecoveryTokens AuthActionToken[] @relation("AuthActionTokenUser")
   createdAuthInvites AuthActionToken[] @relation("AuthActionTokenCreator")
   authSessions AuthSessionRecord[]
+
+  createdInvoiceAllocations FinancialInvoiceAllocation[] @relation("InvoiceAllocationCreator")
+  reversedInvoiceAllocations FinancialInvoiceAllocation[] @relation("InvoiceAllocationReverser")
+  createdCampaignCosts FinancialCampaignCost[] @relation("CampaignCostCreator")
+  approvedCampaignCosts FinancialCampaignCost[] @relation("CampaignCostApprover")
+  financialCampaignReviews FinancialCampaignFinanceReview[]
 
   @@index([role])
   @@index([active])
@@ -534,6 +546,10 @@ model Campaign {
   receivableImportRows FinancialReceivableImportRow[]
   documents ClientDocument[] @relation("CampaignDocuments")
   operationTasks OperationTask[]
+
+  financialAllocations FinancialInvoiceAllocation[]
+  financialCosts FinancialCampaignCost[]
+  financeReviews FinancialCampaignFinanceReview[]
 
   @@index([clientId])
   @@index([status])
@@ -809,6 +825,8 @@ model FinancialReceivable {
   importRows FinancialReceivableImportRow[]
   credits FinancialClientCredit[]
 
+  campaignAllocations FinancialInvoiceAllocation[]
+
   @@index([uploadId])
   @@index([clientId])
   @@index([campaignId])
@@ -1025,6 +1043,8 @@ model FinancialLegalEntity {
   bankStatements      FinancialBankStatement[]
   bankTransactions    FinancialBankTransaction[]
   supplierPaymentRules SupplierPaymentRule[]
+
+  campaignCosts FinancialCampaignCost[]
 
   @@index([normalizedName])
   @@index([active])
@@ -1614,6 +1634,8 @@ model BillingItem {
   receivables FinancialReceivable[]
   documents ClientDocument[] @relation("BillingDocuments")
 
+  financialAllocations FinancialInvoiceAllocation[]
+
   @@index([reservationId])
   @@index([clientId])
   @@index([invoiceDate])
@@ -1654,6 +1676,8 @@ model ClientDocument {
   supplier Supplier? @relation("SupplierDocuments", fields: [supplierId], references: [id], onDelete: Cascade)
   financialPayable FinancialPayable? @relation("PayableDocuments", fields: [financialPayableId], references: [id], onDelete: SetNull)
   uploadedBy User? @relation("DocumentUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  financialCosts FinancialCampaignCost[]
 
   @@index([clientId])
   @@index([campaignId])
@@ -1834,4 +1858,98 @@ model GpsAuditLog {
   @@index([locationId])
   @@index([status])
   @@map("portfolio_gps_audit_logs")
+}
+
+
+// Explicit analytical allocations; no automatic distribution of fiscal amounts.
+model FinancialInvoiceAllocation {
+  id                 String              @id @default(cuid())
+  receivableId       String
+  campaignId         String
+  reservationId      String?
+  locationId         String?
+  billingItemId      String?
+  requestKey         String              @unique
+  requestFingerprint String              @db.VarChar(64)
+  netAmount          Decimal             @db.Decimal(14, 2)
+  vatAmount          Decimal             @db.Decimal(14, 2)
+  grossAmount        Decimal             @db.Decimal(14, 2)
+  currency           String              @db.VarChar(3)
+  status             String              @default("active")
+  notes              String?             @db.Text
+  createdByUserId    String
+  reversedByUserId   String?
+  reversedAt         DateTime?
+  reversalReason     String?             @db.Text
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  receivable         FinancialReceivable @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  campaign           Campaign            @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  reservation        Reservation?        @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  location           Location?           @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  billingItem        BillingItem?        @relation(fields: [billingItemId], references: [id], onDelete: Restrict)
+  createdBy          User                @relation("InvoiceAllocationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  reversedBy         User?               @relation("InvoiceAllocationReverser", fields: [reversedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([receivableId, status])
+  @@index([campaignId, currency, status])
+  @@index([reservationId])
+  @@index([locationId])
+  @@map("portfolio_financial_invoice_allocations")
+}
+
+model FinancialCampaignCost {
+  id                 String               @id @default(cuid())
+  campaignId         String
+  reservationId      String?
+  locationId         String?
+  legalEntityId      String
+  sourceDocumentId   String?
+  sourceReference    String
+  costType           String
+  description        String               @db.Text
+  netAmount          Decimal              @db.Decimal(14, 2)
+  vatAmount          Decimal              @db.Decimal(14, 2)
+  grossAmount        Decimal              @db.Decimal(14, 2)
+  currency           String               @db.VarChar(3)
+  status             String               @default("draft")
+  requestKey         String               @unique
+  requestFingerprint String               @db.VarChar(64)
+  version            Int                  @default(0)
+  createdByUserId    String
+  approvedByUserId   String?
+  approvedAt         DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  campaign           Campaign             @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  reservation        Reservation?         @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  location           Location?            @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  legalEntity        FinancialLegalEntity @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  sourceDocument     ClientDocument?      @relation(fields: [sourceDocumentId], references: [id], onDelete: Restrict)
+  createdBy          User                 @relation("CampaignCostCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  approvedBy         User?                @relation("CampaignCostApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([campaignId, currency, status])
+  @@index([legalEntityId, currency])
+  @@index([reservationId])
+  @@index([locationId])
+  @@map("portfolio_financial_campaign_costs")
+}
+
+model FinancialCampaignFinanceReview {
+  id                String   @id @default(cuid())
+  campaignId        String
+  currency          String   @db.VarChar(3)
+  coverageFrom      DateTime
+  coverageTo        DateTime
+  costsComplete     Boolean  @default(false)
+  sourceFingerprint String   @db.VarChar(64)
+  notes             String   @db.Text
+  approvedByUserId  String
+  approvedAt        DateTime @default(now())
+  campaign          Campaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  approvedBy        User     @relation(fields: [approvedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([campaignId, currency])
+  @@map("portfolio_financial_campaign_finance_reviews")
 }

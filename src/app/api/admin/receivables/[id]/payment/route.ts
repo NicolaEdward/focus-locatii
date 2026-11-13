@@ -9,12 +9,12 @@ export const dynamic = "force-dynamic";
 const schema = z.object({
   mode: z.literal("add").default("add"),
   amount: z.union([z.number().positive(), z.string().trim().regex(/^\d+(?:[.,]\d{1,2})?$/)]),
-  collectedAt: z.string().trim().nullable().optional(),
+  collectedAt: z.string().trim().min(1),
   paymentMethod: z.string().trim().max(120).nullable().optional(),
   paymentReference: z.string().trim().max(191).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
   confirmOverpayment: z.boolean().optional(),
-  requestKey: z.string().trim().max(191).nullable().optional()
+  requestKey: z.string().trim().min(8).max(191)
 }).strict();
 
 export async function POST(request: NextRequest, context: Context) {

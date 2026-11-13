@@ -11,6 +11,7 @@ import {
 import { moneyNumber } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 import { receivableResponsibleUserId } from "@/lib/receivables-ownership";
+import { receivableNetRemaining } from "@/lib/receivable-adjustments";
 
 const receivableReminderDays = new Set([7, 3, 0, -1, -7]);
 const receivableNotificationTypes = ["receivable_overdue", "receivable_due_today", "receivable_due_soon"];
@@ -46,35 +47,40 @@ export async function syncFinancialNotifications(now = new Date()) {
     select: { id: true },
     orderBy: { uploadedAt: "desc" }
   });
-  const [receivables, fallbackUsers] = await Promise.all([
-    prisma.financialReceivable.findMany({
+  const fallbackUsers = await prisma.user.findMany({
+    where: { active: true, role: { in: ["SALES_DIRECTOR", "COO"] } },
+    select: { id: true, role: true }
+  });
+  // Exhaustive, deterministic pages: a reminder window is not the lifetime of
+  // the unpaid obligation. Archive only after every page has been read.
+  const receivables = [];
+  let cursor: string | undefined;
+  while (true) {
+    const page = await prisma.financialReceivable.findMany({
       where: {
-        OR: [
-          { canonicalKey: { not: null } },
-          ...(activeUpload ? [{ uploadId: activeUpload.id }] : [])
-        ],
-        includedInReport: true,
-        needsReview: false,
-        status: { notIn: ["collected", "included", "excluded", "archived"] },
-        remainingAmount: { gt: 0 },
-        dueDate: { gte: addDays(today, -90), lte: addDays(today, 7) }
+        OR: [{ canonicalKey: { not: null } }, ...(activeUpload ? [{ uploadId: activeUpload.id }] : [])],
+        includedInReport: true, needsReview: false,
+        status: { notIn: ["included", "excluded", "archived"] },
+        invoicedAmount: { gt: 0 }, dueDate: { lte: addDays(today, 7) }
       },
       include: { client: { select: { accountOwnerUserId: true, companyName: true } } },
-      take: 500
-    }),
-    prisma.user.findMany({
-      where: { active: true, role: { in: ["SALES_DIRECTOR", "COO"] } },
-      select: { id: true, role: true }
-    })
-  ]);
+      orderBy: { id: "asc" }, take: 500,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {})
+    });
+    receivables.push(...page);
+    if (page.length < 500) break;
+    cursor = page[page.length - 1].id;
+  }
 
   const fallbackIds = fallbackUsers.map((user) => user.id);
   const desiredKeys = new Set<string>();
   let created = 0;
   for (const row of receivables) {
     if (!row.dueDate) continue;
+    const remaining = receivableNetRemaining(row);
+    if (!remaining.greaterThan(0)) continue;
     const days = daysBetween(today, startOfDay(row.dueDate));
-    if (!shouldNotifyReceivable(days)) continue;
+    const reminderEligible = shouldNotifyReceivable(days);
     const ownerUserId = receivableResponsibleUserId(row);
     const recipients = ownerUserId ? [ownerUserId] : fallbackIds;
     for (const userId of recipients) {
@@ -84,7 +90,7 @@ export async function syncFinancialNotifications(now = new Date()) {
         userId,
         type,
         title: days < 0 ? "Client depasit la plata" : days === 0 ? "Client scadent azi" : "Client aproape de scadenta",
-        message: `${row.clientName || row.client?.companyName || "Client"} are rest de incasat ${moneyNumber(row.remainingAmount)} ${row.currency || ""}.`,
+        message: `${row.clientName || row.client?.companyName || "Client"} are rest de incasat ${remaining.toFixed(2)} ${row.currency || ""}.`,
         entityType: "financial_receivable",
         entityId: row.id,
         severity: days < 0 ? "high" : "medium",
@@ -92,9 +98,10 @@ export async function syncFinancialNotifications(now = new Date()) {
         recommendedAction: days < 0 ? "Suna clientul si seteaza urmatorul follow-up." : "Trimite reminder de plata.",
         metadata: {
           daysUntilDue: days,
+          reminderEligible,
           clientId: row.clientId,
           clientName: row.clientName,
-          amount: moneyNumber(row.remainingAmount),
+          amount: remaining.toFixed(2),
           currency: row.currency
         }
       });
@@ -273,6 +280,7 @@ export async function sendDailyNotificationEmails(now = new Date()) {
     },
     select: {
       id: true,
+      type: true,
       userId: true,
       title: true,
       message: true,
@@ -287,7 +295,11 @@ export async function sendDailyNotificationEmails(now = new Date()) {
     orderBy: [{ severity: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
     take: 1000
   });
-  const pendingRows = rows.filter((row) => notificationMetadata(row.metadata).emailDigestDate !== dayKey);
+  const pendingRows = rows.filter((row) => {
+    const metadata = notificationMetadata(row.metadata);
+    return metadata.emailDigestDate !== dayKey
+      && (!receivableNotificationTypes.includes(row.type || "") || metadata.reminderEligible !== false);
+  });
   const grouped = new Map<string, typeof pendingRows>();
   for (const row of pendingRows) {
     const group = grouped.get(row.userId) || [];
@@ -409,7 +421,14 @@ export async function updateNotificationAction(id: string, action: string, note:
   if (!["COO", "SUPER_ADMIN", "SALES_DIRECTOR"].includes(session.role) && notification.userId !== session.id) {
     throw new Error("Poti modifica doar notificarile tale.");
   }
-  const status = action === "resolve" || action === "called" || action === "collected" ? "resolved" : action === "escalate" ? "in_progress" : "open";
+  const financial = receivableNotificationTypes.includes(notification.type);
+  if (financial && ["resolve", "collected"].includes(action) && notification.entityId) {
+    const debt = await prisma.financialReceivable.findUnique({ where: { id: notification.entityId }, select: { invoicedAmount: true, collectedAmount: true, rawRowJson: true, includedInReport: true } });
+    if (debt?.includedInReport && receivableNetRemaining(debt).greaterThan(0)) {
+      throw new Error("Factura are încă sold. Înregistrează încasarea sau rezolvă documentul în registrul financiar; alerta nu confirmă plata.");
+    }
+  }
+  const status = action === "resolve" || action === "collected" || (!financial && action === "called") ? "resolved" : action === "escalate" || (financial && action === "called") ? "in_progress" : "open";
   const updated = await prisma.appNotification.update({
     where: { id },
     data: {
@@ -455,7 +474,7 @@ async function ensureNotification(input: {
       entityId: input.entityId,
       status: { in: ["open", "in_progress"] }
     },
-    select: { id: true }
+    select: { id: true, metadata: true }
   });
   if (existing) {
     await prisma.appNotification.update({
@@ -466,7 +485,7 @@ async function ensureNotification(input: {
         severity: input.severity,
         dueDate: input.dueDate,
         recommendedAction: input.recommendedAction,
-        metadata: input.metadata as Prisma.InputJsonValue
+        metadata: { ...notificationMetadata(existing.metadata), ...input.metadata } as Prisma.InputJsonValue
       }
     });
     return 0;

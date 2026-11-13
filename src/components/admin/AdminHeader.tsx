@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   BriefcaseBusiness,
   ArrowRightLeft,
@@ -45,10 +46,12 @@ export function AdminHeader({ session }: { session: AuthSession }) {
   const canViewCrm = hasAnyPermission(session.role, ["leads.view", "leads.view.own"]);
   const canViewClients = hasAnyPermission(session.role, ["clients.view", "clients.view.own", "campaigns.view", "campaigns.view.own", "finance.view"]);
   const canViewCampaigns = hasAnyPermission(session.role, ["campaigns.view", "campaigns.view.own", "finance.view"]);
+  const canViewCommercialTools = hasAnyPermission(session.role, ["reservations.view", "reservations.view.own"]);
+  const canManageOperationsControl = ["COO", "SUPER_ADMIN"].includes(session.role);
   const canViewFinance = hasPermission(session.role, "finance.view");
   const canViewSaga = hasPermission(session.role, "finance.integrations.saga.view");
   const canViewOperational = hasAnyPermission(session.role, ["dashboard.operations.view", "campaigns.operate", "reservations.view", "reservations.view.own", "inventory.view"]);
-  const hasCommercialMenu = canViewInventory || canViewCrm || canViewClients || canViewCampaigns;
+  const hasCommercialMenu = canViewInventory || canViewCrm || canViewClients || canViewCampaigns || canViewCommercialTools;
   const hasFinanceMenu = canViewFinance || canExportSales;
   const hasSettingsMenu = canManageInventory || canViewUsers || canViewSaga;
 
@@ -66,7 +69,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           {!isFieldOperator ? <AdminNavLink href="/admin/dashboard" active={isActiveAdminPath(pathname, "/admin/dashboard")}><Gauge size={18} />Dashboard</AdminNavLink> : null}
           {hasCommercialMenu ? (
             <AdminNavMenu
-              active={isActiveAnyAdminPath(pathname, ["/admin/selectie-locatii", "/admin/crm", "/admin/clienti", "/admin/campanii"])}
+              active={isActiveAnyAdminPath(pathname, ["/admin/selectie-locatii", "/admin/crm", "/admin/clienti", "/admin/campanii", "/admin/commercial-quotes", "/admin/dooh", "/admin/ai"])}
               icon={<BriefcaseBusiness size={18} />}
               label="Comercial"
             >
@@ -74,6 +77,9 @@ export function AdminHeader({ session }: { session: AuthSession }) {
               {canViewCrm ? <AdminMenuLink href="/admin/crm" active={isActiveAdminPath(pathname, "/admin/crm")} icon={<UserRoundCheck size={17} />} label="CRM" /> : null}
               {canViewClients ? <AdminMenuLink href="/admin/clienti" active={isActiveAdminPath(pathname, "/admin/clienti")} icon={<Building2 size={17} />} label="Clienti" /> : null}
               {canViewCampaigns ? <AdminMenuLink href="/admin/campanii" active={isActiveAdminPath(pathname, "/admin/campanii")} icon={<BriefcaseBusiness size={17} />} label="Campanii in Clienti" /> : null}
+              {canViewCommercialTools ? <AdminMenuLink href="/admin/commercial-quotes" active={isActiveAdminPath(pathname, "/admin/commercial-quotes")} icon={<FileSpreadsheet size={17} />} label="Oferte comerciale" /> : null}
+              {canViewCommercialTools ? <AdminMenuLink href="/admin/dooh" active={isActiveAdminPath(pathname, "/admin/dooh")} icon={<MapPin size={17} />} label="DOOH" /> : null}
+              {canViewCommercialTools ? <AdminMenuLink href="/admin/ai" active={isActiveAdminPath(pathname, "/admin/ai")} icon={<Users size={17} />} label="Copilot și pilot AI" /> : null}
             </AdminNavMenu>
           ) : null}
           {canViewInventory ? <AdminNavLink href="/admin/locatii" active={isActiveAdminPath(pathname, "/admin/locatii")}><Shield size={18} />Locatii</AdminNavLink> : null}
@@ -85,6 +91,8 @@ export function AdminHeader({ session }: { session: AuthSession }) {
               label="Financiar"
             >
               {canViewFinance ? <AdminMenuLink href="/admin/financiar/incasari" active={isActiveAdminPath(pathname, "/admin/financiar/incasari")} icon={<ReceiptText size={17} />} label="Facturi clienți" /> : null}
+              {canViewFinance ? <AdminMenuLink href="/admin/financiar/facturi-de-emis" active={isActiveAdminPath(pathname, "/admin/financiar/facturi-de-emis")} icon={<ListChecks size={17} />} label="Facturi de emis" /> : null}
+              {canViewFinance ? <AdminMenuLink href="/admin/financiar/alocari" active={isActiveAdminPath(pathname, "/admin/financiar/alocari")} icon={<ArrowRightLeft size={17} />} label="Alocări pe campanii" /> : null}
               {canViewFinance ? <AdminMenuLink href="/admin/financiar/reconciliere" active={isActiveAdminPath(pathname, "/admin/financiar/reconciliere")} icon={<ArrowRightLeft size={17} />} label="Import și reconciliere" /> : null}
               {canViewFinance ? <AdminMenuLink href="/admin/furnizori" active={isActiveAdminPath(pathname, "/admin/furnizori")} icon={<Truck size={17} />} label="Furnizori" /> : null}
               {canExportSales ? <SalesReportExportButton variant="menu" icon={<Download size={17} />} label="Export vanzari" /> : null}
@@ -92,7 +100,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           ) : null}
           {hasSettingsMenu ? (
             <AdminNavMenu
-              active={isActiveAnyAdminPath(pathname, ["/admin/utilizatori", "/admin/integritate-date", "/admin/integrari/saga", "/admin/locatii/import", "/admin/locatii/gps"])}
+              active={isActiveAnyAdminPath(pathname, ["/admin/utilizatori", "/admin/integritate-date", "/admin/integrari/saga", "/admin/locatii/import", "/admin/locatii/gps", "/admin/operations-control"])}
               icon={<Settings size={18} />}
               label="Setari"
             >
@@ -101,6 +109,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
               {canViewUsers ? <AdminMenuLink href="/admin/utilizatori" active={isActiveAdminPath(pathname, "/admin/utilizatori")} icon={<Users size={17} />} label="Utilizatori" /> : null}
               {canManageUsers && ["COO", "SUPER_ADMIN"].includes(session.role) ? <AdminMenuLink href="/admin/integritate-date" active={isActiveAdminPath(pathname, "/admin/integritate-date")} icon={<ShieldCheck size={17} />} label="Integritate date" /> : null}
               {canViewSaga ? <AdminMenuLink href="/admin/integrari/saga" active={isActiveAdminPath(pathname, "/admin/integrari/saga")} icon={<Cable size={17} />} label="Integrari / SAGA" /> : null}
+              {canManageOperationsControl ? <AdminMenuLink href="/admin/operations-control" active={isActiveAdminPath(pathname, "/admin/operations-control")} icon={<ShieldCheck size={17} />} label="Control operațional" /> : null}
             </AdminNavMenu>
           ) : null}
           {!isFieldOperator ? <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Portal public</AdminNavLink> : null}
@@ -160,20 +169,102 @@ function AdminNavMenu({
   label: string;
   children: ReactNode;
 }) {
+  const pathname = usePathname();
+  const id = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const keyboardOpenRef = useRef(false);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
+
+  useEffect(() => { setOpen(false); }, [pathname]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    function positionMenu() {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const width = Math.min(288, window.innerWidth - 16);
+      const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
+      setPosition({ left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)), top, width, maxHeight: Math.max(64, window.innerHeight - top - 8) });
+    }
+    positionMenu();
+    window.addEventListener("resize", positionMenu);
+    window.addEventListener("scroll", positionMenu, true);
+    return () => {
+      window.removeEventListener("resize", positionMenu);
+      window.removeEventListener("scroll", positionMenu, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      if (keyboardOpenRef.current) menuRef.current?.querySelector<HTMLElement>("a[href],button:not([disabled])")?.focus();
+    });
+    function outside(event: PointerEvent) {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
+    }
+    function keyboard(event: KeyboardEvent) {
+      // A dialog launched by an export button owns Escape while it is open.
+      if ((event.target as Element)?.closest?.('[role="dialog"]')) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", keyboard);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", keyboard);
+    };
+  }, [open]);
+
   return (
-    <details className="group relative flex-none">
-      <summary
+    <div className="relative flex-none">
+      <button
+        ref={triggerRef}
+        type="button"
+        data-admin-menu-trigger={label}
         className={`focus-button cursor-pointer list-none ${active ? "" : "secondary"}`}
         aria-current={active ? "page" : undefined}
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        onClick={(event) => { keyboardOpenRef.current = event.detail === 0; setOpen((value) => !value); }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            keyboardOpenRef.current = true;
+            setOpen(true);
+          }
+        }}
       >
         {icon}
         {label}
-        <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
-      </summary>
-      <div className="absolute left-0 top-full z-50 mt-2 grid min-w-64 gap-1 rounded-lg border border-focus-line bg-focus-navy p-2 shadow-2xl">
-        {children}
-      </div>
-    </details>
+        <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+      </button>
+      {open ? createPortal(
+        <div
+          ref={menuRef}
+          id={id}
+          data-admin-menu={label}
+          role="group"
+          aria-label={label}
+          className="admin-nav-popup fixed z-[60] grid gap-1 overflow-y-auto rounded-lg border border-focus-line bg-focus-navy p-2 shadow-2xl"
+          style={{ ...position, visibility: position ? "visible" : "hidden" }}
+          onClick={(event) => { if ((event.target as Element).closest("a[href]")) setOpen(false); }}
+          onBlur={(event) => {
+            const next = event.relatedTarget;
+            if (next instanceof Node && !event.currentTarget.contains(next) && !triggerRef.current?.contains(next)) setOpen(false);
+          }}
+        >{children}</div>, document.body
+      ) : null}
+    </div>
   );
 }
 

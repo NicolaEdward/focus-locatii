@@ -10,6 +10,44 @@
   --font-sans: "Inter", Arial, sans-serif;
   --font-display: "Arial Narrow", "Roboto Condensed", Arial, sans-serif;
   color-scheme: dark;
+  --status-success-text: #a7f3d0;
+  --status-danger-text: #fecaca;
+  --status-warning-text: #fcd34d;
+  --status-info-text: #bfdbfe;
+  --status-success-surface: #052e21;
+  --status-danger-surface: #450a13;
+  --status-warning-surface: #422006;
+  --status-info-surface: #102b52;
+}
+
+.text-status-success { color: var(--status-success-text); }
+.text-status-danger { color: var(--status-danger-text); }
+.text-status-warning { color: var(--status-warning-text); }
+.text-status-info { color: var(--status-info-text); }
+
+.theme-dark-panel {
+  background-color: #071b2c;
+}
+
+/* Structural tracks must shrink; wide tables own their horizontal scrollbar. */
+#rezervari-workspace,
+#rezervari-workspace > *,
+#rezervari-workspace .focus-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+#rezervari-workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#rezervari-workspace > .focus-card > .grid,
+#rezervari-workspace .grid > * {
+  min-width: 0;
+}
+
+.admin-nav-popup {
+  overscroll-behavior: contain;
 }
 
 .admin-nav .focus-button {
@@ -830,21 +868,6 @@ html[data-theme="light"] .section-link:hover {
   color: #573900;
 }
 
-html[data-theme="light"] :is(
-  [class*="bg-red-"],
-  [class*="bg-rose-"],
-  [class*="bg-emerald-"],
-  [class*="bg-blue-"]
-) > .text-white,
-html[data-theme="light"] :is(
-  [class*="bg-red-"],
-  [class*="bg-rose-"],
-  [class*="bg-emerald-"],
-  [class*="bg-blue-"]
-) .text-white {
-  color: #ffffff !important;
-}
-
 html[data-theme="light"] .leaflet-popup-content-wrapper,
 html[data-theme="light"] .leaflet-popup-tip {
   background: #ffffff;
@@ -853,6 +876,15 @@ html[data-theme="light"] .leaflet-popup-tip {
 
 html[data-theme="light"] .theme-dark-panel {
   color: #f8fafc;
+  background-color: #071b2c;
+  --status-success-text: #a7f3d0;
+  --status-danger-text: #fecaca;
+  --status-warning-text: #fcd34d;
+  --status-info-text: #bfdbfe;
+  --status-success-surface: #052e21;
+  --status-danger-surface: #450a13;
+  --status-warning-surface: #422006;
+  --status-info-surface: #102b52;
 }
 
 html[data-theme="light"] .theme-dark-panel :is(.text-white, .text-slate-100) {
@@ -883,4 +915,59 @@ html[data-theme="light"] .theme-dark-panel :is(
   .border-white\/15
 ) {
   border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* Theme-aware semantic colors also bridge existing components during migration.
+   The explicit dark-panel variables preserve intentional dark surfaces. */
+html[data-theme="light"] {
+  --status-success-text: #11603c;
+  --status-danger-text: #9f1730;
+  --status-warning-text: #775000;
+  --status-info-text: #194c91;
+  --status-success-surface: #ecfdf3;
+  --status-danger-surface: #fff1f2;
+  --status-warning-surface: #fffbeb;
+  --status-info-surface: #eff6ff;
+}
+
+html[data-theme="light"] :is(.text-emerald-100, .text-emerald-200, .text-emerald-300, .text-green-100, .text-green-200, .text-green-300) {
+  color: var(--status-success-text) !important;
+}
+
+html[data-theme="light"] :is(.text-red-100, .text-red-200, .text-red-300, .text-rose-100, .text-rose-200, .text-rose-300) {
+  color: var(--status-danger-text) !important;
+}
+
+html[data-theme="light"] :is(.text-focus-yellow, .text-amber-100, .text-amber-200, .text-amber-300, .text-yellow-100, .text-yellow-200, .text-yellow-300) {
+  color: var(--status-warning-text) !important;
+}
+
+html[data-theme="light"] :is(.text-blue-100, .text-blue-200, .text-blue-300, .text-sky-100, .text-sky-200, .text-cyan-200) {
+  color: var(--status-info-text) !important;
+}
+
+html[data-theme="light"] :is([class*="bg-emerald-950"], [class*="bg-green-950"]) {
+  background-color: var(--status-success-surface) !important;
+}
+
+html[data-theme="light"] :is([class*="bg-red-950"], [class*="bg-rose-950"]) {
+  background-color: var(--status-danger-surface) !important;
+}
+
+html[data-theme="light"] :is([class*="bg-amber-950"], [class*="bg-yellow-950"]) {
+  background-color: var(--status-warning-surface) !important;
+}
+
+html[data-theme="light"] :is([class*="bg-blue-950"], [class*="bg-sky-950"]) {
+  background-color: var(--status-info-surface) !important;
+}
+
+html[data-theme="light"] .theme-dark-panel .theme-secondary-control {
+  background: #102d42 !important;
+  color: #f8fafc !important;
+  border-color: #6c8598 !important;
+}
+
+html[data-theme="light"] .theme-dark-panel .theme-secondary-control:hover {
+  background: #173d55 !important;
 }

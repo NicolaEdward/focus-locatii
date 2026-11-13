@@ -57,13 +57,18 @@ async function main() {
     assert.equal((await db.quoteRevision.findUniqueOrThrow({ where: { id: revision.id } })).payloadHash, before, "printing does not modify the quote");
     const outsider = await browser.newContext();
     assert.equal((await outsider.request.post(base + "/api/auth/login", { headers: { origin: base }, data: { email: other.email, password } })).status(), 200);
-    const denied = await outsider.request.get(route);
-    assert.equal(denied.status(), 404); assert.equal((await denied.text()).includes("SYN-PRINT-01"), false);
+    const deniedPage = await outsider.newPage();
+    const denied = await deniedPage.goto(route, { timeout: 120000 });
+    await deniedPage.getByRole("heading", { name: "404", exact: true }).waitFor();
+    assert.equal((await denied!.text()).includes("SYN-PRINT-01"), false, "a streamed not-found response must contain no private offer");
+    assert.equal(await deniedPage.locator(".quote-print-paper").count(), 0);
     const anonymous = await browser.newContext();
-    const anonymousResult = await anonymous.request.get(route);
-    assert.ok(anonymousResult.url().includes("/admin/login")); assert.equal((await anonymousResult.text()).includes("SYN-PRINT-01"), false);
+    const anonymousPage = await anonymous.newPage();
+    const anonymousResult = await anonymousPage.goto(route, { timeout: 120000 });
+    await anonymousPage.waitForURL((url) => url.pathname === "/admin/login", { timeout: 30000 });
+    assert.equal((await anonymousResult!.text()).includes("SYN-PRINT-01"), false);
     assert.deepEqual(errors, []);
-    writeFileSync(resolve(output, "result.json"), JSON.stringify({ ok: true, groups: 8, desktop: "1440x1000", mobile: "390x844", pdfBytes: pdf.byteLength, cache: "private/no-store", privateData: "synthetic-only", states: ["draft watermark", "own seller", "foreign seller 404", "anonymous login"] }, null, 2));
+    writeFileSync(resolve(output, "result.json"), JSON.stringify({ ok: true, groups: 8, desktop: "1440x1000", mobile: "390x844", pdfBytes: pdf.byteLength, cache: "private/no-store", privateData: "synthetic-only", states: ["draft watermark", "own seller", "foreign seller not-found view without private content", "anonymous login redirect"] }, null, 2));
     console.log(JSON.stringify({ ok: true, groups: 8, pdfBytes: pdf.byteLength, output }));
   } finally {
     await browser.close();

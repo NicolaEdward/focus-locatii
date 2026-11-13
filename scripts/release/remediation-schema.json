@@ -4036,6 +4036,46 @@
           "generation": ""
         },
         {
+          "name": "activeScanId",
+          "type": "varchar(128)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "activeScanStartedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "activeScanObservedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "activeScanLeaseUntil",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
           "name": "version",
           "type": "int",
           "nullable": "NO",
@@ -4059,46 +4099,6 @@
           "name": "updatedAt",
           "type": "datetime(3)",
           "nullable": "NO",
-          "defaultValue": null,
-          "extra": "",
-          "charsetName": null,
-          "collationName": null,
-          "generation": ""
-        },
-        {
-          "name": "activeScanId",
-          "type": "varchar(128)",
-          "nullable": "YES",
-          "defaultValue": null,
-          "extra": "",
-          "charsetName": "utf8mb4",
-          "collationName": "utf8mb4_unicode_ci",
-          "generation": ""
-        },
-        {
-          "name": "activeScanLeaseUntil",
-          "type": "datetime(3)",
-          "nullable": "YES",
-          "defaultValue": null,
-          "extra": "",
-          "charsetName": null,
-          "collationName": null,
-          "generation": ""
-        },
-        {
-          "name": "activeScanObservedAt",
-          "type": "datetime(3)",
-          "nullable": "YES",
-          "defaultValue": null,
-          "extra": "",
-          "charsetName": null,
-          "collationName": null,
-          "generation": ""
-        },
-        {
-          "name": "activeScanStartedAt",
-          "type": "datetime(3)",
-          "nullable": "YES",
           "defaultValue": null,
           "extra": "",
           "charsetName": null,

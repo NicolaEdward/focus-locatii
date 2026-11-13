@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, KeyRound } from "lucide-react";
+import { ONBOARDING_LOGIN_HREF } from "@/lib/login-continuation";
 
 export function PasswordActionForm({ token, mode }: { token: string; mode: "invite" | "reset" }) {
   const [password, setPassword] = useState("");
@@ -16,19 +17,21 @@ export function PasswordActionForm({ token, mode }: { token: string; mode: "invi
     setError(null);
     if (password !== confirmation) return setError("Confirmarea parolei nu corespunde.");
     setLoading(true);
-    const response = await fetch(mode === "invite" ? "/api/auth/invite/accept" : "/api/auth/password-reset/confirm", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token, password })
-    });
-    const data = await response.json().catch(() => null);
-    setLoading(false);
-    if (!response.ok) return setError(data?.error || "Actiunea nu a putut fi finalizata.");
-    setDone(true);
+    try {
+      const response = await fetch(mode === "invite" ? "/api/auth/invite/accept" : "/api/auth/password-reset/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, password })
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) return setError(data?.error || "Acțiunea nu a putut fi finalizată.");
+      setPassword(""); setConfirmation(""); setDone(true);
+    } catch { setError("Conexiunea s-a întrerupt. Verifică dacă parola a fost activată înainte de a solicita un link nou."); }
+    finally { setLoading(false); }
   }
 
   if (done) {
-    return <section className="focus-card mx-auto grid max-w-md gap-4 rounded-lg p-6 text-center"><CheckCircle2 className="mx-auto text-emerald-300" size={42} /><h1 className="font-display text-3xl font-black uppercase">Parola este activa</h1><p className="text-sm text-slate-300">Toate linkurile vechi si sesiunile anterioare nu mai pot fi folosite.</p><Link className="focus-button justify-center" href="/admin/login">Mergi la autentificare</Link></section>;
+    return <section className="focus-card mx-auto grid max-w-md gap-4 rounded-lg p-6 text-center"><CheckCircle2 className="mx-auto text-emerald-300" size={42} /><h1 className="font-display text-3xl font-black uppercase">{mode === "invite" ? "Contul este activ" : "Parola este activă"}</h1><p className="text-sm text-slate-300">{mode === "invite" ? "Autentifică-te cu noul cont. Vei începe cu ghidul rolului tău și configurarea securității, apoi cu fluxurile de lucru ale echipei." : "Toate linkurile vechi și sesiunile anterioare nu mai pot fi folosite."}</p><Link className="focus-button justify-center" href={mode === "invite" ? ONBOARDING_LOGIN_HREF : "/admin/login"}>{mode === "invite" ? "Autentificare și primii pași" : "Mergi la autentificare"}</Link></section>;
   }
 
   return <form className="focus-card mx-auto grid w-full max-w-md gap-4 rounded-lg p-6" onSubmit={submit}>

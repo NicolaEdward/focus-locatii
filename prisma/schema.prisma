@@ -1953,3 +1953,264 @@ model FinancialCampaignFinanceReview {
   @@unique([campaignId, currency])
   @@map("portfolio_financial_campaign_finance_reviews")
 }
+
+// Additive commercial workbench storage. Existing business records are resolved
+// and authorized by services; no migration rewrites historical records.
+model CommercialPolicy {
+  id             String   @id @default("default")
+  version        Int      @default(1)
+  vatRateBps     Int
+  vatTreatment   String   @db.VarChar(24)
+  rateCardCurrency String @db.VarChar(3)
+  quoteValidityDays Int    @default(7)
+  approvalHours  Int      @default(24)
+  agentToolsEnabled Boolean @default(false)
+  generationEnabled Boolean @default(false)
+  outboundEnabled Boolean @default(false)
+  maxDailyModelCalls Int   @default(20)
+  approvedByUserId String
+  updatedAt      DateTime @updatedAt
+  @@map("portfolio_commercial_policies")
+}
+
+model AgentPrincipal {
+  id             String   @id @default(cuid())
+  name           String   @db.VarChar(120)
+  ownerUserId    String
+  createdByUserId String
+  tokenHash      String   @unique @db.VarChar(64)
+  scopes         Json
+  mode           String   @default("shadow") @db.VarChar(24)
+  maxDailyCommands Int    @default(100)
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  createdAt      DateTime @default(now())
+  @@index([ownerUserId, revokedAt])
+  @@map("portfolio_agent_principals")
+}
+
+model AgentUsageDay {
+  id             String   @id @default(cuid())
+  principalId    String
+  day            String   @db.VarChar(10)
+  commands       Int      @default(0)
+  modelCalls     Int      @default(0)
+  modelTokens    Int      @default(0)
+  @@unique([principalId, day])
+  @@map("portfolio_agent_usage_days")
+}
+
+model AgentCommand {
+  id             String   @id @default(cuid())
+  principalId    String
+  delegatorUserId String
+  requestKey     String   @db.VarChar(120)
+  tool           String   @db.VarChar(64)
+  policyVersion  String   @db.VarChar(80)
+  requestId      String   @db.VarChar(100)
+  sourceReferences Json?
+  model          String?  @db.VarChar(120)
+  tokenCount     Int?
+  inputHash      String   @db.VarChar(64)
+  outputHash     String?  @db.VarChar(64)
+  status         String   @default("pending") @db.VarChar(24)
+  result         Json?
+  errorCode      String?  @db.VarChar(64)
+  approvalId     String?
+  createdAt      DateTime @default(now())
+  completedAt    DateTime?
+  @@unique([principalId, requestKey])
+  @@index([principalId, createdAt])
+  @@map("portfolio_agent_commands")
+}
+
+model CommercialQuote {
+  id             String   @id @default(cuid())
+  ownerUserId    String
+  clientId       String
+  campaignId     String?
+  opportunityId  String?
+  latestRevision Int      @default(1)
+  state          String   @default("draft") @db.VarChar(24)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  revisions      QuoteRevision[]
+  @@index([ownerUserId, state])
+  @@index([clientId])
+  @@map("portfolio_commercial_quotes")
+}
+
+model QuoteRevision {
+  id             String   @id @default(cuid())
+  quoteId        String
+  revision       Int
+  createdByUserId String
+  principalId    String?
+  payload        Json
+  payloadHash    String   @db.VarChar(64)
+  requestKey     String   @unique @db.VarChar(80)
+  intentHash     String   @db.VarChar(64)
+  totalNet       Decimal  @db.Decimal(14, 2)
+  totalTax       Decimal  @db.Decimal(14, 2)
+  totalGross     Decimal  @db.Decimal(14, 2)
+  currency       String   @db.VarChar(3)
+  expiresAt      DateTime
+  availabilityHash String @db.VarChar(64)
+  createdAt      DateTime @default(now())
+  quote          CommercialQuote @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  @@unique([quoteId, revision])
+  @@index([payloadHash])
+  @@map("portfolio_quote_revisions")
+}
+
+model CommercialApproval {
+  id             String   @id @default(cuid())
+  revisionId     String
+  principalId    String?
+  action         String   @db.VarChar(40)
+  payloadHash    String   @db.VarChar(64)
+  recipientHash  String?  @db.VarChar(64)
+  holdExpiresAt  DateTime?
+  state          String   @default("pending") @db.VarChar(24)
+  requestedByUserId String
+  approvedByUserId String?
+  expiresAt      DateTime
+  decidedAt      DateTime?
+  consumedAt     DateTime?
+  reason         String?  @db.Text
+  createdAt      DateTime @default(now())
+  @@index([revisionId, state])
+  @@map("portfolio_commercial_approvals")
+}
+
+model CommercialAcceptance {
+  id             String   @id @default(cuid())
+  revisionId     String
+  actorUserId    String
+  decision       String   @db.VarChar(24)
+  evidenceReference String @db.VarChar(500)
+  documentId     String?
+  requestKey     String   @unique @db.VarChar(80)
+  intentHash     String   @db.VarChar(64)
+  createdAt      DateTime @default(now())
+  @@index([revisionId, createdAt])
+  @@map("portfolio_commercial_acceptances")
+}
+
+model CommercialDispatch {
+  id             String   @id @default(cuid())
+  revisionId     String
+  approvalId     String   @unique
+  principalId    String?
+  recipient      String   @db.VarChar(254)
+  payloadHash    String   @db.VarChar(64)
+  state          String   @default("queued") @db.VarChar(24)
+  providerReceipt String? @db.VarChar(191)
+  errorCode      String?  @db.VarChar(80)
+  requestedByUserId String
+  createdAt      DateTime @default(now())
+  sentAt         DateTime?
+  @@index([state, createdAt])
+  @@map("portfolio_commercial_dispatches")
+}
+
+model CommercialSuppression {
+  recipientHash String   @id @db.VarChar(64)
+  reason        String   @db.VarChar(240)
+  createdByUserId String
+  createdAt     DateTime @default(now())
+  @@map("portfolio_commercial_suppressions")
+}
+
+model DoohProfile {
+  id             String   @id @default(cuid())
+  locationId     String   @unique
+  timezone       String   @default("Europe/Bucharest") @db.VarChar(80)
+  loopSeconds    Int
+  slotSeconds    Int
+  state          String   @default("draft") @db.VarChar(24)
+  sourceReference String  @db.VarChar(500)
+  verifiedByUserId String?
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  @@map("portfolio_dooh_profiles")
+}
+
+model DoohCapacityBooking {
+  id             String   @id @default(cuid())
+  profileId      String
+  campaignId     String
+  ownerUserId    String
+  shareBps       Int
+  periodStart    DateTime
+  periodEnd      DateTime
+  daypartStartMinute Int  @default(0)
+  daypartEndMinute Int    @default(1440)
+  state          String   @default("confirmed") @db.VarChar(24)
+  approvalReference String @db.VarChar(500)
+  requestKey     String   @unique @db.VarChar(120)
+  payloadHash    String   @db.VarChar(64)
+  createdByUserId String
+  profileSnapshot Json
+  createdAt      DateTime @default(now())
+  @@index([profileId, periodStart, periodEnd, state])
+  @@map("portfolio_dooh_capacity_bookings")
+}
+
+model DoohPlaybackProof {
+  id             String   @id @default(cuid())
+  bookingId      String
+  periodStart    DateTime
+  periodEnd      DateTime
+  actualPlays    Int
+  expectedPlays  Int?
+  sourceReference String  @db.VarChar(500)
+  evidenceHash   String   @db.VarChar(64)
+  verifiedByUserId String
+  createdAt      DateTime @default(now())
+  @@unique([bookingId, evidenceHash])
+  @@map("portfolio_dooh_playback_proofs")
+}
+
+model SalesPilot {
+  id             String   @id @default(cuid())
+  name           String   @db.VarChar(160)
+  mode           String   @default("offline") @db.VarChar(24)
+  state          String   @default("draft") @db.VarChar(24)
+  protocol       Json
+  protocolHash   String   @db.VarChar(64)
+  createdByUserId String
+  approvedByUserId String?
+  approvedAt     DateTime?
+  stoppedAt      DateTime?
+  stopReason     String?  @db.Text
+  createdAt      DateTime @default(now())
+  @@map("portfolio_sales_pilots")
+}
+
+model SalesPilotCase {
+  id             String   @id @default(cuid())
+  pilotId        String
+  companyKeyHash String   @db.VarChar(64)
+  arm            String   @db.VarChar(24)
+  opportunityId  String?
+  enrolledAt     DateTime @default(now())
+  metrics        Json
+  matureAt       DateTime?
+  reviewedByUserId String?
+  reviewEvidence String?  @db.VarChar(500)
+  updatedAt      DateTime @updatedAt
+  @@unique([pilotId, companyKeyHash])
+  @@index([pilotId, arm])
+  @@map("portfolio_sales_pilot_cases")
+}
+
+model CommercialDeliveryEvent {
+  eventId       String   @id @db.VarChar(191)
+  dispatchId    String
+  eventType     String   @db.VarChar(80)
+  payloadHash   String   @db.VarChar(64)
+  createdAt     DateTime @default(now())
+  @@index([dispatchId, createdAt])
+  @@map("portfolio_commercial_delivery_events")
+}

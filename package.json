@@ -146,10 +146,13 @@
     "test:data-import-hardening": "tsx scripts/test-data-import-hardening.ts",
     "test:media-boundaries": "tsx scripts/test-media-boundaries.ts",
     "test:dependency-policy": "node scripts/test-dependency-policy.cjs",
-    "test:location-mutation-transactions": "tsx scripts/test-location-mutation-transactions.ts"
+    "test:location-mutation-transactions": "tsx scripts/test-location-mutation-transactions.ts",
+    "test:commercial-workbench": "tsx scripts/test-commercial-workbench.ts",
+    "evaluate:sales-pilot": "tsx scripts/evaluate-sales-pilot.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",
+    "ai": "7.0.172",
     "clsx": "^2.1.1",
     "crc-32": "1.2.2",
     "framer-motion": "^12.0.0",

@@ -46,7 +46,7 @@ export function WorkplaceOnboarding({ name, guide, initialState, canManageUsers 
       <h1 className="mt-3 text-2xl font-black text-white sm:text-3xl">{guide.title}</h1>
       <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">{name.split(" ")[0]}, parcurge pașii împreună cu responsabilul tău, pe un dosar existent sau în mediul de test. Nu crea clienți, contracte sau încasări fictive în aplicația firmei.</p>
       <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
-        <div className="min-w-0 flex-1"><p className="text-sm font-bold text-white">{completed.size} din {guide.steps.length} pași parcurși</p><progress className="mt-2 h-2 w-full max-w-md accent-emerald-400" max={guide.steps.length} value={completed.size} aria-label="Progresul ghidului" /></div>
+        <div className="min-w-[12rem] flex-1"><p className="text-sm font-bold text-white">{completed.size} din {guide.steps.length} pași parcurși</p><progress className="mt-2 h-2 w-full max-w-md accent-emerald-400" max={guide.steps.length} value={completed.size} aria-label="Progresul ghidului" /></div>
         {next ? <Link className="focus-button" href={`#${next.id}`} prefetch={false}>Continuă cu pasul {guide.steps.findIndex((step) => step.id === next.id) + 1}<ArrowRight size={17} /></Link> : <p className="flex items-center gap-2 font-bold text-emerald-200"><CheckCircle2 size={19} /> Ai parcurs ghidul. Confirmă cu responsabilul că poți lucra independent.</p>}
       </div>
     </header>

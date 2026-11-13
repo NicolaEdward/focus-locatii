@@ -150,6 +150,31 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaises(bridge.BridgeError):
             bridge.endpoint_for("https://app.example", "../../wrong", resolver=public)
 
+    def test_source_ancestor_replaced_after_validation_cannot_escape_scope(self):
+        parent = self.folder / "approved-parent"
+        approved = parent / "contracts"
+        approved.mkdir(parents=True)
+        outside = self.folder / "outside-parent"
+        (outside / "contracts").mkdir(parents=True)
+        (outside / "contracts" / "outside.pdf").write_bytes(pdf_bytes(("Outside approved root",)))
+        roots = [{"alias": "contracts", "directory": str(approved), "documentType": "contract"}]
+        original = bridge.verified_directory
+        replaced = False
+        def validate_then_replace(value):
+            nonlocal replaced
+            verified = original(value)
+            if Path(value) == approved and not replaced:
+                parent.rename(self.folder / "original-approved-parent")
+                parent.symlink_to(outside, target_is_directory=True)
+                replaced = True
+            return verified
+        with Receiver() as receiver, mock.patch.object(bridge, "verified_directory", side_effect=validate_then_replace):
+            with self.assertRaisesRegex(bridge.BridgeError, "ROOT_DIRECTORY_CHANGED_OR_UNAVAILABLE"):
+                bridge.run_scan(receiver.origin, "synthetic-source", roots, self.state, self.token, allow_local_test=True)
+            self.assertTrue(replaced)
+            self.assertTrue(receiver.requests)
+            self.assertTrue(all(not json.loads(item["body"])["documents"] for item in receiver.requests))
+
     def test_metadata_only_private_state_no_binary_or_token(self):
         file = self.root / "contract.pdf"
         original = b"%PDF-1.7\nRaw private binary " + self.token.encode() + b"\x00\xff\n"

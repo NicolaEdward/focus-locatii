@@ -88,6 +88,27 @@ def configured_root(value, document_type):
     return {"alias": alias, "directory": str(verified_directory(folder)), "documentType": document_type}
 
 
+def open_root_nofollow(directory):
+    """Anchor every ancestor, closing the check/open symlink replacement gap."""
+    path = Path(directory)
+    if not path.is_absolute() or ".." in path.parts:
+        raise BridgeError("ROOT_DIRECTORY_REQUIRED")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptor = os.open(path.anchor, flags)
+    try:
+        for component in path.parts[1:]:
+            child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except OSError:
+        os.close(descriptor)
+        raise BridgeError("ROOT_DIRECTORY_CHANGED_OR_UNAVAILABLE") from None
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def endpoint_for(app_url, source_id, allow_local_test=False, resolver=socket.getaddrinfo):
     try:
         parsed = urllib.parse.urlsplit(app_url)
@@ -456,7 +477,7 @@ def run_scan(app_url, source_id, roots, state_file, token, include_text=False, a
                 flush()
 
         for root in roots:
-            root_fd = os.open(root["directory"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            root_fd = open_root_nofollow(root["directory"])
             try:
                 def walk_error(_error):
                     counts["skippedUnreadableOrChanged"] += 1

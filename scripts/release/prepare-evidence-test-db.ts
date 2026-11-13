@@ -84,9 +84,12 @@ async function main() {
     phase = "verify-bank-cleanup-before-contracts";
     await assertEmpty(connection);
     runChild("contract-metadata-regression", [require.resolve("tsx/cli"), "scripts/test-contract-metadata-evidence.ts"], environment, secrets);
+    phase = "verify-contract-cleanup-before-receipts";
+    await assertEmpty(connection);
+    runChild("bank-receipt-regression", [require.resolve("tsx/cli"), "scripts/test-bank-receipt-evidence.ts"], { ...environment, RECEIPT_EVIDENCE_TEST_DATABASE: databaseName }, secrets);
     phase = "verify-final-cleanup";
     await assertEmpty(connection);
-    console.log(JSON.stringify({ ok: true, action: "isolated-evidence-regressions", syntheticOnly: true, seeded: false, databaseFingerprint: databaseIdentity(targetUrl.toString()).fingerprint, checks: ["empty before schema", "empty before bank", "bank cleanup before contracts", "empty after contracts", "child ENV_FILE removed"] }));
+    console.log(JSON.stringify({ ok: true, action: "isolated-evidence-regressions", syntheticOnly: true, seeded: false, databaseFingerprint: databaseIdentity(targetUrl.toString()).fingerprint, checks: ["empty before schema", "empty before bank", "bank cleanup before contracts", "contract cleanup before receipts", "empty after receipts", "child ENV_FILE removed"] }));
   } finally {
     if (locked) await connection.query("SELECT RELEASE_LOCK('focus_preview_bank_evidence_tests')").catch(() => undefined);
     await connection.end();

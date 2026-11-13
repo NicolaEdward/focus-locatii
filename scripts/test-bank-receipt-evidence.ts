@@ -22,7 +22,7 @@ function workbook(negative=false,extraSheet=false,negativeTax="RO12345678"){
  const w=XLSX.utils.book_new();XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet(rows),"Facturi");if(extraSheet)XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet([["Hidden additional records"]]),"Extra");return XLSX.write(w,{type:"buffer",bookType:"biff8"}) as Buffer;
 }
 async function main(){
- loadEnvFile();assertSyntheticEnvironment();const target=new URL(process.env.DATABASE_URL!);assert(["127.0.0.1","localhost"].includes(target.hostname)&&target.pathname==="/focus_preview_bank_receipts");
+ loadEnvFile();assertSyntheticEnvironment();const target=new URL(process.env.DATABASE_URL!);assert(["127.0.0.1","localhost"].includes(target.hostname)&&target.pathname==="/"+(process.env.RECEIPT_EVIDENCE_TEST_DATABASE||"focus_preview_bank_receipts"));
  assert.deepEqual(boundedReceiptReferences(["Factura FCSM0001"],["fcsm1"]).keys,["fcsm1"]);
  for(const text of["XFCSM0001","FCSM00010","FCSM0001A","0001"])assert(!boundedReceiptReferences([text],["fcsm1"]).keys.includes("fcsm1"));
  assert(boundedReceiptReferences(["FCSM0001, 0002"],["fcsm1"]).abbreviatedList);

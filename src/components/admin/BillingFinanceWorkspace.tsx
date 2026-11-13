@@ -1,6 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { DocumentUploadDialog, DocumentsList } from "./client-campaigns/WorkspaceUi";
+import type { WorkspaceDocument } from "@/lib/client-campaign-workspaces";
 
 type Option = { id: string; label: string; detail?: string | null };
 type Plan = {
@@ -101,7 +103,7 @@ function SearchOption({
   type: "campaigns" | "receivables" | "fiscal_documents";
   label: string;
   value: string;
-  onChange: (id: string) => void;
+  onChange: (id: string, option?: Option) => void;
   clientId?: string;
 }) {
   const [query, setQuery] = useState("");
@@ -146,7 +148,7 @@ function SearchOption({
           required
           className={field}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.target.value, items.find((item) => item.id === e.target.value))}
         >
           <option value="">Alege…</option>
           {items.map((item) => (
@@ -185,6 +187,13 @@ export function BillingFinanceWorkspace({
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [receivableId, setReceivableId] = useState("");
+  const [receivableLabel, setReceivableLabel] = useState("");
+  const [documentTarget, setDocumentTarget] = useState<{ financialReceivableId: string; label: string } | null>(null);
+  const [invoiceDocuments, setInvoiceDocuments] = useState<WorkspaceDocument[]>([]);
+  const [invoiceDocumentsLoading, setInvoiceDocumentsLoading] = useState(false);
+  const [invoiceDocumentsError, setInvoiceDocumentsError] = useState("");
+  const [invoiceDocumentsHasMore, setInvoiceDocumentsHasMore] = useState(false);
+  const [documentRefresh, setDocumentRefresh] = useState(0);
   const inFlight = useRef(false);
   const intent = useRef<{ signature: string; key: string } | null>(null);
   const loadVersion = useRef(0);
@@ -211,6 +220,20 @@ export function BillingFinanceWorkspace({
   });
   const [taxDocumentId, setTaxDocumentId] = useState("");
   const [coverageNotes, setCoverageNotes] = useState("");
+  useEffect(() => {
+    setInvoiceDocuments([]);
+    setInvoiceDocumentsError("");
+    setInvoiceDocumentsHasMore(false);
+    if (!receivableId) { setInvoiceDocumentsLoading(false); return; }
+    let live = true;
+    const controller = new AbortController();
+    setInvoiceDocumentsLoading(true);
+    requestJson(`/api/admin/receivables/${encodeURIComponent(receivableId)}/documents`, { signal: controller.signal })
+      .then((data) => { if (live) { setInvoiceDocuments(data.documents); setInvoiceDocumentsHasMore(data.hasMore); } })
+      .catch((cause) => { if (live) setInvoiceDocumentsError(cause instanceof Error ? cause.message : "Documentele facturii nu pot fi încărcate."); })
+      .finally(() => { if (live) setInvoiceDocumentsLoading(false); });
+    return () => { live = false; controller.abort(); };
+  }, [receivableId, documentRefresh]);
   async function refresh(page = 1) {
     const version = ++loadVersion.current;
     if (mode === "plan") {
@@ -513,8 +536,19 @@ export function BillingFinanceWorkspace({
             type="receivables"
             label="factura fiscală importată"
             value={receivableId}
-            onChange={setReceivableId}
+            onChange={(id, option) => { setReceivableId(id); setReceivableLabel(option ? `${option.label}${option.detail ? ` · ${option.detail}` : ""}` : ""); }}
           />
+          {receivableId && (
+            <section className="space-y-3 rounded-xl border border-white/15 p-4" aria-label="Documentele facturii selectate" aria-busy={invoiceDocumentsLoading}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="font-bold">Documentele facturii selectate</h2>
+                {canWrite && <button type="button" className={button} onClick={() => setDocumentTarget({ financialReceivableId: receivableId, label: receivableLabel || "Factura selectată" })}>Atașează document facturii</button>}
+              </div>
+              <p className="text-sm text-slate-300">Documentul se leagă direct de factura selectată. Asocierea valorii la campanie se înregistrează separat mai jos.</p>
+              {invoiceDocumentsLoading ? <p role="status">Se încarcă documentele facturii…</p> : invoiceDocumentsError ? <p role="alert" className="text-red-200">{invoiceDocumentsError}</p> : <DocumentsList documents={invoiceDocuments} />}
+              {invoiceDocumentsHasMore && <p className="text-sm text-amber-200">Lista este limitată la cele mai recente 100 de înregistrări.</p>}
+            </section>
+          )}
           {canWrite && (
             <form
               className="space-y-4 rounded-xl border border-white/15 p-4"
@@ -900,6 +934,7 @@ export function BillingFinanceWorkspace({
           )}
         </>
       )}
+      {documentTarget && <DocumentUploadDialog target={documentTarget} onClose={() => setDocumentTarget(null)} onSaved={() => { setDocumentTarget(null); setNotice("Documentul a fost atașat facturii selectate."); setDocumentRefresh((value) => value + 1); }} />}
     </main>
   );
 }

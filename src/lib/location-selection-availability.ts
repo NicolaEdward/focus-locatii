@@ -32,6 +32,8 @@ export async function getLocationSelectionAvailability(input: {
   periodStart?: string | null;
   periodEnd?: string | null;
   session: AuthSession;
+  /** Server-derived exact quote HOLD group; never read directly from request data. */
+  ignoreReservationIds?: string[];
 }) {
   const locationIds = unique(input.locationIds).slice(0, 500);
   const periodStart = parseDate(input.periodStart);
@@ -43,7 +45,8 @@ export async function getLocationSelectionAvailability(input: {
     locationIds,
     periodStart,
     periodEnd,
-    referenceDate
+    referenceDate,
+    ignoreReservationIds: input.ignoreReservationIds,
   });
 
   return Object.fromEntries([...batch.locationsById.values()].map((location) => {
@@ -98,6 +101,7 @@ function buildAvailability(input: {
       warnings: [explanation, ...baseWarnings.filter((warning) => !isGenericAvailableNote(warning))],
       conflicts: input.conflicts,
       blockingIntervals,
+      availableWindows: coverage.availableSegments.map((window) => ({ start: window.start.toISOString(), end: window.end.toISOString() })),
       availableFrom: firstAvailable?.start.toISOString(),
       availableUntil: firstAvailable?.end.toISOString()
     };

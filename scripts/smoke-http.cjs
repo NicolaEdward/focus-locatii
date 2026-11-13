@@ -837,6 +837,7 @@ async function main() {
       body: JSON.stringify({
         kind: "decoration",
         taskType: "redecoration",
+        taskId: `smoke-redecoration-${redecorationTarget.id}`,
         requestedDate: "2036-01-15",
         cost: 300,
         currency: "RON",

@@ -20,8 +20,7 @@ import {
   findOrCreateTaskForLegacyOperation,
   isOperationTaskBridgeUnavailable,
   mirrorOperationTaskStatusToProductionNotes,
-  updateOperationTaskStatus,
-  type OperationTaskBridgeReservation
+  updateOperationTaskStatus
 } from "@/lib/operation-task-bridge";
 import type { OperationTaskStatus } from "@/lib/operation-tasks";
 
@@ -132,7 +131,6 @@ export async function POST(request: NextRequest) {
         try {
           const bridged = await updateOperationStatusThroughBridge(
             reservation.id,
-            reservation,
             { kind: kind as OperationKind, status: status as OperationStatus, taskId: input.taskId || null },
             session
           );
@@ -233,21 +231,23 @@ function operationTasksEnabled() {
 
 async function updateOperationStatusThroughBridge(
   reservationId: string,
-  reservation: OperationTaskBridgeReservation,
   payload: { kind: OperationKind; status: OperationStatus; taskId: string | null },
   session: AuthSession
 ) {
-  return prisma.$transaction(async (tx) => {
-    const task = await findOrCreateTaskForLegacyOperation(reservation, payload, tx);
-    if (!task) return null;
-
-    const updatedTask = await updateOperationTaskStatus(task.id, payload.status as OperationTaskStatus, session, tx);
-    const mirroredNotes = mirrorOperationTaskStatusToProductionNotes(reservation, updatedTask);
-    const updatedReservation = await updateReservationProductionNotesWithClient(tx, reservationId, mirroredNotes || "", session);
-
-    return {
-      reservation: updatedReservation,
-      task: updatedTask
-    };
-  });
+  const noTask = new Error("OPERATION_TASK_NOT_APPLICABLE");
+  try {
+    return await prisma.$transaction(async (tx) => {
+      let updatedTask: Awaited<ReturnType<typeof updateOperationTaskStatus>> | null = null;
+      const updatedReservation = await updateReservationProductionNotesWithClient(tx, reservationId, async (current) => {
+        const task = await findOrCreateTaskForLegacyOperation(current, payload, tx);
+        if (!task) throw noTask;
+        updatedTask = await updateOperationTaskStatus(task.id, payload.status as OperationTaskStatus, session, tx);
+        return mirrorOperationTaskStatusToProductionNotes(current, updatedTask) || "";
+      }, session);
+      return { reservation: updatedReservation, task: updatedTask! };
+    });
+  } catch (error) {
+    if (error === noTask) return null;
+    throw error;
+  }
 }

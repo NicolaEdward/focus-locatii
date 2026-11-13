@@ -97,6 +97,11 @@ export type CampaignOverview = {
   status: string;
   effectiveStatus: CampaignEffectiveStatus;
   campaignType: string;
+  agencyClientId: string | null;
+  agencyClientName: string | null;
+  endClientId: string | null;
+  endClientName: string | null;
+  relationshipDataQualityReasons: string[];
   companyEntity: string | null;
   sellerUserId: string | null;
   sellerName: string | null;
@@ -470,6 +475,7 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
     where: { id: campaignId },
     select: {
       id: true, clientId: true, campaignName: true, campaignCode: true, status: true, campaignType: true,
+      agencyClientId: true, endClientId: true,
       companyEntity: true, sellerUserId: true, accountOwnerUserId: true, startDate: true, endDate: true,
       currency: true, totalContractValue: true, paymentTermType: true, paymentTermDays: true,
       billingRule: true, billingFrequency: true, notes: true,
@@ -485,13 +491,15 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
           monthlyRentShare: true,
           monthlyRentTotal: true,
           contractGroupId: true,
-          currency: true
+          currency: true,
+          priceSegments: { select: { effectiveFrom: true, effectiveTo: true, monthlyRent: true, currency: true }, orderBy: { effectiveFrom: "asc" } }
         }
       }
     }
   });
   if (!campaign || campaign.status === "archived") return null;
   assertCampaignReadAccess(session, campaign);
+  const parties = await campaignPartyDetails(session, campaign);
   const commercial = deriveCampaignCommercialSummary(campaign.reservations);
   const effectiveStatus = deriveCampaignEffectiveStatus({
     ...campaign,
@@ -508,6 +516,7 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
     status: campaign.status,
     effectiveStatus: effectiveStatus.effectiveStatus,
     campaignType: campaign.campaignType,
+    ...parties,
     companyEntity: campaign.companyEntity,
     sellerUserId: campaign.sellerUserId,
     sellerName: campaign.sellerUser?.name || null,
@@ -520,7 +529,7 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
     effectivePeriodSource: effectiveStatus.periodSource,
     commercialSummarySource: commercial.source,
     bookedReservationCount: commercial.bookedReservationCount,
-    currency: commercial.currency,
+    currency: commercial.bookedReservationCount ? commercial.currency : campaign.currency === "RON" || campaign.currency === "EUR" ? campaign.currency : null,
     totalContractValue: commercial.totalContractValue,
     totalsByCurrency: commercial.totalsByCurrency,
     commercialDataQualityReasons: commercial.dataQualityReasons,
@@ -530,6 +539,27 @@ export async function getCampaignOverview(session: AuthSession, campaignId: stri
     billingFrequency: campaign.billingFrequency,
     notes: campaign.notes,
     canEdit: canEditCampaign(session, campaign)
+  };
+}
+
+async function campaignPartyDetails(session: AuthSession, campaign: { campaignType: string; agencyClientId: string | null; endClientId: string | null }) {
+  const ids = [...new Set([campaign.agencyClientId, campaign.endClientId].filter((id): id is string => Boolean(id)))];
+  const rows = ids.length ? await prisma.clientAccount.findMany({
+    where: { id: { in: ids }, ...(session.role === "SALES_AGENT" ? { accountOwnerUserId: session.id } : {}) },
+    select: { id: true, companyName: true }
+  }) : [];
+  const agency = rows.find((row) => row.id === campaign.agencyClientId);
+  const endClient = rows.find((row) => row.id === campaign.endClientId);
+  const relationshipDataQualityReasons: string[] = [];
+  if (campaign.agencyClientId && !agency) relationshipDataQualityReasons.push("CAMPAIGN_AGENCY_LINK_INACCESSIBLE");
+  if (campaign.endClientId && !endClient) relationshipDataQualityReasons.push("CAMPAIGN_END_CLIENT_LINK_INACCESSIBLE");
+  if (campaign.campaignType === "agency" && (!agency || !endClient)) relationshipDataQualityReasons.push("CAMPAIGN_AGENCY_PARTIES_INCOMPLETE");
+  return {
+    agencyClientId: agency?.id || null,
+    agencyClientName: agency?.companyName || null,
+    endClientId: endClient?.id || null,
+    endClientName: endClient?.companyName || null,
+    relationshipDataQualityReasons
   };
 }
 

@@ -24,6 +24,9 @@ export type ClientForm = {
 export type CampaignForm = {
   currency: string;
   clientId: string;
+  campaignType: string;
+  agencyClientId: string;
+  endClientId: string;
   campaignName: string;
   campaignCode: string;
   status: string;
@@ -45,7 +48,7 @@ export const emptyClientForm: ClientForm = {
 
 export const emptyCampaignForm: CampaignForm = {
   currency: "",
-  clientId: "", campaignName: "", campaignCode: "", status: "draft", companyEntity: "Focus Media",
+  clientId: "", campaignType: "direct_client", agencyClientId: "", endClientId: "", campaignName: "", campaignCode: "", status: "draft", companyEntity: "Focus Media",
   sellerUserId: "", accountOwnerUserId: "", paymentTermType: "", paymentTermDays: "",
   billingRule: "", billingFrequency: "", notes: ""
 };
@@ -145,8 +148,8 @@ export function DocumentsList({ documents }: { documents: WorkspaceDocument[] })
   </article>)}</div>;
 }
 
-export function DocumentUploadDialog({ target, onClose, onSaved }: { target: { clientId?: string; campaignId?: string; label: string }; onClose: () => void; onSaved: () => void }) {
-  const [documentType, setDocumentType] = useState("contract");
+export function DocumentUploadDialog({ target, onClose, onSaved }: { target: { clientId?: string; campaignId?: string; financialReceivableId?: string; label: string }; onClose: () => void; onSaved: () => void }) {
+  const [documentType, setDocumentType] = useState(target.financialReceivableId ? "other" : "contract");
   const [notes, setNotes] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [storageUrl, setStorageUrl] = useState("");
@@ -159,6 +162,7 @@ export function DocumentUploadDialog({ target, onClose, onSaved }: { target: { c
       const form = new FormData();
       if (target.clientId) form.set("clientId", target.clientId);
       if (target.campaignId) form.set("campaignId", target.campaignId);
+      if (target.financialReceivableId) form.set("financialReceivableId", target.financialReceivableId);
       form.set("documentType", documentType);
       if (notes) form.set("notes", notes);
       if (file) form.set("file", file);

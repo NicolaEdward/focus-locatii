@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
-import { evaluateDocumentAccess, lockDocumentLinks, resolveDocumentAccess } from "@/lib/client-document-access";
+import { canonicalCampaignDocumentLinks, evaluateDocumentAccess, lockDocumentLinks, resolveDocumentAccess } from "@/lib/client-document-access";
 import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
@@ -63,10 +63,11 @@ export async function POST(request: NextRequest) {
     const links = { clientId, campaignId, reservationId, billingItemId, financialReceivableId, financialPayableId };
     const document = await prisma.$transaction(async (tx) => {
       await lockDocumentLinks(tx, links);
-      const lockedAccessError = evaluateDocumentAccess(session, await resolveDocumentAccess(links, tx), "manage");
+      const canonicalLinks = await canonicalCampaignDocumentLinks(links, tx);
+      const lockedAccessError = evaluateDocumentAccess(session, await resolveDocumentAccess(canonicalLinks, tx), "manage");
       if (lockedAccessError) throw Object.assign(new Error(lockedAccessError.error), { status: lockedAccessError.status });
       const created = await tx.clientDocument.create({ data: {
-        clientId,
+        clientId: canonicalLinks.clientId,
         campaignId,
         reservationId,
         billingItemId,
@@ -84,7 +85,7 @@ export async function POST(request: NextRequest) {
       } });
       await tx.auditLog.create({ data: {
         userId: session.id, action: "document.upload", entityType: "client_document", entityId: created.id,
-        metadata: { durability: "business-transaction", ...links, documentType, fileName: created.fileName }
+        metadata: { durability: "business-transaction", ...canonicalLinks, documentType, fileName: created.fileName }
       } });
       return created;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });

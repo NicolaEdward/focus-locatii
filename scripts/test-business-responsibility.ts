@@ -114,7 +114,7 @@ assert(fieldInbox.includes("Executat de:"), "field history must expose the execu
 assert(completionRoute.includes("completedByUserId: session.id"), "completion must preserve the actual executor identity");
 assert(completionRoute.includes("relationalTask?.assignedToUserId === session.id"), "a Field Operator cannot complete another executor's task");
 assert(completionRoute.includes("hasPlannedFieldExecutor"), "a planned field task can only be completed by its executor");
-assert(completionRoute.includes("recipientUserIds: [businessOwner?.id, relationalTask?.assignedToUserId]"), "completion notifications must use seller and executor");
+assert(completionRoute.includes("recipientUserIds: [businessOwner?.id, outcome.relationalTask?.assignedToUserId]"), "completion notifications must use seller and the executor from the committed transaction result");
 assert(executivePeople.includes("operationalBusinessOwner(task)"), "People Overview must attribute task responsibility to the client seller");
 
 console.log(JSON.stringify({

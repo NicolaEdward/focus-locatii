@@ -18,6 +18,7 @@ import {
   transitionProspect,
   updateCrmCompany
 } from "@/lib/crm-domain-service";
+import { crmParseDateInput, CrmDateInputError } from "@/lib/crm-time";
 import { resolveCrmNotificationsForRecord } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
@@ -192,9 +193,11 @@ const contactSchema = z.object({
 
 function dateOrNull(value?: string | null) {
   if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) throw new CrmDomainError("Data introdusa nu este valida.");
-  return parsed;
+  try { return crmParseDateInput(value); }
+  catch (error) {
+    if (error instanceof CrmDateInputError) throw new z.ZodError([{ code: "custom", path: [], message: error.message }]);
+    throw error;
+  }
 }
 
 function requiredDate(value: string) {

@@ -4,6 +4,7 @@ import type { AuthSession } from "../src/lib/auth";
 import { prisma } from "../src/lib/prisma";
 import { commercialHash, tokenHash } from "../src/lib/commercial-workbench-core";
 import { getCommercialQuotePrint } from "../src/lib/commercial-quote-print";
+import { campaignPartyFingerprint } from "../src/lib/campaign-parties";
 import { assertSyntheticEnvironment } from "./release/env-utils";
 
 assertSyntheticEnvironment();
@@ -11,6 +12,7 @@ const database = new URL(process.env.DATABASE_URL!);
 if (!["localhost", "127.0.0.1"].includes(database.hostname) || !/^\/focus_(preview|test)_/.test(database.pathname) || process.env.VERCEL_ENV === "production") throw Error("Isolated local synthetic database required");
 const tag = `quote-print-${randomUUID()}`;
 const ids: { users: string[]; client?: string; campaign?: string; quote?: string } = { users: [] };
+const partyClients: string[] = [];
 let policyCreated = false;
 const now = new Date();
 const expiresAt = new Date(now.getTime() + 7 * 86400000);
@@ -42,6 +44,31 @@ async function main() {
     const recipientHash = tokenHash(payload.recipient);
     const approval = await prisma.commercialApproval.create({ data: { revisionId: revision.id, action: "send_quote", state: "approved", payloadHash: commercialHash({ revisionHash: revision.payloadHash, action: "send_quote", recipientHash, holdExpiresAt: null }), recipientHash, requestedByUserId: seller.id, approvedByUserId: manager.id, expiresAt } });
     assert.equal((await getCommercialQuotePrint(quote.id, revision.id, seller, now)).state, "approved");
+    const agency = await prisma.clientAccount.create({ data: { companyName: tag + " agency", accountOwnerUserId: seller.id, clientType: "agency" } });
+    const beneficiary = await prisma.clientAccount.create({ data: { companyName: tag + " beneficiary", accountOwnerUserId: seller.id } });
+    partyClients.push(agency.id, beneficiary.id);
+    const parties = { clientId: client.id, campaignType: "agency", agencyClientId: agency.id, endClientId: beneficiary.id };
+    await prisma.campaign.update({ where: { id: campaign.id }, data: parties });
+    assert.equal((await getCommercialQuotePrint(quote.id, revision.id, seller, now)).state, "draft", "a legacy proposal cannot claim that newly added agency parties were approved");
+    const agencyPayload = { ...payload, campaignPartiesFingerprint: campaignPartyFingerprint(parties), campaignParties: { campaignType: "agency", agency: { id: agency.id, name: agency.companyName }, endClient: { id: beneficiary.id, name: beneficiary.companyName } } };
+    const agencyHash = commercialHash(agencyPayload);
+    await prisma.quoteRevision.update({ where: { id: revision.id }, data: { payload: agencyPayload, payloadHash: agencyHash } });
+    await prisma.commercialApproval.update({ where: { id: approval.id }, data: { payloadHash: commercialHash({ revisionHash: agencyHash, action: "send_quote", recipientHash, holdExpiresAt: null }) } });
+    assert.equal((await getCommercialQuotePrint(quote.id, revision.id, seller, now)).state, "approved");
+    await prisma.clientAccount.update({ where: { id: beneficiary.id }, data: { accountOwnerUserId: other.id } });
+    assert.equal((await getCommercialQuotePrint(quote.id, revision.id, seller, now)).state, "draft", "reassigned agency parties invalidate the current approval label without changing the IDs");
+    await prisma.clientAccount.update({ where: { id: beneficiary.id }, data: { accountOwnerUserId: seller.id } });
+    await prisma.user.update({ where: { id: seller.id }, data: { role: "D_CEO" } });
+    assert.equal((await getCommercialQuotePrint(quote.id, revision.id, manager, now)).state, "draft", "read-only owner demotion cannot preserve a currently approved commercial offer");
+    await prisma.user.update({ where: { id: seller.id }, data: { role: "SALES_AGENT" } });
+    await prisma.campaign.update({ where: { id: campaign.id }, data: { endClientId: client.id } });
+    assert.equal((await getCommercialQuotePrint(quote.id, revision.id, seller, now)).state, "draft", "a changed final beneficiary invalidates the current approval label without rewriting the historical offer");
+    assert.equal((await prisma.quoteRevision.findUniqueOrThrow({ where: { id: revision.id } })).payloadHash, agencyHash);
+    await prisma.campaign.update({ where: { id: campaign.id }, data: { ...parties, status: "completed" } });
+    assert.equal((await getCommercialQuotePrint(quote.id, revision.id, seller, now)).state, "draft", "a completed campaign must not produce a currently approved sales proposal");
+    await prisma.campaign.update({ where: { id: campaign.id }, data: { campaignType: "direct_client", agencyClientId: null, endClientId: null, status: campaign.status } });
+    await prisma.quoteRevision.update({ where: { id: revision.id }, data: { payload, payloadHash: revision.payloadHash } });
+    await prisma.commercialApproval.update({ where: { id: approval.id }, data: { payloadHash: commercialHash({ revisionHash: revision.payloadHash, action: "send_quote", recipientHash, holdExpiresAt: null }) } });
     const customPayload = { ...payload, billingRule: "fixed_custom_date", billingFrequency: "custom" };
     const customHash = commercialHash(customPayload);
     await prisma.campaign.update({ where: { id: campaign.id }, data: { billingRule: "fixed_custom_date", billingFrequency: "custom" } });
@@ -73,7 +100,7 @@ async function main() {
     await rejected(() => getCommercialQuotePrint(quote.id, revision.id, seller, now), "QUOTE_PRINT_INTEGRITY");
     await prisma.quoteRevision.update({ where: { id: revision.id }, data: { totalGross: 96.8, payloadHash: commercialHash("corrupt") } });
     await rejected(() => getCommercialQuotePrint(quote.id, revision.id, seller, now), "QUOTE_PRINT_INTEGRITY");
-    console.log(JSON.stringify({ ok: true, groups: 11, scope: "authenticated immutable quote printing, private portfolios, exact approval proof, custom calendar, policy and term drift, historical labels and financial integrity" }));
+    console.log(JSON.stringify({ ok: true, groups: 13, scope: "authenticated immutable quote printing, private portfolios, exact approval proof, agency/beneficiary and terminal-campaign binding, custom calendar, policy and term drift, historical labels and financial integrity" }));
   } finally {
     if (ids.quote) {
       const revisions = await prisma.quoteRevision.findMany({ where: { quoteId: ids.quote }, select: { id: true } });
@@ -83,6 +110,7 @@ async function main() {
     }
     if (ids.campaign) await prisma.campaign.deleteMany({ where: { id: ids.campaign } });
     if (ids.client) await prisma.clientAccount.deleteMany({ where: { id: ids.client } });
+    await prisma.clientAccount.deleteMany({ where: { id: { in: partyClients } } });
     if (policyCreated) await prisma.commercialPolicy.deleteMany({ where: { id: "default" } });
     await prisma.user.deleteMany({ where: { id: { in: ids.users } } });
     await prisma.$disconnect();

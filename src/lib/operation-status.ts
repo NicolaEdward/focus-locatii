@@ -47,6 +47,7 @@ export type OperationExtraTask = {
   createdByUserId?: string | null;
   createdByName?: string | null;
   createdAt?: string | null;
+  requestFingerprint?: string | null;
   updatedAt?: string | null;
   completedAt?: string | null;
   completedByUserId?: string | null;
@@ -174,7 +175,9 @@ export function withOperationCost(
   const nextMeta: OperationMeta = {
     ...meta,
     decorationCost: cost,
-    decorationCurrency: cost == null ? null : currency || meta.decorationCurrency || "EUR"
+    decorationCurrency: cost == null ? null : currency === undefined
+      ? meta.decorationCurrency || null
+      : currency === "RON" || currency === "EUR" ? currency : null
   };
   const metaText = `<!--focus-ops:${JSON.stringify(nextMeta)}-->`;
   return text ? `${text}\n${metaText}` : metaText;
@@ -305,6 +308,7 @@ function normalizeTask(value: unknown): OperationExtraTask | null {
     createdByUserId: task.createdByUserId || null,
     createdByName: task.createdByName || null,
     createdAt: task.createdAt || null,
+    requestFingerprint: task.requestFingerprint || null,
     updatedAt: task.updatedAt || null,
     completedAt: task.completedAt || null,
     completedByUserId: task.completedByUserId || null,

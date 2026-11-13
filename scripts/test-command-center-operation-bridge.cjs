@@ -103,6 +103,7 @@ const route = loadTsModule(path.join(process.cwd(), "src", "app", "api", "admin"
       return { id, productionNotes: reservation.productionNotes };
     },
     updateReservationProductionNotesWithClient: async (_client, id, nextNotes, actor) => {
+      nextNotes = typeof nextNotes === "function" ? await nextNotes({ ...reservation }) : nextNotes;
       if (mirrorFailure) throw new Error("Simulated productionNotes mirror failure");
       noteUpdates.push({ id, nextNotes, actor, transactional: true });
       reservation = { ...reservation, productionNotes: nextNotes };
@@ -161,7 +162,7 @@ async function flagOffUsesLegacyPath() {
   reset();
   delete process.env.OPERATION_TASKS_ENABLED;
   const response = await post(session("coo-1", "COO"), { action: "operationStatus", reservationId: reservation.id, kind: "decoration", status: "DONE" });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, JSON.stringify(response.body));
   assert.equal(taskCalls.length, 0, "flag off must not touch OperationTask");
   assert.equal(legacyReservationUpdates.length, 1, "flag off should use legacy updateReservation path");
   assert(reservation.productionNotes.includes('"decorationStatus":"DONE"'), "legacy path should mirror decoration status");
@@ -314,6 +315,7 @@ function seedTask(overrides) {
 
 function baseReservation() {
   return {
+    updatedAt: new Date("2026-07-01T00:00:00.000Z"),
     id: "reservation-1",
     campaignId: "campaign-1",
     locationId: "location-1",

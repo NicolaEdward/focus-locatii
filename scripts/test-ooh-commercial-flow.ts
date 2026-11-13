@@ -126,6 +126,27 @@ async function main() {
   await updateCampaign(draft.id, { paymentTermDays: 15 }, seller);
   check("negotiated prices retain catalog provenance and exact totals, cannot mutate tariffs, and require a version-bound manager approval");
 
+  const agency = await prisma.clientAccount.create({ data: { companyName: tag + " agency", accountOwnerUserId: seller.id, clientType: "agency" } });
+  const beneficiary = await prisma.clientAccount.create({ data: { companyName: tag + " beneficiary", accountOwnerUserId: seller.id } });
+  clientIds.push(agency.id, beneficiary.id);
+  await updateCampaign(draft.id, { campaignType: "agency", agencyClientId: agency.id, endClientId: beneficiary.id }, seller);
+  await rejects(() => commercial.requestCommercialApproval({ revisionId: quoted.revision.id, action: "send_quote" }, seller), "CAMPAIGN_PARTIES_CHANGED");
+  const agencyOffer = await commercial.createCommercialQuote({ ...quoteInput, requestKey: randomUUID() }, seller);
+  assert.deepEqual((agencyOffer.revision.payload as any).campaignParties, { campaignType: "agency", agency: { id: agency.id, name: agency.companyName }, endClient: { id: beneficiary.id, name: beneficiary.companyName } });
+  await prisma.clientAccount.update({ where: { id: beneficiary.id }, data: { accountOwnerUserId: other.id } });
+  await rejects(() => commercial.requestCommercialApproval({ revisionId: agencyOffer.revision.id, action: "send_quote" }, seller), "CAMPAIGN_PARTIES_INVALID");
+  await prisma.clientAccount.update({ where: { id: beneficiary.id }, data: { accountOwnerUserId: seller.id } });
+  await prisma.user.update({ where: { id: seller.id }, data: { role: "D_CEO" } });
+  await rejects(() => commercial.requestCommercialApproval({ revisionId: agencyOffer.revision.id, action: "send_quote" }, manager), "PORTFOLIO_CHANGED");
+  await prisma.user.update({ where: { id: seller.id }, data: { role: "SALES_AGENT" } });
+  await updateCampaign(draft.id, { campaignType: "direct_client", agencyClientId: null, endClientId: null }, seller);
+  await updateCampaign(draft.id, { status: "active" }, seller);
+  await updateCampaign(draft.id, { status: "completed" }, seller);
+  await rejects(() => commercial.createCommercialQuote({ ...quoteInput, requestKey: randomUUID() }, seller), "INVALID_LINKS");
+  await rejects(() => commercial.requestCommercialApproval({ revisionId: quoted.revision.id, action: "send_quote" }, seller), "PORTFOLIO_CHANGED");
+  await updateCampaign(draft.id, { status: "active" }, seller);
+  check("an approval binds the contracting client, agency and beneficiary, and completed campaigns cannot create or approve new offers");
+
   await rejects(() => commercial.createCommercialQuote({ ...quoteInput, requestKey: randomUUID(), linePrices: [{ ...quoteInput.linePrices[0], locationId: "outside-selection" }] }, seller), "INVALID_LINE_PRICES");
   await assert.rejects(() => commercial.createCommercialQuote({ ...quoteInput, requestKey: randomUUID(), linePrices: [{ ...quoteInput.linePrices[0], monthlyRate: "80.001" }] }, seller));
   let latest = quoted.quote.latestRevision;
@@ -135,13 +156,13 @@ async function main() {
   }
   await commercial.createCommercialQuote({ ...quoteInput, requestKey: randomUUID() }, seller);
   const page = await commercial.commercialWorkspace(seller, { page: 2, pageSize: 1, quoteId: quoted.quote.id, revisionPage: 2, revisionPageSize: 5 });
-  assert.equal(page.quotePage.total, 3); assert.equal(page.quotePage.ids.length, 1); assert.equal(page.revisionPage?.total, 22); assert.equal(page.revisionPage?.ids.length, 5);
+  assert.equal(page.quotePage.total, 4); assert.equal(page.quotePage.ids.length, 1); assert.equal(page.revisionPage?.total, 22); assert.equal(page.revisionPage?.ids.length, 5);
   const selected = page.quotes.find((row) => row.id === quoted.quote.id)!;
   assert.ok(selected.revisions.some((row) => row.revision === 22));
   assert.deepEqual(selected.revisions.filter((row) => page.revisionPage!.ids.includes(row.id)).map((row) => row.revision), [17, 16, 15, 14, 13]);
   const oldest = await commercial.commercialWorkspace(seller, { quoteId: quoted.quote.id, revisionPage: 5, revisionPageSize: 5 });
   assert.ok(oldest.quotes.find((row) => row.id === quoted.quote.id)!.revisions.some((row) => row.revision === 1));
-  assert.equal((await commercial.commercialWorkspace(seller, { q: client.companyName })).quotePage.total, 3);
+  assert.equal((await commercial.commercialWorkspace(seller, { q: client.companyName })).quotePage.total, 4);
   await rejects(() => commercial.commercialWorkspace(other, { quoteId: quoted.quote.id }), "NOT_FOUND");
   assert.equal((await commercial.commercialWorkspace(other, { q: client.companyName })).quotePage.total, 0);
   check("quote search, actual page IDs and all 22 revisions remain accessible without exposing foreign portfolio data");

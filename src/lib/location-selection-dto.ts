@@ -83,6 +83,8 @@ export type LocationSelectionFilters = {
   hasImage?: boolean | null;
   hasPublicPrice?: boolean | null;
   selectedIds?: string[];
+  offset?: number;
+  pageSize?: number;
   sort?: "selected" | "availability" | "code" | "city" | "surface_desc" | "price_asc" | "price_desc" | "updated_desc";
 };
 
@@ -124,12 +126,15 @@ export type LocationSelectionAvailability = {
   warnings: string[];
   conflicts: LocationSelectionConflict[];
   blockingIntervals: LocationSelectionBlockingInterval[];
+  availableWindows?: Array<{ start: string; end: string }>;
   availableUntil?: string | null;
   availableFrom?: string | null;
 };
 
 export type LocationSelectionResponse = {
   locations: LocationSelectionLocationDTO[];
+  page: { offset: number; pageSize: number; total: number; hasMore: boolean };
+  priceCurrency: string | null;
   options: LocationSelectionOptionSets;
   permissions: {
     role: UserRole;

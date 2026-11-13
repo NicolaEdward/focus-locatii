@@ -10,8 +10,11 @@ import {
   reservationWriteTransactionOptions,
 } from "@/lib/reservations";
 import { companyEntityOrThrow } from "@/lib/company-entities";
-import { normalizeClientName } from "@/lib/clients";
+import { ClientMutationError, normalizeClientName } from "@/lib/clients";
+import { assertCampaignParties, campaignPartyFingerprint, campaignPartyIds, type CampaignParties } from "@/lib/campaign-parties";
+import { resolveQuoteHoldContext, quoteHoldRowsSnapshot } from "@/lib/quote-hold-context";
 import { taxIdsMatch } from "@/lib/tax-id";
+import { isSellerCapableRole } from "@/lib/sales-roles";
 import {
   CommercialError,
   commercialManagerRoles,
@@ -174,7 +177,20 @@ async function assertCurrentCommercialActor(db: Db, actor: Actor) {
 }
 
 function active(row: { status: string }) {
-  return !["archived", "merged", "cancelled"].includes(row.status);
+  return !["archived", "merged", "cancelled", "completed"].includes(row.status);
+}
+async function validateCommercialParties(db: Db, parties: CampaignParties, actor?: Actor, requireCompleteAgency = false) {
+  try { await assertCampaignParties(db, parties, actor, { requireCompleteAgency }); }
+  catch (error) {
+    if (error instanceof ClientMutationError) throw new CommercialError("CAMPAIGN_PARTIES_INVALID", error.message, error.status);
+    throw error;
+  }
+}
+async function validateCommercialPartyOwner(db: Db, parties: CampaignParties, ownerId: string, requireCompleteAgency = false) {
+  const owner = await db.user.findUnique({ where: { id: ownerId }, select: { id: true, role: true, active: true, tokenVersion: true } });
+  if (!owner?.active || !isSellerCapableRole(owner.role))
+    throw new CommercialError("PORTFOLIO_CHANGED", "Responsabilul ofertei nu mai are acces la portofoliul comercial. Cere verificarea unui manager.", 409);
+  await validateCommercialParties(db, parties, owner, requireCompleteAgency);
 }
 function assertOwned(owner: string | null | undefined, actor: Actor) {
   if (!hasGlobalDataAccess(actor.role) && owner !== actor.id)
@@ -252,10 +268,10 @@ export async function commercialWorkspace(actor: AuthSession, rawQuery: unknown 
   const revisionIds = quotes.flatMap((q) => q.revisions.map((r) => r.id));
   const [
     p,
-    clients,
-    campaigns,
+    initialClients,
+    initialCampaigns,
     opportunities,
-    locations,
+    initialLocations,
     approvals,
     profiles,
     principals,
@@ -325,6 +341,26 @@ export async function commercialWorkspace(actor: AuthSession, rawQuery: unknown 
       ? prisma.salesPilot.findMany({ orderBy: { createdAt: "desc" }, take: 50 })
       : Promise.resolve([]),
   ]);
+  // Search pickers are paginated, but a selected offer must retain its exact
+  // parties and inventory even when they sort beyond those initial pages.
+  const clientIds = [...new Set(quotes.map((row) => row.clientId))].filter((id) => !initialClients.some((row) => row.id === id));
+  const campaignIds = [...new Set(quotes.flatMap((row) => row.campaignId ? [row.campaignId] : []))].filter((id) => !initialCampaigns.some((row) => row.id === id));
+  const locationIds = [...new Set(quotes.flatMap((quote) => {
+    const payload = quote.revisions[0]?.payload as { lines?: { locationId?: unknown }[] } | undefined;
+    return Array.isArray(payload?.lines) ? payload.lines.slice(0, 50).flatMap((line) => typeof line?.locationId === "string" ? [line.locationId] : []) : [];
+  }))].filter((id) => !initialLocations.some((row) => row.id === id));
+  const [extraClients, extraCampaigns, extraLocations] = await Promise.all([
+    clientIds.length ? prisma.clientAccount.findMany({ where: { id: { in: clientIds }, status: { notIn: ["archived", "merged"] }, ...(global ? {} : { accountOwnerUserId: actor.id }) },
+      select: { id: true, companyName: true, generalEmail: true, contacts: { select: { name: true, email: true, phone: true }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }], take: 1 } } }) : [],
+    campaignIds.length ? prisma.campaign.findMany({ where: { id: { in: campaignIds }, archivedAt: null, ...(global ? {} : { sellerUserId: actor.id }) },
+      select: { id: true, clientId: true, campaignName: true, currency: true, companyEntity: true, paymentTermType: true, paymentTermDays: true, billingRule: true, billingFrequency: true, startDate: true, endDate: true } }) : [],
+    locationIds.length ? prisma.location.findMany({ where: { id: { in: locationIds }, lifecycleStatus: "ACTIVE" }, select: { id: true, code: true, city: true, type: true, rateCardValue: true } }) : [],
+  ]);
+  const clients = [...initialClients, ...extraClients];
+  const campaigns = [...initialCampaigns, ...extraCampaigns];
+  const locations = [...initialLocations, ...extraLocations];
+  const documentFocus = quotes.find((row) => row.id === query.quoteId) || listedQuotes[0];
+  const documentClientId = documentFocus && clients.some((row) => row.id === documentFocus.clientId) ? documentFocus.clientId : null;
   const [
     acceptances,
     dispatches,
@@ -387,7 +423,8 @@ export async function commercialWorkspace(actor: AuthSession, rawQuery: unknown 
       take: 200,
     }) : Promise.resolve([]),
     prisma.clientDocument.findMany({
-      where: { status: "active", clientId: { in: clients.map((c) => c.id) } },
+      where: { status: "active", clientId: documentClientId || "__no_authorized_quote_client__",
+        ...(documentFocus?.campaignId ? { OR: [{ campaignId: documentFocus.campaignId }, { campaignId: null }] } : {}) },
       select: { id: true, clientId: true, campaignId: true, fileName: true },
       orderBy: { createdAt: "desc" },
       take: 200,
@@ -609,7 +646,7 @@ export async function authenticateAgentBearer(authorization: string | null) {
 const availabilitySchema = z
   .object({ locationIds: z.array(id).min(1).max(100), ...period })
   .strict();
-export async function commercialAvailability(raw: unknown, db: Db = prisma) {
+export async function commercialAvailability(raw: unknown, db: Db = prisma, context?: { ignoreReservationIds: string[] }) {
   const input = availabilitySchema.parse(raw);
   const { from, to } = checkedPeriod(input.periodStart, input.periodEnd);
   const ids = [...new Set(input.locationIds)].sort();
@@ -620,6 +657,7 @@ export async function commercialAvailability(raw: unknown, db: Db = prisma) {
       periodEnd: to,
       db,
       requireOverrideStorage: true,
+      ignoreReservationIds: context?.ignoreReservationIds,
     }),
     db.location.findMany({
       where: { id: { in: ids } },
@@ -768,6 +806,12 @@ async function createQuoteInTransaction(
     );
   assertOwned(client.accountOwnerUserId, actor);
   assertOwned(campaign.sellerUserId, actor);
+  await validateCommercialParties(db, campaign, actor);
+  await validateCommercialPartyOwner(db, campaign, campaign.sellerUserId);
+  const partyIds = campaignPartyIds(campaign);
+  const partyNames = await db.clientAccount.findMany({ where: { id: { in: partyIds } }, select: { id: true, companyName: true } });
+  if (partyNames.length !== partyIds.length) throw new CommercialError("CAMPAIGN_PARTIES_INVALID", "Părțile campaniei s-au schimbat. Reîncarcă dosarul comercial.", 409);
+  const partySnapshot = (partyId: string | null) => partyId ? { id: partyId, name: partyNames.find((row) => row.id === partyId)!.companyName } : null;
   if (
     principalId &&
     (client.accountOwnerUserId !== actor.id ||
@@ -810,6 +854,10 @@ async function createQuoteInTransaction(
   for (const locationId of [...new Set(input.locationIds)].sort()) {
     await db.$queryRaw`SELECT id FROM portfolio_locations WHERE id = ${locationId} FOR UPDATE`;
   }
+  const quoteHold = input.quoteId ? await resolveQuoteHoldContext({
+    quoteId: input.quoteId, expectedRevision: input.expectedRevision, actor,
+    locationIds: input.locationIds, periodStart: input.periodStart, periodEnd: input.periodEnd, lock: true,
+  }, db) : null;
   const availability = await commercialAvailability(
     {
       locationIds: input.locationIds,
@@ -817,6 +865,7 @@ async function createQuoteInTransaction(
       periodEnd: input.periodEnd,
     },
     db,
+    { ignoreReservationIds: quoteHold?.reservationIds || [] },
   );
   const unavailable = availability.rows.filter((row) => !row.available);
   if (unavailable.length)
@@ -876,6 +925,9 @@ async function createQuoteInTransaction(
     clientName: client.companyName,
     campaignId: campaign.id,
     campaignName: campaign.campaignName,
+    campaignPartiesFingerprint: campaignPartyFingerprint(campaign),
+    campaignParties: { campaignType: campaign.campaignType, agency: partySnapshot(campaign.agencyClientId), endClient: partySnapshot(campaign.endClientId) },
+    ...(quoteHold?.snapshot ? { quoteHoldSnapshot: quoteHold.snapshot } : {}),
     recipient: normalizeRecipient(input.recipient),
     periodStart: input.periodStart,
     periodEnd: input.periodEnd,
@@ -1000,7 +1052,7 @@ async function recheckRevision(
     );
   const portfolio = await db.$queryRaw<
     Array<{ id: string }>
-  >`SELECT ca.id FROM portfolio_client_accounts ca JOIN portfolio_campaigns c ON c.id = ${revision.quote.campaignId} AND c.clientId = ca.id WHERE ca.id = ${revision.quote.clientId} AND ca.accountOwnerUserId = ${revision.quote.ownerUserId} AND c.sellerUserId = ${revision.quote.ownerUserId} AND ca.status NOT IN ('archived', 'merged', 'cancelled') AND c.status NOT IN ('archived', 'merged', 'cancelled') AND c.archivedAt IS NULL FOR UPDATE`;
+  >`SELECT ca.id FROM portfolio_client_accounts ca JOIN portfolio_campaigns c ON c.id = ${revision.quote.campaignId} AND c.clientId = ca.id WHERE ca.id = ${revision.quote.clientId} AND ca.accountOwnerUserId = ${revision.quote.ownerUserId} AND c.sellerUserId = ${revision.quote.ownerUserId} AND ca.status NOT IN ('archived', 'merged', 'cancelled') AND c.status NOT IN ('archived', 'merged', 'cancelled', 'completed') AND c.archivedAt IS NULL FOR UPDATE`;
   if (!portfolio.length)
     throw new CommercialError(
       "PORTFOLIO_CHANGED",
@@ -1018,6 +1070,8 @@ async function recheckRevision(
     paymentTermDays: number | null;
     billingRule?: string | null;
     billingFrequency?: string | null;
+    campaignPartiesFingerprint?: string;
+    quoteHoldSnapshot?: string;
     lines: {
       locationId: string;
       monthlyRate: string;
@@ -1033,9 +1087,22 @@ async function recheckRevision(
     );
   if (requireConfirmedCalendar && !hasConfirmedCommercialCalendar(payload))
     throw new CommercialError("CAMPAIGN_CALENDAR_REQUIRED", "Calendarul de facturare personalizat nu este documentat în ofertă. Ciorna poate fi salvată, dar calendarul trebuie verificat înainte de aprobare, expediere sau rezervare.", 409);
-  const campaign = revision.quote.campaignId ? await db.campaign.findUnique({ where: { id: revision.quote.campaignId }, select: { currency: true, companyEntity: true, paymentTermType: true, paymentTermDays: true, billingRule: true, billingFrequency: true } }) : null;
+  const campaign = revision.quote.campaignId ? await db.campaign.findUnique({ where: { id: revision.quote.campaignId }, select: { clientId: true, campaignType: true, agencyClientId: true, endClientId: true, currency: true, companyEntity: true, paymentTermType: true, paymentTermDays: true, billingRule: true, billingFrequency: true } }) : null;
   if (!campaign || campaign.currency !== payload.currency || !campaign.companyEntity || companyEntityOrThrow(campaign.companyEntity) !== payload.companyEntity || campaign.paymentTermType !== payload.paymentTermType || campaign.paymentTermDays !== payload.paymentTermDays || (payload.billingRule !== undefined && campaign.billingRule !== payload.billingRule) || (payload.billingFrequency !== undefined && campaign.billingFrequency !== payload.billingFrequency))
     throw new CommercialError("CAMPAIGN_TERMS_CHANGED", "Moneda, firma contractantă sau termenii de plată ai campaniei s-au schimbat. Creează o versiune nouă a ofertei.", 409);
+  await validateCommercialPartyOwner(db, campaign, revision.quote.ownerUserId, requireConfirmedCalendar);
+  if ((payload.campaignPartiesFingerprint && payload.campaignPartiesFingerprint !== campaignPartyFingerprint(campaign)) || (!payload.campaignPartiesFingerprint && campaign.campaignType === "agency"))
+    throw new CommercialError("CAMPAIGN_PARTIES_CHANGED", "Agenția, beneficiarul final sau clientul contractual diferă de versiunea verificată. Creează o versiune nouă a ofertei.", 409);
+  const quoteHold = await resolveQuoteHoldContext({
+    quoteId: revision.quoteId, expectedRevision: revision.revision,
+    locationIds: payload.lines.map((line) => line.locationId), periodStart: payload.periodStart, periodEnd: payload.periodEnd,
+    lock: true,
+  }, db);
+  const issuedSnapshot = quoteHold.latestReceiptRevisionId === revision.id ? quoteHold.latestReceiptSnapshot : null;
+  if ((issuedSnapshot && issuedSnapshot !== quoteHold.snapshot)
+    || (!issuedSnapshot && payload.quoteHoldSnapshot && payload.quoteHoldSnapshot !== quoteHold.snapshot)) {
+    throw new CommercialError("QUOTE_HOLD_CONTEXT_CHANGED", "Hold-ul asociat ofertei s-a schimbat. Reîncarcă dosarul și pregătește o versiune nouă înainte de aprobare.", 409);
+  }
   const snapshot = await commercialAvailability(
     {
       locationIds: payload.lines.map((l) => l.locationId),
@@ -1043,6 +1110,7 @@ async function recheckRevision(
       periodEnd: payload.periodEnd,
     },
     db,
+    { ignoreReservationIds: quoteHold.reservationIds },
   );
   if (
     snapshot.rows.some((r) => !r.available) ||
@@ -3054,6 +3122,7 @@ async function executeHoldInTransaction(
     currency: "RON" | "EUR";
     companyEntity: string;
     lines: { locationId: string; monthlyRate: string }[];
+    quoteHoldSnapshot?: string;
   };
   const interval = checkedPeriod(payload.periodStart, payload.periodEnd);
   // This object represents a database-verified human approver for the domain
@@ -3079,14 +3148,18 @@ async function executeHoldInTransaction(
       requestKey: "commercial:" + approval.id,
       holdExpiresAt: approval.holdExpiresAt,
       quotedTerms: { currency: payload.currency, companyEntity: payload.companyEntity, quoteRevisionId: revision.id, lines: payload.lines.map(({ locationId, monthlyRate }) => ({ locationId, monthlyRate })) },
+      quoteContext: { quoteId: revision.quoteId, expectedRevision: revision.revision, snapshot: payload.quoteHoldSnapshot || null },
   };
   const reservations = await createApprovedAgentHold(tx, holdInput, verifiedApprover);
+  const heldRows = await tx.reservation.findMany({ where: { id: { in: reservations.map((row) => row.id) } } });
   const result = {
     reservationIds: reservations.map((r) => r.id),
     state: "HOLD",
     holdExpiresAt: approval.holdExpiresAt.toISOString(),
     approvalId: approval.id,
     quoteRevisionId: revision.id,
+    holdSnapshotAfter: quoteHoldRowsSnapshot(heldRows),
+    reusedHold: Boolean(payload.quoteHoldSnapshot),
   };
   await tx.commercialApproval.update({
     where: { id: approval.id },

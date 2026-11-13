@@ -76,6 +76,20 @@ under supervision or isolated synthetic records, never fictional production cash
   historical, rejected and internally approved documents have distinct labels.
 - Configuring code does not demonstrate real email delivery, NAS connectivity,
   backup recovery, fiscal ERP issuance or a scheduled native ChatGPT run.
+- An unknown installation estimate remains empty; an explicitly entered zero
+  means a known zero cost. Installation cost has its own verified currency and
+  never inherits the rental-income currency. Unsupported or missing currencies
+  remain review items outside verified monetary totals.
+- The operational execution register preserves recorded completed work after a
+  rental is cancelled. It is separate from the current billing-review list and
+  cannot establish client billability, a supplier liability or a fiscal invoice.
+  Its pages and per-rental task limits are explicit; old completion metadata is
+  checked independently of the rental's contractual period.
+- A new operational request carries a stable task ID. Retrying that same intent
+  returns its existing result; changing its payload is refused. Current actor,
+  portfolio, credential version and account state are checked before replay.
+  A seller may request work for an owned confirmed rental; requesting work grants
+  no direct completion, approval or booking permission.
 
 ## Verification and release
 

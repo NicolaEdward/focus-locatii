@@ -19,6 +19,8 @@ import {
   crmOpportunityStageLabel,
   crmProspectStatusLabel,
   crmStartOfLocalDay,
+  crmStartOfNextLocalDay,
+  crmStartOfLocalMonth,
   crmValidateActionForStage,
   type CrmProspectStatus
 } from "@/lib/crm-domain";
@@ -65,7 +67,7 @@ export async function getCrmWorkspace(input: CrmWorkspaceInput, actor: AuthSessi
   const limit = Math.max(10, Math.min(50, Math.floor(input.limit || defaultPageSize)));
   const now = new Date();
   const dayStart = crmStartOfLocalDay(now);
-  const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+  const dayEnd = crmStartOfNextLocalDay(now);
   const query = input.query?.trim() || "";
   const ownerId = scopedOwner(actor, input.ownerId);
   const companyFilter: Prisma.CrmCompanyWhereInput = {
@@ -136,7 +138,7 @@ export async function getCrmWorkspace(input: CrmWorkspaceInput, actor: AuthSessi
           take: limit
         }),
     aggregateOpportunityTotals(ownerId),
-    aggregateCrmSummary(ownerId, dayStart, dayEnd, new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)))
+    aggregateCrmSummary(ownerId, dayStart, dayEnd, crmStartOfLocalMonth(now))
   ]);
 
   return {

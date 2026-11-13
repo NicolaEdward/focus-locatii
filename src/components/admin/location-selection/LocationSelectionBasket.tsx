@@ -1,5 +1,6 @@
 "use client";
 
+import { calculateProrata } from "@/lib/prorata";
 import { ArrowDown, ArrowUp, Copy, Download, FileImage, MoreHorizontal, Trash2, X } from "lucide-react";
 import { AvailabilityBadge } from "@/components/admin/location-selection/AvailabilityBadge";
 import type {
@@ -45,6 +46,9 @@ export function LocationSelectionBasket({
   const estimatedTotal = items.reduce((sum, item) => sum + (item.suggestedBasePrice || 0), 0);
   const currencies = [...new Set(items.map((item) => item.currency).filter(Boolean))];
   const estimateLabel = currencies.length === 1 && items.every((item) => item.suggestedBasePrice != null && item.currency) ? `${estimatedTotal.toLocaleString("ro-RO")} ${currencies[0]}/lună` : "De verificat";
+  const periodDays = (new Date(periodEnd).getTime() - new Date(periodStart).getTime()) / 86_400_000;
+  const periodEstimate = items.length && currencies.length === 1 && items.every((item) => item.suggestedBasePrice != null && item.currency) && periodDays >= 0 && periodDays <= 1096
+    ? items.reduce((sum, item) => sum + calculateProrata(item.suggestedBasePrice!, periodStart, periodEnd, periodStart, periodEnd).amount, 0) : null;
   const currentAvailability = (item: LocationSelectionItem) => availabilityById[item.locationId];
   const warningCount = items.filter((item) => {
     const availability = currentAvailability(item);
@@ -62,9 +66,10 @@ export function LocationSelectionBasket({
         </div>
         <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
           <Metric label="Suprafata" value={totalSurface ? `${round(totalSurface)} mp` : "-"} />
-          <Metric label="Estimare" value={items.length ? estimateLabel : "-"} />
+          <Metric label="Listă / lună" value={items.length ? estimateLabel : "-"} />
           <Metric label="Avertizari" value={String(warningCount)} />
         </div>
+        {items.length ? <div className="mt-3 rounded-md border border-focus-line p-3 text-xs"><p className="font-bold text-white">Estimare de listă pentru perioada cerută: {periodEstimate == null ? "De verificat" : `${periodEstimate.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencies[0]}`}</p><p className="mt-1 text-slate-400">Chirie media de listă, înainte de negociere; TVA se aplică după regulile comerciale. Producția și montajul se tratează separat. Totalul contractual se verifică pe server în ofertă.</p></div> : null}
         {conflictCount ? (
           <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-red-300/35 bg-red-400/10 px-3 py-2 text-xs font-bold text-red-100">
             <span>{conflictCount} locatii selectate au conflict in perioada aleasa.</span>
@@ -113,7 +118,7 @@ export function LocationSelectionBasket({
           Exporta disponibil
         </a>
         <p className="-mt-1 text-xs font-bold text-slate-400">
-          Daca nu ai selectie, exportul foloseste rezultatele filtrate.
+          Daca nu ai selectie, exportul foloseste rezultatele filtrate încărcate. Încarcă paginile următoare pentru mai multe locații.
         </p>
         <button className="focus-button secondary" type="button" onClick={onClear} disabled={!items.length}>
           <Trash2 size={15} />
@@ -203,7 +208,8 @@ function SelectedLocationRow({
           <div className="mt-2">
             <AvailabilityBadge availability={availability} />
           </div>
-          {availability.explanation ? <p className={`mt-1 line-clamp-2 text-xs ${availability.state === "CONFLICT" ? "text-red-100" : availability.tone === "yellow" ? "text-amber-100" : "text-slate-400"}`}>{availability.explanation}</p> : null}
+          {availability.explanation ? <details className="mt-1 text-xs text-slate-300"><summary className="min-h-11 cursor-pointer py-2 font-bold">Detalii disponibilitate {item.snapshot.code}</summary><p className="break-words leading-relaxed">{availability.explanation}</p></details> : null}
+          <p className="mt-1 text-xs font-bold text-white">{item.suggestedBasePrice != null && item.currency ? `${item.suggestedBasePrice.toLocaleString("ro-RO")} ${item.currency}/lună` : "Tarif de verificat"}</p>
           <p className="mt-1 line-clamp-2 break-words text-xs text-slate-400">{item.snapshot.name || item.snapshot.address || "-"}</p>
         </div>
       </div>

@@ -21,4 +21,8 @@ assert.equal(validateQuoteSelectionDraft({ ...revision, rateInputs: [{ ...revisi
 assert.equal(validateQuoteSelectionDraft({ ...revision, rateInputs: [{ ...revision.rateInputs[0], monthlyRate: "-1" }] }, "seller-a", now), null);
 assert.equal(validateQuoteSelectionDraft({ ...revision, requestKey: "x" }, "seller-a", now), null);
 assert.deepEqual(validateQuoteSelectionDraft({ ...revision, rateInputs: [{ locationId: "loc-a", monthlyRate: "100.00", reason: "" }] }, "seller-a", now)?.rateInputs, [{ locationId: "loc-a", monthlyRate: "100.00", reason: "" }], "A deliberate reset to the catalog rate must survive the map round trip and must not resurrect an old discount.");
-console.log("Quote selection handoff: 17 account, expiry, calendar, bounded-payload and complete revision round-trip checks passed.");
+const discovery = { ...valid, intent: "inventory-discovery" as const, locationIds: [] };
+assert.deepEqual(validateQuoteSelectionDraft(discovery, "seller-a", now)?.locationIds, [], "A dated discovery handoff must open the map before any location has been chosen.");
+assert.equal(validateQuoteSelectionDraft({ ...discovery, intent: undefined }, "seller-a", now), null, "An ordinary offer handoff still requires at least one location.");
+assert.equal(validateQuoteSelectionDraft({ ...discovery, intent: "book-directly" }, "seller-a", now), null);
+console.log("Quote selection handoff: 20 account, expiry, calendar, bounded-payload, discovery and revision round-trip checks passed.");

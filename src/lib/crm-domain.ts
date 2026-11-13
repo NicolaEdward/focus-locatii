@@ -270,6 +270,18 @@ export function crmStartOfLocalDay(value: Date) {
   return localDateAtHour(parts.year, parts.month, parts.day, 0, CRM_TIME_ZONE);
 }
 
+/** Calendar boundaries in the business timezone; DST days may have 23 or 25 hours. */
+export function crmStartOfNextLocalDay(value: Date) {
+  const parts = datePartsInTimeZone(value, CRM_TIME_ZONE);
+  const next = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1, 12));
+  return localDateAtHour(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), 0, CRM_TIME_ZONE);
+}
+
+export function crmStartOfLocalMonth(value: Date) {
+  const parts = datePartsInTimeZone(value, CRM_TIME_ZONE);
+  return localDateAtHour(parts.year, parts.month, 1, 0, CRM_TIME_ZONE);
+}
+
 export function crmNormalizeEmail(value?: string | null) {
   return value?.trim().toLowerCase() || null;
 }

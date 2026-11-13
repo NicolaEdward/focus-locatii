@@ -16,7 +16,10 @@ export async function GET(request: NextRequest) {
 
   const params = request.nextUrl.searchParams;
   const filters: LocationSelectionFilters = {
-    search: params.get("search"),
+    search: params.get("search")?.slice(0, 200),
+    selectedIds: listParam(params.get("selectedIds"))?.slice(0, 50),
+    offset: integerParam(params.get("offset"), 0, 0, 1000000),
+    pageSize: integerParam(params.get("pageSize"), 100, 1, 500),
     city: params.get("city"),
     area: params.get("area"),
     mediaType: params.get("mediaType"),
@@ -55,4 +58,9 @@ function listParam(value: string | null) {
 function sortParam(value: string | null): LocationSelectionFilters["sort"] {
   const allowed = new Set(["selected", "availability", "code", "city", "surface_desc", "price_asc", "price_desc", "updated_desc"]);
   return allowed.has(String(value)) ? (value as LocationSelectionFilters["sort"]) : "code";
+}
+
+function integerParam(value: string | null, fallback: number, min: number, max: number) {
+  const parsed = value == null ? fallback : Number(value);
+  return Number.isSafeInteger(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
 }

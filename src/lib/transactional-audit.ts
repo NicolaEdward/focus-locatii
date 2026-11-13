@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { currentCorrelationId } from "@/lib/observability";
 
-export type TransactionalAuditActor = { id: string; email?: string; role?: string };
+export type TransactionalAuditActor = { id: string; email?: string; role?: string; auditRequestId?: string };
 export type TransactionalAuditInput = {
   actor?: TransactionalAuditActor | null;
   action: string;
@@ -40,7 +40,7 @@ export async function recordTransactionalAudit(
   tx: Pick<Prisma.TransactionClient, "auditLog">,
   input: TransactionalAuditInput
 ) {
-  const correlationId = input.correlationId || currentCorrelationId();
+  const correlationId = input.correlationId || input.actor?.auditRequestId || currentCorrelationId();
   const metadata = safeAuditMetadata({
     ...(input.metadata || {}),
     ...(input.actor?.role ? { actorRole: input.actor.role } : {}),

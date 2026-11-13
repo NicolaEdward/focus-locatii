@@ -145,7 +145,8 @@
     "smoke:capture": "node scripts/release/capture-role-pages.cjs",
     "test:data-import-hardening": "tsx scripts/test-data-import-hardening.ts",
     "test:media-boundaries": "tsx scripts/test-media-boundaries.ts",
-    "test:dependency-policy": "node scripts/test-dependency-policy.cjs"
+    "test:dependency-policy": "node scripts/test-dependency-policy.cjs",
+    "test:location-mutation-transactions": "tsx scripts/test-location-mutation-transactions.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",

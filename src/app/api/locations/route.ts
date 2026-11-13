@@ -41,34 +41,21 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const [{ requireAnyPermission }, { createLocation }, { prisma }, { recordAudit }, { serializeLocation }] = await Promise.all([
+  const [{ requireAnyPermission }, { createLocation, locationMutationFailure }, { serializeLocation }] = await Promise.all([
     import("@/lib/auth"),
     import("@/lib/location-mutations"),
-    import("@/lib/prisma"),
-    import("@/lib/audit"),
     import("@/lib/locations")
   ]);
   const { session, response } = await requireAnyPermission(request, ["inventory.create", "inventory.manage"]);
   if (response || !session) return response;
-
-  const body = await request.json();
-  const location = await createLocation(body);
-  const full = await prisma.location.findUniqueOrThrow({
-    where: { id: location.id },
-    include: {
-      category: true,
-      images: {
-        orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }]
-      },
-      reservations: {
-        orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
-      }
-    }
-  });
-  await recordAudit({ actor: session, action: "location.create", entityType: "location", entityId: full.id, metadata: { code: full.code }, request });
-
-  return NextResponse.json(
-    { location: serializeLocation(full, { includeHiddenCommercials: true, includePrivateFields: true, reservationViewer: session }) },
-    { status: 201, headers: noStoreHeaders }
-  );
+  try {
+    const full = await createLocation(await request.json(), session);
+    return NextResponse.json(
+      { location: serializeLocation(full, { includeHiddenCommercials: true, includePrivateFields: true, reservationViewer: session }) },
+      { status: 201, headers: noStoreHeaders }
+    );
+  } catch (error) {
+    const failure = locationMutationFailure(error);
+    return NextResponse.json({ error: failure.error }, { status: failure.status, headers: noStoreHeaders });
+  }
 }

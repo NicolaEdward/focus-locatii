@@ -43,74 +43,63 @@ export async function GET(request: NextRequest, context: Context) {
 }
 
 export async function PATCH(request: NextRequest, context: Context) {
-  const [{ requirePermission }, { updateLocation }, { prisma }, { recordAudit }, { serializeLocation }] = await Promise.all([
+  const [{ requirePermission }, { updateLocation, locationMutationFailure }, { serializeLocation }] = await Promise.all([
     import("@/lib/auth"),
     import("@/lib/location-mutations"),
-    import("@/lib/prisma"),
-    import("@/lib/audit"),
     import("@/lib/locations")
   ]);
   const { session, response } = await requirePermission(request, "inventory.manage");
   if (response || !session) return response;
-
-  const { id } = await context.params;
-  const body = await request.json();
-  const updated = await updateLocation(id, body);
-  const full = await prisma.location.findUniqueOrThrow({
-    where: { id: updated.id },
-    include: {
-      category: true,
-      images: {
-        orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }]
-      },
-      reservations: {
-        orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
-      }
-    }
-  });
-  await recordAudit({ actor: session, action: "location.update", entityType: "location", entityId: id, metadata: { code: full.code }, request });
-
-  return NextResponse.json(
-    { location: serializeLocation(full, { includeHiddenCommercials: true, includePrivateFields: true, reservationViewer: session }) },
-    { headers: noStoreHeaders }
-  );
+  try {
+    const { id } = await context.params;
+    const full = await updateLocation(id, await request.json(), session);
+    return NextResponse.json(
+      { location: serializeLocation(full, { includeHiddenCommercials: true, includePrivateFields: true, reservationViewer: session }) },
+      { headers: noStoreHeaders }
+    );
+  } catch (error) {
+    const failure = locationMutationFailure(error);
+    return NextResponse.json({ error: failure.error }, { status: failure.status, headers: noStoreHeaders });
+  }
 }
 
 export async function POST(request: NextRequest, context: Context) {
-  const [{ requirePermission }, { duplicateLocation }, { recordAudit }] = await Promise.all([
+  const [{ requirePermission }, { duplicateLocation, locationMutationFailure }, { serializeLocation }] = await Promise.all([
     import("@/lib/auth"),
     import("@/lib/location-mutations"),
-    import("@/lib/audit")
+    import("@/lib/locations")
   ]);
   const { session, response } = await requirePermission(request, "inventory.manage");
   if (response || !session) return response;
-
-  const { id } = await context.params;
-  const action = request.nextUrl.searchParams.get("action");
-  if (action !== "duplicate") {
-    return NextResponse.json({ error: "Unsupported action" }, { status: 400, headers: noStoreHeaders });
+  if (request.nextUrl.searchParams.get("action") !== "duplicate") {
+    return NextResponse.json({ error: "Acțiune nesuportată." }, { status: 400, headers: noStoreHeaders });
   }
-
-  const duplicate = await duplicateLocation(id);
-  await recordAudit({ actor: session, action: "location.duplicate", entityType: "location", entityId: duplicate.id, request });
-  return NextResponse.json({ location: duplicate }, { status: 201, headers: noStoreHeaders });
+  try {
+    const { id } = await context.params;
+    const duplicate = await duplicateLocation(id, session);
+    return NextResponse.json(
+      { location: serializeLocation(duplicate, { includeHiddenCommercials: true, includePrivateFields: true, reservationViewer: session }) },
+      { status: 201, headers: noStoreHeaders }
+    );
+  } catch (error) {
+    const failure = locationMutationFailure(error);
+    return NextResponse.json({ error: failure.error }, { status: failure.status, headers: noStoreHeaders });
+  }
 }
 
 export async function DELETE(request: NextRequest, context: Context) {
-  const [{ requirePermission }, { prisma }, { recordAudit }] = await Promise.all([
+  const [{ requirePermission }, { deleteLocation, locationMutationFailure }] = await Promise.all([
     import("@/lib/auth"),
-    import("@/lib/prisma"),
-    import("@/lib/audit")
+    import("@/lib/location-mutations")
   ]);
   const { session, response } = await requirePermission(request, "inventory.manage");
   if (response || !session) return response;
-
-  const { id } = await context.params;
-  const reservationCount = await prisma.reservation.count({ where: { locationId: id } });
-  if (reservationCount > 0) {
-    return NextResponse.json({ error: "Locatia are istoric comercial si nu poate fi stearsa. Ascunde-o din portalul public." }, { status: 409 });
+  try {
+    const { id } = await context.params;
+    await deleteLocation(id, session);
+    return NextResponse.json({ ok: true }, { headers: noStoreHeaders });
+  } catch (error) {
+    const failure = locationMutationFailure(error);
+    return NextResponse.json({ error: failure.error }, { status: failure.status, headers: noStoreHeaders });
   }
-  await prisma.location.delete({ where: { id } });
-  await recordAudit({ actor: session, action: "location.delete", entityType: "location", entityId: id, request });
-  return NextResponse.json({ ok: true }, { headers: noStoreHeaders });
 }

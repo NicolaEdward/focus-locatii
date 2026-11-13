@@ -77,3 +77,13 @@ node scripts/release/run-with-env.cjs .env.implementation.local node_modules/.bi
 Ultima suită refuză producția și orice DB care nu este locală și nu are prefixul `focus_preview_`. Creează numai fixture-uri sintetice proprii și le curăță. Integrarea finală trebuie să includă typecheck/build, imaginea logo benignă prin `/_next/image`, acces pe roluri și capturi desktop/mobil ale formularului. Nu s-a făcut deploy sau test de exploatare în producție în acest lot.
 
 Politica conservatoare de respingere SVG poate afecta schițe SVG existente: acestea trebuie convertite în raster sau servite ulterior dintr-o origine separată, după o decizie explicită. Nu s-au convertit sau șters active existente și nu s-a inventariat producția.
+
+## Extensie: mutațiile individuale ale inventarului
+
+Crearea, editarea, duplicarea și ștergerea unei locații folosesc auditul durabil în aceeași tranzacție cu locația, categoria și imaginile sale. Rutele transmit actorul autentificat către comandă; comanda blochează rândul utilizatorului și verifică din nou `active`, rolul și `tokenVersion`, apoi sesiunea înregistrată dacă există. Un actor dezactivat, cu rol schimbat ori token/sesiune revocate nu mai poate scrie folosind rezultatul unei autorizări anterioare.
+
+Crearea cere `inventory.create` sau `inventory.manage`; editarea, duplicarea și ștergerea cer `inventory.manage`. Datele complete pentru răspuns sunt citite înainte de commit, apoi serializate cu `reservationViewer` pentru a păstra protecția între portofolii. Erorile Prisma nu sunt expuse în răspunsuri.
+
+Ștergerea blochează locația și verifică istoricul după lock la READ COMMITTED. Rezervările inclusiv anulate, taskurile inclusiv arhivate, rândurile de import financiar, istoricul GPS și blocajele de disponibilitate inclusiv închise împiedică ștergerea; se recomandă ascunderea locației. Numai imaginile proprii ale unei locații fără istoric pot fi eliminate împreună cu ea. Inserările concurente trebuie să păstreze FK-urile InnoDB către locație; verificarea schemei rămâne parte din preflight-ul de lansare.
+
+`test:location-mutation-transactions` execută create/update/duplicate/delete reale într-o bază locală sintetică: injectează indisponibilitatea auditului după scriere, verifică rollback-ul categoriei/imaginilor și al cascadei de delete, actorul vechi pe toate cele patru rute, matricea de revocare a sesiunii și un insert de istoric între citirea actorului și lock-ul locației. Verifică și că PATCH-ul Zod 4 nu resetează câmpurile omise. Nu au fost schimbate utilitarele bulk GPS în această extensie.

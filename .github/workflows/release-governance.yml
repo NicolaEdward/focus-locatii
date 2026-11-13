@@ -51,6 +51,7 @@ jobs:
       - run: pnpm run test:release-governance
       - run: pnpm run typecheck
       - run: pnpm run test:rbac
+      - run: pnpm run test:database-read-retry
       - run: pnpm run test:public-visibility
       - run: pnpm run test:dashboard-command-centers
       - run: pnpm run test:operations-rbac

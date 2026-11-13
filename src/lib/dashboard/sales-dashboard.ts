@@ -235,4 +235,3 @@ function salesOperation(row: any, kind: "decoration" | "neutralization", date: D
     href: `/admin/operational?panel=${kind === "decoration" ? "decorations" : "neutralizations"}&reservationId=${encodeURIComponent(row.id)}`
   };
 }
-

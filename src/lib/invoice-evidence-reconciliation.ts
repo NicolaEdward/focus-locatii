@@ -33,6 +33,12 @@ const verifiedSources = new WeakMap<object, { rows: readonly SmartBillCustomerIn
 export type InvoiceEvidenceExecutionContext = {
   mode: "check" | "apply"; manifestHash: string; approvedOperationHash: string; runId: string; source: VerifiedSource
 };
+export class InvoiceEvidenceGuardError extends Error {
+  constructor(readonly code: string, message: string, readonly field?: string) {
+    super(message);
+    this.name = "InvoiceEvidenceGuardError";
+  }
+}
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k,v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`;
@@ -54,9 +60,10 @@ const amount = (value: unknown) => new Prisma.Decimal(value == null ? 0 : String
 const iso = (value: Date | null) => value?.toISOString() || null;
 function inactive(row: { includedInReport: boolean; status: string }) { return !row.includedInReport || ["cancelled", "archived", "excluded"].includes(row.status); }
 function expectedMatches(row: any, expected: NonNullable<InvoiceEvidenceOperation["expectedTarget"]>) {
-  for (const field of ["id", "companyCode", "companyName", "legalEntityId", "currency", "clientId", "includedInReport", "status", "sourceFingerprint"] as const) if (row[field] !== expected[field]) throw new Error(`Invoice guard changed: ${field}.`);
-  if (iso(row.updatedAt) !== expected.updatedAt || iso(row.invoiceDate) !== expected.invoiceDate || invoiceNumberComparisonKey(row.normalizedInvoiceNumber || row.invoiceNumber) !== expected.invoiceNumberKey) throw new Error("Invoice version or identity changed.");
-  for (const field of ["invoicedAmount", "collectedAmount", "remainingAmount"] as const) if (!amount(row[field]).equals(amount(expected[field]))) throw new Error(`Invoice monetary guard changed: ${field}.`);
+  for (const field of ["id", "companyCode", "companyName", "legalEntityId", "currency", "clientId", "includedInReport", "status", "sourceFingerprint"] as const) if (row[field] !== expected[field]) throw new InvoiceEvidenceGuardError("INVOICE_STATE_DRIFT", `Invoice guard changed: ${field}.`, field);
+  if (iso(row.updatedAt) !== expected.updatedAt) throw new InvoiceEvidenceGuardError("INVOICE_VERSION_DRIFT", "Invoice version or identity changed.", "updatedAt");
+  if (iso(row.invoiceDate) !== expected.invoiceDate || invoiceNumberComparisonKey(row.normalizedInvoiceNumber || row.invoiceNumber) !== expected.invoiceNumberKey) throw new InvoiceEvidenceGuardError("INVOICE_IDENTITY_DRIFT", "Invoice version or identity changed.");
+  for (const field of ["invoicedAmount", "collectedAmount", "remainingAmount"] as const) if (!amount(row[field]).equals(amount(expected[field]))) throw new InvoiceEvidenceGuardError("INVOICE_MONEY_DRIFT", `Invoice monetary guard changed: ${field}.`, field);
 }
 export async function executeInvoiceEvidenceOperation(input: unknown, context: InvoiceEvidenceExecutionContext) {
   const op = invoiceEvidenceOperationSchema.parse(input), operationHash = hashInvoiceEvidenceOperation(op);
@@ -91,18 +98,36 @@ export async function executeInvoiceEvidenceOperation(input: unknown, context: I
         return { operationId: op.id, operationHash, replay: true, receivableId: committed.entityId, applied: false };
       }
     }
-    const financialRows = await tx.financialReceivable.findMany({ where: { OR: [{ companyCode: company.companyCode }, { companyName: company.companyName }] }, select: { id: true, invoiceNumber: true, normalizedInvoiceNumber: true, sourceFingerprint: true }, take: 10001 });
+    const financialRows = await tx.financialReceivable.findMany({ where: { OR: [{ companyCode: company.companyCode }, { companyName: company.companyName }] }, select: { id: true, invoiceNumber: true, normalizedInvoiceNumber: true, sourceFingerprint: true, includedInReport: true, status: true, companyCode: true, companyName: true, currency: true, invoicedAmount: true, rawRowJson: true }, take: 10001 });
     assertSmartBillHistoryComplete(financialRows);
     const collisions = financialRows.filter(r => invoiceNumberComparisonKey(r.normalizedInvoiceNumber || r.invoiceNumber) === invoiceNumberComparisonKey(row.invoiceNumber) || r.sourceFingerprint === `${company.companyCode}:${row.dedupeKey}`);
     let current = null;
+    let historicalSourceKeyOwnerIds: string[] = [];
     if (op.expectedTarget) {
       if (context.mode === "apply") await tx.$queryRaw`SELECT id FROM portfolio_financial_receivables WHERE id = ${op.expectedTarget.id} FOR UPDATE`;
       current = await tx.financialReceivable.findUnique({ where: { id: op.expectedTarget.id } });
       if (!current) throw new Error("Invoice target no longer exists.");
       expectedMatches(current, op.expectedTarget);
-      if (inactive(current) || collisions.length !== 1 || collisions[0].id !== current.id || current.currency !== row.currency || !amount(current.invoicedAmount).equals(row.totalAmount)) throw new Error("Invoice target is inactive, duplicated, or differs from source amount/currency.");
+      const activeCollisions = collisions.filter(candidate => !inactive(candidate));
+      // An explicitly guarded canonical invoice may have archived import copies.
+      // Retain those copies; a second active invoice or a claimed source key
+      // still makes the refresh unsafe. New documents reject every collision.
+      const sourceKeyOwners = collisions.filter(candidate => candidate.id !== current!.id && candidate.sourceFingerprint === `${company.companyCode}:${row.dedupeKey}`);
+      const provenArchivedSourceCopies = sourceKeyOwners.every(candidate => {
+        const metadata = candidate.rawRowJson && typeof candidate.rawRowJson === "object" && !Array.isArray(candidate.rawRowJson) ? candidate.rawRowJson as Record<string, unknown> : {};
+        return candidate.status === "archived" && !candidate.includedInReport &&
+          candidate.companyCode === company.companyCode && candidate.currency === row.currency &&
+          amount(candidate.invoicedAmount).equals(row.totalAmount) &&
+          invoiceNumberComparisonKey(candidate.normalizedInvoiceNumber || candidate.invoiceNumber) === invoiceNumberComparisonKey(row.invoiceNumber) &&
+          metadata.smartBillDedupeKey === row.dedupeKey;
+      });
+      if (inactive(current)) throw new InvoiceEvidenceGuardError("INVOICE_TARGET_INACTIVE", "Invoice target is inactive, duplicated, or differs from source amount/currency.");
+      if (activeCollisions.length !== 1 || activeCollisions[0].id !== current.id) throw new InvoiceEvidenceGuardError("INVOICE_ACTIVE_DUPLICATE", "Invoice target is inactive, duplicated, or differs from source amount/currency.");
+      if (!provenArchivedSourceCopies) throw new InvoiceEvidenceGuardError("INVOICE_SOURCE_KEY_CLAIMED", "Another invoice already holds the approved source key.");
+      historicalSourceKeyOwnerIds = sourceKeyOwners.map(candidate => candidate.id);
+      if (current.currency !== row.currency || !amount(current.invoicedAmount).equals(row.totalAmount)) throw new InvoiceEvidenceGuardError("INVOICE_SOURCE_AMOUNT_CONFLICT", "Invoice target differs from source amount/currency.");
       if ((current.companyCode !== company.companyCode && current.companyName !== company.companyName) || (current.legalEntityId && current.legalEntityId !== entity.id)) throw new Error("Invoice company differs from approved source.");
-    } else if (collisions.length) throw new Error("Invoice document already exists, including historical/excluded records.");
+    } else if (collisions.length) throw new InvoiceEvidenceGuardError("INVOICE_HISTORICAL_COLLISION", "Invoice document already exists, including historical/excluded records.");
     if (context.mode === "apply" && op.client.strategy === "existing") await tx.$queryRaw`SELECT id FROM portfolio_client_accounts WHERE id = ${op.client.id} FOR UPDATE`;
     const allClients = await tx.clientAccount.findMany({ select: { id: true, taxId: true, updatedAt: true, status: true, accountOwnerUserId: true }, take: 10001 });
     assertSmartBillHistoryComplete(allClients);
@@ -135,11 +160,14 @@ export async function executeInvoiceEvidenceOperation(input: unknown, context: I
     const reportDate = new Date(Math.max(...sourceRows.map(r => r.issueDate?.getTime() || 0)));
     await tx.financialReportUpload.upsert({ where: { id: uploadId }, update: {}, create: { id: uploadId, uploadedByUserId: null, legalEntityId: entity.id, reportDate, originalFileName: context.source.fileName, fileHash: `smartbill-${company.companyCode}-${context.source.sha256}`, status: "confirmed", activeVersion: false, importType: "smartbill_customer_invoices", parserName: "VerifiedInvoiceEvidenceReconciliation", parserVersion: "1", rowsRead: sourceRows.length } });
     const incoming = { ...smartBillCustomerReceivableData({ row, uploadId, companyContext: company, clientId, accountOwnerUserId: clientOwnerUserId }), legalEntityId: entity.id, partnerId: current?.partnerId };
-    const sourceEvidence = { sourceSha256: context.source.sha256, manifestHash: context.manifestHash, operationHash, runId: context.runId, actorType: "owner_authorized_system" };
+    const sourceEvidence = { sourceSha256: context.source.sha256, manifestHash: context.manifestHash, operationHash, runId: context.runId, actorType: "owner_authorized_system", ...(historicalSourceKeyOwnerIds.length ? { sourceFingerprintAlias: { historicalReceivableIds: historicalSourceKeyOwnerIds, kind: "archived_source_copy", activeFingerprintPreserved: true, identityMerged: false, historicalRecordsChanged: false } } : {}) };
     const sourceClaimsPaid = /^(incasata|incasat|platita|achitata)$/i.test(row.sourceStatus || "");
     let unresolvedPaidSnapshot = false;
     if (current) {
       const refresh = await prepareSmartBillReceivableRefresh(tx, current, incoming);
+      // The archived record retains its unique source key. Record provenance on
+      // the canonical invoice without transferring that key or editing history.
+      if (historicalSourceKeyOwnerIds.length) refresh.sourceFingerprint = current.sourceFingerprint;
       const raw = { ...refresh.rawRowJson as Prisma.InputJsonObject, sourceEvidence };
       const net = receivableNetAmount(row.totalAmount, raw), remaining = Prisma.Decimal.max(net.minus(collected), 0);
       unresolvedPaidSnapshot = sourceClaimsPaid && remaining.greaterThan(0);

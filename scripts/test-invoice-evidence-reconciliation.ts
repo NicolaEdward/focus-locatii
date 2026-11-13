@@ -33,14 +33,23 @@ async function main() {
  await prisma.financialReceivablePayment.create({data:{receivableId:invoiceId,amount:"150",currency:"RON",receivedAt:new Date("2026-11-02Z"),source:"manual",status:"active"}});
  const legacy=await prisma.financialReceivable.create({data:{...common,id:legacyId,invoiceNumber:`${sequence}02`,invoicedAmount:"500",collectedAmount:"250",remainingAmount:"250"}});
  await prisma.financialReceivable.create({data:{...common,id:inactiveId,invoiceNumber:`${sequence}05`,invoicedAmount:"50",collectedAmount:"0",remainingAmount:"50",includedInReport:false,status:"archived"}});
+ const archivedCopies = await Promise.all([0,1].map(index => prisma.financialReceivable.create({data:{...common,id:`${tag}-archived-${index}`,invoiceNumber:`${sequence}01`,invoicedAmount:"1000",collectedAmount:"0",remainingAmount:"1000",includedInReport:false,status:"archived"}})));
  const bytes=workbook(),sourceSha256=sha(bytes),fileName=`${tag}-source.xlsx`;
  const verified=await verifyInvoiceEvidenceSource({bytes,fileName,expectedHash:sourceSha256,companyCode:"FOCUS_MEDIA"});
  const parsed=await parseSmartBillCustomerInvoices(bytes,{fileName});
+ const originalSourceRow=parsed.rows.find((r:any)=>r.invoiceNumber===`${sequence}01`)!;
+ archivedCopies[0]=await prisma.financialReceivable.update({where:{id:archivedCopies[0].id},data:{sourceFingerprint:`FOCUS_MEDIA:${originalSourceRow.dedupeKey}`,rawRowJson:{smartBillDedupeKey:originalSourceRow.dedupeKey}}});
  const clientSpec={strategy:"existing" as const,id:client.id,taxId:tax,updatedAt:client.updatedAt.toISOString(),status:client.status};
  function operation(suffix:string,type:InvoiceEvidenceOperation["type"],target:any=null,newClient=false):InvoiceEvidenceOperation { const row=parsed.rows.find((r:any)=>r.invoiceNumber===`${sequence}${suffix}`)!;return invoiceEvidenceOperationSchema.parse({schemaVersion:1,id:`${tag}-${suffix}`,type,sourceSha256,sourceRowNumber:row.rowNumber,sourceDedupeKey:row.dedupeKey,expectedTarget:target?expected(target):null,client:newClient?{strategy:"create_unassigned",normalizedFiscalCode:newTax}:clientSpec}); }
  const ops=[operation("01","refresh",target),operation("02","refresh",legacy),operation("03","create"),operation("04","negative_unlinked"),operation("06","create",null,true),operation("07","create",null,true)];
  const base={manifestHash:sha(tag),runId:tag,source:verified};
  const context=(op:InvoiceEvidenceOperation,mode:"check"|"apply"):InvoiceEvidenceExecutionContext=>({...base,mode,approvedOperationHash:hashInvoiceEvidenceOperation(op)});
+ const duplicateActive = await prisma.financialReceivable.create({data:{...common,id:`${tag}-duplicate-active`,invoiceNumber:`${sequence}01`,invoicedAmount:"1000",collectedAmount:"0",remainingAmount:"1000"}});
+ await assert.rejects(executeInvoiceEvidenceOperation(ops[0],context(ops[0],"check")),error => (error as any).code === "INVOICE_ACTIVE_DUPLICATE");
+ await prisma.financialReceivable.delete({where:{id:duplicateActive.id}});
+ await prisma.financialReceivable.update({where:{id:archivedCopies[0].id},data:{currency:"EUR"}});
+ await assert.rejects(executeInvoiceEvidenceOperation(ops[0],context(ops[0],"check")),error => (error as any).code === "INVOICE_SOURCE_KEY_CLAIMED");
+ archivedCopies[0]=await prisma.financialReceivable.update({where:{id:archivedCopies[0].id},data:{currency:"RON"}});
  const before=await counts();for(const op of ops)assert.equal((await executeInvoiceEvidenceOperation(op,context(op,"check"))).applied,false);assert.deepEqual(await counts(),before,"Check mode must perform no DML, including audit/uploads/clients");
  await assert.rejects(verifyInvoiceEvidenceSource({bytes,fileName,expectedHash:"0".repeat(64),companyCode:"FOCUS_MEDIA"}),/SHA-256/);
  await assert.rejects(executeInvoiceEvidenceOperation(ops[0],{...context(ops[0],"check"),source:{...verified}}),/Unverified/);
@@ -53,6 +62,10 @@ async function main() {
  createdIds.push(concurrent[0].receivableId!);
  for(const op of ops)assert.equal((await executeInvoiceEvidenceOperation(op,context(op,"apply"))).replay,true);
  const after=await prisma.financialReceivable.findUniqueOrThrow({where:{id:invoiceId}});assert.equal(receivableNetAmount(after.invoicedAmount,after.rawRowJson).toFixed(2),"800.00");assert.equal(after.collectedAmount?.toFixed(2),"150.00");assert.equal(after.remainingAmount?.toFixed(2),"650.00");assert.equal(after.netAmount?.toFixed(2),"850.00");assert.equal(after.vatAmount?.toFixed(2),"150.00");assert.equal(receivableAdjustmentEntries(after.rawRowJson).length,1);assert.deepEqual((after.rawRowJson as any).ledgerProvenance,raw.ledgerProvenance);assert.equal(after.needsReview,true);
+ for (const archived of archivedCopies) assert.deepEqual(await prisma.financialReceivable.findUniqueOrThrow({where:{id:archived.id}}),archived,"Refreshing the unique active canonical invoice must preserve archived siblings exactly");
+ assert.equal(after.sourceFingerprint,target.sourceFingerprint,"The unique source fingerprint remains on the archived source copy");
+ assert.deepEqual((after.rawRowJson as any).sourceEvidence.sourceFingerprintAlias.historicalReceivableIds,[archivedCopies[0].id]);
+ assert.equal((after.rawRowJson as any).sourceEvidence.sourceFingerprintAlias.identityMerged,false);
  const legacyAfter=await prisma.financialReceivable.findUniqueOrThrow({where:{id:legacyId}});assert.equal(legacyAfter.collectedAmount?.toFixed(2),"250.00");assert.equal(legacyAfter.remainingAmount?.toFixed(2),"250.00");assert.equal(await prisma.financialReceivablePayment.count({where:{receivableId:legacyId}}),0,"Legacy snapshot collections must not be zeroed or converted into new payments");
  const paid=await prisma.financialReceivable.findFirstOrThrow({where:{invoiceNumber:`${sequence}03`}});assert.equal(paid.collectedAmount?.toFixed(2),"0.00");assert.equal(paid.collectedAt,null);assert.equal(paid.needsReview,true);assert.equal(paid.accountOwnerUserId,ownerId,"New invoices inherit the verified client portfolio without reassigning it");
  const negative=await prisma.financialReceivable.findFirstOrThrow({where:{invoiceNumber:`${sequence}04`}});assert.equal(negative.includedInReport,false);assert.equal(negative.needsReview,true);assert.equal(negative.remainingAmount?.toFixed(2),"0.00");assert.equal(negative.collectedAt,null);assert.equal((negative.rawRowJson as any).adjustmentReview.automaticallyApplied,false);
@@ -61,9 +74,9 @@ async function main() {
  const importUpload=await prisma.financialReportUpload.findUniqueOrThrow({where:{id:paid.uploadId}});assert.equal(importUpload.rowsCreated,4);assert.equal(importUpload.rowsUpdated,2);assert.equal(importUpload.warningCount,3);
  assert.equal(await prisma.clientAccount.count({where:{taxId:newTax}}),1);const newClient=await prisma.clientAccount.findUniqueOrThrow({where:{id:generatedClientId}});assert.equal(newClient.accountOwnerUserId,null);
  const events=await prisma.auditLog.findMany({where:{action:"financial.invoice_source_reconciled",metadata:{path:"$.runId",equals:tag}}});assert.equal(events.length,ops.length);assert.ok(events.every(e=>e.userId===null),"System imports cannot impersonate a human");
- const stale={...ops[0],id:`${tag}-stale`};await assert.rejects(executeInvoiceEvidenceOperation(stale,context(stale,"apply")),/guard changed|version or identity changed/);
+ const stale={...ops[0],id:`${tag}-stale`};await assert.rejects(executeInvoiceEvidenceOperation(stale,context(stale,"apply")),error => ["INVOICE_VERSION_DRIFT", "INVOICE_STATE_DRIFT"].includes((error as any).code));
  const modified={...ops[0],sourceRowNumber:parsed.rows[1].rowNumber,sourceDedupeKey:parsed.rows[1].dedupeKey};await assert.rejects(executeInvoiceEvidenceOperation(modified,context(modified,"apply")),/already used/);
- console.log(JSON.stringify({ok:true,syntheticOnly:true,readOnlyCheck:true,exactSourceHash:true,forgedSourceDenied:true,concurrentReplaySingleEffect:true,sourcePaidNoCash:true,legacyNoLedgerCashPreserved:true,canonicalStornoPreserved:true,fiscalAttestationPreserved:true,negativeUnlinkedNoDebtEffect:true,newClientUnassignedAndDeduplicated:true,systemAuditUserNull:true,staleGuardDenied:true}));
+ console.log(JSON.stringify({ok:true,syntheticOnly:true,readOnlyCheck:true,exactSourceHash:true,forgedSourceDenied:true,concurrentReplaySingleEffect:true,sourcePaidNoCash:true,legacyNoLedgerCashPreserved:true,canonicalStornoPreserved:true,fiscalAttestationPreserved:true,negativeUnlinkedNoDebtEffect:true,newClientUnassignedAndDeduplicated:true,systemAuditUserNull:true,staleGuardDenied:true,archivedCopiesPreserved:true,secondActiveInvoiceDenied:true,archivedSourceKeyAliasedWithoutReassignment:true}));
 }
 main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
  await prisma.financialReceivablePayment.deleteMany({where:{receivableId:{in:createdIds}}});

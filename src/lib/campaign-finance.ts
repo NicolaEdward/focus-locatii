@@ -552,6 +552,15 @@ export async function getCampaignFinance(
   currency: string,
   client: Prisma.TransactionClient | typeof prisma = prisma,
 ) {
+  if (client === prisma) return prisma.$transaction(tx => readCampaignFinance(campaignId, currency, tx), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 });
+  return readCampaignFinance(campaignId, currency, client);
+}
+
+async function readCampaignFinance(
+  campaignId: string,
+  currency: string,
+  client: Prisma.TransactionClient | typeof prisma,
+) {
   if (!["RON", "EUR"].includes(currency))
     throw new Error("Moneda este obligatorie.");
   const [campaign, allocations, costs, review, invoices] = await Promise.all([
@@ -580,11 +589,11 @@ export async function getCampaignFinance(
           },
         },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     }),
     client.financialCampaignCost.findMany({
       where: { campaignId, currency, status: { not: "reversed" } },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     }),
     client.financialCampaignFinanceReview.findUnique({
       where: { campaignId_currency: { campaignId, currency } },
@@ -604,6 +613,7 @@ export async function getCampaignFinance(
           select: { netAmount: true, vatAmount: true, grossAmount: true },
         },
       },
+      orderBy: { id: "asc" },
     }),
   ]);
   const revenue = allocations.reduce(

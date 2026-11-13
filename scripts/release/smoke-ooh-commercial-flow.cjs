@@ -121,8 +121,11 @@ async function login(role) {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: path.join(out, "negotiated-offer-mobile.png"), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, "Mobile layout overflows the viewport.");
-    const unauthorized = await seller.request.get(base + "/admin/commercial-settings", { maxRedirects: 0 });
-    assert.equal([303, 307, 308].includes(unauthorized.status()), true, "Seller must not manage shared commercial policy.");
+    await page.goto(base + "/admin/commercial-settings", { timeout: 120000 });
+    await page.waitForURL((url) => url.pathname === "/admin/dashboard", { timeout: 30000 });
+    assert.equal(await page.getByRole("button", { name: "Salvează regulile comerciale", exact: true }).count(), 0, "A streamed redirect must not expose the policy editor.");
+    const unauthorized = await seller.request.post(base + "/api/admin/commercial-workbench", { headers: { origin: base }, data: { action: "policy.commercial.save", input: { expectedVersion: policy.version, vatRateBps: policy.vatRateBps, vatTreatment: policy.vatTreatment, rateCardCurrency: policy.rateCardCurrency, quoteValidityDays: policy.quoteValidityDays, approvalHours: policy.approvalHours } } });
+    assert.equal(unauthorized.status(), 403, "Server authorization must refuse a seller's direct policy command.");
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ ok: true, checks: ["real seller login", "campaign currency before booking", "configured commercial policy outside AI", "selector to quote without reentry", "revision map round trip retains identity/prices/recipient", "negotiated price provenance", "no inventory allocation from draft", "catalog tariff preserved", "searchable history", "390px layout", "policy role isolation"], screenshots: out }));
   } finally {

@@ -25,10 +25,10 @@ export function OccupancySummary({ summary, loading = false, error = null, onRef
         {cards.map(({ label, value, icon: Icon, tone }) => (
           <article key={label} aria-label={`${label}: ${value ?? "neverificat"}`} className="min-w-0 rounded-lg border border-focus-line bg-focus-ink/65 p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
-              <p className="min-w-0 break-words text-xs font-black uppercase text-slate-400">{label}</p>
+              <p data-ui-contrast className="min-w-0 break-words text-xs font-black uppercase text-slate-400">{label}</p>
               <Icon className={`shrink-0 ${tone}`} size={18} aria-hidden="true" />
             </div>
-            <p className={`mt-2 text-3xl font-black tabular-nums ${tone}`}>{value ?? "—"}</p>
+            <p data-ui-contrast className={`mt-2 text-3xl font-black tabular-nums ${tone}`}>{value ?? "—"}</p>
           </article>
         ))}
       </div>

@@ -39,6 +39,20 @@ async function main() {
     // Match scripts/release/env-utils.ts databaseIdentity() exactly.
     const endpoint = `${originalUrl.protocol}//${originalUrl.hostname}:${originalUrl.port || "default"}/${database}`;
     const databaseFingerprint = crypto.createHash("sha256").update(endpoint).digest("hex").slice(0, 12);
+    if (process.env.RUN_DATABASE_TLS_PROBE === "true") {
+      const mysql = require("mysql2/promise");
+      let strict;
+      try {
+        const caPath = originalUrl.searchParams.get("sslcert");
+        strict = await mysql.createConnection({ host: originalUrl.hostname, port: Number(originalUrl.port || 3306), user: decodeURIComponent(originalUrl.username), password: decodeURIComponent(originalUrl.password), database,
+          ssl: { rejectUnauthorized: true, ...(caPath ? { ca: require("node:fs").readFileSync(caPath) } : {}) }, connectTimeout: 10000 });
+        await strict.query("SELECT 1");
+        console.log(JSON.stringify({ event: "database_strict_tls_probe", ok: true, databaseFingerprint }));
+      } catch {
+        console.error(JSON.stringify({ event: "database_strict_tls_probe", ok: false, databaseFingerprint, code: "PROVIDER_CA_VERIFICATION_REQUIRED" }));
+        throw new Error("PROVIDER_CA_VERIFICATION_REQUIRED");
+      } finally { await strict?.end(); }
+    }
     const poolParameters = {};
     for (const key of poolKeys) {
       if (originalUrl.searchParams.has(key)) poolParameters[key] = numeric(originalUrl.searchParams.get(key));

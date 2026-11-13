@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { AuthSession } from "@/lib/auth";
 import { assertReceivablePaymentTransition } from "@/lib/financial-state-machine";
 import { receivableAdjustmentEntries, receivableNetAmount } from "@/lib/receivable-adjustments";
+import { hasUnresolvedSourceFiscalReview } from "@/lib/smartbill-source-metadata";
 import { money, receivableStatus } from "@/lib/receivables-domain";
 import { prisma } from "@/lib/prisma";
 import { synchronizeBankTransaction } from "@/lib/financial-bank-ledger";
@@ -316,7 +317,7 @@ export async function synchronizeReceivableLedger(tx: Prisma.TransactionClient, 
       collectedAt: remaining.equals(0) ? latest?.receivedAt || null : null,
       paymentMethod: latest?.paymentMethod || null,
       collectionNotes: latest?.notes || receivable.collectionNotes,
-      needsReview: false
+      needsReview: hasUnresolvedSourceFiscalReview(receivable.rawRowJson)
     }
   });
   await synchronizeAdjustmentCredits(tx, receivable, collected, invoiceAmount);

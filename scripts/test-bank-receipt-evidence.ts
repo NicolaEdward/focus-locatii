@@ -1,0 +1,106 @@
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import * as XLSX from "xlsx";
+import {PrismaClient} from "@prisma/client";
+import {parseBankStatement} from "../src/lib/bcr-george-import";
+import {parseSmartBillCustomerInvoices} from "../src/lib/smartbill-import";
+import {boundedReceiptReferences,receiptPayerIdentity,proveReceiptEvidence,verifyReceiptBankSource,verifyReceiptInvoiceSource} from "../src/lib/bank-receipt-evidence";
+import {applyBankReceiptEvidenceOperation,bankReceiptTransactionOptions,hashBankReceiptOperation,hashReceiptLedgerState,hashReceiptAdjustmentState,hashReceiptImportRowState,type BankReceiptOperation,type BankReceiptContext} from "../src/lib/bank-receipt-evidence-executor";
+import {assertSyntheticEnvironment,loadEnvFile} from "./release/env-utils";
+const hash=(v:Buffer|string)=>crypto.createHash("sha256").update(v).digest("hex");
+const quote=(v:string)=>`"${v.replace(/"/g,'""')}"`;
+function csv(){
+ const headers=["Data emitere extras","Ora emitere extras","Data inceput","Data finala","Valuta","Contul pentru care s a generat extrasul","Titular cont","Sold contabil initial","Data finalizarii tranzactiei","Ora finalizare tranzactie","Tranzactii finalizate detalii","Referinta oper document","Debit suma","Credit suma","Sold contabil final"];
+ const rows=[headers];
+ for(let i=1;i<=6;i++)rows.push(["03.11.2026","12:00","01.11.2026","02.11.2026","RON","RO00SYNTHETICRECEIPT0001","FOCUS MEDIA OUTDOOR SRL",String((i-1)*100)+".00","02.11.2026",`12:0${i}`,`Referinta SYN${i}-Platitor: SYNTHETIC CLIENT SRL; CODFISC RO12345678-Beneficiar: FOCUS MEDIA OUTDOOR SRL; CODFISC RO40766474-Detalii: Factura FCSM000${i}`,`DOC${i}`,"0.00","100.00",String(i*100)+".00"]);
+ return Buffer.from(rows.map(r=>r.map(quote).join(";")).join("\n"));
+}
+function workbook(negative=false,extraSheet=false,negativeTax="RO12345678"){
+ const rows:unknown[][]=[["FOCUS MEDIA OUTDOOR SRL"],["Client","CIF","Factura","Data emiterii","Data scadentei","Status","Moneda","Valoare fara TVA","Valoare TVA","Valoare Totala"]];
+ for(let i=1;i<=6;i++)rows.push(["SYNTHETIC CLIENT SRL","RO12345678",`FCSM000${i}`,"01.11.2026","15.11.2026","emisa","RON",100,0,100]);
+ if(negative)rows.push(["SYNTHETIC CLIENT SRL",negativeTax,"FCSM0099","01.11.2026","15.11.2026","emisa","RON",-10,0,-10]);
+ const w=XLSX.utils.book_new();XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet(rows),"Facturi");if(extraSheet)XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet([["Hidden additional records"]]),"Extra");return XLSX.write(w,{type:"buffer",bookType:"biff8"}) as Buffer;
+}
+async function main(){
+ loadEnvFile();assertSyntheticEnvironment();const target=new URL(process.env.DATABASE_URL!);assert(["127.0.0.1","localhost"].includes(target.hostname)&&target.pathname==="/"+(process.env.RECEIPT_EVIDENCE_TEST_DATABASE||"focus_preview_bank_receipts"));
+ assert.deepEqual(boundedReceiptReferences(["Factura FCSM0001"],["fcsm1"]).keys,["fcsm1"]);
+ for(const text of["XFCSM0001","FCSM00010","FCSM0001A","0001"])assert(!boundedReceiptReferences([text],["fcsm1"]).keys.includes("fcsm1"));
+ assert(boundedReceiptReferences(["FCSM0001, 0002"],["fcsm1"]).abbreviatedList);
+ assert(boundedReceiptReferences(["FCSM0001 si 0002"],["fcsm1"]).abbreviatedList);
+ assert(boundedReceiptReferences(["FCSM0001-0002"],["fcsm1"]).abbreviatedList);
+ assert.equal(boundedReceiptReferences(["FCSM0001; plata FCSM999"],["fcsm1"]).keys.length,2);
+ assert(boundedReceiptReferences(["FCSM0001 + EMP999"],["fcsm1"]).abbreviatedList);
+ for(const suffix of["factura: XYZ999","factura nr: XYZ999","INV: XYZ999"])assert.equal(boundedReceiptReferences([`Factura FCSM0001; ${suffix}`],["fcsm1"]).keys.length,2);
+ assert.equal(boundedReceiptReferences(["FCSM0001 si FCSM0002"],["fcsm1","fcsm2"]).keys.length,2);
+ assert.throws(()=>receiptPayerIdentity({payerName:"SYNTHETIC CLIENT SRL",payerTaxId:"99999999"},{clientName:"SYNTHETIC CLIENT SRL",fiscalCode:"12345678",normalizedFiscalCode:"12345678"}),/RECEIPT_PAYER_TAX_MISMATCH/);
+ assert.throws(()=>receiptPayerIdentity({payerName:"SYNTHETIC CLIENT",payerTaxId:null},{clientName:"SYNTHETIC CLIENT BRAND SRL",fiscalCode:"12345678",normalizedFiscalCode:"12345678"}),/RECEIPT_PAYER_NAME_MISMATCH/);
+ const bankBytes=csv(),invoiceBytes=workbook(),bank=parseBankStatement(bankBytes,"receipt.csv","FOCUS_MEDIA"),report=await parseSmartBillCustomerInvoices(invoiceBytes,{fileName:"invoices.xls"});
+ const bankToken=verifyReceiptBankSource({bytes:bankBytes,fileName:"receipt.csv",expectedHash:hash(bankBytes),companyCode:"FOCUS_MEDIA"});
+ const invoiceToken=await verifyReceiptInvoiceSource({bytes:invoiceBytes,fileName:"invoices.xls",expectedHash:hash(invoiceBytes),companyCode:"FOCUS_MEDIA",issuerBinding:"owner-approved-source-sha256"});
+ await assert.rejects(verifyReceiptInvoiceSource({bytes:invoiceBytes,fileName:"invoices.xls",expectedHash:hash(invoiceBytes),companyCode:"FOCUS_MEDIA",issuerBinding:undefined as any}),/RECEIPT_INVOICE_SOURCE_SCOPE/);
+ const extra=workbook(false,true);await assert.rejects(verifyReceiptInvoiceSource({bytes:extra,fileName:"invoices.xls",expectedHash:hash(extra),companyCode:"FOCUS_MEDIA",issuerBinding:"owner-approved-source-sha256"}),/RECEIPT_INVOICE_EXTRA_WORKSHEETS/);
+ const badNegative=workbook(true,false,"");await assert.rejects(verifyReceiptInvoiceSource({bytes:badNegative,fileName:"invoices.xls",expectedHash:hash(badNegative),companyCode:"FOCUS_MEDIA",issuerBinding:"owner-approved-source-sha256"}),/RECEIPT_NEGATIVE_SOURCE_IDENTITY_INVALID/);
+ const mixedLines=bankBytes.toString().split("\n");mixedLines[2]=mixedLines[2].replace("RO00SYNTHETICRECEIPT0001","RO00SYNTHETICOTHER00002");const mixedBytes=Buffer.from(mixedLines.join("\n"));const mixedToken=verifyReceiptBankSource({bytes:mixedBytes,fileName:"receipt.csv",expectedHash:hash(mixedBytes),companyCode:"FOCUS_MEDIA"});
+ assert.throws(()=>proveReceiptEvidence({bankSource:mixedToken,invoiceSource:invoiceToken,companyCode:"FOCUS_MEDIA",bankSourceHash:hash(mixedBytes),invoiceSourceHash:hash(invoiceBytes),bankRowNumber:bank.rows[1].rowNumber,bankFingerprint:bank.rows[1].fingerprint,invoiceRowNumber:report.rows[1].rowNumber,invoiceDedupeKey:report.rows[1].dedupeKey}),/RECEIPT_MIXED_BANK_METADATA/);
+ assert.equal(bank.rows.length,6);assert.equal(report.rows.length,6);
+ const db=new PrismaClient({log:[]}),prefix=`receipt-test-${crypto.randomUUID()}`,clientId=prefix+"-client",entityId=prefix+"-entity",accountId=prefix+"-account",uploadId=prefix+"-upload",statementId=prefix+"-statement";
+ const completed:string[]=[];
+ try{
+  assert.equal(await db.financialBankTransaction.count(),0,"Fresh dedicated synthetic database required");
+  await db.financialLegalEntity.create({data:{id:entityId,code:"FOCUS_MEDIA",legalName:"FOCUS MEDIA OUTDOOR SRL",normalizedName:prefix}});
+  await db.clientAccount.create({data:{id:clientId,companyName:"SYNTHETIC CLIENT SRL",normalizedName:"synthetic client",taxId:"RO12345678"}});
+  const a=bank.accounts[0];await db.financialBankAccount.create({data:{id:accountId,legalEntityId:entityId,ibanOriginal:a.storageIdentifier,ibanNormalized:a.storageIdentifier,currency:"RON"}});
+  await db.financialReportUpload.create({data:{id:uploadId,originalFileName:"synthetic.xls",fileHash:hash(invoiceBytes),legalEntityId:entityId,reportDate:new Date("2026-11-03T00:00:00Z")}});
+  await db.financialBankStatement.create({data:{id:statementId,uploadId,legalEntityId:entityId,bankAccountId:accountId,statementFingerprint:hash(prefix),periodStart:a.periodStart,periodEnd:a.periodEnd,currency:"RON"}});
+  for(let index=0;index<6;index++){
+   const row=bank.rows[index],source=report.rows[index];assert.equal(source.kind,"customer_invoice");
+   await db.financialBankTransaction.create({data:{id:prefix+`-bank${index}`,statementId,legalEntityId:entityId,bankAccountId:accountId,fingerprint:row.fingerprint,bookedAt:row.bookedAt,currency:row.currency,debitAmount:row.debitAmount,creditAmount:row.creditAmount,description:row.description,documentReference:row.documentReference,bankReference:row.bankReference,payerName:row.payerName,payerTaxId:row.payerTaxId,classification:row.classification}});
+   await db.financialReceivable.create({data:{id:prefix+`-invoice${index}`,uploadId,legalEntityId:entityId,companyCode:"FOCUS_MEDIA",companyName:"Focus Media",clientId,clientName:source.clientName,invoiceNumber:source.invoiceNumber,normalizedInvoiceNumber:source.normalizedInvoiceNumber,invoiceDate:source.issueDate,dueDate:source.dueDate,currency:"RON",invoicedAmount:100,collectedAmount:index===1?100:0,remainingAmount:index===1?0:100,status:index===1?"collected":"in_term",needsReview:false,rawRowJson:{normalizedFiscalCode:"12345678"}}});
+  }
+  const importRow=await db.financialReceivableImportRow.create({data:{id:prefix+"-import-row",uploadId,receivableId:prefix+"-invoice1",clientId,companyCode:"FOCUS_MEDIA",companyName:"Focus Media",sheetName:"Synthetic report",rowNumber:1,sourceRowKey:prefix,sourceHash:hash(prefix+"-report-source"),normalizedInvoiceNumber:"fcsm0002",currency:"RON",invoiceAmount:100,reportCollectedAmount:100,reportRemainingAmount:0}});
+  const imported=await db.financialReceivablePayment.create({data:{id:prefix+"-imported",receivableId:prefix+"-invoice1",sourceImportRowId:importRow.id,amount:100,currency:"RON",receivedAt:new Date("2026-11-03T00:00:00Z"),paymentMethod:"report",paymentReference:"ORIGINAL-REPORT-REF",notes:"ORIGINAL_PROVENANCE",source:"report_import",verificationStatus:"source_report",requestKey:prefix+"-source"}});
+  async function operation(index:number,invoiceData=invoiceBytes):Promise<BankReceiptOperation>{
+   const currentInvoice=await db.financialReceivable.findUniqueOrThrow({where:{id:prefix+`-invoice${index}`},include:{client:true}}),currentBank=await db.financialBankTransaction.findUniqueOrThrow({where:{id:prefix+`-bank${index}`}}),account=await db.financialBankAccount.findUniqueOrThrow({where:{id:accountId}});
+   const payments=await db.financialReceivablePayment.findMany({where:{receivableId:currentInvoice.id}}),source=(await parseSmartBillCustomerInvoices(invoiceData,{fileName:"invoices.xls"})).rows[index];
+   const common={operationId:`synthetic-receipt-${index}`,companyCode:"FOCUS_MEDIA" as const,bankSourceHash:hash(bankBytes),invoiceSourceHash:hash(invoiceData),invoiceIssuerBinding:"owner-approved-source-sha256" as const,bankEvidence:{rowNumber:bank.rows[index].rowNumber,fingerprint:bank.rows[index].fingerprint},invoiceEvidence:{rowNumber:source.rowNumber,dedupeKey:source.dedupeKey},amount:"100.00",expectedAccount:{id:accountId,legalEntityId:entityId,ibanNormalized:account.ibanNormalized,currency:"RON" as const,updatedAt:account.updatedAt.toISOString()},expectedBank:{id:currentBank.id,updatedAt:currentBank.updatedAt.toISOString(),fingerprint:currentBank.fingerprint},expectedInvoice:{id:currentInvoice.id,updatedAt:currentInvoice.updatedAt.toISOString(),clientId,clientUpdatedAt:currentInvoice.client!.updatedAt.toISOString(),invoiceComparisonKey:`fcsm${index+1}`,grossAmount:"100.00",collectedAmount:currentInvoice.collectedAmount!.toFixed(2),remainingAmount:currentInvoice.remainingAmount!.toFixed(2),netAfterAdjustments:"100.00",ledgerHash:hashReceiptLedgerState(payments),adjustmentsHash:hashReceiptAdjustmentState(currentInvoice.rawRowJson)}};
+   if(index===1){const p=await db.financialReceivablePayment.findUniqueOrThrow({where:{id:imported.id}}),r=await db.financialReceivableImportRow.findUniqueOrThrow({where:{id:importRow.id},include:{upload:{select:{fileHash:true,reportDate:true}}}});return{...common,kind:"bank.receipt-link-existing",expectedPayment:{id:p.id,updatedAt:p.updatedAt.toISOString(),source:"report_import",receivedAt:p.receivedAt.toISOString(),requestKey:p.requestKey,sourceImportRowId:r.id,sourceRowHash:hashReceiptImportRowState(r)}};}
+   return{...common,kind:"bank.receipt-create"};
+  }
+  function context(op:BankReceiptOperation,token=invoiceToken){return{mode:"apply" as const,manifestHash:hash("synthetic-reviewed-plan"),approvedOperationHash:hashBankReceiptOperation(op),runId:"synthetic-bank-receipts",bankSource:bankToken,invoiceSource:token};}
+  const execute=(op:BankReceiptOperation,ctx:BankReceiptContext=context(op))=>db.$transaction(tx=>applyBankReceiptEvidenceOperation(tx,op,ctx),bankReceiptTransactionOptions);
+  const counts=()=>Promise.all([db.financialReceivablePayment.count(),db.auditLog.count(),db.financialClientCredit.count()]);
+  const first=await operation(0),initialCounts=await counts(),initialInvoice=await db.financialReceivable.findUniqueOrThrow({where:{id:first.expectedInvoice.id}}),initialBank=await db.financialBankTransaction.findUniqueOrThrow({where:{id:first.expectedBank.id}});
+  await assert.rejects(execute({...first,amount:"99.00"},context(first)),/RECEIPT_OPERATION_NOT_APPROVED/);
+  await assert.rejects(execute(first,{...context(first),bankSource:{sha256:first.bankSourceHash}}));
+  assert.throws(()=>verifyReceiptBankSource({bytes:Buffer.concat([bankBytes,Buffer.from("x")]),fileName:"receipt.csv",expectedHash:first.bankSourceHash,companyCode:"FOCUS_MEDIA"}),/RECEIPT_BANK_SOURCE_HASH/);
+  await assert.rejects(verifyReceiptInvoiceSource({bytes:Buffer.concat([invoiceBytes,Buffer.from("x")]),fileName:"invoices.xls",expectedHash:first.invoiceSourceHash,companyCode:"FOCUS_MEDIA",issuerBinding:"owner-approved-source-sha256"}),/RECEIPT_INVOICE_SOURCE_HASH/);
+  const checked=await execute(first,{...context(first),mode:"check"});assert.equal(checked.wouldCreate,1);assert.deepEqual(await counts(),initialCounts);assert.deepEqual(await db.financialReceivable.findUniqueOrThrow({where:{id:initialInvoice.id}}),initialInvoice);assert.deepEqual(await db.financialBankTransaction.findUniqueOrThrow({where:{id:initialBank.id}}),initialBank);
+  completed.push("original CSV+XLS SHA, private proof tokens, bounded references, payer mismatch and check0DML");
+  await assert.rejects(db.$transaction(async tx=>{await applyBankReceiptEvidenceOperation(tx,first,context(first));throw Error("synthetic-rollback");},bankReceiptTransactionOptions),/synthetic-rollback/);assert.deepEqual(await counts(),initialCounts);
+  const parallel=await Promise.all([execute(first),execute(first)]);assert.equal(parallel.reduce((s,r)=>s+r.createdPayments,0),1);assert.equal(parallel.filter(r=>r.replay).length,1);
+  const paid=await db.financialReceivable.findUniqueOrThrow({where:{id:first.expectedInvoice.id}}),matched=await db.financialBankTransaction.findUniqueOrThrow({where:{id:first.expectedBank.id}});assert.equal(paid.collectedAmount!.toFixed(2),"100.00");assert.equal(paid.remainingAmount!.toFixed(2),"0.00");assert.equal(matched.reconciliationStatus,"matched");
+  const created=await db.financialReceivablePayment.findFirstOrThrow({where:{receivableId:paid.id}});assert.equal(created.source,"bank_reconciliation");assert.equal(created.verificationStatus,"verified");assert.equal(created.createdByUserId,null);assert.equal(created.receivedAt.getTime(),bank.rows[0].bookedAt.getTime());
+  const receipt=await db.auditLog.findFirstOrThrow({where:{action:"financial.bank_receipt_evidence.committed"}});assert.equal(receipt.userId,null);assert.equal((receipt.metadata as any).actorKind,"SYSTEM");
+  const conflict={...first,operationId:"different-intent"};await assert.rejects(execute(conflict),/RECEIPT_INTENT_CONFLICT/);
+  completed.push("actual verified cash updates invoice and bank atomically; rollback, concurrent replay and changed intent");
+  await db.financialReportUpload.update({where:{id:uploadId},data:{reportDate:new Date("2026-11-01T00:00:00Z")}});const badCutoff=await operation(1);await assert.rejects(execute(badCutoff),/RECEIPT_IMPORTED_SOURCE_OR_CUTOFF_MISMATCH/);await db.financialReportUpload.update({where:{id:uploadId},data:{reportDate:new Date("2026-11-03T00:00:00Z")}});
+  const link=await operation(1),beforeLink=await db.financialReceivablePayment.findUniqueOrThrow({where:{id:imported.id}}),beforeCount=await counts();const linkCheck=await execute(link,{...context(link),mode:"check"});assert.equal(linkCheck.wouldLink,1);assert.deepEqual(await counts(),beforeCount);
+  const linked=await execute(link);assert.equal(linked.linkedPayments,1);assert.equal((await counts())[0],beforeCount[0]);const afterLink=await db.financialReceivablePayment.findUniqueOrThrow({where:{id:imported.id}});for(const key of["source","sourceImportRowId","receivedAt","requestKey","notes","paymentReference","verificationStatus"]as const)assert.deepEqual(afterLink[key],beforeLink[key]);assert.equal(afterLink.bankTransactionId,link.expectedBank.id);assert.equal((await db.financialReceivable.findUniqueOrThrow({where:{id:link.expectedInvoice.id}})).collectedAmount!.toFixed(2),"100.00");assert.equal((await execute(link)).linkedPayments,0);
+  completed.push("existing imported payment links with zero cash delta and original provenance intact");
+  const drift=await operation(2);await db.financialReceivable.update({where:{id:drift.expectedInvoice.id},data:{collectedAmount:20}});const beforeDrift=await counts();await assert.rejects(execute(drift),/RECEIPT_INVOICE_DRIFT/);assert.deepEqual(await counts(),beforeDrift);const legacy=await operation(2);await assert.rejects(execute(legacy),/RECEIPT_LEGACY_CASH_OR_SNAPSHOT_MISMATCH/);await db.financialReceivable.update({where:{id:drift.expectedInvoice.id},data:{collectedAmount:0}});
+  completed.push("postexport invoice drift and implicit legacy cash rejected without side effects");
+  const duplicateId=prefix+"-duplicate";await db.financialReceivable.create({data:{id:duplicateId,uploadId,companyCode:"FOCUS_MEDIA",companyName:"Focus Media",clientId,invoiceNumber:"FCSM5",currency:"RON",invoicedAmount:100,collectedAmount:100,remainingAmount:0}});const duplicateOp=await operation(4);await assert.rejects(execute(duplicateOp),/RECEIPT_DATABASE_INVOICE_AMBIGUOUS/);await db.financialReceivable.delete({where:{id:duplicateId}});completed.push("equivalent padded database invoice identity cannot hide already recorded cash");
+  const negativeBytes=workbook(true),negativeToken=await verifyReceiptInvoiceSource({bytes:negativeBytes,fileName:"invoices.xls",expectedHash:hash(negativeBytes),companyCode:"FOCUS_MEDIA",issuerBinding:"owner-approved-source-sha256"});const negativeOp=await operation(3,negativeBytes);await assert.rejects(execute(negativeOp,context(negativeOp,negativeToken)),/RECEIPT_UNLINKED_SOURCE_NEGATIVE/);
+  const creditId=prefix+"-negative";await db.financialReceivable.create({data:{id:creditId,uploadId,legalEntityId:entityId,companyCode:"FOCUS_MEDIA",companyName:"Focus Media",clientId,invoiceNumber:"FCSM0099",currency:"RON",invoicedAmount:-10,collectedAmount:0,remainingAmount:0,rawRowJson:{normalizedFiscalCode:"12345678"}}});await assert.rejects(execute(negativeOp,context(negativeOp,negativeToken)),/RECEIPT_UNLINKED_NEGATIVE/);
+  await db.financialReceivable.update({where:{id:creditId},data:{clientId:null,rawRowJson:{}}});await assert.rejects(execute(negativeOp,context(negativeOp,negativeToken)),/RECEIPT_NEGATIVE_FISCAL_UNVERIFIED/);await db.financialReceivable.update({where:{id:creditId},data:{clientId,rawRowJson:{normalizedFiscalCode:"12345678"}}});
+  await db.financialReceivable.update({where:{id:creditId},data:{rawRowJson:{normalizedFiscalCode:"12345678",smartBillAdjustment:{linkedReceivableId:prefix+"-invoice5"}}}});await db.financialReceivable.update({where:{id:prefix+"-invoice5"},data:{rawRowJson:{normalizedFiscalCode:"12345678",smartBillAdjustments:[{adjustmentReceivableId:creditId,adjustmentAmount:10}]},remainingAmount:90}});assert.equal((await execute(negativeOp,context(negativeOp,negativeToken))).createdPayments,1);
+  completed.push("same-party unlinked credit note blocks; reciprocal other-invoice link proves not applicable");
+  const overpay=await operation(5,negativeBytes);overpay.expectedInvoice.netAfterAdjustments="90.00";await assert.rejects(execute(overpay,context(overpay,negativeToken)),/RECEIPT_EXISTING_CASH_OR_OVERPAYMENT/);
+  const blocked=await operation(4);await db.financialBankTransaction.update({where:{id:blocked.expectedBank.id},data:{classification:"internal_transfer"}});await assert.rejects(execute(blocked),/RECEIPT_BANK_DRIFT/);
+  completed.push("net after storno prevents overpayment and reclassified bank cash is rejected");
+  console.log(JSON.stringify({event:"bank_receipt_evidence_tests",ok:true,synthetic:true,productionCalls:0,checks:completed}));
+ }finally{
+  await db.financialReceivablePayment.deleteMany({where:{receivableId:{startsWith:prefix}}});await db.financialReceivableImportRow.deleteMany({where:{id:{startsWith:prefix}}});await db.auditLog.deleteMany({where:{action:"financial.bank_receipt_evidence.committed"}});await db.financialReceivable.deleteMany({where:{id:{startsWith:prefix}}});await db.financialBankTransaction.deleteMany({where:{id:{startsWith:prefix}}});await db.financialBankStatement.deleteMany({where:{id:statementId}});await db.financialBankAccount.deleteMany({where:{id:accountId}});await db.financialReportUpload.deleteMany({where:{id:uploadId}});await db.clientAccount.deleteMany({where:{id:clientId}});await db.financialLegalEntity.deleteMany({where:{id:entityId}});await db.$disconnect();
+ }
+}
+main().catch(error=>{console.error(error);process.exitCode=1;});

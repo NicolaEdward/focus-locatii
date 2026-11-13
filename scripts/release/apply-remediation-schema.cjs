@@ -105,6 +105,9 @@ async function run({ generate = false, apply = false } = {}) {
         if (!expected || stable(existing.storage) !== stable(expected.storage) || stable(existing.columns) !== stable(expected.columns) || existing.indexes.some((index) => !expected.indexes.some((v) => stable(v) === stable(index))) || existing.foreignKeys.some((fk) => !expected.foreignKeys.some((v) => stable(v) === stable(fk)))) throw new Error('EXISTING_ADDITIVE_TABLE_SCHEMA_MISMATCH');
       }
     }
+    // Capture reviewed DDL itself. Reusing tables previously changed by db push
+    // can record a different physical column order from CREATE TABLE.
+    if (generate && Object.values(initial).some(Boolean)) throw new Error('MANIFEST_CAPTURE_REQUIRES_ABSENT_ADDITIVE_TABLES');
     // Reject incompatible historical parent definitions before the first DDL.
     if (!generate) for (const table of validated.tables) {
       const spec = expectedTables[table];

@@ -4,6 +4,7 @@ import { requireAnyPermission } from "@/lib/auth";
 import {
   assertSmartBillCompanyMatchesReport,
   buildSmartBillPreview,
+  assertSmartBillHistoryComplete,
   parseSmartBillCustomerInvoices,
   parseSmartBillSupplierDocuments,
   resolveSmartBillCompanyContext,
@@ -122,7 +123,7 @@ async function loadSmartBillPreviewContext(reportType: SmartBillReportType, comp
         select: { id: true, companyName: true, normalizedName: true, taxId: true, accountOwnerUserId: true }
       }),
       prisma.financialReceivable.findMany({
-        where: { ...companyWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
+        where: companyWhere,
         select: {
           id: true,
           companyName: true,
@@ -142,10 +143,11 @@ async function loadSmartBillPreviewContext(reportType: SmartBillReportType, comp
           status: true,
           client: { select: { taxId: true, normalizedName: true } }
         },
-        take: 10000,
+        take: 10001,
         orderBy: { createdAt: "desc" }
       })
     ]);
+    assertSmartBillHistoryComplete(receivables);
     return {
       clients: clients.map((client) => ({
         id: client.id,
@@ -170,7 +172,7 @@ async function loadSmartBillPreviewContext(reportType: SmartBillReportType, comp
       select: { id: true, supplierName: true, normalizedName: true, taxId: true }
     }),
     prisma.financialPayable.findMany({
-      where: { ...companyWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
+      where: companyWhere,
       select: {
         id: true,
         companyName: true,
@@ -190,10 +192,11 @@ async function loadSmartBillPreviewContext(reportType: SmartBillReportType, comp
           status: true,
           supplier: { select: { taxId: true, normalizedName: true } }
         },
-      take: 10000,
+      take: 10001,
       orderBy: { createdAt: "desc" }
     })
   ]);
+  assertSmartBillHistoryComplete(payables);
   return {
     suppliers: suppliers.map((supplier) => ({
       id: supplier.id,

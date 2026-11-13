@@ -427,6 +427,10 @@ export function mapSmartBillSupplierDocumentStatus(value: unknown, input?: { tot
   return { status: "needs_review", paidAmount: 0, remainingAmount: Math.max(0, total), ignored: false, needsReview: true };
 }
 
+export function assertSmartBillHistoryComplete(rows: readonly unknown[]) {
+  if (rows.length > 10000) throw new Error("Istoricul financiar depășește limita sigură a importului. Folosește reconcilierea paginată; importul incomplet a fost oprit.");
+}
+
 export function buildSmartBillPreview(input: {
   parsed: SmartBillParsedReport;
   fileName: string;
@@ -625,7 +629,7 @@ export function smartBillCustomerAdjustmentReceivableData(input: {
     invoicedAmount: input.row.totalAmount,
     collectedAmount: 0,
     remainingAmount: 0,
-    collectedAt: input.row.issueDate,
+    collectedAt: null,
     currency: normalizedCurrency(input.row.currency),
     status: "collected",
     rawRowJson,
@@ -788,6 +792,7 @@ function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, c
     ? findSmartBillNetRepresentation(row, financialRows, reportRows, companyContext)
     : null;
   const duplicate = findSmartBillDuplicate(row, financialRows, companyContext) || netRepresentation?.existing || null;
+  const inactiveDocument = findSmartBillInactiveDocument(row, financialRows, companyContext);
   const conflictingDocument = findSmartBillDocumentConflict(row, financialRows, companyContext);
   const errors = [...row.issues];
   const adjustmentKind = classifySmartBillAdjustment(row);
@@ -804,6 +809,9 @@ function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, c
     warning = "Rand ignorat din cauza statusului SmartBill.";
   } else if (errors.length) {
     proposedAction = "INVALID";
+  } else if (inactiveDocument && (!duplicate || isSmartBillInactiveDocument(duplicate))) {
+    proposedAction = "DUPLICATE";
+    warning = "Documentul există deja, dar este exclus, anulat sau arhivat. Reimportul nu îl reactivează și nu creează o copie.";
   } else if (adjustmentKind && duplicate) {
     proposedAction = "DUPLICATE";
     warning = netRepresentation
@@ -863,7 +871,7 @@ function previewRow(row: SmartBillParsedRow, context: SmartBillPreviewContext, c
     totalAmount: row.totalAmount,
     matchedEntityId: match.entity?.id || null,
     matchedEntityName: match.entity?.name || null,
-    duplicateId: duplicate?.id || null,
+    duplicateId: duplicate?.id || inactiveDocument?.id || null,
     adjustmentKind,
     linkedFinancialRowId: adjustmentMatch?.linkedRow?.id || null,
     linkedDocumentNumber: adjustmentMatch?.linkedRow?.invoiceNumber || adjustmentMatch?.linkedRow?.normalizedInvoiceNumber || null,
@@ -921,6 +929,17 @@ export function findSmartBillDocumentConflict(row: SmartBillParsedRow, existingR
       !smartBillDatesCompatible(existing.invoiceDate, row.issueDate) ||
       Math.abs(existingAmount(existing) - row.totalAmount) > 0.01;
   }) || null;
+}
+
+export function isSmartBillInactiveDocument(existing: SmartBillExistingFinancialRow) {
+  return existing.includedInReport === false || ["cancelled", "archived", "excluded"].includes(String(existing.status || ""));
+}
+
+export function findSmartBillInactiveDocument(row: SmartBillParsedRow, existingRows: SmartBillExistingFinancialRow[], companyContext?: SmartBillCompanyContext) {
+  return existingRows.find((existing) => sameFinancialCompany(existing, companyContext) &&
+    isSmartBillInactiveDocument(existing) &&
+    (isSmartBillSourceDuplicate(existing, row.dedupeKey) ||
+      invoiceNumbersEquivalent(existing.normalizedInvoiceNumber || existing.invoiceNumber, row.normalizedInvoiceNumber))) || null;
 }
 
 export function assertSmartBillCompanyMatchesReport(parsed: SmartBillParsedReport, companyContext: SmartBillCompanyContext) {

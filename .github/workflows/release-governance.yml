@@ -41,6 +41,10 @@ jobs:
       SMOKE_BASE_URL: http://localhost:3000
       CAPTURE_BASE_URL: http://localhost:3000
       CAPTURE_OUT_DIR: artifacts/release-screenshots
+      ASSISTANT_MCP_ENABLED: "true"
+      ASSISTANT_MCP_BASE_URL: http://127.0.0.1:3000
+      DOCUMENT_AUDIT_TEST_DATABASE: focus_preview_ci
+      AUTH_TRUSTED_ORIGINS: http://127.0.0.1:3000,http://localhost:3000
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -104,6 +108,24 @@ jobs:
           node node_modules/tsx/dist/cli.mjs scripts/test-dooh-static-capacity.ts
           node node_modules/tsx/dist/cli.mjs scripts/test-inventory-availability-summary.ts
           node scripts/test-occupancy-summary-ui.cjs
+      - name: Assistant MCP and NAS document audit regressions
+        run: |
+          node node_modules/tsx/dist/cli.mjs scripts/test-assistant-mcp.ts
+          ASSISTANT_DOCUMENT_TEST_DATABASE=focus_preview_ci node node_modules/tsx/dist/cli.mjs scripts/test-assistant-document-tools.ts
+          node node_modules/tsx/dist/cli.mjs scripts/test-document-source-audit.ts
+          python3 scripts/test_nas_document_bridge.py
+        env:
+          NAS_BRIDGE_BACKEND_INTEGRATION: "true"
+          PYTHONDONTWRITEBYTECODE: "1"
+      - name: Financial evidence and encrypted-envelope regressions
+        run: |
+          node scripts/test-evidence-test-db-guards.cjs
+          node node_modules/tsx/dist/cli.mjs scripts/release/prepare-evidence-test-db.ts --seed-main-entities
+          node node_modules/tsx/dist/cli.mjs scripts/test-smartbill-reimport-ledger.ts
+          node node_modules/tsx/dist/cli.mjs scripts/test-invoice-evidence-reconciliation.ts
+          node node_modules/tsx/dist/cli.mjs scripts/test-evidence-job-envelope.ts
+      - name: Bank and contract evidence on a fresh unseeded database
+        run: node node_modules/tsx/dist/cli.mjs scripts/release/prepare-evidence-test-db.ts
       - run: pnpm prisma validate
       - run: pnpm run build
       - name: Start production server
@@ -117,7 +139,16 @@ jobs:
         run: node scripts/release/smoke-occupancy-summary.cjs
         env:
           OCCUPANCY_UI_BASE_URL: http://localhost:3000
+      - name: Assistant OAuth browser flow with production CSP
+        run: node node_modules/tsx/dist/cli.mjs scripts/test-assistant-ui.ts
       - run: pnpm run smoke:capture
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: assistant-oauth-production-ui
+          path: artifacts/assistant-mcp-ui
+          if-no-files-found: warn
+          retention-days: 14
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

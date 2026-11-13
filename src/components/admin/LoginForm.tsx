@@ -5,7 +5,10 @@ import { ArrowLeft, Copy, KeyRound, Link2, Lock, LogIn, Mail, ShieldCheck } from
 
 type Step = "credentials" | "mfa" | "enrollment" | "recovery" | "reset";
 
-export function LoginForm({ passwordResetAvailable }: { passwordResetAvailable: boolean }) {
+export function LoginForm({ passwordResetAvailable, returnTo }: { passwordResetAvailable: boolean; returnTo?: string }) {
+  // Only the local consent page may continue authentication; never accept a
+  // client-supplied external callback as a post-login destination.
+  const continuation = returnTo?.startsWith("/oauth/authorize?") ? returnTo : undefined;
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -43,7 +46,7 @@ export function LoginForm({ passwordResetAvailable }: { passwordResetAvailable: 
         setEnrollmentToken(data.enrollmentToken); setStep("enrollment");
         await beginRequiredEnrollment(data.enrollmentToken); return;
       }
-      window.location.href = data?.redirectTo || "/admin/dashboard";
+      window.location.href = continuation || data?.redirectTo || "/admin/dashboard";
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Autentificarea nu a reușit."); }
     finally { setLoading(false); }
   }
@@ -52,7 +55,7 @@ export function LoginForm({ passwordResetAvailable }: { passwordResetAvailable: 
     event.preventDefault(); setLoading(true); setError(null);
     try {
       const data = await post("/api/auth/mfa/verify-login", { challengeToken, code: mfaCode });
-      window.location.href = data?.redirectTo || "/admin/dashboard";
+      window.location.href = continuation || data?.redirectTo || "/admin/dashboard";
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Codul nu este valid."); }
     finally { setLoading(false); }
   }
@@ -62,7 +65,7 @@ export function LoginForm({ passwordResetAvailable }: { passwordResetAvailable: 
     try {
       if (!enrollment) { await beginRequiredEnrollment(enrollmentToken); return; }
       const data = await post("/api/auth/mfa/confirm-required", { enrollmentToken, code: mfaCode });
-      setRecoveryCodes(data.recoveryCodes || []); setRedirectTo(data.redirectTo || "/admin/dashboard");
+      setRecoveryCodes(data.recoveryCodes || []); setRedirectTo(continuation || data.redirectTo || "/admin/dashboard");
       setEnrollment(null); setEnrollmentToken(""); setMfaCode(""); setStep("recovery");
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Configurarea nu a reușit."); }
     finally { setLoading(false); }

@@ -9,6 +9,7 @@ import {
 import { companyCodeForEntity } from "@/lib/company-entities";
 import { hasAnyPermission } from "@/lib/rbac";
 import { recordTransactionalAudit } from "@/lib/transactional-audit";
+import { hasUnresolvedSourceFiscalReview } from "@/lib/smartbill-source-metadata";
 import {
   assertSameFinancialIntent,
   financialRequestFingerprint,
@@ -127,6 +128,7 @@ export async function attestInvoiceTaxSplit(
   if (input.evidenceReference.trim().length < 5)
     throw new Error("Referința la documentul verificat este obligatorie.");
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM portfolio_financial_receivables WHERE id = ${input.receivableId} FOR UPDATE`;
     const invoice = await tx.financialReceivable.findUniqueOrThrow({
       where: { id: input.receivableId },
     });
@@ -152,7 +154,18 @@ export async function attestInvoiceTaxSplit(
       );
     await tx.financialReceivable.update({
       where: { id: invoice.id },
-      data: { netAmount: net, vatAmount: vat },
+      data: {
+        netAmount: net, vatAmount: vat,
+        needsReview: hasUnresolvedSourceFiscalReview(invoice.rawRowJson) ? false : invoice.needsReview,
+        rawRowJson: {
+          ...(invoice.rawRowJson && typeof invoice.rawRowJson === "object" && !Array.isArray(invoice.rawRowJson) ? invoice.rawRowJson as Prisma.InputJsonObject : {}),
+          sourceFiscalReview: null,
+          fiscalTaxSplitAttestation: {
+            verifiedByUserId: input.actor.id, verifiedAt: new Date().toISOString(), evidenceReference: input.evidenceReference.trim(),
+            netAmount: net.toFixed(2), vatAmount: vat.toFixed(2), grossAmount: originalGross.toFixed(2)
+          }
+        }
+      },
     });
     await recordTransactionalAudit(tx, {
       actor: input.actor,
@@ -172,7 +185,7 @@ export async function attestInvoiceTaxSplit(
       netAmount: net.toFixed(2),
       vatAmount: vat.toFixed(2),
     };
-  }, transactionOptions);
+  }, { ...transactionOptions, isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
 export async function allocateInvoiceToCampaign(

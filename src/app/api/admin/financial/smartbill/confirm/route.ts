@@ -22,10 +22,13 @@ import {
 } from "@/lib/receivables-payment-service";
 import {
   buildSmartBillPreview,
+  assertSmartBillHistoryComplete,
   findSmartBillDuplicate,
+  findSmartBillInactiveDocument,
   findSmartBillAdjustmentMatch,
   importableAction,
   isSmartBillSourceDuplicate,
+  isSmartBillInactiveDocument,
   matchSmartBillEntity,
   normalizeCompanyName,
   normalizeFiscalCode,
@@ -43,6 +46,7 @@ import {
   type SmartBillReportType,
   type SmartBillSupplierDocumentRow
 } from "@/lib/smartbill-import";
+import { prepareSmartBillReceivableRefresh, smartBillPayableUpdateData } from "@/lib/smartbill-financial-refresh";
 import { emitStructuredLog, requestCorrelationId, safeErrorCode } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +55,8 @@ export const maxDuration = 180;
 
 const SMARTBILL_TRANSACTION_OPTIONS = {
   maxWait: 10_000,
-  timeout: 120_000
+  timeout: 120_000,
+  isolationLevel: "ReadCommitted"
 } as const;
 export const runtime = "nodejs";
 
@@ -191,6 +196,8 @@ export async function POST(request: NextRequest) {
         select: { id: true }
       });
       const legalEntity = await ensureFinancialLegalEntity(tx, companyContext.companyCode);
+      // Serialize imports for one legal entity before reloading document identity.
+      await tx.$queryRaw`SELECT id FROM portfolio_financial_legal_entities WHERE id = ${legalEntity.id} FOR UPDATE`;
       const upload = await tx.financialReportUpload.create({
         data: {
             uploadedByUserId: session.id,
@@ -283,7 +290,7 @@ export async function POST(request: NextRequest) {
       };
       const latestReceivables: SmartBillExistingFinancialRow[] = payload.reportType === "customer_invoices"
         ? (await tx.financialReceivable.findMany({
-          where: { ...companyWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
+          where: companyWhere,
           select: {
             id: true,
             companyName: true,
@@ -304,7 +311,7 @@ export async function POST(request: NextRequest) {
             status: true,
             client: { select: { taxId: true, normalizedName: true } }
           },
-          take: 10000,
+          take: 10001,
           orderBy: { createdAt: "desc" }
         })).map((row) => ({
           ...row,
@@ -316,7 +323,7 @@ export async function POST(request: NextRequest) {
         : [];
       const latestPayables: SmartBillExistingFinancialRow[] = payload.reportType === "supplier_documents"
         ? (await tx.financialPayable.findMany({
-          where: { ...companyWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
+          where: companyWhere,
           select: {
             id: true,
             companyName: true,
@@ -337,7 +344,7 @@ export async function POST(request: NextRequest) {
             status: true,
             supplier: { select: { taxId: true, normalizedName: true } }
           },
-          take: 10000,
+          take: 10001,
           orderBy: { createdAt: "desc" }
         })).map((row) => ({
           ...row,
@@ -348,6 +355,8 @@ export async function POST(request: NextRequest) {
         })) satisfies SmartBillExistingFinancialRow[]
         : [];
 
+      assertSmartBillHistoryComplete(latestReceivables);
+      assertSmartBillHistoryComplete(latestPayables);
       for (const item of plan) {
         const { row, previewRow } = item;
         if (item.action === "SKIP_MANUAL") {
@@ -366,6 +375,10 @@ export async function POST(request: NextRequest) {
 
         if (row.kind === "customer_invoice") {
           const duplicate = findSmartBillDuplicate(row, latestReceivables, companyContext);
+          if (findSmartBillInactiveDocument(row, latestReceivables, companyContext) && (!duplicate || isSmartBillInactiveDocument(duplicate))) {
+            summary.skippedDuplicates += 1;
+            continue;
+          }
           if (duplicate && !isSmartBillSourceDuplicate(duplicate, row.dedupeKey)) {
             summary.skippedDuplicates += 1;
             continue;
@@ -432,9 +445,24 @@ export async function POST(request: NextRequest) {
           });
           const linkedData = { ...data, legalEntityId: legalEntity.id, partnerId: partner.id };
           if (duplicate && isSmartBillSourceDuplicate(duplicate, row.dedupeKey)) {
+            await tx.$queryRaw`SELECT id FROM portfolio_financial_receivables WHERE id = ${duplicate.id} FOR UPDATE`;
+            const current = await tx.financialReceivable.findUniqueOrThrow({ where: { id: duplicate.id } });
+            if (isSmartBillInactiveDocument(current)) {
+              summary.skippedDuplicates += 1;
+              continue;
+            }
+            if (!isSmartBillSourceDuplicate(current, row.dedupeKey) ||
+              Number(current.invoicedAmount) !== row.totalAmount ||
+              String(current.currency || "").toUpperCase() !== row.currency ||
+              current.companyCode !== duplicate.companyCode || current.companyName !== duplicate.companyName ||
+              (current.legalEntityId != null && current.legalEntityId !== legalEntity.id) ||
+              current.clientId !== duplicate.clientId ||
+              current.invoiceDate?.toISOString().slice(0, 10) !== row.issueDate?.toISOString().slice(0, 10)) {
+              throw new Error("Factura s-a schimbat față de sursa importului. Verifică identitatea și valoarea înainte de reimport.");
+            }
             const updated = await tx.financialReceivable.update({
               where: { id: duplicate.id },
-              data: smartBillReceivableUpdateData(linkedData)
+              data: await prepareSmartBillReceivableRefresh(tx, current, linkedData)
             });
             await bootstrapLegacyReceivablePayment(tx, updated, session.id);
             await synchronizeReceivableLedger(tx, updated.id);
@@ -466,6 +494,10 @@ export async function POST(request: NextRequest) {
           }
         } else {
           const duplicate = findSmartBillDuplicate(row, latestPayables, companyContext);
+          if (findSmartBillInactiveDocument(row, latestPayables, companyContext) && (!duplicate || isSmartBillInactiveDocument(duplicate))) {
+            summary.skippedDuplicates += 1;
+            continue;
+          }
           if (duplicate && !isSmartBillSourceDuplicate(duplicate, row.dedupeKey)) {
             summary.skippedDuplicates += 1;
             continue;
@@ -504,9 +536,24 @@ export async function POST(request: NextRequest) {
             documentType: body.defaultDocumentType || "unknown"
           };
           if (duplicate && isSmartBillSourceDuplicate(duplicate, row.dedupeKey)) {
+            await tx.$queryRaw`SELECT id FROM portfolio_financial_payables WHERE id = ${duplicate.id} FOR UPDATE`;
+            const current = await tx.financialPayable.findUniqueOrThrow({ where: { id: duplicate.id } });
+            if (isSmartBillInactiveDocument(current)) {
+              summary.skippedDuplicates += 1;
+              continue;
+            }
+            if (!isSmartBillSourceDuplicate(current, row.dedupeKey) ||
+              Number(current.amountToPay) !== row.totalAmount ||
+              String(current.currency || "").toUpperCase() !== row.currency ||
+              current.companyCode !== duplicate.companyCode || current.companyName !== duplicate.companyName ||
+              (current.legalEntityId != null && current.legalEntityId !== legalEntity.id) ||
+              current.supplierId !== duplicate.supplierId ||
+              current.invoiceDate?.toISOString().slice(0, 10) !== row.issueDate?.toISOString().slice(0, 10)) {
+              throw new Error("Documentul furnizorului s-a schimbat față de sursa importului. Verifică identitatea și valoarea înainte de reimport.");
+            }
             const updated = await tx.financialPayable.update({
               where: { id: duplicate.id },
-              data: smartBillPayableUpdateData(linkedData)
+              data: smartBillPayableUpdateData(linkedData, current.rawRowJson)
             });
             await bootstrapLegacyPayablePayment(tx, updated, session.id);
             await synchronizePayableLedger(tx, updated.id);
@@ -796,7 +843,7 @@ async function loadSmartBillConfirmContext(reportType: SmartBillReportType, comp
         select: { id: true, companyName: true, normalizedName: true, taxId: true, accountOwnerUserId: true }
       }),
       prisma.financialReceivable.findMany({
-        where: { ...companyWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
+        where: companyWhere,
         select: {
           id: true,
           companyName: true,
@@ -817,10 +864,11 @@ async function loadSmartBillConfirmContext(reportType: SmartBillReportType, comp
           status: true,
           client: { select: { taxId: true, normalizedName: true } }
         },
-        take: 10000,
+        take: 10001,
         orderBy: { createdAt: "desc" }
       })
     ]);
+    assertSmartBillHistoryComplete(receivables);
     return {
       clients: clients.map((client) => ({
         id: client.id,
@@ -845,7 +893,7 @@ async function loadSmartBillConfirmContext(reportType: SmartBillReportType, comp
       select: { id: true, supplierName: true, normalizedName: true, taxId: true }
     }),
     prisma.financialPayable.findMany({
-      where: { ...companyWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
+      where: companyWhere,
       select: {
         id: true,
         companyName: true,
@@ -866,10 +914,11 @@ async function loadSmartBillConfirmContext(reportType: SmartBillReportType, comp
           status: true,
           supplier: { select: { taxId: true, normalizedName: true } }
         },
-      take: 10000,
+      take: 10001,
       orderBy: { createdAt: "desc" }
     })
   ]);
+  assertSmartBillHistoryComplete(payables);
   return {
     suppliers: suppliers.map((supplier) => ({
       id: supplier.id,
@@ -989,8 +1038,19 @@ async function applySmartBillCustomerAdjustment(
     ? validateManualSmartBillAdjustmentLink(row, existingRows, linkedFinancialRowId, companyContext)
     : findSmartBillAdjustmentMatch(row, existingRows, companyContext);
   if (!match || match.kind !== "auto" || !match.linkedRow) return null;
-  const linkedRow = existingRows.find((receivable) => receivable.id === match.linkedRow?.id);
-  if (!linkedRow) return null;
+  const candidate = existingRows.find((receivable) => receivable.id === match.linkedRow?.id);
+  if (!candidate) return null;
+  await tx.$queryRaw`SELECT id FROM portfolio_financial_receivables WHERE id = ${candidate.id} FOR UPDATE`;
+  const current = await tx.financialReceivable.findUnique({ where: { id: candidate.id } });
+  if (!current || isSmartBillInactiveDocument(current) || current.clientId !== candidate.clientId ||
+    current.currency !== row.currency ||
+    (current.companyCode !== companyContext.companyCode && current.companyName !== companyContext.companyName)) return null;
+  // A positive row may already have refreshed its source/fiscal metadata in
+  // this same import. Append to the locked current JSON, never the old preview.
+  const linkedRow: SmartBillExistingFinancialRow = {
+    ...candidate, ...current, amount: current.invoicedAmount,
+    paidOrCollectedAmount: current.collectedAmount
+  };
   let application: ReturnType<typeof calculateSmartBillReceivableAdjustment>;
   try {
     application = calculateSmartBillReceivableAdjustment({ row, receivable: linkedRow });
@@ -1160,51 +1220,6 @@ function appendSmartBillAdjustmentMetadata(
         appliedAt: new Date().toISOString()
       }
     ]
-  };
-}
-
-function smartBillReceivableUpdateData(data: ReturnType<typeof smartBillCustomerReceivableData> & { legalEntityId?: string | null; partnerId?: string | null }) {
-  return {
-    legalEntityId: data.legalEntityId,
-    partnerId: data.partnerId,
-    companyName: data.companyName,
-    companyCode: data.companyCode,
-    invoiceDate: data.invoiceDate,
-    sourceStatus: data.sourceStatus,
-    sourceExternalId: data.sourceExternalId,
-    sourceFingerprint: data.sourceFingerprint,
-    spvIndex: data.spvIndex,
-    netAmount: data.netAmount,
-    vatAmount: data.vatAmount,
-    dueDate: data.dueDate,
-    invoicedAmount: data.invoicedAmount,
-    currency: data.currency,
-    rawRowJson: data.rawRowJson as Prisma.InputJsonValue,
-    rowType: data.rowType,
-    reviewedByUserId: data.reviewedByUserId,
-    reviewedAt: data.reviewedAt
-  };
-}
-
-function smartBillPayableUpdateData(data: ReturnType<typeof smartBillSupplierPayableData> & { legalEntityId?: string | null; partnerId?: string | null; documentType?: string }) {
-  return {
-    legalEntityId: data.legalEntityId,
-    partnerId: data.partnerId,
-    companyName: data.companyName,
-    companyCode: data.companyCode,
-    invoiceDate: data.invoiceDate,
-    documentType: data.documentType,
-    sourceStatus: data.sourceStatus,
-    sourceFingerprint: data.sourceFingerprint,
-    netAmount: data.netAmount,
-    vatAmount: data.vatAmount,
-    dueDate: data.dueDate,
-    amountToPay: data.amountToPay,
-    currency: data.currency,
-    rawRowJson: data.rawRowJson as Prisma.InputJsonValue,
-    rowType: data.rowType,
-    reviewedByUserId: data.reviewedByUserId,
-    reviewedAt: data.reviewedAt
   };
 }
 

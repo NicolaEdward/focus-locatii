@@ -1361,7 +1361,7 @@ export function AdminReservationsPanel({
               </div>
               <span className="inline-flex items-center gap-2 rounded-lg border border-focus-line px-3 py-2 text-xs font-black uppercase text-slate-200">
                 <CalendarDays size={16} />
-                {reservations.filter((item) => activeReservationStatuses.includes(item.status)).length} active
+                {reservations.filter((item) => activeReservationStatuses.includes(item.status)).length} înregistrări
               </span>
             </div>
 

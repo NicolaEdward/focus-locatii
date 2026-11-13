@@ -2,15 +2,653 @@
   "version": 1,
   "migrations": [
     {
+      "path": "prisma/migrations/202611130001_assistant_oauth/migration.sql",
+      "sha256": "1b3e8409d519646938ea51fcc5f94b825a0c6fc25449e065470fa2afb0cbc9fc"
+    },
+    {
       "path": "prisma/migrations/202611130001_finance_commands/migration.sql",
       "sha256": "465eacfe1312dd832126defac63ef93eb8b5619741090ed08998477d63750c8e"
     },
     {
       "path": "prisma/migrations/20261113160000_commercial_workbench/migration.sql",
       "sha256": "37f0314a949c851a9ad6746423a945e933afdb572103a54c8eb3d1db26dd1529"
+    },
+    {
+      "path": "prisma/migrations/20261113190000_document_source_audit/migration.sql",
+      "sha256": "565c51d9c63826b44cfa814a465e30014b77a677b1b54001cb6e828555fa083f"
     }
   ],
   "tables": {
+    "portfolio_assistant_oauth_clients": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "name",
+          "type": "varchar(160)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "secretHash",
+          "type": "varchar(64)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "redirectUris",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "allowedScopes",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "disabledAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_assistant_oauth_consents": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "nonceHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "clientId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "userId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sessionId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "tokenVersion",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "request",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "consumedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_assistant_oauth_consents_nonceHash_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "nonceHash",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_assistant_oauth_consents_userId_expiresAt_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "userId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_assistant_oauth_consents_userId_expiresAt_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "expiresAt",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_assistant_oauth_grants": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "clientId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "userId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sessionId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "roleAtConsent",
+          "type": "varchar(40)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "tokenVersion",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "scopes",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "resource",
+          "type": "varchar(1000)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "offline",
+          "type": "tinyint(1)",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "mfaVerifiedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "revokedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_assistant_oauth_grants_userId_revokedAt_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "userId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_assistant_oauth_grants_userId_revokedAt_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "revokedAt",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_assistant_oauth_codes": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "codeHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "grantId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "clientId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "redirectUri",
+          "type": "varchar(1000)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "challenge",
+          "type": "varchar(43)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "consumedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_assistant_oauth_codes_codeHash_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "codeHash",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_assistant_oauth_codes_grantId_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "grantId",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_assistant_oauth_tokens": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "tokenHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "grantId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "kind",
+          "type": "varchar(12)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "consumedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_assistant_oauth_tokens_grantId_kind_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "grantId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_assistant_oauth_tokens_grantId_kind_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "kind",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_assistant_oauth_tokens_tokenHash_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "tokenHash",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
     "portfolio_financial_invoice_allocations": {
       "storage": {
         "engine": "InnoDB",
@@ -3236,6 +3874,1055 @@
           "nonUnique": 0,
           "sequence": 1,
           "columnName": "eventId",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_document_audit_sources": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "label",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sourceType",
+          "type": "varchar(32)",
+          "nullable": "NO",
+          "defaultValue": "local_bridge",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "baseReference",
+          "type": "text",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "allowedPathPrefixes",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "indexTextEnabled",
+          "type": "tinyint(1)",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "maxStaleHours",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "24",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "state",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "active",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "ownerUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "ownerTokenVersion",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "ingestTokenHash",
+          "type": "varchar(64)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "tokenIssuedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "lastIngestAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "lastCompletedScanAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "lastCompletedScanId",
+          "type": "varchar(128)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "activeScanId",
+          "type": "varchar(128)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "activeScanStartedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "activeScanObservedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "activeScanLeaseUntil",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "version",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_document_audit_sources_ingestTokenHash_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "ingestTokenHash",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_document_audit_sources_state_updatedAt_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "state",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_document_audit_sources_state_updatedAt_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "updatedAt",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_source_documents": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sourceId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "pathHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "relativePath",
+          "type": "text",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "displayName",
+          "type": "varchar(255)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "documentType",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "unknown",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "state",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "present",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "currentVersionId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "lastScanId",
+          "type": "varchar(128)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "firstSeenAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "lastSeenAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_source_documents_sourceId_pathHash_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "sourceId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_source_documents_sourceId_pathHash_key",
+          "nonUnique": 0,
+          "sequence": 2,
+          "columnName": "pathHash",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_source_documents_sourceId_state_id_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "sourceId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_source_documents_sourceId_state_id_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "state",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_source_documents_sourceId_state_id_idx",
+          "nonUnique": 1,
+          "sequence": 3,
+          "columnName": "id",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": [
+        {
+          "name": "portfolio_source_documents_sourceId_fkey",
+          "columnName": "sourceId",
+          "sequence": 1,
+          "targetTable": "portfolio_document_audit_sources",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        }
+      ]
+    },
+    "portfolio_source_document_versions": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "documentId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sha256",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sizeBytes",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "modifiedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "observedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "extractionStatus",
+          "type": "varchar(40)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "extractionHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "textTruncated",
+          "type": "tinyint(1)",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "sourceReferenceSnapshot",
+          "type": "text",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sourceConfigVersion",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "textPages",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "reviewVersion",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_source_document_versions_documentId_observedAt_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "documentId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_source_document_versions_documentId_observedAt_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "observedAt",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_source_document_versions_documentId_sha256_extract_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "documentId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_source_document_versions_documentId_sha256_extract_key",
+          "nonUnique": 0,
+          "sequence": 2,
+          "columnName": "sha256",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_source_document_versions_documentId_sha256_extract_key",
+          "nonUnique": 0,
+          "sequence": 3,
+          "columnName": "extractionHash",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": [
+        {
+          "name": "portfolio_source_document_versions_documentId_fkey",
+          "columnName": "documentId",
+          "sequence": 1,
+          "targetTable": "portfolio_source_documents",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        }
+      ]
+    },
+    "portfolio_document_fact_reviews": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "documentVersionId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "version",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "state",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "facts",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "note",
+          "type": "text",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "reviewedByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "reviewedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_document_fact_reviews_documentVersionId_reviewedAt_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "documentVersionId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_document_fact_reviews_documentVersionId_reviewedAt_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "reviewedAt",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_document_fact_reviews_documentVersionId_version_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "documentVersionId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_document_fact_reviews_documentVersionId_version_key",
+          "nonUnique": 0,
+          "sequence": 2,
+          "columnName": "version",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": [
+        {
+          "name": "portfolio_document_fact_reviews_documentVersionId_fkey",
+          "columnName": "documentVersionId",
+          "sequence": 1,
+          "targetTable": "portfolio_source_document_versions",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        }
+      ]
+    },
+    "portfolio_document_ingest_batches": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sourceId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestKey",
+          "type": "varchar(128)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "payloadHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "scanId",
+          "type": "varchar(128)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "observedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "scanComplete",
+          "type": "tinyint(1)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "documentCount",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "result",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_document_ingest_batches_sourceId_requestKey_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "sourceId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_document_ingest_batches_sourceId_requestKey_key",
+          "nonUnique": 0,
+          "sequence": 2,
+          "columnName": "requestKey",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_document_ingest_batches_sourceId_scanId_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "sourceId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_document_ingest_batches_sourceId_scanId_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "scanId",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": [
+        {
+          "name": "portfolio_document_ingest_batches_sourceId_fkey",
+          "columnName": "sourceId",
+          "sequence": 1,
+          "targetTable": "portfolio_document_audit_sources",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        }
+      ]
+    },
+    "portfolio_document_audit_runs": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestedByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "asOf",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "sourceSnapshotHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "scopeComplete",
+          "type": "tinyint(1)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "counts",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "findings",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "limitations",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_document_audit_runs_createdAt_id_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "createdAt",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_document_audit_runs_createdAt_id_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "id",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
           "prefixLength": null
         }
       ],

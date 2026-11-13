@@ -18,7 +18,7 @@ const suites = [
   'test-receivables-reconciliation.ts','test-billing.cjs','test-finance-consistency.cjs',
   'test-commercial-workbench.ts','test-dooh-static-capacity.ts','test-operations-controls.ts','test-backup-restore.cjs','test-backup-hardening.cjs',
   'test-remediation-schema.cjs','test-remediation-collation-plan.cjs','test-database-connection-policy.ts','test-remediation-history.ts','test-database-read-retry.ts','test-release-governance.cjs','test-observability.ts',
-  'test-admin-route-links.cjs','test-notifications.cjs','test-operations-rbac.cjs','test-dependency-policy.cjs'
+  'test-admin-route-links.cjs','test-dashboard-command-centers.cjs','test-notifications.cjs','test-operations-rbac.cjs','test-dependency-policy.cjs'
 ];
 const selected = process.env.REMEDIATION_TEST_FILTER ? suites.filter((s) => s.includes(process.env.REMEDIATION_TEST_FILTER)) : suites;
 if (!selected.length) throw new Error('No matching remediation test');

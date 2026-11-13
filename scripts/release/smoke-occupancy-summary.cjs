@@ -28,7 +28,7 @@ async function main() {
   try {
     fs.mkdirSync(output, { recursive: true });
     await prisma.user.create({ data: { id, email: id + "@example.invalid", name: "Synthetic Occupancy Browser", role: "COO", passwordHash } });
-    browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || "/usr/bin/chromium", headless: true, args: ["--no-sandbox"] });
+    browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || process.env.CHROME_PATH || "/usr/bin/chromium", headless: true, args: ["--no-sandbox"] });
     for (const width of [390, 768]) for (const theme of ["light", "dark"]) {
       let mode = "known", release = null;
       const context = await browser.newContext({ viewport: { width, height: 1024 } });

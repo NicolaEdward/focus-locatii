@@ -796,7 +796,9 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
       await assertCanonicalReservationAvailabilityForWrite(tx, next.locationId, next.periodStart, next.periodEnd, next.status, id);
     }
 
-    assertBookedPrice(nextStatusForClient, proposedReservationRent(parsed, existing));
+    if (existing.status !== "BOOKED" || isCommercialReservationPatch(parsed)) {
+      assertBookedPrice(nextStatusForClient, proposedReservationRent(parsed, existing));
+    }
     const patchData = reservationPatchData(parsed, rentalContext, nextStatusForClient, existing);
     if (parsed.status === "CANCELLED" && parsed.cancellationReason) {
       patchData.notes = appendReservationNote(existing.notes, `Anulare: ${parsed.cancellationReason}`);
@@ -990,7 +992,9 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
 
     for (const [itemIndex, item] of prepared.entries()) {
       const rowInput = groupShares ? { ...parsed, amount: groupShares[itemIndex], monthlyRentShare: groupShares[itemIndex] } : parsed;
-      assertBookedPrice(item.nextStatusForClient, proposedReservationRent(rowInput, item.reservation));
+      if (item.reservation.status !== "BOOKED" || isCommercialReservationPatch(rowInput)) {
+        assertBookedPrice(item.nextStatusForClient, proposedReservationRent(rowInput, item.reservation));
+      }
       const patchData = reservationPatchData(rowInput, item.rentalContext, item.nextStatusForClient, item.reservation);
       if (parsed.productionNotes !== undefined) {
         patchData.productionNotes = splitDecorationCostForGroup(
@@ -1082,6 +1086,24 @@ export async function updateReservationProductionNotesWithClient(
   });
   await recordTransactionalAudit(client, { actor, action: "reservation.production_notes.committed", entityType: "reservation", entityId: id });
   return serializeReservation(reservation);
+}
+
+/** Append operational context only; every group member is authorized and audited atomically. */
+export async function appendReservationGroupProductionNote(id: string, note: string, actor: AuthSession) {
+  const line = z.string().trim().min(1).max(4000).parse(note);
+  const updated = await prisma.$transaction(async (tx) => {
+    const reservations = await loadLockedReservationGroupForCommand(tx, id, actor);
+    for (const reservation of reservations) {
+      await tx.reservation.update({
+        where: { id: reservation.id },
+        data: { productionNotes: appendReservationNote(reservation.productionNotes, line) }
+      });
+    }
+    const ids = reservations.map((reservation) => reservation.id);
+    await recordTransactionalAudit(tx, { actor, action: "reservation.group_production_note.committed", entityType: "reservation", entityId: id, metadata: { reservationIds: ids } });
+    return refreshedReservationsByIds(tx, ids);
+  }, reservationUpdateTransactionOptions);
+  return updated.map(serializeReservation);
 }
 
 export async function deleteReservation(id: string, actor?: AuthSession | null) {
@@ -1291,6 +1313,11 @@ function proposedReservationRent(
   return (input.amount === undefined ? existing.amount : input.amount)
     ?? (input.monthlyRentShare === undefined ? existing.monthlyRentShare : input.monthlyRentShare)
     ?? (input.monthlyRentTotal === undefined ? existing.monthlyRentTotal : input.monthlyRentTotal);
+}
+
+function isCommercialReservationPatch(input: ReturnType<typeof reservationPatchSchema.parse>) {
+  return ["status", "locationId", "clientId", "campaignId", "periodStart", "periodEnd", "amount", "monthlyRentShare", "monthlyRentTotal", "currency", "paymentTermType", "paymentTermDays", "billingRule", "billingFrequency"]
+    .some((key) => input[key as keyof typeof input] !== undefined);
 }
 
 function assertNoPlannedReservationConflicts(rows: Array<{

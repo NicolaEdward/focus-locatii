@@ -59,6 +59,7 @@ async function main() {
   // Existing mixed groups fail closed too; fixture simulates legacy data only.
   await prisma.reservation.update({ where: { id: own.id }, data: { contractGroupId: foreign[0].contractGroupId } });
   await assert.rejects(() => service.updateReservationGroupStatus(own.id, "CANCELLED", a), (e) => e.status === 403);
+  await assert.rejects(() => service.appendReservationGroupProductionNote(own.id, "foreign note denied", a), (e) => e.status === 403);
   assert.equal((await prisma.reservation.findUniqueOrThrow({ where: { id: foreign[0].id } })).status, "HOLD");
   await prisma.reservation.update({ where: { id: own.id }, data: { contractGroupId: null } });
 
@@ -66,6 +67,20 @@ async function main() {
   await assert.rejects(() => service.updateReservationGroup(group[0].id, { locationId: locations[7].id }, a), /suprapuse/);
   assert.equal(await prisma.reservation.count({ where: { locationId: locations[7].id } }), 0, "invalid group move is entirely rolled back");
   await service.updateReservationGroup(group[0].id, { periodStart: "2090-03-02", periodEnd: "2090-03-12" }, a);
+  await prisma.reservation.update({ where: { id: group[0].id }, data: { productionNotes: "first row" } });
+  await prisma.reservation.update({ where: { id: group[1].id }, data: { productionNotes: "second row" } });
+  const notesBefore = await prisma.reservation.findMany({ where: { id: { in: group.map((row) => row.id) } }, orderBy: { id: "asc" } });
+  await service.appendReservationGroupProductionNote(group[0].id, "approved operational note", a);
+  const notesAfter = await prisma.reservation.findMany({ where: { id: { in: group.map((row) => row.id) } }, orderBy: { id: "asc" } });
+  for (const [index, row] of notesAfter.entries()) {
+    const before = notesBefore[index];
+    assert.ok(row.productionNotes.startsWith(before.productionNotes), "each row retains its own note history");
+    assert.ok(row.productionNotes.includes("approved operational note"));
+    for (const field of ["locationId", "periodStart", "periodEnd", "status", "ownerId", "sellerUserId", "clientId", "campaignId", "amount", "monthlyRentShare", "contractGroupId"]) {
+      assert.deepEqual(row[field], before[field], "notes command cannot change " + field);
+    }
+  }
+  assert.equal(await prisma.auditLog.count({ where: { userId: a.id, action: "reservation.group_production_note.committed" } }), 1);
 
   const six = locations.slice(0, 6).map((r) => r.id);
   const prices = await service.createReservation({ ...booking, locationId: null, locationIds: six, amount: undefined, monthlyRentTotal: 1000, periodStart: "2090-04-01", periodEnd: "2090-04-30" }, coo);
@@ -115,11 +130,18 @@ async function main() {
   assert.equal(await prisma.reservation.count({ where: { campaignId: historical.id, status: "BOOKED" } }), 1, "archiving preserves historical sales");
 
   const beforeFailure = await prisma.reservation.count({ where: { locationId: locations[11].id } });
+  let failingAuditAction = "reservation.create.committed";
   prisma.$transaction = (callback, options) => original(async (tx) => callback(new Proxy(tx, { get(target, key) {
-    if (key === "auditLog") return { create: async ({ data }) => { if (data.action === "reservation.create.committed") throw Error("synthetic audit failure"); return target.auditLog.create({ data }); } };
+    if (key === "auditLog") return { create: async ({ data }) => { if (data.action === failingAuditAction) throw Error("synthetic audit failure"); return target.auditLog.create({ data }); } };
     const v = target[key]; return typeof v === "function" ? v.bind(target) : v;
   } })), options);
-  try { await assert.rejects(() => hold(locations[11], "2092-01-01", "2092-01-10", a), /synthetic audit failure/); }
+  try {
+    await assert.rejects(() => hold(locations[11], "2092-01-01", "2092-01-10", a), /synthetic audit failure/);
+    failingAuditAction = "reservation.group_production_note.committed";
+    await assert.rejects(() => service.appendReservationGroupProductionNote(group[0].id, "must rollback both notes", a), /synthetic audit failure/);
+    const rolledBackNotes = await prisma.reservation.findMany({ where: { id: { in: group.map((row) => row.id) } }, orderBy: { id: "asc" } });
+    assert.deepEqual(rolledBackNotes.map((row) => row.productionNotes), notesAfter.map((row) => row.productionNotes), "all group note writes roll back when their durable audit fails");
+  }
   finally { prisma.$transaction = original; }
   assert.equal(await prisma.reservation.count({ where: { locationId: locations[11].id } }), beforeFailure, "business mutation rolls back with its failed audit");
   for (const type of ["DOOH", "display", "LED", "Digital Screen"]) {
@@ -138,7 +160,7 @@ async function main() {
   const customized = await service.updateReservation(confirmed[0].id, { currency: "EUR", paymentTermType: "custom_days", paymentTermDays: 42 }, coo);
   const noteOnly = await service.updateReservation(customized.id, { notes: "synthetic follow-up" }, coo);
   assert.equal(noteOnly.currency, "EUR"); assert.equal(noteOnly.paymentTermDays, 42, "note-only updates retain explicit existing BOOKED terms");
-  console.log(JSON.stringify({ ok: true, cases: ["group ownership", "group internal collisions", "concurrent updates", "inclusive dates", "booking role/price", "campaign terms", "cents allocation", "inquiry claim and null clears", "historical archive", "audit rollback", "DOOH classification", "approved agent HOLD idempotency"] }, null, 2));
+  console.log(JSON.stringify({ ok: true, cases: ["group ownership", "group internal collisions", "group notes immutable fields and audit rollback", "concurrent updates", "inclusive dates", "booking role/price", "campaign terms", "cents allocation", "inquiry claim and null clears", "historical archive", "audit rollback", "DOOH classification", "approved agent HOLD idempotency"] }, null, 2));
 }
 
 async function cleanup() {

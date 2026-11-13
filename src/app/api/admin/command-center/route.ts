@@ -5,6 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { hasAnyPermission, hasPermission } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import {
+  appendReservationGroupProductionNote,
   assignReservationSeller,
   extendReservationHold,
   markReservationHoldLost,
@@ -108,16 +109,8 @@ export async function POST(request: NextRequest) {
       if (!input.periodStart || !input.periodEnd) throw new Error("Completeaza perioada noua.");
       result = await updateReservation(reservation.id, { periodStart: input.periodStart, periodEnd: input.periodEnd }, session);
     } else if (input.action === "approveException" || input.action === "markResolved") {
-      await prisma.reservation.updateMany({
-        where,
-        data: {
-          productionNotes: appendNote(
-            reservation.productionNotes,
-            `${input.action === "approveException" ? "Exceptie aprobata" : "Problema marcata rezolvata"} de ${session.name}: ${input.note || "fara observatii"}`
-          )
-        }
-      });
-      result = await refreshedReservations(where);
+      const productionNotesLine = `${input.action === "approveException" ? "Exceptie aprobata" : "Problema marcata rezolvata"} de ${session.name}: ${input.note || "fara observatii"}`;
+      result = await appendReservationGroupProductionNote(reservation.id, productionNotesLine, session);
     } else if (input.action === "createTask") {
       const kind = input.kind || "decoration";
       const status = input.status || "NEW";
@@ -182,7 +175,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Actiunea nu a putut fi executata." },
-      { status: 400, headers: noStoreHeaders }
+      { status: error instanceof Error && "status" in error && error.status === 403 ? 403 : 400, headers: noStoreHeaders }
     );
   }
 }
@@ -221,14 +214,6 @@ function isOwnReservation(
   if (hasAnyPermission(session.role, ["reservations.manage"])) return true;
   const legacyOwner = [session.name, session.email].includes(reservation.salesperson || "");
   return reservation.sellerUserId === session.id || reservation.ownerId === session.id || (!reservation.ownerId && legacyOwner);
-}
-
-async function refreshedReservations(where: { id: string } | { contractGroupId: string }) {
-  return prisma.reservation.findMany({
-    where,
-    include: { location: { select: { code: true, address: true, city: true, type: true } } },
-    orderBy: [{ createdAt: "asc" }]
-  });
 }
 
 function appendNote(current: string | null | undefined, note?: string) {

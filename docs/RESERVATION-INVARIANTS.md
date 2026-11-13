@@ -10,7 +10,7 @@ Implemented audit scope: SEC-AUTH-001, OPS-001 through OPS-009, FIN-008 and FIN-
 - Omitted BOOKED commercial terms inherit the live campaign. An existing BOOKED record retains explicit terms during unrelated edits. Explicit payment-term changes calculate the corresponding days. Contract totals are allocated as integer cents with the deterministic remainder assigned to the first rows, preserving the total exactly.
 - Campaign archival checks current and future effective blockers under the campaign lock. Completed historical reservations remain BOOKED and are retained. New BOOKED writes lock and validate the campaign in the same transaction.
 - An offer-request claim locks the request, reads its latest owner and writes once. The second seller is refused with 403. Omitted metadata is retained; explicit null clears nullable follow-up, estimate and notes.
-- Core reservation, expiry, offer and archive writes persist their COMMITTED audit entry inside the business transaction. Audit insertion failure rolls back the write.
+- Core reservation, expiry, offer and archive writes persist their COMMITTED audit entry inside the business transaction. Audit insertion failure rolls back the write. Command-center exception/resolution notes use a narrow group command that preserves each row's own notes and changes no commercial or ownership fields. Operational note-only updates do not force a historical missing-price correction.
 - Digital operational classification is shared through `location-medium.ts`. This does not create digital capacity, slot inventory or proof-of-play.
 
 ## Approved AI HOLD hook

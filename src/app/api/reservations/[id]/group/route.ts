@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
+import { reservationMutationFailure } from "@/lib/reservation-amendments";
 import { recordAudit } from "@/lib/audit";
 import { updateReservationGroup } from "@/lib/reservations";
 
@@ -32,9 +33,7 @@ export async function PATCH(request: NextRequest, context: Context) {
     });
     return NextResponse.json({ reservation: reservations.find((item) => item.id === id) || reservations[0], reservations }, { headers: noStoreHeaders });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Contractul nu a putut fi actualizat." },
-      { status: error instanceof Error && "status" in error && error.status === 403 ? 403 : 400, headers: noStoreHeaders }
-    );
+    const failure = reservationMutationFailure(error, "Contractul nu a putut fi actualizat.");
+    return NextResponse.json(failure.body, { status: failure.status, headers: noStoreHeaders });
   }
 }

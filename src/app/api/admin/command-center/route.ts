@@ -42,6 +42,8 @@ const actionSchema = z.object({
   "operationStatus"
   ]),
   reservationId: z.string().min(1),
+  expectedUpdatedAt: z.string().datetime().optional(),
+  expectedVersions: z.record(z.string(), z.string().datetime()).optional(),
   seller: z.string().trim().max(160).optional(),
   sellerUserId: z.string().trim().min(1).optional(),
   periodStart: z.string().trim().optional(),
@@ -77,7 +79,7 @@ export async function POST(request: NextRequest) {
 
     const reservation = await prisma.reservation.findUnique({
       where: { id: input.reservationId },
-      select: { ...bridgeReservationSelect, contractGroupId: true, notes: true, ownerId: true, sellerUserId: true, salesperson: true, status: true }
+      select: { ...bridgeReservationSelect, contractGroupId: true, notes: true, ownerId: true, sellerUserId: true, salesperson: true, status: true, updatedAt: true }
     });
     if (!reservation) {
       return NextResponse.json({ error: "Rezervarea nu exista." }, { status: 404, headers: noStoreHeaders });
@@ -95,7 +97,8 @@ export async function POST(request: NextRequest) {
     let result: unknown = null;
 
     if (input.action === "confirmBooking") {
-      result = await updateReservationGroupStatus(reservation.id, "BOOKED", session);
+      const currentGroup = await prisma.reservation.findMany({ where, select: { id: true, updatedAt: true } });
+      result = await updateReservationGroupStatus(reservation.id, "BOOKED", session, { expectedVersions: input.expectedVersions || Object.fromEntries(currentGroup.map((row) => [row.id, row.updatedAt.toISOString()])) });
     } else if (input.action === "releaseHold") {
       result = await releaseReservationHold(reservation.id, session);
     } else if (input.action === "markLost") {
@@ -107,7 +110,7 @@ export async function POST(request: NextRequest) {
       result = await assignReservationSeller(reservation.id, input.sellerUserId, session);
     } else if (input.action === "changePeriod") {
       if (!input.periodStart || !input.periodEnd) throw new Error("Completeaza perioada noua.");
-      result = await updateReservation(reservation.id, { periodStart: input.periodStart, periodEnd: input.periodEnd }, session);
+      result = await updateReservation(reservation.id, { periodStart: input.periodStart, periodEnd: input.periodEnd, expectedUpdatedAt: input.expectedUpdatedAt }, session);
     } else if (input.action === "approveException" || input.action === "markResolved") {
       const productionNotesLine = `${input.action === "approveException" ? "Exceptie aprobata" : "Problema marcata rezolvata"} de ${session.name}: ${input.note || "fara observatii"}`;
       result = await appendReservationGroupProductionNote(reservation.id, productionNotesLine, session);
@@ -115,6 +118,7 @@ export async function POST(request: NextRequest) {
       const kind = input.kind || "decoration";
       const status = input.status || "NEW";
       result = await updateReservation(reservation.id, {
+        expectedUpdatedAt: reservation.updatedAt.toISOString(),
         productionNotes: withOperationStatus(
           appendNote(reservation.productionNotes, input.note || "Task creat din command center."),
           kind as OperationKind,
@@ -155,6 +159,7 @@ export async function POST(request: NextRequest) {
       }
       if (!result) {
         result = await updateReservation(reservation.id, {
+          expectedUpdatedAt: reservation.updatedAt.toISOString(),
           productionNotes: input.taskId
             ? withOperationTaskStatus(reservation.productionNotes, input.taskId, status as OperationStatus)
             : withOperationStatus(reservation.productionNotes, kind as OperationKind, status as OperationStatus)
@@ -175,7 +180,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Actiunea nu a putut fi executata." },
-      { status: error instanceof Error && "status" in error && error.status === 403 ? 403 : 400, headers: noStoreHeaders }
+      { status: error instanceof Error && "status" in error && typeof error.status === "number" && [403, 409, 428].includes(error.status) ? error.status : 400, headers: noStoreHeaders }
     );
   }
 }

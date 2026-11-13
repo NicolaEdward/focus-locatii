@@ -10,7 +10,8 @@ if (!["127.0.0.1", "localhost"].includes(database.hostname) ||
 }
 const load = (name) => loadTsModule(path.join(process.cwd(), "src/lib", name));
 const { prisma } = load("prisma.ts");
-const service = load("reservations.ts");
+const rawService = load("reservations.ts");
+const service = { ...rawService, ...require("./reservation-test-commands.cjs").versionedReservationCommands(rawService, prisma) };
 const offers = load("offer-requests.ts");
 const { archiveCampaign } = load("campaigns.ts");
 const { allocateMoneyAcrossRows } = load("money-allocation.ts");

@@ -595,6 +595,7 @@ function serializeCampaign(item: CampaignRow) {
     : { date: item.neutralizationDate, source: item.neutralizationDate ? "neutralizationDate" as const : null };
   return {
     id: item.id,
+    updatedAt: item.updatedAt.toISOString(),
     campaignId: item.campaignId,
     reservationId: item.id,
     updatedAt: item.updatedAt.toISOString(),

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { recordTransactionalAudit } from "@/lib/transactional-audit";
+import { amendedPriceIntervals, assertReservationVersion, assertReservationGroupVersions, ReservationConflictError } from "@/lib/reservation-amendments";
 import { retryClosedConnectionRead } from "@/lib/database-read-retry";
 import { loadAvailabilityDecisions } from "@/lib/availability-service";
 import { getInventoryAvailabilitySummary } from "@/lib/inventory-availability-summary";
@@ -213,6 +214,12 @@ export const reservationInputSchema = z.object({
 });
 
 export const reservationPatchSchema = z.object({
+  expectedUpdatedAt: z.string().datetime().optional(),
+  expectedVersions: z.record(z.string(), z.string().datetime()).optional(),
+  amendmentEffectiveDate: optionalDate,
+  amendmentReference: z.string().trim().min(3).max(191).optional(),
+  amendmentMode: z.enum(["amendment", "correction"]).optional(),
+  groupRentShares: z.array(z.object({ reservationId: z.string().min(1), monthlyRent: z.number().positive().finite() })).max(500).optional(),
   locationId: z.string().trim().min(1).nullable().optional(),
   clientId: optionalText,
   campaignId: optionalText,
@@ -220,7 +227,7 @@ export const reservationPatchSchema = z.object({
   clientName: optionalText,
   clientCompany: optionalText,
   contractCompany: optionalText,
-  clientEmail: z.preprocess((value) => value === "" || value == null ? null : String(value).trim(), z.string().email("Emailul clientului nu este valid.").max(254).nullable().optional()),
+  clientEmail: z.preprocess((value) => value === undefined ? undefined : value === "" || value == null ? null : String(value).trim(), z.string().email("Emailul clientului nu este valid.").max(254).nullable().optional()),
   clientPhone: optionalText,
   campaignName: optionalText,
   contractNumber: optionalText,
@@ -706,6 +713,7 @@ export async function createApprovedAgentHold(
     locationIds: string[]; periodStart: Date; periodEnd: Date;
     clientId: string; campaignId: string; ownerUserId: string;
     requestKey: string; holdExpiresAt: Date;
+    quotedTerms?: { currency: "RON" | "EUR"; companyEntity: string; quoteRevisionId: string; lines: Array<{ locationId: string; monthlyRate: string }> };
   },
   actor: AuthSession
 ): Promise<ReservationDTO[]> {
@@ -733,12 +741,24 @@ export async function createApprovedAgentHold(
       ![context.campaign.accountOwnerUserId, context.campaign.sellerUserId].includes(input.ownerUserId)) {
     throw new ReservationPermissionError("Clientul si campania nu apartin portofoliului aprobat.");
   }
+  const quoted = input.quotedTerms ? z.object({
+    currency: z.enum(["RON", "EUR"]), companyEntity: z.string().min(1), quoteRevisionId: z.string().trim().min(1).max(191),
+    lines: z.array(z.object({ locationId: z.string().min(1), monthlyRate: z.string().regex(/^\d+\.\d{2}$/).refine((rate) => Number(rate) > 0 && Number.isFinite(Number(rate))) })).min(1).max(500)
+  }).strict().parse(input.quotedTerms) : null;
+  const quoteRates = new Map(quoted?.lines.map((line) => [line.locationId, Number(line.monthlyRate)]) || []);
+  const quoteTotal = quoted ? quoted.lines.reduce((sum, line) => sum.plus(line.monthlyRate), new Prisma.Decimal(0)).toNumber() : null;
+  if (quoted && (quoteRates.size !== locationIds.length || quoted.lines.length !== locationIds.length || locationIds.some((id) => !quoteRates.has(id)) ||
+      quoted.currency !== context.campaign.currency || companyEntityOrThrow(quoted.companyEntity) !== companyEntityOrThrow(context.campaign.companyEntity || ""))) {
+    throw new Error("Termenii ofertei nu corespund locațiilor, monedei sau firmei campaniei aprobate.");
+  }
+  const quoteProvenance = quoted ? `Ofertă comercială aprobată · versiune ${quoted.quoteRevisionId}` : null;
   const prior = await tx.reservation.findMany({ where: { externalId: { in: externalIds } }, include: reservationInclude });
   if (prior.length) {
     if (prior.length !== locationIds.length || prior.some((row) =>
       row.status !== "HOLD" || row.ownerId !== input.ownerUserId || row.clientId !== input.clientId ||
       row.campaignId !== input.campaignId || row.periodStart.getTime() !== plan.periodStart.getTime() ||
-      row.periodEnd.getTime() !== plan.periodEnd.getTime() || row.holdExpiresAt?.getTime() !== input.holdExpiresAt.getTime()
+      row.periodEnd.getTime() !== plan.periodEnd.getTime() || row.holdExpiresAt?.getTime() !== input.holdExpiresAt.getTime() ||
+      (quoted ? row.amount !== quoteRates.get(row.locationId) || row.monthlyRentShare !== quoteRates.get(row.locationId) || row.monthlyRentTotal !== quoteTotal || row.currency !== quoted.currency || row.contractCompany !== companyEntityOrThrow(quoted.companyEntity) || row.notes !== quoteProvenance : Boolean(row.notes?.startsWith("Ofertă comercială aprobată")))
     )) throw new Error("Cheia hold-ului a fost deja utilizata pentru un rezultat diferit.");
     return prior.map(serializeReservation);
   }
@@ -754,6 +774,12 @@ export async function createApprovedAgentHold(
       campaignName: context.campaign.campaignName, status: "HOLD", contractGroupId,
       periodStart: plan.periodStart, periodEnd: plan.periodEnd,
       holdExpiresAt: input.holdExpiresAt, bookedAt: null,
+      ...(quoted ? {
+        amount: quoteRates.get(locationId), monthlyRentShare: quoteRates.get(locationId), monthlyRentTotal: quoteTotal,
+        currency: quoted.currency, contractCompany: companyEntityOrThrow(quoted.companyEntity), notes: quoteProvenance,
+        paymentTermType: context.campaign.paymentTermType, paymentTermDays: context.campaign.paymentTermDays,
+        billingRule: context.campaign.billingRule, billingFrequency: context.campaign.billingFrequency
+      } : {}),
       ownerId: seller.ownerId, sellerUserId: seller.sellerUserId, salesperson: seller.salesperson,
       externalSource: "approved-sales-agent", externalId: externalIds[index], invoiceGenerationMode: "manual"
     }, include: reservationInclude }));
@@ -764,7 +790,6 @@ export async function createApprovedAgentHold(
 }
 
 export async function updateReservation(id: string, input: unknown, actor?: AuthSession | null) {
-  await expireStaleHolds();
   const parsed = normalizeReservationInput(reservationPatchSchema.parse(input));
 
   const reservation = await prisma.$transaction(async (tx) => {
@@ -776,6 +801,7 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
     existing = await tx.reservation.findUniqueOrThrow({ where: { id }, include: { client: true, campaign: true } });
     if (existing.locationId !== originalLocationId) throw concurrentReservationChange();
     assertReservationOwnership(existing, actor);
+    assertReservationVersion(existing, parsed.expectedUpdatedAt, Boolean(actor));
     assertGroupIdUnchanged(parsed, existing);
     const ownershipPatch: SellerPatch = await resolveUpdateSeller(parsed, existing, actor, tx);
     const nextStatusForClient = parsed.status || existing.status;
@@ -807,7 +833,15 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
     if (existing.status !== "BOOKED" || isCommercialReservationPatch(parsed)) {
       assertBookedPrice(nextStatusForClient, proposedReservationRent(parsed, existing));
     }
+    if (existing.status === "BOOKED" && existing.contractGroupId && (["amount", "monthlyRentShare", "monthlyRentTotal", "currency"].some((key) => parsed[key as "amount"] !== undefined && parsed[key as "amount"] !== existing[key as "amount"]))) {
+      const members = await tx.reservation.count({ where: { contractGroupId: existing.contractGroupId } });
+      if (members > 1) throw new Error("Modifică prețul din editarea întregului contract grupat, păstrând explicit chiriile celorlalte amplasamente.");
+    }
     const patchData = reservationPatchData(parsed, rentalContext, nextStatusForClient, existing);
+    if (!existing.contractGroupId && ["amount", "monthlyRentShare", "monthlyRentTotal"].some((key) => parsed[key as "amount"] !== undefined)) {
+      const rent = proposedReservationRent(parsed, existing);
+      patchData.amount = rent ?? null; patchData.monthlyRentShare = rent ?? null; patchData.monthlyRentTotal = rent ?? null;
+    }
     if (parsed.status === "CANCELLED" && parsed.cancellationReason) {
       patchData.notes = appendReservationNote(existing.notes, `Anulare: ${parsed.cancellationReason}`);
     }
@@ -816,7 +850,8 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
       where: { id },
       data: {
         ...patchData,
-        ...(rentalContext
+        updatedAt: new Date(Math.max(Date.now(), existing.updatedAt.getTime() + 1)),
+        ...(rentalContext && (existing.status !== "BOOKED" || (parsed.clientId !== undefined && parsed.clientId !== existing.clientId) || (parsed.campaignId !== undefined && parsed.campaignId !== existing.campaignId))
           ? {
               clientId: rentalContext.client.id,
               campaignId: rentalContext.campaign.id,
@@ -834,16 +869,8 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
       include: reservationInclude
     });
 
-    if (nextStatusForClient === "BOOKED" && (existing.status !== "BOOKED" || parsed.amount !== undefined || parsed.monthlyRentShare !== undefined || parsed.monthlyRentTotal !== undefined)) {
-      await ensureCurrentPriceSegment(
-        tx,
-        updated.id,
-        updated.periodStart,
-        updated.periodEnd,
-        updated.amount ?? updated.monthlyRentShare ?? updated.monthlyRentTotal ?? 0,
-        updated.currency || "EUR",
-        actor?.id || null
-      );
+    if (nextStatusForClient === "BOOKED") {
+      await synchronizeReservationPriceHistory(tx, existing, updated, parsed, actor);
     }
 
     await logRentalCorrection(tx, existing, updated, actor?.id || null);
@@ -872,12 +899,12 @@ export async function updateReservationGroupStatus(
   id: string,
   inputStatus: unknown,
   actor?: AuthSession | null,
-  options: { cancellationReason?: string | null } = {}
+  options: { cancellationReason?: string | null; expectedVersions?: Record<string, string> } = {}
 ) {
-  await expireStaleHolds();
   const status = reservationStatusSchema.parse(inputStatus);
   const updated = await prisma.$transaction(async (tx) => {
     const reservations = await loadLockedReservationGroupForCommand(tx, id, actor);
+    assertReservationGroupVersions(reservations, options.expectedVersions, Boolean(actor));
     const validatedIds = reservations.map((reservation) => reservation.id);
     assertNoPlannedReservationConflicts(reservations.map((reservation) => ({ ...reservation, status })));
 
@@ -908,12 +935,13 @@ export async function updateReservationGroupStatus(
       const context = contexts.get(reservation.id);
       const statusData = {
         status,
+        updatedAt: new Date(Math.max(Date.now(), reservation.updatedAt.getTime() + 1)),
         ...(status === "BOOKED" ? {
-          currency: normalizeCurrency((reservation.status === "BOOKED" ? reservation.currency : null) || context?.campaign.currency),
-          paymentTermType: (reservation.status === "BOOKED" ? reservation.paymentTermType : null) || context?.campaign.paymentTermType || "30_days",
-          paymentTermDays: (reservation.status === "BOOKED" ? reservation.paymentTermDays : null) ?? context?.campaign.paymentTermDays ?? 30,
-          billingRule: (reservation.status === "BOOKED" ? reservation.billingRule : null) || context?.campaign.billingRule || "manual_per_contract",
-          billingFrequency: (reservation.status === "BOOKED" ? reservation.billingFrequency : null) || context?.campaign.billingFrequency || "monthly",
+          currency: normalizeCurrency(reservation.currency || context?.campaign.currency),
+          paymentTermType: reservation.paymentTermType || context?.campaign.paymentTermType || "30_days",
+          paymentTermDays: reservation.paymentTermDays ?? context?.campaign.paymentTermDays ?? 30,
+          billingRule: reservation.billingRule || context?.campaign.billingRule || "manual_per_contract",
+          billingFrequency: reservation.billingFrequency || context?.campaign.billingFrequency || "monthly",
           invoiceGenerationMode: "manual",
           neutralizationDate: reservation.neutralizationDate || reservation.periodEnd,
           ...(context ? {
@@ -951,14 +979,26 @@ export async function updateReservationGroupStatus(
 }
 
 export async function updateReservationGroup(id: string, input: unknown, actor?: AuthSession | null) {
-  await expireStaleHolds();
   const parsed = normalizeReservationInput(reservationPatchSchema.parse(input));
 
   const updated = await prisma.$transaction(async (tx) => {
     const reservations = await loadLockedReservationGroupForCommand(tx, id, actor, parsed.locationId ? [parsed.locationId] : []);
     const validatedIds = reservations.map((reservation) => reservation.id);
     for (const reservation of reservations) assertGroupIdUnchanged(parsed, reservation);
-    const groupShares = parsed.monthlyRentTotal != null ? allocateMoneyAcrossRows(parsed.monthlyRentTotal, reservations.length) : null;
+    assertReservationGroupVersions(reservations, parsed.expectedVersions, Boolean(actor));
+    let groupShares: number[] | null = null;
+    if (parsed.groupRentShares) {
+      const shares = new Map(parsed.groupRentShares.map((row) => [row.reservationId, row.monthlyRent]));
+      if (shares.size !== reservations.length || parsed.groupRentShares.length !== reservations.length || reservations.some((row) => !shares.has(row.id))) throw new Error("Specifică explicit chiria fiecărui amplasament din contract.");
+      groupShares = reservations.map((row) => shares.get(row.id)!);
+      const cents = groupShares.reduce((sum, value) => sum + Math.round(value * 100), 0);
+      if (parsed.monthlyRentTotal != null && cents !== Math.round(parsed.monthlyRentTotal * 100)) throw new Error("Suma chiriilor pe amplasament trebuie să coincidă cu totalul contractual.");
+      parsed.monthlyRentTotal = cents / 100;
+    } else if (reservations.length > 1 && ["amount", "monthlyRentShare"].some((key) => parsed[key as "amount" | "monthlyRentShare"] !== undefined)) {
+      throw new Error("La editarea unui grup, specifică explicit chiria fiecărui amplasament.");
+    } else if (parsed.monthlyRentTotal != null && reservations.some((row) => row.monthlyRentTotal !== parsed.monthlyRentTotal)) {
+      throw new Error("Modificarea totalului cere distribuția explicită pe amplasamente. Împărțirea egală nu se aplică automat.");
+    }
     assertNoPlannedReservationConflicts(reservations.map((reservation) => ({
       ...reservation,
       locationId: parsed.locationId || reservation.locationId,
@@ -1016,7 +1056,8 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
         where: { id: item.reservation.id },
         data: {
           ...patchData,
-          ...(item.rentalContext
+          updatedAt: new Date(Math.max(Date.now(), item.reservation.updatedAt.getTime() + 1)),
+          ...(item.rentalContext && (item.reservation.status !== "BOOKED" || (parsed.clientId !== undefined && parsed.clientId !== item.reservation.clientId) || (parsed.campaignId !== undefined && parsed.campaignId !== item.reservation.campaignId))
             ? {
                 clientId: item.rentalContext.client.id,
                 campaignId: item.rentalContext.campaign.id,
@@ -1034,20 +1075,10 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
         include: reservationInclude
       });
 
-      if (
-        item.nextStatusForClient === "BOOKED" &&
-        (parsed.amount !== undefined || parsed.monthlyRentShare !== undefined || parsed.monthlyRentTotal !== undefined)
-      ) {
-        await ensureCurrentPriceSegment(
-          tx,
-          updatedReservation.id,
-          updatedReservation.periodStart,
-          updatedReservation.periodEnd,
-          updatedReservation.amount ?? updatedReservation.monthlyRentShare ?? updatedReservation.monthlyRentTotal ?? 0,
-          updatedReservation.currency || "EUR",
-          actor?.id || null
-        );
+      if (item.nextStatusForClient === "BOOKED") {
+        await synchronizeReservationPriceHistory(tx, item.reservation, updatedReservation, rowInput, actor);
       }
+
       await logRentalCorrection(tx, item.reservation, updatedReservation, actor?.id || null);
     }
     if (campaignCommercialSummaryAffected(parsed)) {
@@ -1115,9 +1146,10 @@ export async function appendReservationGroupProductionNote(id: string, note: str
   return updated.map(serializeReservation);
 }
 
-export async function deleteReservation(id: string, actor?: AuthSession | null) {
+export async function deleteReservation(id: string, actor?: AuthSession | null, expectedUpdatedAt?: string) {
   await prisma.$transaction(async (tx) => {
     const existing = (await loadLockedReservationGroupForCommand(tx, id, actor)).find((row) => row.id === id)!;
+    assertReservationVersion(existing, expectedUpdatedAt, Boolean(actor));
     await tx.reservation.update({ where: { id }, data: { status: "CANCELLED", holdExpiresAt: null } });
     if (existing.campaignId) await syncCampaignCommercialSummary(tx, existing.campaignId);
     await recordTransactionalAudit(tx, { actor, action: "reservation.cancel.committed", entityType: "reservation", entityId: id });
@@ -1270,7 +1302,7 @@ async function loadReservationGroupForCommand(tx: Prisma.TransactionClient, id: 
 }
 
 function concurrentReservationChange() {
-  return new Error("Rezervarea a fost modificata concurent. Reincarca datele si verifica din nou disponibilitatea.");
+  return new ReservationConflictError();
 }
 
 async function lockReservationRowsForWrite(tx: Prisma.TransactionClient, ids: string[]) {
@@ -1319,9 +1351,15 @@ function proposedReservationRent(
   input: { amount?: number | null; monthlyRentShare?: number | null; monthlyRentTotal?: number | null },
   existing: { amount: number | null; monthlyRentShare: number | null; monthlyRentTotal: number | null }
 ) {
-  return (input.amount === undefined ? existing.amount : input.amount)
-    ?? (input.monthlyRentShare === undefined ? existing.monthlyRentShare : input.monthlyRentShare)
-    ?? (input.monthlyRentTotal === undefined ? existing.monthlyRentTotal : input.monthlyRentTotal);
+  if (input.amount != null) return input.amount;
+  if (input.monthlyRentShare != null) return input.monthlyRentShare;
+  if (input.monthlyRentTotal != null) return input.monthlyRentTotal;
+  if ([input.amount, input.monthlyRentShare, input.monthlyRentTotal].some((value) => value === null)) {
+    return (input.amount === undefined ? existing.amount : input.amount)
+      ?? (input.monthlyRentShare === undefined ? existing.monthlyRentShare : input.monthlyRentShare)
+      ?? (input.monthlyRentTotal === undefined ? existing.monthlyRentTotal : input.monthlyRentTotal);
+  }
+  return existing.amount ?? existing.monthlyRentShare ?? existing.monthlyRentTotal;
 }
 
 function isCommercialReservationPatch(input: ReturnType<typeof reservationPatchSchema.parse>) {
@@ -1424,6 +1462,7 @@ async function resolveRentalContextForUpdate(
 ) {
   const nextStatus = input.status || existing.status;
   if (nextStatus !== "BOOKED") return null;
+  if (existing.status === "BOOKED" && !isCommercialReservationPatch(input)) return null;
   const clientId = input.clientId === undefined ? existing.clientId : input.clientId;
   const campaignId = input.campaignId === undefined ? existing.campaignId : input.campaignId;
   if (!clientId || !campaignId) {
@@ -1704,6 +1743,7 @@ function reservationPatchData(
   // The cancellation reason is audit context, not a Reservation column.
   // It is appended to notes below and must never reach Prisma's update payload.
   delete data.cancellationReason;
+  for (const field of ["expectedUpdatedAt", "expectedVersions", "amendmentEffectiveDate", "amendmentReference", "amendmentMode", "groupRentShares"]) delete data[field];
   // Group membership changes need their own authorized command; never a free-form patch.
   delete data.contractGroupId;
   for (const key of ["locationId", "clientName", "status", "periodStart", "periodEnd"]) {
@@ -1736,6 +1776,54 @@ function reservationPatchData(
   }
   data.invoiceGenerationMode = "manual";
   return data;
+}
+
+type PriceHistoryReservation = {
+  id: string; status: string; periodStart: Date; periodEnd: Date; currency: string | null; updatedAt: Date; contractGroupId: string | null;
+  amount: number | null; monthlyRentShare: number | null; monthlyRentTotal: number | null;
+};
+
+async function synchronizeReservationPriceHistory(
+  tx: Prisma.TransactionClient,
+  previous: PriceHistoryReservation,
+  next: PriceHistoryReservation,
+  input: ReturnType<typeof reservationPatchSchema.parse>,
+  actor?: AuthSession | null
+) {
+  const nextRent = proposedReservationRent({}, next) ?? 0;
+  if (previous.status !== "BOOKED") {
+    await ensureCurrentPriceSegment(tx, next.id, next.periodStart, next.periodEnd, nextRent, next.currency || "EUR", actor?.id || null);
+    return;
+  }
+  const priceChanged = proposedReservationRent({}, previous) !== nextRent || previous.currency !== next.currency;
+  const periodChanged = previous.periodStart.getTime() !== next.periodStart.getTime() || previous.periodEnd.getTime() !== next.periodEnd.getTime();
+  if (!priceChanged && !periodChanged) return;
+  if (!input.amendmentEffectiveDate || !input.amendmentReference || !input.amendmentMode) {
+    throw new Error("Modificarea chiriei, monedei sau perioadei confirmate cere data efectivă, referința documentului și tipul modificării.");
+  }
+  assertReservationInitialStatus("BOOKED", actor?.role);
+  const segments = await tx.rentalPriceSegment.findMany({ where: { rentalId: next.id }, orderBy: [{ effectiveFrom: "asc" }, { createdAt: "asc" }] });
+  const replacement = amendedPriceIntervals({
+    previousStart: previous.periodStart, previousEnd: previous.periodEnd,
+    nextStart: next.periodStart, nextEnd: next.periodEnd,
+    previousRent: proposedReservationRent({}, previous) ?? 0, previousCurrency: previous.currency || "",
+    nextRent, nextCurrency: next.currency || "", segments,
+    effectiveFrom: input.amendmentEffectiveDate, reference: input.amendmentReference, mode: input.amendmentMode,
+    changePrice: priceChanged
+  });
+  // Price segments are the active projection. The previous complete projection is retained
+  // in the same transaction's change log, so an amendment is reconstructible and auditable.
+  await tx.rentalChangeLog.create({ data: {
+    rentalId: next.id, action: "contract_amendment",
+    previousJson: { periodStart: previous.periodStart.toISOString(), periodEnd: previous.periodEnd.toISOString(), segments: segments.map((s) => ({ ...s, monthlyRent: s.monthlyRent.toString(), effectiveFrom: s.effectiveFrom.toISOString(), effectiveTo: s.effectiveTo?.toISOString() || null, createdAt: s.createdAt.toISOString() })) },
+    nextJson: { periodStart: next.periodStart.toISOString(), periodEnd: next.periodEnd.toISOString(), effectiveDate: input.amendmentEffectiveDate.toISOString(), mode: input.amendmentMode, segments: replacement.map((s) => ({ ...s, effectiveFrom: s.effectiveFrom.toISOString(), effectiveTo: s.effectiveTo.toISOString() })) },
+    note: input.amendmentReference, createdByUserId: actor?.id || null
+  } });
+  await tx.rentalPriceSegment.deleteMany({ where: { rentalId: next.id } });
+  await tx.rentalPriceSegment.createMany({ data: replacement.map((s) => ({ ...s, rentalId: next.id, createdByUserId: actor?.id || null })) });
+  const latest = replacement.at(-1)!;
+  await tx.reservation.update({ where: { id: next.id }, data: { amount: latest.monthlyRent, monthlyRentShare: latest.monthlyRent, ...(!next.contractGroupId ? { monthlyRentTotal: latest.monthlyRent } : {}), currency: latest.currency, updatedAt: new Date(Math.max(Date.now(), next.updatedAt.getTime() + 1)) } });
+  await recordTransactionalAudit(tx, { actor, action: "reservation.amendment.committed", entityType: "reservation", entityId: next.id, metadata: { reference: input.amendmentReference, effectiveDate: input.amendmentEffectiveDate.toISOString(), mode: input.amendmentMode } });
 }
 
 async function ensureCurrentPriceSegment(

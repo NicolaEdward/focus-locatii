@@ -71,7 +71,7 @@ function dashboardActionsUseSafeChangePeriodFlow() {
   const commandRoute = read("src", "app", "api", "admin", "command-center", "route.ts");
   assert(holdActions.includes('"changePeriod", { periodStart, periodEnd }'), "hold dialog should call existing command-center changePeriod action");
   assert(!commandCenter.includes("/api/admin/command-center"), "the read-only COO dashboard must not call reservation mutation commands");
-  assert(commandRoute.includes("updateReservation(reservation.id, { periodStart: input.periodStart, periodEnd: input.periodEnd }, session)"), "command-center changePeriod must still use reservation domain update flow");
+  assert(commandRoute.includes("updateReservation(reservation.id, { periodStart: input.periodStart, periodEnd: input.periodEnd, expectedUpdatedAt: input.expectedUpdatedAt }, session)"), "command-center changePeriod must still use reservation domain update flow");
 }
 
 function dirtyResetConfirmationIsInApp() {

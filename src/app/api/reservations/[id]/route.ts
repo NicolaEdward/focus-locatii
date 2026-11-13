@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission, requirePermission } from "@/lib/auth";
 import { deleteReservation, getReservationGroup, updateReservation, updateReservationGroupStatus } from "@/lib/reservations";
+import { reservationMutationFailure } from "@/lib/reservation-amendments";
 import { recordAudit } from "@/lib/audit";
 import { observeRoute, setObservabilityRole } from "@/lib/observability";
 
@@ -44,7 +45,8 @@ export async function PATCH(request: NextRequest, context: Context) {
       const body = await request.json();
       if (body?.applyToGroup === true && body?.status) {
         const reservations = await updateReservationGroupStatus(id, body.status, session, {
-          cancellationReason: typeof body.cancellationReason === "string" ? body.cancellationReason : null
+          cancellationReason: typeof body.cancellationReason === "string" ? body.cancellationReason : null,
+          expectedVersions: body.expectedVersions
         });
         const reservation = reservations.find((item) => item.id === id) || reservations[0];
         await recordAudit({
@@ -62,10 +64,8 @@ export async function PATCH(request: NextRequest, context: Context) {
       await recordAudit({ actor: session, action: "reservation.update", entityType: "reservation", entityId: id, metadata: { status: reservation.status }, request });
       return NextResponse.json({ reservation, reservations: [reservation] }, { headers: noStoreHeaders });
     } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "Rezervarea nu a putut fi actualizata." },
-        { status: error instanceof Error && "status" in error && error.status === 403 ? 403 : 400, headers: noStoreHeaders }
-      );
+      const failure = reservationMutationFailure(error, "Rezervarea nu a putut fi actualizată.");
+      return NextResponse.json(failure.body, { status: failure.status, headers: noStoreHeaders });
     }
   });
 }
@@ -75,7 +75,13 @@ export async function DELETE(request: NextRequest, context: Context) {
   if (response || !session) return response;
 
   const { id } = await context.params;
-  await deleteReservation(id, session);
+  try {
+    const body = await request.json().catch(() => null);
+    await deleteReservation(id, session, body?.expectedUpdatedAt || request.headers.get("if-match")?.replace(/^"|"$/g, ""));
+  } catch (error) {
+    const failure = reservationMutationFailure(error, "Anularea nu a putut fi confirmată.");
+    return NextResponse.json(failure.body, { status: failure.status, headers: noStoreHeaders });
+  }
   await recordAudit({ actor: session, action: "reservation.cancel", entityType: "reservation", entityId: id, request });
 
   return NextResponse.json({ ok: true }, { headers: noStoreHeaders });

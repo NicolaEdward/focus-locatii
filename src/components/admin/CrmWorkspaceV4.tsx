@@ -26,6 +26,7 @@ import {
   Users,
   X
 } from "lucide-react";
+import { CrmCommandRecovery, useCrmCommandFlow } from "@/components/admin/crm/CrmCommandRecovery";
 import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   CRM_NEXT_ACTION_CATALOG,
@@ -229,7 +230,7 @@ export function CrmWorkspaceV4({
 
     {data && data.pagination.pages > 1 ? <Pagination pagination={data.pagination} onPage={setPage} /> : null}
     {canEdit && createMode ? <CreateDialog mode={createMode} owners={owners} canAssignOwners={canAssignOwners} sessionUserId={sessionUserId} onClose={() => setCreateMode(null)} onCreated={(message) => { setCreateMode(null); completed(message); }} /> : null}
-    {selected ? <RecordDrawer selected={selected} canEdit={canEdit} onClose={() => setSelected(null)} onChanged={completed} /> : null}
+    {selected ? <RecordDrawer sessionUserId={sessionUserId} selected={selected} canEdit={canEdit} onClose={() => setSelected(null)} onChanged={completed} /> : null}
   </main>;
 }
 
@@ -308,10 +309,13 @@ function CreateDialog({ mode, owners, canAssignOwners, sessionUserId, onClose, o
   const [error, setError] = useState("");
   const [duplicatePayload, setDuplicatePayload] = useState<Record<string, unknown> | null>(null);
   const [prospectStatus, setProspectStatus] = useState<(typeof CRM_PROSPECT_STATUS_OPTIONS)[number]["value"]>("prospecting");
+  const flow = useCrmCommandFlow(`${sessionUserId}:create:${mode}`);
   const qualifiedProspect = mode === "prospect" && prospectStatus === "qualified";
 
   async function submit(event: FormEvent<HTMLFormElement>, allowPotentialDuplicate = false) {
-    event.preventDefault(); setPending(true); setError("");
+    event.preventDefault();
+    if (pending || flow.blocked || !flow.ready) return;
+    setPending(true); setError("");
     const form = new FormData(event.currentTarget);
     const payload: Record<string, unknown> = duplicatePayload && allowPotentialDuplicate ? { ...duplicatePayload, allowPotentialDuplicate: true } : {
       action: mode === "prospect" ? "create_prospect" : "create_inbound",
@@ -321,16 +325,15 @@ function CreateDialog({ mode, owners, canAssignOwners, sessionUserId, onClose, o
       email: textValue(form, "email"), phone: textValue(form, "phone"), nextActionDueAt: textValue(form, "nextActionDueAt"),
       nextActionType: mode === "prospect" ? undefined : "request_full_brief",
       opportunityName: textValue(form, "opportunityName"), needSummary: textValue(form, "needSummary"),
-      geography: textValue(form, "geography"), formats: textValue(form, "formats"), idempotencyKey: crypto.randomUUID()
+      geography: textValue(form, "geography"), formats: textValue(form, "formats")
     };
     try {
-      const response = await fetch("/api/admin/crm/commands", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
-      const result = await response.json();
-      if (!response.ok) {
-        if (result.code === "CRM_POSSIBLE_DUPLICATE") setDuplicatePayload(payload);
-        throw new Error(result.error || "Înregistrarea nu a putut fi creată.");
+      const outcome = await flow.run(payload);
+      if (outcome.outcome !== "committed") {
+        if (outcome.code === "CRM_POSSIBLE_DUPLICATE") setDuplicatePayload(payload);
+        setError(outcome.message); return;
       }
-      onCreated(mode === "prospect" ? "Prospectul a fost creat." : "Oportunitatea inbound a fost creată.");
+      onCreated([mode === "prospect" ? "Prospectul a fost creat." : "Oportunitatea inbound a fost creată.", outcome.message].filter(Boolean).join(" "));
     } catch (submitError) { setError(submitError instanceof Error ? submitError.message : "Înregistrarea nu a putut fi creată."); }
     finally { setPending(false); }
   }
@@ -356,14 +359,16 @@ function CreateDialog({ mode, owners, canAssignOwners, sessionUserId, onClose, o
         <Field label="Nevoie concretă *" wide><textarea className={`${fieldClass} min-h-24`} name="needSummary" required /></Field>
         <Field label="Geografie"><input className={fieldClass} name="geography" /></Field><Field label="Formate"><input className={fieldClass} name="formats" /></Field>
       </div> : null}
+      <CrmCommandRecovery flow={flow} browseHref="/admin/crm" onCommitted={() => onCreated("Rezultatul intenției a fost verificat în istoric. Comanda nu a fost repetată.")} onResolved={() => setError("")} />
       {error ? <p className="rounded-md bg-red-950/60 px-3 py-2 text-sm font-bold text-red-100">{error}</p> : null}
-      {duplicatePayload ? <button className={secondaryButton} type="button" disabled={pending} onClick={(event) => { const form = event.currentTarget.closest("form"); if (form) void submit({ preventDefault() {}, currentTarget: form } as FormEvent<HTMLFormElement>, true); }}>Am verificat, creează separat</button> : null}
-      <div className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-700 bg-focus-navy/95 pt-4"><button className={secondaryButton} type="button" onClick={onClose}>Renunță</button><button className={primaryButton} disabled={pending} type="submit">{pending ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />} Creează</button></div>
+      {duplicatePayload ? <button className={secondaryButton} type="button" disabled={pending || !flow.ready || Boolean(flow.blocked)} onClick={(event) => { const form = event.currentTarget.closest("form"); if (form) void submit({ preventDefault() {}, currentTarget: form } as FormEvent<HTMLFormElement>, true); }}>Am verificat, creează separat</button> : null}
+      <div className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-700 bg-focus-navy/95 pt-4"><button className={secondaryButton} type="button" onClick={onClose}>Renunță</button><button className={primaryButton} disabled={pending || !flow.ready || Boolean(flow.blocked)} type="submit">{pending ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />} Creează</button></div>
     </form>
   </ModalShell>;
 }
 
-function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { kind: RecordKind; id: string }; canEdit: boolean; onClose: () => void; onChanged: (message: string) => void }) {
+function RecordDrawer({ sessionUserId, selected, canEdit, onClose, onChanged }: { sessionUserId: string; selected: { kind: RecordKind; id: string }; canEdit: boolean; onClose: () => void; onChanged: (message: string) => void }) {
+  const flow = useCrmCommandFlow(`${sessionUserId}:record:${selected.kind}:${selected.id}`);
   const [detail, setDetail] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -381,12 +386,13 @@ function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { k
   useEffect(() => { void load(); }, [load]);
 
   async function command(payload: Record<string, unknown>, message: string) {
+    if (pending || flow.blocked || !flow.ready) return;
     setPending(true); setError("");
     try {
-      const response = await fetch("/api/admin/crm/commands", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...payload, idempotencyKey: crypto.randomUUID() }) });
-      const result = await response.json(); if (!response.ok) throw new Error(result.error || "Modificarea nu a putut fi salvată.");
-      await load(); onChanged(message);
-    } catch (commandError) { setError(commandError instanceof Error ? commandError.message : "Modificarea nu a putut fi salvată."); }
+      const outcome = await flow.run(payload);
+      if (outcome.outcome !== "committed") { setError(outcome.message); return; }
+      await load(); onChanged([message, outcome.message].filter(Boolean).join(" "));
+    } catch { setError("Rezultatul trebuie verificat în dosar și istoric înainte de o nouă acțiune."); }
     finally { setPending(false); }
   }
 
@@ -398,6 +404,7 @@ function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { k
         <button className="rounded-md p-2 text-slate-300 hover:bg-white/10 hover:text-white" onClick={onClose} type="button" aria-label="Închide"><X size={22} /></button>
       </div>
       <div className="space-y-5 p-4 sm:p-6">
+        <CrmCommandRecovery flow={flow} browseHref={`/admin/crm?kind=${selected.kind}&record=${encodeURIComponent(selected.id)}`} onCommitted={async () => { await load(); onChanged("Rezultatul intenției a fost verificat. Comanda nu a fost repetată."); }} onResolved={() => { setError(""); void load(); }} />
         {loading ? <LoadingState compact /> : error && !detail ? <ErrorState message={error} onRetry={() => void load()} /> : detail ? <>
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <MiniMetric label="Etapă" value={detail.statusLabel || detail.stageLabel} />
@@ -410,15 +417,15 @@ function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { k
             <ActionSummary action={detail.nextAction} />
           </section>
           {!canEdit ? <p className="rounded-md border border-slate-700 bg-focus-navy/40 px-4 py-3 text-sm text-slate-300">Ai acces complet la informații și istoric, fără drept de modificare.</p> : null}
-          {canEdit && selected.kind === "prospect" && ["prospecting", "qualified"].includes(detail.status) ? <QualifyPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, payload.action === "qualify_prospect" ? "Prospectul a fost calificat." : "Oportunitatea a fost creată.")} /> : null}
-          {canEdit && selected.kind === "opportunity" && ["opportunity", "quoted", "negotiation", "contracting"].includes(detail.stage) ? <OpportunityTransitionPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Etapa oportunității a fost actualizată.")} /> : null}
+          {canEdit && selected.kind === "prospect" && ["prospecting", "qualified"].includes(detail.status) ? <QualifyPanel detail={detail} pending={pending || !flow.ready || Boolean(flow.blocked)} onSubmit={(payload) => command(payload, payload.action === "qualify_prospect" ? "Prospectul a fost calificat." : "Oportunitatea a fost creată.")} /> : null}
+          {canEdit && selected.kind === "opportunity" && ["opportunity", "quoted", "negotiation", "contracting"].includes(detail.stage) ? <OpportunityTransitionPanel detail={detail} pending={pending || !flow.ready || Boolean(flow.blocked)} onSubmit={(payload) => command(payload, "Etapa oportunității a fost actualizată.")} /> : null}
           {selected.kind === "opportunity" && detail.stage === "won" ? <section className="rounded-lg border border-emerald-400/25 bg-emerald-950/25 p-4">
             <SectionTitle title="Predare catre portofoliul comercial" count={0} />
             <p className="text-sm text-slate-300">CRM-ul si portofoliul de clienti raman separate. Clientul si campania se creeaza sau se confirma numai printr-o actiune explicita.</p>
             {canEdit ? <div className="mt-4 flex justify-end"><Link className={primaryButton} href={`/admin/clienti?crmOpportunityId=${encodeURIComponent(detail.id)}`}><ArrowRight size={17} /> Pregateste clientul si campania</Link></div> : null}
           </section> : null}
-          {canEdit ? <ActivityPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Update-ul a fost adăugat în istoric.")} /> : null}
-          <details className="rounded-lg border border-slate-700 bg-focus-navy/25"><summary className="cursor-pointer px-4 py-3 font-black text-white">Firmă și contacte</summary><div className="border-t border-slate-700 p-4"><CompanyContacts detail={detail} canEdit={canEdit} pending={pending} command={command} /></div></details>
+          {canEdit ? <ActivityPanel detail={detail} pending={pending || !flow.ready || Boolean(flow.blocked)} onSubmit={(payload) => command(payload, "Update-ul a fost adăugat în istoric.")} /> : null}
+          <details className="rounded-lg border border-slate-700 bg-focus-navy/25"><summary className="cursor-pointer px-4 py-3 font-black text-white">Firmă și contacte</summary><div className="border-t border-slate-700 p-4"><CompanyContacts detail={detail} canEdit={canEdit} pending={pending || !flow.ready || Boolean(flow.blocked)} command={command} /></div></details>
           <section><SectionTitle title="Istoric" count={events.length} /><Timeline rows={events} /></section>
         </> : null}
       </div>

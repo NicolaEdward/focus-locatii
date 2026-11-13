@@ -63,10 +63,11 @@ async function main() {
     assert.equal((await denied!.text()).includes("SYN-PRINT-01"), false, "a streamed not-found response must contain no private offer");
     assert.equal(await deniedPage.locator(".quote-print-paper").count(), 0);
     const anonymous = await browser.newContext();
+    const anonymousResponse = await anonymous.request.get(route);
+    assert.equal((await anonymousResponse.text()).includes("SYN-PRINT-01"), false, "anonymous HTML must never contain private offer content");
     const anonymousPage = await anonymous.newPage();
-    const anonymousResult = await anonymousPage.goto(route, { timeout: 120000 });
+    await anonymousPage.goto(route, { timeout: 120000 });
     await anonymousPage.waitForURL((url) => url.pathname === "/admin/login", { timeout: 30000 });
-    assert.equal((await anonymousResult!.text()).includes("SYN-PRINT-01"), false);
     assert.deepEqual(errors, []);
     writeFileSync(resolve(output, "result.json"), JSON.stringify({ ok: true, groups: 8, desktop: "1440x1000", mobile: "390x844", pdfBytes: pdf.byteLength, cache: "private/no-store", privateData: "synthetic-only", states: ["draft watermark", "own seller", "foreign seller not-found view without private content", "anonymous login redirect"] }, null, 2));
     console.log(JSON.stringify({ ok: true, groups: 8, pdfBytes: pdf.byteLength, output }));

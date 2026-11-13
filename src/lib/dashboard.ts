@@ -580,7 +580,7 @@ function serializeCampaign(item: CampaignRow) {
   const amount = item.amount ?? item.monthlyRentShare ?? item.monthlyRentTotal ?? 0;
   const profit = calculateLocationProfit({
     monthlyRevenue: amount,
-    revenueCurrency: "EUR",
+    revenueCurrency: item.currency,
     monthlyCost: item.location.monthlyCost,
     costCurrency: item.location.costCurrency,
     periodStart: item.periodStart,
@@ -597,6 +597,7 @@ function serializeCampaign(item: CampaignRow) {
     id: item.id,
     campaignId: item.campaignId,
     reservationId: item.id,
+    updatedAt: item.updatedAt.toISOString(),
     clientId: item.clientId,
     locationId: item.location.id,
     code: item.location.code,
@@ -614,7 +615,7 @@ function serializeCampaign(item: CampaignRow) {
     sellerUserId: item.sellerUserId,
     status: item.status,
     amount,
-    currency: item.currency || "EUR",
+    currency: item.currency,
     paymentTermType: item.paymentTermType,
     paymentTermDays: item.paymentTermDays,
     billingRule: item.billingRule,
@@ -661,11 +662,12 @@ function serializeCampaignGroup(items: CampaignRow[]) {
   const rows = sorted.map(serializeCampaign);
   const periodStart = earliestDate(sorted.map((item) => item.periodStart)) || base.periodStart;
   const periodEnd = latestDate(sorted.map((item) => item.periodEnd)) || base.periodEnd;
-  const amount = roundMoney(rows.reduce((sum, item) => sum + (item.amount || 0), 0));
-  const revenue = roundMoney(rows.reduce((sum, item) => sum + (item.revenue || 0), 0));
-  const sameCostCurrency = rows.every((item) => item.costCurrency === rows[0]?.costCurrency);
-  const cost = sameCostCurrency ? roundMoney(rows.reduce((sum, item) => sum + (item.cost || 0), 0)) : 0;
-  const grossProfit = sameCostCurrency ? roundMoney(revenue - cost) : null;
+  const sameRevenueCurrency = Boolean(rows[0]?.revenueCurrency) && rows.every((item) => item.revenueCurrency === rows[0]?.revenueCurrency);
+  const amount = sameRevenueCurrency ? roundMoney(rows.reduce((sum, item) => sum + (item.amount || 0), 0)) : null;
+  const revenue = sameRevenueCurrency ? roundMoney(rows.reduce((sum, item) => sum + item.revenue, 0)) : null;
+  const sameCostCurrency = Boolean(rows[0]?.costCurrency) && rows.every((item) => item.costCurrency === rows[0]?.costCurrency && item.cost != null);
+  const cost = sameCostCurrency ? roundMoney(rows.reduce((sum, item) => sum + (item.cost || 0), 0)) : null;
+  const grossProfit = revenue != null && cost != null && rows.every((row) => row.costStatus === "ok") ? roundMoney(revenue - cost) : null;
 
   return {
     ...rows[0],
@@ -678,6 +680,7 @@ function serializeCampaignGroup(items: CampaignRow[]) {
     revenue,
     cost,
     grossProfit,
+    financialSummaryVerified: grossProfit != null,
     grossMargin: revenue && grossProfit != null ? Math.round((grossProfit / revenue) * 100) : null,
     periodStart: periodStart.toISOString(),
     periodEnd: periodEnd.toISOString(),

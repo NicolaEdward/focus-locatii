@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendDailyNotificationEmails, syncCrmNotifications, syncFinancialNotifications } from "@/lib/notifications";
 import { emitStructuredLog, observeRoute, safeErrorCode } from "@/lib/observability";
+import { syncOperationsControlAlerts } from "@/lib/operations-controls";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
         syncCrmNotifications()
       ]);
       const emailDigest = await sendDailyNotificationEmails();
+      const operationsControls = await syncOperationsControlAlerts();
       emitStructuredLog(emailDigest.failed ? "warn" : "info", "cron_completed", {
         durationMs: Math.round(performance.now() - startedAt),
         status: emailDigest.failed ? "partial" : "success",
@@ -37,7 +39,7 @@ export async function GET(request: NextRequest) {
           failedCount: emailDigest.failed
         }
       });
-      return NextResponse.json({ ok: true, financialCreated, crmCreated, emailDigest });
+      return NextResponse.json({ ok: true, financialCreated, crmCreated, emailDigest, operationsControls });
     } catch (error) {
       emitStructuredLog("error", "cron_failed", {
         durationMs: Math.round(performance.now() - startedAt),

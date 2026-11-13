@@ -11,7 +11,7 @@ export type QuoteSelectionDraft = {
   requestKey?: string;
   recipient?: string;
   assumptions?: string;
-  linePrices?: { locationId: string; monthlyRate: string; reason: string }[];
+  rateInputs?: { locationId: string; monthlyRate: string; reason: string }[];
   clientName: string;
   campaignName: string;
   companyEntity: string;
@@ -38,13 +38,13 @@ export function validateQuoteSelectionDraft(value: unknown, userId: string, now 
   if (v.requestKey !== undefined && (typeof v.requestKey !== "string" || v.requestKey.length < 8 || v.requestKey.length > 120 || !safeId.test(v.requestKey))) return null;
   if (v.recipient !== undefined && (typeof v.recipient !== "string" || v.recipient.length > 254)) return null;
   if (v.assumptions !== undefined && (typeof v.assumptions !== "string" || v.assumptions.length > 2000)) return null;
-  if (v.linePrices !== undefined && (!Array.isArray(v.linePrices) || v.linePrices.length > 50 || v.linePrices.some((line) => !line || typeof line !== "object" || typeof line.locationId !== "string" || !(v.locationIds as string[]).includes(line.locationId) || typeof line.monthlyRate !== "string" || !/^\d+(\.\d{1,2})?$/.test(line.monthlyRate) || Number(line.monthlyRate) <= 0 || typeof line.reason !== "string" || line.reason.trim().length < 3 || line.reason.length > 500))) return null;
+  if (v.rateInputs !== undefined && (!Array.isArray(v.rateInputs) || v.rateInputs.length > 50 || v.rateInputs.some((line) => !line || typeof line !== "object" || typeof line.locationId !== "string" || !(v.locationIds as string[]).includes(line.locationId) || typeof line.monthlyRate !== "string" || !/^\d+(\.\d{1,2})?$/.test(line.monthlyRate) || Number(line.monthlyRate) <= 0 || typeof line.reason !== "string" || line.reason.length > 500))) return null;
   return { ...v, locationIds: [...new Set(v.locationIds)] } as QuoteSelectionDraft;
 }
 
 export function saveQuoteSelectionDraft(draft: QuoteSelectionDraft): string {
   const validated = validateQuoteSelectionDraft(draft, draft.ownerUserId);
-  if (!validated) throw new Error("Selectează între 1 și 50 de locații și o perioadă completă înainte de ofertare.");
+  if (!validated) throw new Error("Verifică selecția de 1–50 de locații, perioada completă și prețurile propuse înainte de continuare.");
   const key = crypto.randomUUID();
   // Session storage keeps the handoff in this tab, isolated by account and expiry.
   window.sessionStorage.setItem(prefix + draft.ownerUserId + ":" + key, JSON.stringify(validated));

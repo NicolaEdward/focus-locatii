@@ -57,7 +57,7 @@ export function CommercialQuoteEditor({ data, quote, run, busy, onSaved }: { dat
       if (draft.requestKey) setRequestKey(draft.requestKey);
       if (draft.recipient !== undefined) setRecipient(draft.recipient);
       if (draft.assumptions !== undefined) setAssumptions(draft.assumptions);
-      if (draft.linePrices) { setRates((current) => ({ ...current, ...Object.fromEntries(draft.linePrices!.map((line) => [line.locationId, line.monthlyRate])) })); setReasons((current) => ({ ...current, ...Object.fromEntries(draft.linePrices!.map((line) => [line.locationId, line.reason])) })); }
+      if (draft.rateInputs) { setRates((current) => ({ ...current, ...Object.fromEntries(draft.rateInputs!.map((line) => [line.locationId, line.monthlyRate])) })); setReasons((current) => ({ ...current, ...Object.fromEntries(draft.rateInputs!.map((line) => [line.locationId, line.reason])) })); }
       setSeedNotice(`${draft.locationIds.length} locații și perioada au fost preluate din selector. Verifică clientul și campania înainte de salvare.`);
     }
     const matchingClients = draft?.clientName ? data.clients.filter((row) => normalized(row.companyName) === normalized(draft.clientName)) : [];
@@ -125,11 +125,8 @@ export function CommercialQuoteEditor({ data, quote, run, busy, onSaved }: { dat
   function openMap() {
     setLocalError("");
     try {
-      const linePrices = selectedRows.flatMap((row) => {
-        const monthlyRate = (rates[row.id] ?? String(row.rateCardValue ?? "")).replace(",", ".");
-        return Number(monthlyRate) !== row.rateCardValue ? [{ locationId: row.id, monthlyRate, reason: reasons[row.id] || "" }] : [];
-      });
-      const key = saveQuoteSelectionDraft({ quoteId: quote?.id, expectedRevision, requestKey, recipient, assumptions, linePrices, ownerUserId: userId, createdAt: Date.now(), clientId: clientId || undefined, campaignId: campaignId || undefined, opportunityId: opportunityId || undefined, clientName: client?.companyName || "", campaignName: campaign?.campaignName || "", companyEntity: entity, periodStart: from, periodEnd: to, locationIds: selected });
+      const rateInputs = selectedRows.map((row) => ({ locationId: row.id, monthlyRate: (rates[row.id] ?? String(row.rateCardValue ?? "")).replace(",", "."), reason: reasons[row.id] || "" }));
+      const key = saveQuoteSelectionDraft({ quoteId: quote?.id, expectedRevision, requestKey, recipient, assumptions, rateInputs, ownerUserId: userId, createdAt: Date.now(), clientId: clientId || undefined, campaignId: campaignId || undefined, opportunityId: opportunityId || undefined, clientName: client?.companyName || "", campaignName: campaign?.campaignName || "", companyEntity: entity, periodStart: from, periodEnd: to, locationIds: selected });
       window.location.assign(`/admin/selectie-locatii?selection=${encodeURIComponent(key)}`);
     } catch (cause) { setLocalError(cause instanceof Error ? cause.message : "Completează perioada și selectează cel puțin o locație."); }
   }

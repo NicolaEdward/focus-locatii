@@ -33,7 +33,7 @@ type SelectionState = {
   requestKey?: string;
   recipient?: string;
   assumptions?: string;
-  linePrices?: { locationId: string; monthlyRate: string; reason: string }[];
+  rateInputs?: { locationId: string; monthlyRate: string; reason: string }[];
   clientName: string;
   campaignName: string;
   periodStart: string;
@@ -132,7 +132,7 @@ export function AdminLocationSelectionPage({
         const location = initialData.locations.find((row) => row.id === id);
         return location ? [{ locationId: id, sortOrder, snapshot: toSelectionSnapshot(location), availabilityState: "UNKNOWN" as const, availabilityWarnings: [], suggestedBasePrice: location.suggestedBasePrice, currency: location.currency }] : [];
       }) });
-    } else if (savedSelection) setSelection(savedSelection);
+    } else if (savedSelection) setSelection({ ...savedSelection, quoteId: undefined, expectedRevision: undefined, requestKey: undefined, rateInputs: undefined, recipient: undefined, assumptions: undefined });
     if (handoffKey && !draft) setHandoffError("Selecția transferată a expirat sau nu aparține acestui cont. Selecția salvată rămâne disponibilă.");
     setSelectionLoaded(true);
   }, [initialData.locations, session.id]);
@@ -333,7 +333,7 @@ export function AdminLocationSelectionPage({
         clientId: selection.clientId, campaignId: selection.campaignId, opportunityId: selection.opportunityId,
         quoteId: selection.quoteId, expectedRevision: selection.expectedRevision, requestKey: selection.requestKey,
         recipient: selection.recipient, assumptions: selection.assumptions,
-        linePrices: selection.linePrices?.filter((line) => selection.items.some((item) => item.locationId === line.locationId)),
+        rateInputs: selection.rateInputs?.filter((line) => selection.items.some((item) => item.locationId === line.locationId)),
         clientName: selection.clientName, campaignName: selection.campaignName,
         companyEntity: selection.companyEntity, periodStart: selection.periodStart, periodEnd: selection.periodEnd,
         locationIds: selection.items.map((item) => item.locationId),
@@ -646,7 +646,7 @@ function readSavedSelection(userId: string): SelectionState | null {
       companyEntity: parsed.companyEntity || "Focus Media",
       clientId: parsed.clientId, campaignId: parsed.campaignId, opportunityId: parsed.opportunityId,
       quoteId: parsed.quoteId, expectedRevision: parsed.expectedRevision, requestKey: parsed.requestKey,
-      recipient: parsed.recipient, assumptions: parsed.assumptions, linePrices: parsed.linePrices,
+      recipient: parsed.recipient, assumptions: parsed.assumptions, rateInputs: parsed.rateInputs,
       clientName: parsed.clientName || "",
       campaignName: parsed.campaignName || "",
       periodStart: parsed.periodStart || "",

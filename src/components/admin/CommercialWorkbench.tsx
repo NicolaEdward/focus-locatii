@@ -573,7 +573,7 @@ function Quotes({
             quote={data.quotes.find((x) => x.id === revise)}
             run={run}
             busy={busy}
-            onSaved={(quoteId) => { setRevise(null); setEditorOpen(false); onBrowse({ quoteId, revisionPage: 1 }); }}
+            onSaved={(quoteId) => { setRevise(null); setEditorOpen(false); window.history.replaceState(null, "", `/admin/commercial-quotes?quoteId=${encodeURIComponent(quoteId)}`); onBrowse({ quoteId, revisionPage: 1 }); }}
           />}
         </section>
       )}

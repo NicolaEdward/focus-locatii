@@ -14,10 +14,11 @@ assert.equal(validateQuoteSelectionDraft({ ...valid, locationIds: [] }, "seller-
 assert.equal(validateQuoteSelectionDraft({ ...valid, locationIds: Array.from({ length: 51 }, (_, i) => "loc-" + i) }, "seller-a", now), null);
 assert.equal(validateQuoteSelectionDraft({ ...valid, locationIds: ["https://foreign.invalid"] }, "seller-a", now), null);
 assert.equal(validateQuoteSelectionDraft({ ...valid, campaignId: "../foreign" }, "seller-a", now), null);
-const revision = { ...valid, quoteId: "quote-a", expectedRevision: 4, requestKey: "intent-round-trip", recipient: "person@example.invalid", assumptions: "Contract-specific campaign", linePrices: [{ locationId: "loc-a", monthlyRate: "80.50", reason: "Approved package proposal" }] };
+const revision = { ...valid, quoteId: "quote-a", expectedRevision: 4, requestKey: "intent-round-trip", recipient: "person@example.invalid", assumptions: "Contract-specific campaign", rateInputs: [{ locationId: "loc-a", monthlyRate: "80.50", reason: "Approved package proposal" }] };
 assert.deepEqual(validateQuoteSelectionDraft(revision, "seller-a", now), { ...revision, locationIds: ["loc-a", "loc-b"] }, "Map round trips must preserve quote identity, expected revision, negotiated prices, recipient and idempotency intent.");
 assert.equal(validateQuoteSelectionDraft({ ...revision, expectedRevision: undefined }, "seller-a", now), null);
-assert.equal(validateQuoteSelectionDraft({ ...revision, linePrices: [{ ...revision.linePrices[0], locationId: "foreign" }] }, "seller-a", now), null);
-assert.equal(validateQuoteSelectionDraft({ ...revision, linePrices: [{ ...revision.linePrices[0], monthlyRate: "-1" }] }, "seller-a", now), null);
+assert.equal(validateQuoteSelectionDraft({ ...revision, rateInputs: [{ ...revision.rateInputs[0], locationId: "foreign" }] }, "seller-a", now), null);
+assert.equal(validateQuoteSelectionDraft({ ...revision, rateInputs: [{ ...revision.rateInputs[0], monthlyRate: "-1" }] }, "seller-a", now), null);
 assert.equal(validateQuoteSelectionDraft({ ...revision, requestKey: "x" }, "seller-a", now), null);
-console.log("Quote selection handoff: 16 account, expiry, calendar, bounded-payload and complete revision round-trip checks passed.");
+assert.deepEqual(validateQuoteSelectionDraft({ ...revision, rateInputs: [{ locationId: "loc-a", monthlyRate: "100.00", reason: "" }] }, "seller-a", now)?.rateInputs, [{ locationId: "loc-a", monthlyRate: "100.00", reason: "" }], "A deliberate reset to the catalog rate must survive the map round trip and must not resurrect an old discount.");
+console.log("Quote selection handoff: 17 account, expiry, calendar, bounded-payload and complete revision round-trip checks passed.");

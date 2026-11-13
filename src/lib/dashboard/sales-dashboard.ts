@@ -76,7 +76,7 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
       select: {
         id: true, campaignId: true, clientName: true, campaignName: true, periodStart: true, periodEnd: true,
         installationDate: true, neutralizationDate: true, productionNotes: true, location: { select: { code: true } },
-        _count: { select: { documents: { where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active" } } } }
+        _count: { select: { documents: { where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active", OR: [{ expiryDate: null }, { expiryDate: { gte: now } }] } } } }
       },
       orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }, { id: "asc" }], take: 500
     }),
@@ -146,7 +146,7 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
     }),
     ...operationalItems.map((row): SalesAgendaItem => ({
       id: row.id, kind: "operation", urgency: row.overdue ? "high" : "medium", title: `${row.locationCode} · ${row.clientName}`,
-      context: `${row.kind === "decoration" ? "Decorare" : "Neutralizare"} ${row.overdue ? "întârziată" : "programată"}`,
+      context: `${row.kind === "decoration" ? "Decorare" : "Neutralizare"} ${row.overdue ? "întârziată" : "programată"}${row.proofPhotoCount ? ` · ${row.proofPhotoCount} poze dovadă în dosar` : " · dovadă foto lipsă în dosar"}`,
       dueDate: row.dueDate, amount: null, currency: null, href: row.href, actionLabel: "Vezi operațional"
     })),
     ...holds.map((row): SalesAgendaItem => {

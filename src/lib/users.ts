@@ -4,6 +4,8 @@ import { hashPassword } from "@/lib/auth";
 import { assertRoleAssignmentAllowed, USER_ROLES, type UserRole } from "@/lib/rbac";
 import { assertUserCanBeDeactivated } from "@/lib/ownership-integrity";
 import { isSellerCapableRole } from "@/lib/sales-roles";
+import { invalidatePendingMfaChallenges } from "@/lib/auth-action-tokens";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
 
 const roleSchema = z.enum(USER_ROLES);
 
@@ -115,17 +117,39 @@ export async function updateUser(id: string, input: unknown, actorId: string, ac
   }
 
   const securityChanged = parsed.password !== undefined || parsed.role !== undefined || parsed.active !== undefined;
-  const user = await prisma.user.update({
-    where: { id },
-    data: {
-      ...(parsed.email !== undefined ? { email: parsed.email } : {}),
-      ...(parsed.name !== undefined ? { name: parsed.name } : {}),
-      ...(parsed.role !== undefined ? { role: parsed.role } : {}),
-      ...(parsed.active !== undefined ? { active: parsed.active } : {}),
-      ...(parsed.password !== undefined ? { passwordHash: await hashPassword(parsed.password) } : {}),
-      ...(securityChanged ? { tokenVersion: { increment: 1 } } : {})
-    },
-    include: { authMfaCredential: { select: { enabledAt: true } } }
+  const passwordHash = parsed.password !== undefined ? await hashPassword(parsed.password) : undefined;
+  const user = await prisma.$transaction(async (tx) => {
+    // A common ordering also protects the last active SUPER_ADMIN against two
+    // administrators concurrently deactivating/demoting each other.
+    await tx.$queryRaw`SELECT id FROM portfolio_users WHERE role = 'SUPER_ADMIN' ORDER BY id FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM portfolio_users WHERE id = ${id} FOR UPDATE`;
+    const current = await tx.user.findUniqueOrThrow({ where: { id } });
+    assertRoleAssignmentAllowed(actorRole, current.role as UserRole, parsed.role ?? current.role as UserRole);
+    const removesAdmin = current.role === "SUPER_ADMIN" && (parsed.role !== undefined && parsed.role !== "SUPER_ADMIN" || parsed.active === false);
+    if (removesAdmin && await tx.user.count({ where: { role: "SUPER_ADMIN", active: true } }) <= 1) {
+      throw new Error("Aplicatia trebuie sa pastreze cel putin un SUPER_ADMIN activ.");
+    }
+    const updated = await tx.user.update({
+      where: { id },
+      data: {
+        ...(parsed.email !== undefined ? { email: parsed.email } : {}),
+        ...(parsed.name !== undefined ? { name: parsed.name } : {}),
+        ...(parsed.role !== undefined ? { role: parsed.role } : {}),
+        ...(parsed.active !== undefined ? { active: parsed.active } : {}),
+        ...(passwordHash !== undefined ? { passwordHash } : {}),
+        ...(securityChanged ? { tokenVersion: { increment: 1 } } : {})
+      },
+      include: { authMfaCredential: { select: { enabledAt: true } } }
+    });
+    if (securityChanged) {
+      await invalidatePendingMfaChallenges(tx, id);
+      await tx.authSessionRecord.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+    }
+    await recordTransactionalAudit(tx, {
+      actor: { id: actorId, role: actorRole }, action: "user.access.updated", entityType: "user", entityId: id,
+      metadata: { before: { role: current.role, active: current.active }, after: { role: updated.role, active: updated.active }, sessionsRevoked: securityChanged }
+    });
+    return updated;
   });
   return serializeUser(user);
 }

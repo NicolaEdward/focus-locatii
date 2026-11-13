@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { randomOpaqueToken, securityHash } from "@/lib/security-secrets";
 import type { Prisma } from "@prisma/client";
 
-export const AUTH_ACTION_TYPES = ["MFA_LOGIN", "PASSWORD_RESET", "USER_INVITE"] as const;
+export const AUTH_ACTION_TYPES = ["MFA_LOGIN", "MFA_ENROLLMENT", "PASSWORD_RESET", "USER_INVITE"] as const;
 export type AuthActionType = typeof AUTH_ACTION_TYPES[number];
 
 export async function issueAuthActionToken(input: {
@@ -61,4 +61,11 @@ export async function findUsableAuthActionToken(type: AuthActionType, token: str
 
 export function authActionTokenHash(type: AuthActionType, token: string) {
   return securityHash(`auth-action:${type}`, token);
+}
+
+export async function invalidatePendingMfaChallenges(tx: Prisma.TransactionClient, userId: string) {
+  return tx.authActionToken.updateMany({
+    where: { userId, type: { in: ["MFA_LOGIN", "MFA_ENROLLMENT"] }, usedAt: null },
+    data: { usedAt: new Date() }
+  });
 }

@@ -14,6 +14,9 @@ import { AUTH_SESSION_SECONDS, createAuthSessionRecord, resolveRegisteredSession
 import { mutationRequestError } from "@/lib/request-security";
 import { authSecret, base64Url, secureEqual } from "@/lib/security-secrets";
 import { dceoBusinessMutationError } from "@/lib/business-mutation-policy";
+import { mfaEnrollmentRequired } from "@/lib/mfa-policy";
+import { ensureMutationAuditIntent } from "@/lib/mutation-audit-intent";
+import { emitStructuredLog } from "@/lib/observability";
 
 export const ADMIN_COOKIE = "focus_admin_session";
 
@@ -25,6 +28,7 @@ export type AuthSession = {
   tokenVersion: number;
   sessionId?: string;
   mfaVerifiedAt?: string;
+  auditRequestId?: string;
   iat: number;
   exp: number;
 };
@@ -77,6 +81,7 @@ async function resolveSession(session: AuthSession | null) {
   if (session.sessionId) {
     const record = await resolveRegisteredSession({ id: session.id, sessionId: session.sessionId, tokenVersion: session.tokenVersion });
     if (!record || !isUserRole(record.user.role)) return null;
+    if (mfaEnrollmentRequired(record.user.role) && !record.mfaVerifiedAt) return null;
     return {
       ...session,
       ...record.user,
@@ -89,6 +94,7 @@ async function resolveSession(session: AuthSession | null) {
     select: { id: true, email: true, name: true, role: true, tokenVersion: true }
   });
   if (!user || !isUserRole(user.role)) return null;
+  if (mfaEnrollmentRequired(user.role) && !session.mfaVerifiedAt) return null;
   return { ...session, ...user, role: user.role as UserRole };
 }
 
@@ -115,7 +121,7 @@ export async function requirePermission(request: NextRequest, permission: Permis
   if (!hasPermission(session.role, permission)) {
     return { session, response: NextResponse.json({ error: "Nu ai permisiunea necesara." }, { status: 403 }) };
   }
-  return { session, response: null };
+  return authorizeMutationIntent(request, session);
 }
 
 export async function requireAnyPermission(request: NextRequest, permissions: readonly Permission[]) {
@@ -130,7 +136,16 @@ export async function requireAnyPermission(request: NextRequest, permissions: re
   if (!hasAnyPermission(session.role, permissions)) {
     return { session, response: NextResponse.json({ error: "Nu ai permisiunea necesara." }, { status: 403 }) };
   }
-  return { session, response: null };
+  return authorizeMutationIntent(request, session);
+}
+
+async function authorizeMutationIntent(request: NextRequest, session: AuthSession) {
+  try {
+    return { session: await ensureMutationAuditIntent(request, session), response: null };
+  } catch {
+    emitStructuredLog("error", "mutation_audit_unavailable", { errorCode: "AUDIT_UNAVAILABLE" });
+    return { session, response: NextResponse.json({ error: "Cererea nu a fost executata deoarece jurnalul de audit nu este disponibil.", code: "AUDIT_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }) };
+  }
 }
 
 export async function requireAdmin(request: NextRequest) {
@@ -159,7 +174,7 @@ export async function establishAuthenticatedSession(
   request: NextRequest,
   mfaVerifiedAt?: Date | null
 ) {
-  const record = await createAuthSessionRecord(user.id, request, mfaVerifiedAt);
+  const record = await createAuthSessionRecord(user.id, request, mfaVerifiedAt, user.tokenVersion);
   setSessionCookie(response, {
     id: user.id,
     email: user.email,

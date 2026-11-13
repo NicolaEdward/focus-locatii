@@ -119,6 +119,7 @@
     "test:account-notifications": "node scripts/test-account-notifications.cjs",
     "audit:auth-hardening": "tsx scripts/audit-auth-hardening.ts",
     "test:auth-hardening": "tsx scripts/test-auth-hardening.ts",
+    "test:auth-remediation": "tsx scripts/test-auth-remediation.ts",
     "test:auth-hardening:preview": "tsx scripts/test-auth-hardening-preview.ts",
     "audit:domain-state-cleanup": "tsx scripts/audit-domain-state-cleanup.ts",
     "test:domain-state-cleanup": "tsx scripts/test-domain-state-cleanup.ts",

@@ -29,6 +29,7 @@ import {
 type Props = {
   initialUsers: UserDTO[];
   currentUserId: string;
+  currentUserRole: UserRole;
   invitesAvailable: boolean;
   readOnly?: boolean;
   roles: readonly RoleDefinition[];
@@ -51,6 +52,7 @@ const emptyCreateForm = {
 export function UserManagement({
   initialUsers,
   currentUserId,
+  currentUserRole,
   invitesAvailable,
   readOnly = false,
   roles
@@ -72,10 +74,14 @@ export function UserManagement({
   const [resetPasswordConfirmation, setResetPasswordConfirmation] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
   const [mfaResetUser, setMfaResetUser] = useState<UserDTO | null>(null);
+  const [mfaResetReason, setMfaResetReason] = useState("");
+  const [mfaIdentityVerified, setMfaIdentityVerified] = useState(false);
+  const [mfaResetBusy, setMfaResetBusy] = useState(false);
   const [auditUser, setAuditUser] = useState<UserDTO | null>(null);
   const [auditEvents, setAuditEvents] = useState<UserAuditEventDTO[]>([]);
   const [auditBusy, setAuditBusy] = useState(false);
   const [testInviteLink, setTestInviteLink] = useState<string | null>(null);
+  const assignableRoles = currentUserRole === "SUPER_ADMIN" ? USER_ROLES : USER_ROLES.filter((role) => role !== "SUPER_ADMIN" && role !== "D_CEO");
 
   const visibleUsers = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("ro-RO");
@@ -234,10 +240,11 @@ export function UserManagement({
   }
 
   async function resetMfa() {
-    if (!mfaResetUser) return;
+    if (!mfaResetUser || mfaResetBusy || !mfaIdentityVerified || mfaResetReason.trim().length < 3) return;
+    setMfaResetBusy(true);
     setMessage(null);
     try {
-      const response = await fetch(`/api/admin/users/${mfaResetUser.id}/reset-mfa`, { method: "POST" });
+      const response = await fetch(`/api/admin/users/${mfaResetUser.id}/reset-mfa`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reason: mfaResetReason, identityVerified: mfaIdentityVerified }) });
       const data = await response.json().catch(() => null);
       if (!response.ok) {
         setMessage({ tone: "error", text: data?.error || "MFA nu a putut fi resetat." });
@@ -252,8 +259,8 @@ export function UserManagement({
           : "Contul nu avea MFA activ. Sesiunile au fost revocate preventiv."
       });
     } catch {
-      setMessage({ tone: "error", text: "Conexiunea a fost intrerupta. MFA nu a fost modificat." });
-    }
+      setMessage({ tone: "error", text: "Conexiunea a fost intrerupta. Verifica starea contului inainte de a incerca din nou." });
+    } finally { setMfaResetBusy(false); }
   }
 
   async function openAudit(user: UserDTO) {
@@ -291,7 +298,7 @@ export function UserManagement({
             <p className="text-xs font-black uppercase text-focus-yellow">Administrare acces</p>
             <h1 className="font-display text-3xl font-black uppercase sm:text-4xl">Utilizatori si permisiuni</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-400">
-              Interfata canonica pentru conturi, roluri, autentificare si audit. Conturile cu istoric se dezactiveaza si nu se sterg.
+              Interfata canonica pentru conturi, roluri, autentificare si audit. Conturile cu istoric se dezactiveaza, nu se sterg.
             </p>
           </div>
           {!readOnly ? (
@@ -378,6 +385,7 @@ export function UserManagement({
                     {visibleUsers.map((user) => {
                       const role = roles.find((item) => item.id === user.role);
                       const self = user.id === currentUserId;
+                      const protectedTarget = currentUserRole !== "SUPER_ADMIN" && (user.role === "SUPER_ADMIN" || user.role === "D_CEO");
                       return (
                         <tr key={user.id} className="border-t border-focus-line align-top">
                           <td className="px-4 py-4">
@@ -386,7 +394,7 @@ export function UserManagement({
                             {self ? <span className="mt-1 inline-flex rounded border border-focus-yellow/40 px-1.5 py-0.5 text-[10px] font-black uppercase text-focus-yellow">Contul tau</span> : null}
                           </td>
                           <td className="px-4 py-4">
-                            {readOnly || self ? (
+                            {readOnly || self || protectedTarget ? (
                               <span className="font-bold text-slate-200">{ROLE_LABELS[user.role]}</span>
                             ) : (
                               <select
@@ -398,7 +406,7 @@ export function UserManagement({
                                   setChangeReason("");
                                 }}
                               >
-                                {USER_ROLES.map((item) => <option key={item} value={item}>{ROLE_LABELS[item]}</option>)}
+                                {assignableRoles.map((item) => <option key={item} value={item}>{ROLE_LABELS[item]}</option>)}
                               </select>
                             )}
                             <button className="mt-1 block min-h-8 text-left text-xs text-slate-400 underline decoration-slate-600 underline-offset-2" type="button" onClick={() => { setSelectedRole(user.role); setView("permissions"); }}>
@@ -422,11 +430,11 @@ export function UserManagement({
                             <td className="px-4 py-3">
                               <div className="flex flex-wrap gap-2">
                                 <IconAction label={`Istoric acces pentru ${user.name}`} onClick={() => openAudit(user)}><History size={16} /></IconAction>
-                                <IconAction label={`Reseteaza parola pentru ${user.name}`} disabled={self} onClick={() => setResettingUser(user)}><KeyRound size={16} /></IconAction>
-                                <IconAction label={`Reseteaza MFA pentru ${user.name}`} disabled={self} onClick={() => setMfaResetUser(user)}><ShieldCheck size={16} /></IconAction>
+                                <IconAction label={`Reseteaza parola pentru ${user.name}`} disabled={self || protectedTarget} onClick={() => setResettingUser(user)}><KeyRound size={16} /></IconAction>
+                                <IconAction label={`Reseteaza MFA pentru ${user.name}`} disabled={self || protectedTarget} onClick={() => { setMfaResetUser(user); setMfaResetReason(""); setMfaIdentityVerified(false); }}><ShieldCheck size={16} /></IconAction>
                                 <button
                                   className="focus-button secondary min-h-9"
-                                  disabled={self}
+                                  disabled={self || protectedTarget}
                                   type="button"
                                   onClick={() => {
                                     setPendingChange({ type: "status", user, active: !user.active });
@@ -467,7 +475,7 @@ export function UserManagement({
             </p>
             <Field label="Nume"><input className="focus-input" value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })} required /></Field>
             <Field label="Email"><input className="focus-input" type="email" value={createForm.email} onChange={(event) => setCreateForm({ ...createForm, email: event.target.value })} required /></Field>
-            <Field label="Rol"><select className="focus-input" value={createForm.role} onChange={(event) => setCreateForm({ ...createForm, role: event.target.value as UserRole })}>{USER_ROLES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></Field>
+            <Field label="Rol"><select className="focus-input" value={createForm.role} onChange={(event) => setCreateForm({ ...createForm, role: event.target.value as UserRole })}>{assignableRoles.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></Field>
             {createMode === "direct" ? (
               <>
                 <Field label="Parola temporara"><input className="focus-input" type="password" minLength={12} maxLength={128} autoComplete="new-password" value={createForm.password} onChange={(event) => setCreateForm({ ...createForm, password: event.target.value })} required /></Field>
@@ -523,13 +531,15 @@ export function UserManagement({
       ) : null}
 
       {mfaResetUser ? (
-        <Modal title={`Reseteaza MFA - ${mfaResetUser.name}`} onClose={() => setMfaResetUser(null)}>
+        <Modal title={`Reseteaza MFA - ${mfaResetUser.name}`} onClose={() => { if (!mfaResetBusy) setMfaResetUser(null); }}>
           <div className="grid gap-4">
             <p className="text-sm text-slate-300">Credentialul MFA si codurile de recuperare vor fi invalidate. Toate sesiunile active ale utilizatorului vor fi revocate.</p>
             <p className="rounded-lg border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">Utilizatorul va trebui sa configureze din nou MFA la urmatoarea autentificare, conform politicii rolului.</p>
+            <label className="grid gap-2"><span className="text-sm font-bold">Motivul resetarii MFA</span><textarea className="focus-input" value={mfaResetReason} maxLength={1000} disabled={mfaResetBusy} onChange={(event) => setMfaResetReason(event.target.value)} /></label>
+            <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={mfaIdentityVerified} disabled={mfaResetBusy} onChange={(event) => setMfaIdentityVerified(event.target.checked)} />Am verificat identitatea utilizatorului printr-un canal de incredere.</label>
             <div className="flex justify-end gap-2">
-              <button className="focus-button secondary" type="button" onClick={() => setMfaResetUser(null)}>Renunta</button>
-              <button className="focus-button" type="button" onClick={resetMfa}><ShieldCheck size={18} /> Reseteaza MFA</button>
+              <button className="focus-button secondary" type="button" disabled={mfaResetBusy} onClick={() => setMfaResetUser(null)}>Renunta</button>
+              <button className="focus-button" type="button" disabled={mfaResetBusy || !mfaIdentityVerified || mfaResetReason.trim().length < 3} onClick={resetMfa}><ShieldCheck size={18} />{mfaResetBusy ? "Se reseteaza..." : "Reseteaza MFA"}</button>
             </div>
           </div>
         </Modal>

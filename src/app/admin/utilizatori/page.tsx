@@ -14,5 +14,5 @@ export default async function UsersPage() {
   if (!session) redirect("/admin/login");
   if (!hasAnyPermission(session.role, ["users.view", "users.manage"])) redirect("/admin/dashboard");
   const canManage = hasPermission(session.role, "users.manage");
-  return <><AdminHeader session={session} /><UserManagement initialUsers={await listUsers()} currentUserId={session.id} invitesAvailable={canManage && (authEmailCapability().enabled || syntheticAuthFlowAllowed())} readOnly={!canManage} roles={roleCatalog()} /></>;
+  return <><AdminHeader session={session} /><UserManagement initialUsers={await listUsers()} currentUserId={session.id} currentUserRole={session.role} invitesAvailable={canManage && (authEmailCapability().enabled || syntheticAuthFlowAllowed())} readOnly={!canManage} roles={roleCatalog()} /></>;
 }

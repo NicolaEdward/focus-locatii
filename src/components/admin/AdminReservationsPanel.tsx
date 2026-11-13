@@ -28,6 +28,7 @@ import {
   XCircle
 } from "lucide-react";
 import { AdminSalesMap } from "@/components/admin/AdminSalesMap";
+import { OccupancySummary } from "@/components/admin/inventory/OccupancySummary";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 import type { AdminLocationListItemDTO, OccupancySummaryDTO, OfferRequestDTO, OfferRequestStatus, ReservationDTO, ReservationStatus } from "@/types/location";
@@ -301,6 +302,8 @@ export function AdminReservationsPanel({
   const [occupancySummary, setOccupancySummary] = useState<OccupancySummaryDTO>(
     initialOccupancySummary || summarizeReservationOccupancy(initialReservations)
   );
+  const [occupancyLoading, setOccupancyLoading] = useState(false);
+  const [occupancyError, setOccupancyError] = useState<string | null>(null);
   const [offerRequests, setOfferRequests] = useState(initialOfferRequests);
   const [form, setForm] = useState<ReservationForm>(initialForm);
   const [sellers, setSellers] = useState<SellerUser[]>([]);
@@ -346,6 +349,7 @@ export function AdminReservationsPanel({
 
   useEffect(() => {
     setOccupancySummary(initialOccupancySummary || summarizeReservationOccupancy(initialReservations));
+    setOccupancyError(null);
   }, [initialOccupancySummary, initialReservations]);
 
   useEffect(() => {
@@ -1240,19 +1244,29 @@ export function AdminReservationsPanel({
   }
 
   async function refreshLocations() {
-    const [locationsResponse, summaryResponse] = await Promise.all([
-      onLocationsUpdated
-        ? fetch(`/api/admin/reservation-locations?ts=${Date.now()}`, { cache: "no-store" })
-        : Promise.resolve(null),
-      fetch(`/api/reservations?view=occupancy-summary&ts=${Date.now()}`, { cache: "no-store" })
-    ]);
-    if (locationsResponse?.ok) {
-      const payload = await locationsResponse.json();
-      if (Array.isArray(payload.locations)) onLocationsUpdated?.(payload.locations);
-    }
-    if (summaryResponse.ok) {
-      const payload = await summaryResponse.json();
-      if (payload.summary) setOccupancySummary(payload.summary);
+    setOccupancyLoading(true);
+    setOccupancyError(null);
+    try {
+      const [locationsResult, summaryResult] = await Promise.allSettled([
+        onLocationsUpdated
+          ? fetch(`/api/admin/reservation-locations?ts=${Date.now()}`, { cache: "no-store" })
+          : Promise.resolve(null),
+        fetch(`/api/reservations?view=occupancy-summary&ts=${Date.now()}`, { cache: "no-store" })
+      ]);
+      if (locationsResult.status === "fulfilled" && locationsResult.value?.ok) {
+        const payload = await locationsResult.value.json().catch(() => null);
+        if (Array.isArray(payload?.locations)) onLocationsUpdated?.(payload.locations);
+      }
+      if (summaryResult.status !== "fulfilled" || !summaryResult.value.ok) throw new Error("OCCUPANCY_REFRESH_FAILED");
+      const payload = await summaryResult.value.json().catch(() => null);
+      if (!payload?.summary || typeof payload.summary !== "object") throw new Error("OCCUPANCY_SUMMARY_MISSING");
+      setOccupancySummary(payload.summary);
+    } catch {
+      // A read failure must not turn an already committed write into a failed
+      // save or replace the last verified inventory snapshot with zeros.
+      setOccupancyError("Disponibilitatea nu a putut fi actualizată.");
+    } finally {
+      setOccupancyLoading(false);
     }
   }
 
@@ -1275,22 +1289,17 @@ export function AdminReservationsPanel({
         </div>
 
         {!isFieldOperator ? (
-          <div className="mt-5 grid gap-3 md:grid-cols-5">
+          <div className="mt-5">
             {isOperationalWorkspace ? (
-              <>
+              <div className="grid gap-3 md:grid-cols-5">
                 <MiniStat label="Campanii operationale" value={operationalStats.reservations.toString()} />
                 <MiniStat label="Inchirieri viitoare" value={operationalStats.future.toString()} tone="green" />
                 <MiniStat label="Decorari de urmarit" value={operationalStats.decorations.toString()} tone="yellow" />
                 <MiniStat label="Neutralizari de urmarit" value={operationalStats.neutralizations.toString()} tone="yellow" />
                 <MiniStat label="Finalizate" value={operationalStats.completed.toString()} tone="green" />
-              </>
+              </div>
             ) : (
-              <>
-                <MiniStat label="Ocupate acum" value={occupancySummary.occupiedNow.toString()} tone="red" />
-                <MiniStat label="HOLD activ" value={occupancySummary.activeHolds.toString()} tone="yellow" />
-                <MiniStat label="Rezervari viitoare" value={occupancySummary.upcoming.toString()} />
-                <MiniStat label="Total blocante" value={occupancySummary.activeOrUpcoming.toString()} tone="green" />
-              </>
+              <OccupancySummary summary={occupancySummary} loading={occupancyLoading} error={occupancyError} onRefresh={refreshLocations} />
             )}
           </div>
         ) : null}

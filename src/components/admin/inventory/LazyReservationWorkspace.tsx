@@ -151,7 +151,7 @@ async function loadWorkspacePayload(request: ReservationWorkspaceRequest, signal
 }
 
 function emptyOccupancySummary(): OccupancySummaryDTO {
-  return { activeHolds: 0, occupiedNow: 0, upcoming: 0, activeOrUpcoming: 0 };
+  return { activeHolds: 0, occupiedNow: 0, upcoming: 0, activeOrUpcoming: 0, inventory: null };
 }
 
 async function readPayload(response: Response) {

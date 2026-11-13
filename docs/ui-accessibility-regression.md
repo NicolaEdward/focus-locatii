@@ -52,6 +52,8 @@ The capture matrix now includes light and dark for admin views (public pages
 retain their product theme). `CAPTURE_THEMES=light` may narrow a local spot check;
 the default release matrix uses both. Capture manifests include targeted contrast
 and structural bounds, and identify unmeasurable gradient/transparency cases.
+`CAPTURE_PAGE_FILTER` accepts comma-separated page-name fragments for a focused
+integration pass; an unset filter captures every registered route group.
 
 These checks are not full WCAG certification. Contrast over photographs and
 unknown gradients, screen-reader behavior, physical devices and complete user

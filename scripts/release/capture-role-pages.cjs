@@ -83,7 +83,8 @@ async function main() {
 
     const manifest = [];
     const pageFilter = String(process.env.CAPTURE_PAGE_FILTER || "").trim();
-    const selectedPages = pageFilter ? pages.filter((page) => page.name.includes(pageFilter)) : pages;
+    const pageFilters = pageFilter.split(",").map((filter) => filter.trim()).filter(Boolean);
+    const selectedPages = pageFilters.length ? pages.filter((page) => pageFilters.some((filter) => page.name.includes(filter))) : pages;
     if (!selectedPages.length) throw new Error(`No capture page matches CAPTURE_PAGE_FILTER=${pageFilter}.`);
     for (const page of selectedPages) {
       for (const viewport of viewports) {

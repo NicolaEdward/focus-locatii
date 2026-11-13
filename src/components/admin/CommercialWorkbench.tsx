@@ -623,6 +623,7 @@ function Quotes({
             <h2 className="text-lg font-black text-white">
               {revision.payload.clientName} · versiunea {revision.revision}
             </h2>
+            <Link className="focus-button secondary" href={`/admin/commercial-quotes/${encodeURIComponent(q.id)}/print?revision=${encodeURIComponent(revision.id)}`} target="_blank" rel="noopener noreferrer" prefetch={false}>Deschide oferta pentru PDF</Link>
             {data.permissions.write && (
               <button
                 type="button"
@@ -728,7 +729,7 @@ function Quotes({
               >
                 Cere aprobarea expedierii
               </button>
-              <button
+              {data.policy?.generationEnabled && data.capabilities.generationConfigured ? <button
                 type="button"
                 className="focus-button secondary"
                 disabled={
@@ -744,9 +745,10 @@ function Quotes({
                 }
               >
                 Generează introducere internă
-              </button>
+              </button> : null}
             </div>
           )}
+          {(!data.policy?.outboundEnabled || !data.capabilities.outboundConfigured) ? <p className="mt-3 text-sm text-slate-400">Expedierea automată nu este configurată. Poți pregăti, aproba și salva PDF-ul ofertei; aplicația nu trimite mesaje clientului.</p> : null}
           <form
             className="mt-3 flex flex-wrap items-end gap-3"
             onSubmit={(e) => {
@@ -845,7 +847,7 @@ function Quotes({
                       )}
                     {data.permissions.write &&
                       a.state === "approved" &&
-                      a.action === "send_quote" && (
+                      a.action === "send_quote" && data.policy?.outboundEnabled && data.capabilities.outboundConfigured && (
                         <button
                           type="button"
                           className="focus-button secondary"
@@ -948,7 +950,7 @@ function Quotes({
                     Verifică furnizorul; nu repeta automat trimiterea.
                   </p>
                 )}
-                {data.permissions.manage && d.state === "queued" && (
+                {data.permissions.manage && d.state === "queued" && data.policy?.outboundEnabled && data.capabilities.outboundConfigured && (
                   <button
                     type="button"
                     disabled={

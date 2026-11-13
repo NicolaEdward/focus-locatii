@@ -10,6 +10,10 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/admin/commercial-quotes/:path*",
+        headers: [{ key: "Cache-Control", value: "private, no-store, max-age=0" }]
+      },
+      {
         source: "/(.*)",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },

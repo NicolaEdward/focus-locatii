@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
+import { bucharestDateKey } from "@/lib/campaigns/campaign-effective-status";
 import { prisma } from "@/lib/prisma";
 import type { AuthSession } from "@/lib/auth";
 import { paymentTermDays } from "@/lib/billing";
@@ -11,7 +14,7 @@ import {
 import { companyEntityOrDefault, companyEntityOrThrow } from "@/lib/company-entities";
 import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
 import { resolveRequiredSalesOwner } from "@/lib/seller-users";
-import { isSellerCapableRole } from "@/lib/sales-roles";
+import { canDefaultSalesOwnerToActor } from "@/lib/sales-roles";
 
 const optionalText = z.preprocess((value) => {
   if (value == null || value === "") return null;
@@ -111,18 +114,24 @@ export async function updateCampaign(id: string, input: unknown, actor: AuthSess
 }
 
 export async function archiveCampaign(id: string, actor: AuthSession) {
-  const existing = await prisma.campaign.findUnique({ where: { id }, include: { client: true } });
-  if (!existing) throw new Error("Campania nu exista.");
-  assertCanMutateCampaign(existing, actor);
-  assertCampaignStatusTransition(existing.status, "archived");
-  const activeRentals = await prisma.reservation.count({ where: { campaignId: id, ...effectiveBlockingReservationWhere() } });
-  if (activeRentals > 0) {
-    throw new Error("Campania are inchirieri/hold-uri active. Anuleaza-le sau muta-le inainte de arhivare.");
-  }
-  return prisma.campaign.update({
-    where: { id },
-    data: { status: "archived", archivedAt: new Date() }
-  });
+  return prisma.$transaction(async (tx) => {
+    // Serialize archival with BOOKED creation/update: both lock the campaign
+    // before validating its live state. Historical sales remain intact.
+    await tx.$queryRaw`SELECT id FROM portfolio_campaigns WHERE id = ${id} FOR UPDATE`;
+    const existing = await tx.campaign.findUniqueOrThrow({ where: { id }, include: { client: true } });
+    assertCanMutateCampaign(existing, actor);
+    assertCampaignStatusTransition(existing.status, "archived");
+    const today = new Date(bucharestDateKey() + "T00:00:00.000Z");
+    const activeRentals = await tx.reservation.count({ where: {
+      campaignId: id,
+      ...effectiveBlockingReservationWhere(),
+      periodEnd: { gte: today }
+    } });
+    if (activeRentals > 0) throw new Error("Campania are inchirieri/hold-uri curente sau viitoare. Anuleaza-le sau muta-le inainte de arhivare.");
+    const campaign = await tx.campaign.update({ where: { id }, data: { status: "archived", archivedAt: new Date() } });
+    await recordTransactionalAudit(tx, { actor, action: "campaign.archive.committed", entityType: "campaign", entityId: id });
+    return campaign;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 5000, timeout: 15000 });
 }
 
 function assertCanMutateCampaign(
@@ -152,8 +161,8 @@ function normalizeCampaignForCreate(input: z.infer<typeof campaignInputSchema>, 
     paymentTermDays: paymentDays,
     billingRule: input.billingRule || "manual_per_contract",
     billingFrequency: input.billingFrequency || "monthly",
-    sellerUserId: input.sellerUserId || (isSellerCapableRole(actor.role) ? actor.id : null),
-    accountOwnerUserId: input.accountOwnerUserId || input.sellerUserId || (isSellerCapableRole(actor.role) ? actor.id : null)
+    sellerUserId: input.sellerUserId || (canDefaultSalesOwnerToActor(actor.role) ? actor.id : null),
+    accountOwnerUserId: input.accountOwnerUserId || input.sellerUserId || (canDefaultSalesOwnerToActor(actor.role) ? actor.id : null)
   };
 }
 

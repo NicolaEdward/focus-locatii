@@ -92,7 +92,7 @@ function main() {
   assert(!reservationWorkspace.includes("mustPreviewPeriod && (!currentPeriodPreview"), "a missing manual preview must not disable period save");
   assert(reservationWorkspace.includes('"Verifica si salveaza"'), "period save action must explain the automatic validation");
   assert(reservationsService.includes("reservationUpdateTransactionOptions"), "reservation edits must tolerate normal database latency");
-  assert(reservationsService.includes("resolveRentalContextForUpdate(parsed, existing, tx)"), "single edits must validate rental context inside the write transaction");
+  assert(reservationsService.includes("resolveRentalContextForUpdate(parsed, existing, tx, undefined, actor)"), "single edits must validate rental context and actor inside the write transaction");
   assert(reservationsService.includes("rentalContextCache"), "group edits must not reload the same client and campaign for every location");
   assert(reservationsService.includes("splitDecorationCostForGroup"), "group writes must divide the decoration total server-side");
   assert(reservationWorkspace.includes("editingGroupReservations"), "the editor must load the complete group before calculating totals");

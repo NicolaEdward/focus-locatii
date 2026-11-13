@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { AuthSession } from "@/lib/auth";
 import type { Prisma } from "@prisma/client";
-import { isSellerCapableRole, SELLER_CAPABLE_ROLES } from "@/lib/sales-roles";
+import { canDefaultSalesOwnerToActor, SELLER_CAPABLE_ROLES } from "@/lib/sales-roles";
 
 const assignerRoles = ["SALES_DIRECTOR", "COO", "SUPER_ADMIN"] as const;
 type SellerDbClient = typeof prisma | Prisma.TransactionClient;
@@ -34,8 +34,7 @@ export async function resolveRequiredSalesOwner(
   if (actor.role === "SALES_AGENT" && requestedUserId && requestedUserId !== actor.id) {
     throw new Error("Nu poti asigna inregistrarea catre alt vanzator.");
   }
-  const actorIsSeller = isSellerCapableRole(actor.role);
-  const targetUserId = requestedUserId || (actorIsSeller ? actor.id : null);
+  const targetUserId = requestedUserId || (canDefaultSalesOwnerToActor(actor.role) ? actor.id : null);
   if (!targetUserId) {
     throw new Error("Alege un agent sau director de vanzari responsabil.");
   }

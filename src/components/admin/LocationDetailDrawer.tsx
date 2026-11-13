@@ -55,7 +55,7 @@ type LocationTimelineResponse = {
       isBookable: boolean;
       reasons: string[];
       explanation: string;
-      dateSemantics: "INCLUSIVE_WITH_SAME_DAY_HANDOFF";
+      dateSemantics: "INCLUSIVE_CALENDAR_DAYS";
       activeOverride: ActiveLocationOverride;
     };
     periods: LocationTimelinePeriod[];

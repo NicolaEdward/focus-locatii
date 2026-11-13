@@ -65,8 +65,8 @@ async function main() {
   );
   await assert.rejects(
     () => createReservation({ locationId: location.id, status: "BOOKED", periodStart: "2035-01-01", periodEnd: "2035-01-10" }, agentSession),
-    /client existent/,
-    "new BOOKED requires canonical client and campaign"
+    (error: any) => error.status === 403,
+    "new BOOKED requires commercial confirmation permission before validating its links"
   );
 
   const client = await prisma.clientAccount.create({ data: { companyName: `Synthetic ${suffix}`, normalizedName: `synthetic ${suffix}`, accountOwnerUserId: source.id, createdByUserId: source.id, status: "active" } });

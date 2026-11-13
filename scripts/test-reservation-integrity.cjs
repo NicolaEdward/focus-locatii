@@ -110,13 +110,14 @@ async function main() {
     clientId: ctx.client.id,
     campaignId: ctx.campaign.id
   });
-  const sameDayHandoff = await createBooked(ctx.locationT.id, "2027-01-15", "2027-01-31", ctx, agentSession);
-  assert.equal(sameDayHandoff.status, "BOOKED", "BOOKED campaigns may hand off on the same calendar date");
   await rejects(
-    () => createBooked(ctx.locationT.id, "2027-01-10", "2027-01-20", ctx, agentSession),
-    "a real BOOKED overlap remains rejected"
+    () => createBooked(ctx.locationT.id, "2027-01-15", "2027-01-31", ctx, cooSession),
+    "BOOKED final calendar day remains occupied"
   );
-  assert.notEqual(previousBooked.id, sameDayHandoff.id);
+  const nextDayBooking = await createBooked(ctx.locationT.id, "2027-01-16", "2027-01-31", ctx, cooSession);
+  assert.equal(nextDayBooking.status, "BOOKED", "the following day is available");
+  await rejects(() => createBooked(ctx.locationT.id, "2027-03-01", "2027-03-31", ctx, agentSession), "agents cannot confirm BOOKED at creation");
+  assert.notEqual(previousBooked.id, nextDayBooking.id);
 
   const groupedDecoration = await createReservation({
     locationIds: [ctx.locationU.id, ctx.locationV.id],
@@ -127,8 +128,9 @@ async function main() {
     periodEnd: "2027-02-28",
     monthlyRentTotal: 1000,
     currency: "EUR",
-    productionNotes: withOperationCost(null, "decoration", 100, "EUR")
-  }, agentSession);
+    productionNotes: withOperationCost(null, "decoration", 100, "EUR"),
+    sellerUserId: ctx.agent.id
+  }, cooSession);
   created.reservations.push(...groupedDecoration.map((row) => row.id));
   const initialDecorationShares = groupedDecoration.map((row) =>
     Number(operationCost(row.productionNotes, "decoration").cost)
@@ -275,7 +277,7 @@ async function main() {
       "update non-overlap succeeds",
       "single reservation cancellation preserves its reason without an invalid Prisma field",
       "BOOKED conversion rechecks conflicts",
-      "BOOKED campaigns allow same-day operational handoff while real overlaps remain blocked",
+      "BOOKED final calendar day blocks and following day is available",
       "group decoration cost is divided exactly across locations",
       "concurrency overlapping create only one succeeds",
       "lifecycle and manual blocks reject writes",
@@ -375,7 +377,8 @@ async function createBooked(locationId, start, end, ctx, actor) {
     periodStart: start,
     periodEnd: end,
     monthlyRentTotal: 1000,
-    currency: "EUR"
+    currency: "EUR",
+    sellerUserId: ctx.agent.id
   }, actor);
   created.reservations.push(row.id);
   return row;
@@ -434,6 +437,7 @@ async function cleanup() {
   await prisma.clientAccount.deleteMany({ where: { id: { in: created.clients } } }).catch(() => null);
   await prisma.location.deleteMany({ where: { id: { in: created.locations } } }).catch(() => null);
   await prisma.category.deleteMany({ where: { id: { in: created.categories } } }).catch(() => null);
+  await prisma.auditLog.deleteMany({ where: { userId: { in: created.users } } }).catch(() => null);
   await prisma.user.deleteMany({ where: { id: { in: created.users } } }).catch(() => null);
 }
 
@@ -458,7 +462,7 @@ function loadLocalEnv() {
 
 function assertSyntheticEnvironment() {
   const appEnv = String(process.env.APP_ENV || "").trim().toLowerCase();
-  if (!["preview", "test"].includes(appEnv) || process.env.ALLOW_SYNTHETIC_SEED !== "true") {
+  if (!["preview", "test", "ci"].includes(appEnv) || process.env.ALLOW_SYNTHETIC_SEED !== "true") {
     throw new Error("Reservation integrity fixtures require an isolated Preview/Test database.");
   }
 }

@@ -55,6 +55,7 @@
     "audit:ownership-integrity": "tsx scripts/audit-ownership-integrity.ts",
     "test:ownership-integrity": "tsx scripts/test-ownership-integrity.ts",
     "test:reservation-integrity": "node scripts/test-reservation-integrity.cjs",
+    "test:reservation-remediation": "node scripts/test-reservation-remediation.cjs",
     "test:reservation-route-safety": "node scripts/test-reservation-route-safety.cjs",
     "test:database-read-retry": "tsx scripts/test-database-read-retry.ts",
     "test:reservation-lifecycle": "node scripts/test-reservation-lifecycle.cjs",

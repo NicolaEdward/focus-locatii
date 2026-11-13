@@ -1,3 +1,4 @@
+import { isDigitalLocationType } from "@/lib/location-medium";
 import { createHash } from "node:crypto";
 import type { OperationTaskReconciliationFinding } from "@/lib/dashboard/executive/operation-task-reconciliation-contracts";
 import {
@@ -171,7 +172,7 @@ export function buildOperationTaskCutoverReview(input: OperationTaskCutoverRevie
 export function mediaClassificationForLocationType(value?: string | null): OperationCutoverMediaClassification {
   const source = normalize(value);
   if (!source) return "UNKNOWN";
-  const digital = /(digital|led|ecran|screen|lcd|display|dooh)/i.test(source);
+  const digital = isDigitalLocationType(source);
   const physical = /(autocolant|sticker|vinyl|colant|mesh|panou|billboard|backlit|unipol|citylight|totem|st[aâ]lp|prisma|trivision|blockout|pasarela|pasaj|pod|bridge)/i.test(source);
   if (digital && physical) return "MIXED";
   if (digital) return "DIGITAL";

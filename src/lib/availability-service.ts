@@ -54,6 +54,7 @@ export async function loadAvailabilityDecisions(input: {
   periodEnd?: Date | null;
   referenceDate?: Date | null;
   ignoreReservationId?: string | null;
+  ignoreReservationIds?: string[];
   now?: Date;
   db?: AvailabilityDb;
   requireOverrideStorage?: boolean;
@@ -62,6 +63,7 @@ export async function loadAvailabilityDecisions(input: {
   const db = input.db || prisma;
   const now = input.now || new Date();
   const referenceDate = input.referenceDate || input.periodStart || input.periodEnd || startOfUtcDay(now);
+  const ignoredIds = [...new Set([...(input.ignoreReservationIds || []), ...(input.ignoreReservationId ? [input.ignoreReservationId] : [])])];
   if (!locationIds.length) {
     return { decisionsByLocationId: {}, locationsById: new Map(), reservationsById: new Map() };
   }
@@ -83,7 +85,7 @@ export async function loadAvailabilityDecisions(input: {
         locationId: { in: locationIds },
         ...effectiveBlockingReservationWhere(now),
         ...reservationPeriodWhere,
-        ...(input.ignoreReservationId ? { id: { not: input.ignoreReservationId } } : {})
+        ...(ignoredIds.length ? { id: { notIn: ignoredIds } } : {})
       },
       select: availabilityReservationSelect,
       orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }, { id: "asc" }]

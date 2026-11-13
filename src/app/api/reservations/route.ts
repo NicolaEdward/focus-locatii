@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
       }
       return NextResponse.json(
         { error: error instanceof Error ? error.message : "Rezervarea nu a putut fi salvata." },
-        { status: 400, headers: noStoreHeaders }
+        { status: error instanceof Error && "status" in error && error.status === 403 ? 403 : 400, headers: noStoreHeaders }
       );
     }
   });

@@ -15,6 +15,7 @@ const auditCalls = [];
 
 const prisma = {
   $transaction: async (callback) => callback({
+    auditLog: { create: async ({ data }) => ({ id: "audit-committed", ...data }) },
     reservation: {
       findMany: async () => rows.filter(isEligible).map(({ id, status, holdExpiresAt, createdAt }) => ({
         id,

@@ -1,8 +1,12 @@
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
 import { prisma } from "@/lib/prisma";
 import type { OfferRequestDTO } from "@/types/location";
 import { parseOfferRequestMeta, stripOfferRequestMeta, withOfferRequestMeta } from "@/lib/offer-request-meta";
 import type { AuthSession } from "@/lib/auth";
+
+class OfferRequestOwnershipError extends Error { readonly status = 403; }
 
 const crmLeadStatuses = ["NEW", "CONTACTED", "OFFER_SENT", "NEGOTIATION", "RESERVATION_CREATED", "WON", "LOST"] as const;
 
@@ -24,11 +28,13 @@ export const offerRequestPatchSchema = z.object({
   salesperson: z.string().trim().max(160).nullable().optional(),
   crmStatus: z.enum(crmLeadStatuses).nullable().optional(),
   estimatedValue: z.preprocess((value) => {
+    if (value === undefined) return undefined;
     if (value === "" || value == null) return null;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
   }, z.number().nonnegative().nullable().optional()),
   nextFollowUpAt: z.preprocess((value) => {
+    if (value === undefined) return undefined;
     if (value === "" || value == null) return null;
     const date = parseDate(value);
     return date ? date.toISOString() : null;
@@ -48,18 +54,22 @@ export async function createOfferRequest(input: unknown) {
 
   if (!locations.length) throw new Error("Selectia nu mai contine locatii publice.");
 
-  const request = await prisma.offerRequest.create({
-    data: {
-      status: "NEW",
-      clientName: parsed.clientName,
-      company: parsed.company,
-      email: parsed.email || null,
-      phone: parsed.phone,
-      message: parsed.message,
-      selectedLocationIds: locations.map((location) => location.id),
-      selectedCodes: locations.map((location) => location.code).join(", "),
-      source: parsed.source || "portal-client"
-    }
+  const request = await prisma.$transaction(async (tx) => {
+    const created = await tx.offerRequest.create({
+      data: {
+        status: "NEW",
+        clientName: parsed.clientName,
+        company: parsed.company,
+        email: parsed.email || null,
+        phone: parsed.phone,
+        message: parsed.message,
+        selectedLocationIds: locations.map((location) => location.id),
+        selectedCodes: locations.map((location) => location.code).join(", "),
+        source: parsed.source || "portal-client"
+      }
+    });
+    await recordTransactionalAudit(tx, { actor: null, action: "offer_request.create.committed", entityType: "offer_request", entityId: created.id });
+    return created;
   });
 
   return serializeOfferRequest(request);
@@ -87,80 +97,68 @@ export async function updateOfferRequestStatus(
   salesperson?: string | null,
   actor?: AuthSession | null
 ) {
-  const existing = await prisma.offerRequest.findUniqueOrThrow({
-    where: { id },
-    select: { source: true, ownerId: true }
-  });
-  assertOfferOwnership(existing, actor);
-  const request = await prisma.offerRequest.update({
-    where: { id },
-    data: {
-      status,
-      source: withOfferRequestMeta(existing.source, {
-        salesperson: actor?.role === "SALES_AGENT" ? actor.name : salesperson || undefined
-      }),
-      ownerId: actor?.role === "SALES_AGENT" ? actor.id : existing.ownerId
-    }
-  });
-
-  return serializeOfferRequest(request);
+  return mutateOfferRequest(id, actor, "offer_request.status.committed", (existing) => ({
+    status,
+    source: withOfferRequestMeta(existing.source, {
+      salesperson: actor?.role === "SALES_AGENT" ? actor.name : salesperson,
+      lastActivityAt: new Date().toISOString()
+    }),
+    ownerId: actor?.role === "SALES_AGENT" ? actor.id : existing.ownerId
+  }));
 }
 
 export async function updateOfferRequest(id: string, input: unknown, actor?: AuthSession | null) {
   const parsed = offerRequestPatchSchema.parse(input);
-  const existing = await prisma.offerRequest.findUniqueOrThrow({
-    where: { id },
-    select: { source: true, ownerId: true, status: true }
-  });
-  assertOfferOwnership(existing, actor);
-  const currentMeta = parseOfferRequestMeta(existing.source);
-  const salesperson = actor?.role === "SALES_AGENT" ? actor.name : parsed.salesperson ?? currentMeta.salesperson;
-  const request = await prisma.offerRequest.update({
-    where: { id },
-    data: {
+  return mutateOfferRequest(id, actor, "offer_request.update.committed", (existing) => {
+    const current = parseOfferRequestMeta(existing.source);
+    return {
       ...(parsed.status ? { status: parsed.status } : {}),
       source: withOfferRequestMeta(existing.source, {
-        salesperson,
-        crmStatus: parsed.crmStatus ?? currentMeta.crmStatus ?? statusToCrmStatus(parsed.status || existing.status),
-        estimatedValue: parsed.estimatedValue ?? currentMeta.estimatedValue ?? null,
-        nextFollowUpAt: parsed.nextFollowUpAt ?? currentMeta.nextFollowUpAt ?? null,
-        notes: parsed.notes ?? currentMeta.notes ?? null,
+        salesperson: actor?.role === "SALES_AGENT" ? actor.name : parsed.salesperson,
+        crmStatus: parsed.crmStatus === undefined ? current.crmStatus || statusToCrmStatus(parsed.status || existing.status) : parsed.crmStatus,
+        estimatedValue: parsed.estimatedValue,
+        nextFollowUpAt: parsed.nextFollowUpAt,
+        notes: parsed.notes,
         lastActivityAt: new Date().toISOString()
       }),
       ownerId: actor?.role === "SALES_AGENT" ? actor.id : existing.ownerId
-    }
+    };
   });
-
-  return serializeOfferRequest(request);
 }
 
 export async function softDeleteOfferRequest(id: string, actor?: AuthSession | null) {
-  const existing = await prisma.offerRequest.findUniqueOrThrow({
-    where: { id },
-    select: { source: true, ownerId: true }
-  });
-  assertOfferOwnership(existing, actor);
-  const request = await prisma.offerRequest.update({
-    where: { id },
-    data: {
-      status: "ARCHIVED",
-      source: withOfferRequestMeta(existing.source, {
-        deletedAt: new Date().toISOString()
-      })
-    }
-  });
+  return mutateOfferRequest(id, actor, "offer_request.archive.committed", (existing) => ({
+    status: "ARCHIVED",
+    source: withOfferRequestMeta(existing.source, { deletedAt: new Date().toISOString() })
+  }));
+}
 
-  return serializeOfferRequest(request);
+async function mutateOfferRequest(
+  id: string,
+  actor: AuthSession | null | undefined,
+  action: string,
+  patch: (existing: { source: string | null; ownerId: string | null; status: string }) => Prisma.OfferRequestUncheckedUpdateInput
+) {
+  return prisma.$transaction(async (tx) => {
+    // The locking read serializes claims. A waiting claimant re-reads the winner's
+    // owner before deriving metadata, so two sellers cannot both report success.
+    await tx.$queryRaw`SELECT id FROM portfolio_offer_requests WHERE id = ${id} FOR UPDATE`;
+    const existing = await tx.offerRequest.findUniqueOrThrow({ where: { id } });
+    assertOfferOwnership(existing, actor);
+    const request = await tx.offerRequest.update({ where: { id }, data: patch(existing) });
+    await recordTransactionalAudit(tx, { actor, action, entityType: "offer_request", entityId: id });
+    return serializeOfferRequest(request);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 5000, timeout: 15000 });
 }
 
 function assertOfferOwnership(request: { ownerId: string | null; source: string | null }, actor?: AuthSession | null) {
   if (!actor || actor.role !== "SALES_AGENT") return;
   const salesperson = parseOfferRequestMeta(request.source).salesperson;
   if (request.ownerId && request.ownerId !== actor.id) {
-    throw new Error("Solicitarea este deja alocata altui agent.");
+    throw new OfferRequestOwnershipError("Solicitarea este deja alocata altui agent.");
   }
   if (!request.ownerId && salesperson && ![actor.name, actor.email].includes(salesperson)) {
-    throw new Error("Solicitarea este deja alocata altui agent.");
+    throw new OfferRequestOwnershipError("Solicitarea este deja alocata altui agent.");
   }
 }
 

@@ -100,7 +100,10 @@ async function run({ generate = false, apply = false } = {}) {
       for (const fk of spec.foreignKeys) {
         const parent = manifest.tables[fk.targetTable] || await shape(db, source.name, fk.targetTable);
         const from = spec.columns.find((c) => c.name === fk.columnName), to = parent?.columns.find((c) => c.name === fk.targetColumn);
-        if (!parent || parent.storage?.engine !== 'InnoDB' || !from || !to || from.type !== to.type || from.charsetName !== to.charsetName || from.collationName !== to.collationName || !parent.indexes.some((i) => i.columnName === fk.targetColumn && Number(i.sequence) === 1)) throw new Error('FOREIGN_KEY_PARENT_INCOMPATIBLE');
+        if (!parent || parent.storage?.engine !== 'InnoDB' || !from || !to || from.type !== to.type || from.charsetName !== to.charsetName || from.collationName !== to.collationName || !parent.indexes.some((i) => i.columnName === fk.targetColumn && Number(i.sequence) === 1)) {
+          console.log(JSON.stringify({ event:'remediation_foreign_key_preflight', childTable:table, childColumn:fk.columnName, parentTable:fk.targetTable, parentColumn:fk.targetColumn, expected:from ? {type:from.type,charset:from.charsetName,collation:from.collationName}:null, actual:to ? {type:to.type,charset:to.charsetName,collation:to.collationName,engine:parent.storage?.engine}:null }));
+          throw new Error('FOREIGN_KEY_PARENT_INCOMPATIBLE');
+        }
       }
     }
     if (apply || generate) for (const s of validated.parsed) {

@@ -193,7 +193,9 @@
     "test:public-business-errors": "tsx scripts/test-public-business-errors.ts",
     "test:commercial-quote-print": "tsx scripts/test-commercial-quote-print.ts",
     "smoke:ooh-workspace-states": "node scripts/release/smoke-ooh-workspace-states.cjs",
-    "smoke:commercial-quote-print": "tsx scripts/test-commercial-quote-print-browser.ts"
+    "smoke:commercial-quote-print": "tsx scripts/test-commercial-quote-print-browser.ts",
+    "test:operational-proof-upload": "tsx scripts/test-operational-proof-upload.ts",
+    "test:operational-proof-browser": "node scripts/test-operational-proof-browser.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

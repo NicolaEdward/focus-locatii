@@ -1,5 +1,8 @@
 # Operations And Finance Roadmap
 
+> Historical planning snapshot. For current operations, financial attribution and
+> verification boundaries, read [OOH_COMPANY_WORKSPACE.md](OOH_COMPANY_WORKSPACE.md).
+
 Date: 2026-06-29
 
 Goal: build practical operational and financial control without making OperationTask authoritative prematurely and without bypassing SmartBill preview/review safety.

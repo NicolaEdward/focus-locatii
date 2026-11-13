@@ -115,6 +115,8 @@ jobs:
           pnpm run test:public-business-errors
           pnpm run test:quote-selection-bridge
           pnpm run test:reservation-amendments
+          pnpm run test:operational-proof-upload
+          pnpm run test:operational-proof-browser
           pnpm run test:segmented-billing
           pnpm run test:workspace-finance-attribution
           pnpm run test:workplace-onboarding

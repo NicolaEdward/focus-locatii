@@ -8,6 +8,7 @@ import { isProductionSketchImage } from "@/lib/location-images";
 import { displayPhotoUrl, samplePhotoForCode } from "@/lib/photos";
 import { effectiveBlockingReservationWhere, isEffectiveBlockingReservation } from "@/lib/reservation-lifecycle";
 import { sortOperationalLocations } from "@/lib/location-order";
+import { canReadReservationDetails, reservationDetailsWhere, type ReservationReader } from "@/lib/reservation-read-access";
 import type {
   AdminLocationListItemDTO,
   AdminLocationPageDTO,
@@ -219,6 +220,8 @@ type SerializeLocationOptions = {
   includeHiddenCommercials?: boolean;
   includePrivateFields?: boolean;
   includeReservationDetails?: boolean;
+  reservationViewer?: ReservationReader | null;
+  reservationDetails?: AdminLocationWithRelations["reservations"];
 };
 
 export function serializeLocation(location: LocationWithRelations, options: SerializeLocationOptions = {}): LocationDTO {
@@ -346,7 +349,9 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
       isMain: image.isMain
     })),
     reservations: exposePrivateFields && options.includeReservationDetails !== false
-      ? (location.reservations as AdminLocationWithRelations["reservations"]).map((reservation) => ({
+      ? (options.reservationDetails || location.reservations as AdminLocationWithRelations["reservations"])
+        .filter((reservation) => canReadReservationDetails(options.reservationViewer, reservation))
+        .map((reservation) => ({
           id: reservation.id,
           locationId: reservation.locationId,
           clientId: reservation.clientId,
@@ -589,13 +594,22 @@ export async function getPublicLocation(id: string) {
   return location ? serializeLocation(location) : null;
 }
 
-export async function getAdminLocation(id: string) {
+export async function getAdminLocation(id: string, viewer?: ReservationReader | null) {
   const location = await prisma.location.findUnique({
     where: { id },
-    include: adminLocationInclude
+    include: publicLocationInclude(new Date())
   });
-
-  return location ? serializeLocation(location, { includeHiddenCommercials: true, includePrivateFields: true }) : null;
+  if (!location) return null;
+  // Fetch only authorized private rows. Occupancy still includes every blocker
+  // through the separate, minimal availability projection above.
+  const details = viewer ? await prisma.reservation.findMany({
+    where: { AND: [{ locationId: id }, reservationDetailsWhere(viewer)] },
+    orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
+  }) : [];
+  return serializeLocation(location, {
+    includeHiddenCommercials: true, includePrivateFields: true,
+    reservationViewer: viewer, reservationDetails: details
+  });
 }
 
 function adminLocationListWhere(filters: AdminLocationListFilters): Prisma.LocationWhereInput {

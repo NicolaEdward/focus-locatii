@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
   await recordAudit({ actor: session, action: "location.create", entityType: "location", entityId: full.id, metadata: { code: full.code }, request });
 
   return NextResponse.json(
-    { location: serializeLocation(full, { includeHiddenCommercials: true, includePrivateFields: true }) },
+    { location: serializeLocation(full, { includeHiddenCommercials: true, includePrivateFields: true, reservationViewer: session }) },
     { status: 201, headers: noStoreHeaders }
   );
 }

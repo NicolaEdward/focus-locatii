@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import { canReadReservationDetails, reservationDetailsWhere, type ReservationReader } from "../src/lib/reservation-read-access";
+const agent: ReservationReader = { id: "agent-a", name: "Agent A", email: "agent-a@synthetic.test", role: "SALES_AGENT" };
+const foreign = { ownerId: "agent-b", sellerUserId: "agent-b", salesperson: "Agent B" };
+assert.equal(canReadReservationDetails(agent, foreign), false);
+assert.equal(canReadReservationDetails(agent, { ownerId: "agent-a", sellerUserId: "agent-a", salesperson: "Agent A" }), true);
+assert.equal(canReadReservationDetails(agent, { ownerId: null, sellerUserId: "agent-b", salesperson: "Agent A" }), false, "legacy name cannot override an explicit seller");
+assert.equal(canReadReservationDetails(agent, { ownerId: null, sellerUserId: null, salesperson: "Agent A" }), true);
+assert.equal(canReadReservationDetails(null, foreign), false, "private serializer fails closed without an actor");
+for (const role of ["SUPER_ADMIN", "COO", "SALES_DIRECTOR", "D_CEO"] as const) assert.equal(canReadReservationDetails({ ...agent, role }, foreign), true);
+for (const role of ["FINANCE_OPERATOR", "FIELD_OPERATOR"] as const) assert.equal(canReadReservationDetails({ ...agent, role }, foreign), false);
+assert.deepEqual(reservationDetailsWhere(undefined), { id: { in: [] } });
+assert.equal(JSON.stringify(reservationDetailsWhere(agent)).includes('"ownerId":"agent-b"'), false);
+console.log("Reservation private-read policy passed");

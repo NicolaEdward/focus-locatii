@@ -28,9 +28,9 @@ export async function GET(request: NextRequest, context: Context) {
       import("@/lib/auth"),
       import("@/lib/locations")
     ]);
-    const { response } = await requirePermission(request, "inventory.view");
-    if (response) return response;
-    const location = await getAdminLocation(id);
+    const { session, response } = await requirePermission(request, "inventory.view");
+    if (response || !session) return response;
+    const location = await getAdminLocation(id, session);
     return location
       ? NextResponse.json({ location }, { headers: noStoreHeaders })
       : NextResponse.json({ error: "Location not found" }, { status: 404, headers: noStoreHeaders });
@@ -71,7 +71,7 @@ export async function PATCH(request: NextRequest, context: Context) {
   await recordAudit({ actor: session, action: "location.update", entityType: "location", entityId: id, metadata: { code: full.code }, request });
 
   return NextResponse.json(
-    { location: serializeLocation(full, { includeHiddenCommercials: true, includePrivateFields: true }) },
+    { location: serializeLocation(full, { includeHiddenCommercials: true, includePrivateFields: true, reservationViewer: session }) },
     { headers: noStoreHeaders }
   );
 }

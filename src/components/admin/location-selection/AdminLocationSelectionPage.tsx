@@ -13,6 +13,7 @@ import {
   toSelectionSnapshot
 } from "@/lib/location-selection-client";
 import type { AuthSession } from "@/lib/auth";
+import { readQuoteSelectionDraft, saveQuoteSelectionDraft } from "@/lib/quote-selection-bridge";
 import type {
   LocationSelectionAvailability,
   LocationSelectionAvailabilityState,
@@ -24,6 +25,9 @@ import type {
 
 type SelectionState = {
   companyEntity: string;
+  clientId?: string;
+  campaignId?: string;
+  opportunityId?: string;
   clientName: string;
   campaignName: string;
   periodStart: string;
@@ -58,6 +62,7 @@ export function AdminLocationSelectionPage({
   const [fitKey, setFitKey] = useState("initial");
   const [showMap, setShowMap] = useState(false);
   const [availabilityRefreshKey, setAvailabilityRefreshKey] = useState(0);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
   const availabilityRequestRef = useRef(0);
 
   const selectedIds = useMemo(() => new Set(selection.items.map((item) => item.locationId)), [selection.items]);
@@ -112,10 +117,19 @@ export function AdminLocationSelectionPage({
   const seed = useMemo(() => buildMediaPlanSeedFromSelection(selectionPayload), [selectionPayload]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const handoffKey = params.get("selection");
+    const draft = handoffKey ? readQuoteSelectionDraft(handoffKey, session.id) : null;
     const savedSelection = readSavedSelection(session.id);
-    if (savedSelection) setSelection(savedSelection);
+    if (draft) {
+      setSelection({ ...draft, items: draft.locationIds.flatMap((id, sortOrder) => {
+        const location = initialData.locations.find((row) => row.id === id);
+        return location ? [{ locationId: id, sortOrder, snapshot: toSelectionSnapshot(location), availabilityState: "UNKNOWN" as const, availabilityWarnings: [], suggestedBasePrice: location.suggestedBasePrice, currency: location.currency }] : [];
+      }) });
+    } else if (savedSelection) setSelection(savedSelection);
+    if (handoffKey && !draft) setHandoffError("Selecția transferată a expirat sau nu aparține acestui cont. Selecția salvată rămâne disponibilă.");
     setSelectionLoaded(true);
-  }, [session.id]);
+  }, [initialData.locations, session.id]);
 
   useEffect(() => {
     if (!selectionLoaded) return;
@@ -305,6 +319,22 @@ export function AdminLocationSelectionPage({
     await navigator.clipboard?.writeText(codes).catch(() => undefined);
   }, [selection.items]);
 
+  const createCommercialQuote = useCallback(() => {
+    setHandoffError(null);
+    try {
+      const key = saveQuoteSelectionDraft({
+        ownerUserId: session.id, createdAt: Date.now(),
+        clientId: selection.clientId, campaignId: selection.campaignId, opportunityId: selection.opportunityId,
+        clientName: selection.clientName, campaignName: selection.campaignName,
+        companyEntity: selection.companyEntity, periodStart: selection.periodStart, periodEnd: selection.periodEnd,
+        locationIds: selection.items.map((item) => item.locationId),
+      });
+      window.location.assign(`/admin/commercial-quotes?selection=${encodeURIComponent(key)}`);
+    } catch (cause) {
+      setHandoffError(cause instanceof Error ? cause.message : "Selecția nu a putut fi transferată. Verifică dacă stocarea în browser este permisă.");
+    }
+  }, [selection, session.id]);
+
   const periodError =
     periodInvalid
       ? "Data de final trebuie sa fie dupa data de start."
@@ -356,7 +386,7 @@ export function AdminLocationSelectionPage({
                 type="text"
                 maxLength={160}
                 value={selection.clientName}
-                onChange={(event) => setSelection((current) => ({ ...current, clientName: event.target.value }))}
+                onChange={(event) => setSelection((current) => ({ ...current, clientName: event.target.value, clientId: undefined, campaignId: undefined }))}
                 placeholder="Optional"
               />
             </Field>
@@ -366,7 +396,7 @@ export function AdminLocationSelectionPage({
                 type="text"
                 maxLength={160}
                 value={selection.campaignName}
-                onChange={(event) => setSelection((current) => ({ ...current, campaignName: event.target.value }))}
+                onChange={(event) => setSelection((current) => ({ ...current, campaignName: event.target.value, campaignId: undefined }))}
                 placeholder="Optional"
               />
             </Field>
@@ -470,6 +500,9 @@ export function AdminLocationSelectionPage({
           periodStart={selection.periodStart}
           periodEnd={selection.periodEnd}
           exportHref={exportHref}
+          onCreateQuote={createCommercialQuote}
+          quoteBlockedReason={!selection.items.length ? "Adaugă locații pentru ofertă." : selection.items.length > 50 ? "O ofertă poate conține maximum 50 de locații." : !periodValid ? "Completează perioada ofertei." : availabilityLoading ? "Așteaptă verificarea disponibilității." : availabilityError ? "Reîncearcă verificarea disponibilității." : selection.items.some((item) => availabilityById[item.locationId]?.state !== "AVAILABLE") ? "Pentru ofertă, toate locațiile trebuie să fie disponibile pe întreaga perioadă." : null}
+          handoffError={handoffError}
           onRemove={removeLocation}
           onClear={clearSelection}
           onRemoveConflicts={removeConflicted}
@@ -602,6 +635,7 @@ function readSavedSelection(userId: string): SelectionState | null {
     if (!Array.isArray(parsed.items)) return null;
     return {
       companyEntity: parsed.companyEntity || "Focus Media",
+      clientId: parsed.clientId, campaignId: parsed.campaignId, opportunityId: parsed.opportunityId,
       clientName: parsed.clientName || "",
       campaignName: parsed.campaignName || "",
       periodStart: parsed.periodStart || "",

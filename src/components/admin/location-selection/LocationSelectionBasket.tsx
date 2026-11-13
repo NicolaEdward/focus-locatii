@@ -20,7 +20,10 @@ export function LocationSelectionBasket({
   onClear,
   onRemoveConflicts,
   onMove,
-  onCopyCodes
+  onCopyCodes,
+  onCreateQuote,
+  quoteBlockedReason,
+  handoffError
 }: {
   items: LocationSelectionItem[];
   availabilityById: Record<string, LocationSelectionAvailability>;
@@ -34,9 +37,14 @@ export function LocationSelectionBasket({
   onRemoveConflicts: () => void;
   onMove: (locationId: string, direction: -1 | 1) => void;
   onCopyCodes: () => void;
+  onCreateQuote: () => void;
+  quoteBlockedReason: string | null;
+  handoffError: string | null;
 }) {
   const totalSurface = items.reduce((sum, item) => sum + (item.snapshot.surface || 0), 0);
   const estimatedTotal = items.reduce((sum, item) => sum + (item.suggestedBasePrice || 0), 0);
+  const currencies = [...new Set(items.map((item) => item.currency).filter(Boolean))];
+  const estimateLabel = currencies.length === 1 && items.every((item) => item.suggestedBasePrice != null && item.currency) ? `${estimatedTotal.toLocaleString("ro-RO")} ${currencies[0]}/lună` : "De verificat";
   const currentAvailability = (item: LocationSelectionItem) => availabilityById[item.locationId];
   const warningCount = items.filter((item) => {
     const availability = currentAvailability(item);
@@ -54,7 +62,7 @@ export function LocationSelectionBasket({
         </div>
         <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
           <Metric label="Suprafata" value={totalSurface ? `${round(totalSurface)} mp` : "-"} />
-          <Metric label="Estimare" value={estimatedTotal ? `${estimatedTotal.toLocaleString("ro-RO")} EUR` : "-"} />
+          <Metric label="Estimare" value={items.length ? estimateLabel : "-"} />
           <Metric label="Avertizari" value={String(warningCount)} />
         </div>
         {conflictCount ? (
@@ -95,14 +103,11 @@ export function LocationSelectionBasket({
             {warnings.slice(0, 3).map((warning) => <p key={warning}>{warning}</p>)}
           </div>
         ) : null}
-        <button
-          className="cursor-not-allowed rounded-lg border border-focus-line bg-focus-ink/80 px-4 py-3 text-center text-sm font-black uppercase text-slate-400"
-          type="button"
-          disabled
-          title="Disponibil dupa activarea modulului Media Plan."
-        >
-          Continua catre Media Plan - urmatorul pas
+        <button className="focus-button justify-center" type="button" disabled={Boolean(quoteBlockedReason)} onClick={onCreateQuote}>
+          Creează oferta cu aceste locații
         </button>
+        {quoteBlockedReason ? <p className="text-xs text-slate-300">{quoteBlockedReason}</p> : <p className="text-xs text-slate-300">Clientul, perioada și locațiile se transferă în oferta comercială.</p>}
+        {handoffError ? <p role="alert" className="text-sm font-bold text-red-200">{handoffError}</p> : null}
         <a className="focus-button secondary justify-center" href={exportHref}>
           <Download size={16} />
           Exporta disponibil

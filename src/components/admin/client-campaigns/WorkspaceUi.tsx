@@ -22,6 +22,7 @@ export type ClientForm = {
 };
 
 export type CampaignForm = {
+  currency: string;
   clientId: string;
   campaignName: string;
   campaignCode: string;
@@ -43,6 +44,7 @@ export const emptyClientForm: ClientForm = {
 };
 
 export const emptyCampaignForm: CampaignForm = {
+  currency: "",
   clientId: "", campaignName: "", campaignCode: "", status: "draft", companyEntity: "Focus Media",
   sellerUserId: "", accountOwnerUserId: "", paymentTermType: "30_days", paymentTermDays: "30",
   billingRule: "manual_per_contract", billingFrequency: "monthly", notes: ""
@@ -194,7 +196,8 @@ export function dateLabel(value?: string | null) {
   return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(value));
 }
 
-export function moneyLabel(value: number, currency = "") {
+export function moneyLabel(value: number | null | undefined, currency = "") {
+  if (value == null || !Number.isFinite(value)) return "Necesită verificare";
   return `${new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 }).format(value || 0)} ${currency}`.trim();
 }
 

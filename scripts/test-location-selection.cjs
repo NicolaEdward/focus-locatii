@@ -131,8 +131,8 @@ assert(files.builder.includes('if (filter === "CURRENT_AVAILABLE") return state 
 assert(files.builder.includes("Elimina conflictele") || files.basket.includes("Elimina conflictele"), "stale conflicted basket items should have a clear cleanup action");
 assert(files.basket.includes("availabilityById"), "basket and result list should share the normalized availability source");
 assert(files.basket.includes("currentAvailability(item)?.state"), "basket conflict counter must use current normalized availability");
-assert(files.basket.includes("Continua catre Media Plan - urmatorul pas"), "future Media Plan CTA should be disabled placeholder");
-assert(files.basket.includes("disabled"), "future Media Plan CTA must not write in this batch");
+assert(files.basket.includes("Creează oferta cu aceste locații"), "selection must continue into the commercial quote flow");
+assert(!files.basket.includes("Continua catre Media Plan - urmatorul pas"), "obsolete disabled Media Plan placeholder must be removed");
 assert(files.basket.includes("Exporta disponibil"), "basket should expose availability export as a primary action");
 assert(files.basket.includes("Daca nu ai selectie, exportul foloseste rezultatele filtrate"), "export should explain empty basket behavior");
 assert(files.basket.includes("Mai multe") && files.basket.includes("Copiaza coduri selectate"), "copy codes should be secondary");

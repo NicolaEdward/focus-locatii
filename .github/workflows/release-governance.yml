@@ -111,6 +111,7 @@ jobs:
       - name: OOH company workflow regressions
         run: |
           pnpm run test:ooh-commercial-flow
+          pnpm run test:commercial-policy-separation
           pnpm run test:commercial-quote-print
           pnpm run test:public-business-errors
           pnpm run test:quote-selection-bridge

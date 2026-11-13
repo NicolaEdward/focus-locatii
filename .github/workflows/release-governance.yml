@@ -108,6 +108,18 @@ jobs:
           node node_modules/tsx/dist/cli.mjs scripts/test-dooh-static-capacity.ts
           node node_modules/tsx/dist/cli.mjs scripts/test-inventory-availability-summary.ts
           node scripts/test-occupancy-summary-ui.cjs
+      - name: OOH company workflow regressions
+        run: |
+          pnpm run test:ooh-commercial-flow
+          pnpm run test:quote-selection-bridge
+          pnpm run test:reservation-amendments
+          pnpm run test:segmented-billing
+          pnpm run test:workspace-finance-attribution
+          pnpm run test:workplace-onboarding
+          pnpm run test:crm-commercial-prepare
+          pnpm run test:invitation-onboarding
+          pnpm run test:contract-control
+          pnpm run test:sales-workspace
       - name: Assistant MCP and NAS document audit regressions
         run: |
           node node_modules/tsx/dist/cli.mjs scripts/test-assistant-mcp.ts
@@ -132,6 +144,13 @@ jobs:
         run: pnpm start > /tmp/focus-preview.log 2>&1 &
       - name: Wait for server
         run: node -e "const http=require('http');let n=0;const ping=()=>http.get('http://127.0.0.1:3000/admin/login',r=>process.exit(0)).on('error',()=>{if(++n>60)process.exit(1);setTimeout(ping,1000)});ping()"
+      - name: Real employee invitation and offer browser flows
+        run: |
+          pnpm run smoke:onboarding
+          pnpm run smoke:ooh-commercial
+        env:
+          ONBOARDING_BROWSER_BASE_URL: http://localhost:3000
+          OOH_SMOKE_BASE_URL: http://localhost:3000
       - run: pnpm run smoke:roles
       - name: Interactive UI regressions
         run: node scripts/release/smoke-ui-regressions.cjs

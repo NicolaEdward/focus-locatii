@@ -598,7 +598,6 @@ function serializeCampaign(item: CampaignRow) {
     updatedAt: item.updatedAt.toISOString(),
     campaignId: item.campaignId,
     reservationId: item.id,
-    updatedAt: item.updatedAt.toISOString(),
     clientId: item.clientId,
     locationId: item.location.id,
     code: item.location.code,

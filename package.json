@@ -177,7 +177,19 @@
     "test:assistant-mcp": "tsx scripts/test-assistant-mcp.ts",
     "test:assistant-ui": "tsx scripts/test-assistant-ui.ts",
     "test:document-source-audit": "tsx scripts/test-document-source-audit.ts",
-    "test:assistant-document-tools": "tsx scripts/test-assistant-document-tools.ts"
+    "test:assistant-document-tools": "tsx scripts/test-assistant-document-tools.ts",
+    "test:ooh-commercial-flow": "tsx scripts/test-ooh-commercial-flow.ts",
+    "test:quote-selection-bridge": "tsx scripts/test-quote-selection-bridge.ts",
+    "test:reservation-amendments": "tsx scripts/test-reservation-amendments.ts",
+    "test:segmented-billing": "node scripts/test-segmented-billing.cjs && tsx scripts/test-segmented-billing-plan.ts",
+    "test:workspace-finance-attribution": "tsx scripts/test-workspace-finance-attribution.ts",
+    "test:workplace-onboarding": "tsx scripts/test-workplace-onboarding.ts",
+    "test:crm-commercial-prepare": "tsx scripts/test-crm-commercial-prepare-route.ts",
+    "test:invitation-onboarding": "tsx scripts/test-invitation-onboarding.ts",
+    "test:contract-control": "tsx scripts/test-contract-control.ts",
+    "test:sales-workspace": "tsx scripts/test-sales-work-queue.ts && tsx scripts/test-sales-workspace.ts",
+    "smoke:ooh-commercial": "node scripts/release/smoke-ooh-commercial-flow.cjs",
+    "smoke:onboarding": "tsx scripts/test-onboarding-browser.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

@@ -55,7 +55,7 @@ async function openPage(route, viewport, theme = "light", fixtureMode = null) {
   await client.send("Page.navigate", { url: base + route });
   // Next can stream hidden route segments before replacing its visible loading
   // boundary. DOM presence alone would audit an unpainted, hidden workspace.
-  await waitForExpression(client, "document.readyState === 'complete' && !!document.querySelector('nav.admin-nav')?.getClientRects().length", 90000);
+  await waitForExpression(client, "document.readyState === 'complete' && !!document.querySelector('nav.admin-nav') && (innerWidth >= 1280 || !!document.querySelector('[data-admin-mobile-menu-trigger]')?.getClientRects().length)", 90000);
   return client;
 }
 
@@ -98,6 +98,15 @@ async function menuChecks() {
     const client = await openPage("/admin/crm", width, "light", "ready");
     try {
       await waitForExpression(client, "!!document.querySelector('[data-crm-snapshot=ready]')");
+      if (width < 1280) {
+        assert.equal(await evaluate(client, "document.querySelector('[data-admin-mobile-menu-trigger]').getAttribute('aria-expanded')"), "false");
+        assert.equal(await evaluate(client, "!!document.querySelector('nav.admin-nav').getClientRects().length"), false, "Collapsed mobile navigation must not expose hidden tab stops.");
+        await evaluate(client, "document.querySelector('[data-admin-mobile-menu-trigger]').focus()");
+        await press(client, "Enter");
+        await waitForExpression(client, "document.querySelector('[data-admin-mobile-menu-trigger]').getAttribute('aria-expanded')==='true' && !!document.querySelector('nav.admin-nav').getClientRects().length");
+        const targets = await evaluate(client, "Array.from(document.querySelectorAll('nav.admin-nav > a,nav.admin-nav > div > button')).map(element=>{const r=element.getBoundingClientRect();return{left:r.left,right:r.right,height:r.height}})");
+        assert.ok(targets.length && targets.every((target) => target.left >= 0 && target.right <= width + 1 && target.height >= 44), "Expanded mobile navigation must wrap every 44px action inside the viewport.");
+      }
       const labels = await evaluate(client, "Array.from(document.querySelectorAll('[data-admin-menu-trigger]')).map(e=>e.dataset.adminMenuTrigger)");
       for (const label of labels) {
         await evaluate(client, `document.querySelector('[data-admin-menu-trigger=' + CSS.escape(${JSON.stringify(label)}) + ']').focus()`);
@@ -111,6 +120,11 @@ async function menuChecks() {
         await press(client, "Escape");
         await waitForExpression(client, "!document.querySelector('[data-admin-menu]')");
         assert.equal(await evaluate(client, `document.activeElement?.dataset.adminMenuTrigger === ${JSON.stringify(label)}`), true);
+      }
+      if (width < 1280) {
+        await press(client, "Escape");
+        await waitForExpression(client, "document.querySelector('[data-admin-mobile-menu-trigger]').getAttribute('aria-expanded')==='false' && !document.querySelector('nav.admin-nav').getClientRects().length");
+        assert.equal(await evaluate(client, "document.activeElement===document.querySelector('[data-admin-mobile-menu-trigger]')"), true, "Closing mobile navigation must restore the visible Meniu trigger.");
       }
       evidence.push({ context: `menus/${width}`, passed: true });
     } finally { client.close(); }

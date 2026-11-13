@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/sync-financial-notifications",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/document-audit",
+      "schedule": "30 4 * * *"
     }
   ]
 }

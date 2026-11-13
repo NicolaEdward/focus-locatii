@@ -173,7 +173,8 @@
     "smoke:occupancy-summary": "node scripts/release/smoke-occupancy-summary.cjs",
     "audit:inventory-availability": "tsx scripts/release/snapshot-inventory-availability.ts",
     "test:assistant-mcp": "tsx scripts/test-assistant-mcp.ts",
-    "test:assistant-ui": "tsx scripts/test-assistant-ui.ts"
+    "test:assistant-ui": "tsx scripts/test-assistant-ui.ts",
+    "test:document-source-audit": "tsx scripts/test-document-source-audit.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

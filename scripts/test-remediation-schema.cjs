@@ -11,7 +11,7 @@ assert.equal(statements(sql).length,2);
 assert.equal(validate([{path:'fixture',sql}]).tables.length,1);
 for (const extra of ['DELETE FROM `portfolio_users`','ALTER TABLE `portfolio_users` ADD COLUMN `x` INT','DROP TABLE `portfolio_fixture`','UPDATE `portfolio_users` SET active=0','TRUNCATE TABLE `portfolio_users`']) assert.throws(()=>validate([{path:'fixture',sql:sql+';'+extra}]),/NON_ADDITIVE/);
 const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'release/remediation-schema.json'),'utf8'));
-assert.equal(Object.keys(manifest.tables).length,19);
+assert.equal(Object.keys(manifest.tables).length,30);
 assert.ok(Object.values(manifest.tables).every((t)=>t.storage.engine==='InnoDB'));
 function invoke(args, env) {
   const r=spawnSync(process.execPath,[path.join(__dirname,'release/apply-remediation-schema.cjs'),...args],{env:{...process.env,...env},encoding:'utf8',timeout:60000});
@@ -22,4 +22,4 @@ assert.notEqual(denied.code,0);assert.equal(denied.result.code,'EXPLICIT_DATABAS
 const check=invoke([],{});assert.equal(check.code,0);assert.deepEqual(check.result.pending,[]);
 const replay=invoke(['--apply'],{APPLY_REMEDIATION_SCHEMA:'true',REMEDIATION_DATABASE_FINGERPRINT:source.fingerprint,REMEDIATION_RESOLVED_PLAN_SHA256:check.result.resolvedPlanSha256});
 assert.equal(replay.code,0);assert.deepEqual(replay.result.before,replay.result.after);assert.equal(replay.result.schemaSha256,check.result.schemaSha256);
-console.log('Additive schema gate passed: SQL restrictions, wrong-target denial, exact nineteen-table metadata, no-op replay and preserved historical counts');
+console.log('Additive schema gate passed: SQL restrictions, wrong-target denial, exact thirty-table metadata, no-op replay and preserved historical counts');

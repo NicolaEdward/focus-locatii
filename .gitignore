@@ -14,5 +14,7 @@ tsconfig.tsbuildinfo
 backups/
 artifacts/
 outputs/
+__pycache__/
+*.pyc
 
 .vercel

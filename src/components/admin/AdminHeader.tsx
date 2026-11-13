@@ -48,12 +48,13 @@ export function AdminHeader({ session }: { session: AuthSession }) {
   const canViewCampaigns = hasAnyPermission(session.role, ["campaigns.view", "campaigns.view.own", "finance.view"]);
   const canViewCommercialTools = hasAnyPermission(session.role, ["reservations.view", "reservations.view.own"]);
   const canManageOperationsControl = ["COO", "SUPER_ADMIN"].includes(session.role);
+  const canViewDocumentAudit = ["COO", "SUPER_ADMIN", "D_CEO"].includes(session.role);
   const canViewFinance = hasPermission(session.role, "finance.view");
   const canViewSaga = hasPermission(session.role, "finance.integrations.saga.view");
   const canViewOperational = hasAnyPermission(session.role, ["dashboard.operations.view", "campaigns.operate", "reservations.view", "reservations.view.own", "inventory.view"]);
   const hasCommercialMenu = canViewInventory || canViewCrm || canViewClients || canViewCampaigns || canViewCommercialTools;
   const hasFinanceMenu = canViewFinance || canExportSales;
-  const hasSettingsMenu = canManageInventory || canViewUsers || canViewSaga;
+  const hasSettingsMenu = canManageInventory || canViewUsers || canViewSaga || !isFieldOperator;
 
   return (
     <header className="sticky top-0 z-40 border-b border-focus-line bg-focus-navy/95 backdrop-blur">
@@ -100,7 +101,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           ) : null}
           {hasSettingsMenu ? (
             <AdminNavMenu
-              active={isActiveAnyAdminPath(pathname, ["/admin/utilizatori", "/admin/integritate-date", "/admin/integrari/saga", "/admin/locatii/import", "/admin/locatii/gps", "/admin/operations-control"])}
+              active={isActiveAnyAdminPath(pathname, ["/admin/utilizatori", "/admin/integritate-date", "/admin/integrari/saga", "/admin/locatii/import", "/admin/locatii/gps", "/admin/operations-control", "/admin/assistant-connections", "/admin/document-audit"])}
               icon={<Settings size={18} />}
               label="Setari"
             >
@@ -110,6 +111,8 @@ export function AdminHeader({ session }: { session: AuthSession }) {
               {canManageUsers && ["COO", "SUPER_ADMIN"].includes(session.role) ? <AdminMenuLink href="/admin/integritate-date" active={isActiveAdminPath(pathname, "/admin/integritate-date")} icon={<ShieldCheck size={17} />} label="Integritate date" /> : null}
               {canViewSaga ? <AdminMenuLink href="/admin/integrari/saga" active={isActiveAdminPath(pathname, "/admin/integrari/saga")} icon={<Cable size={17} />} label="Integrari / SAGA" /> : null}
               {canManageOperationsControl ? <AdminMenuLink href="/admin/operations-control" active={isActiveAdminPath(pathname, "/admin/operations-control")} icon={<ShieldCheck size={17} />} label="Control operațional" /> : null}
+              {!isFieldOperator ? <AdminMenuLink href="/admin/assistant-connections" active={isActiveAdminPath(pathname, "/admin/assistant-connections")} icon={<KeyRound size={17} />} label="Conexiunea ChatGPT" /> : null}
+              {canViewDocumentAudit ? <AdminMenuLink href="/admin/document-audit" active={isActiveAdminPath(pathname, "/admin/document-audit")} icon={<FileSpreadsheet size={17} />} label="Audit documente NAS" /> : null}
             </AdminNavMenu>
           ) : null}
           {!isFieldOperator ? <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Portal public</AdminNavLink> : null}

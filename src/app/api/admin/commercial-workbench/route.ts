@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { JsonRequestError, readBoundedJson } from "@/lib/bounded-json-request";
 import { requireAnyPermission } from "@/lib/auth";
 import { CommercialError } from "@/lib/commercial-workbench-core";
 import {
@@ -7,8 +8,11 @@ import {
   executeCommercialHold,
   readCommercialReceipt,
   commercialWorkspace,
+  commercialWorkspaceQuerySchema,
   commercialAvailability,
   saveCommercialPolicy,
+  saveCommercialSettings,
+  saveCommercialAutomation,
   issueAgentPrincipal,
   revokeAgentPrincipal,
   createCommercialQuote,
@@ -49,8 +53,8 @@ export async function GET(request: NextRequest) {
       : pilotId
         ? await salesPilotReport(pilotId, session)
         : {
-            ...(await commercialWorkspace(session)),
-            doohBookings: await listDoohBookings(session),
+            ...(await commercialWorkspace(session, commercialWorkspaceQuerySchema.parse(Object.fromEntries([...request.nextUrl.searchParams.entries()].filter(([key]) => ["q", "state", "page", "pageSize", "quoteId", "revisionPage", "revisionPageSize"].includes(key)))))),
+            doohBookings: process.env.NEXT_PUBLIC_DOOH_ENABLED === "true" ? await listDoohBookings(session) : [],
           };
     return NextResponse.json(result, { headers: commercialNoStoreHeaders });
   } catch (error) {
@@ -67,7 +71,7 @@ export async function POST(request: NextRequest) {
     const body = z
       .object({ action: z.string().min(1).max(80), input: z.unknown() })
       .strict()
-      .parse(await request.json());
+      .parse(await readBoundedJson(request, 65536));
     let result: unknown;
     switch (body.action) {
       case "policy.stopAll":
@@ -78,6 +82,12 @@ export async function POST(request: NextRequest) {
         break;
       case "policy.save":
         result = await saveCommercialPolicy(body.input, session);
+        break;
+      case "policy.commercial.save":
+        result = await saveCommercialSettings(body.input, session);
+        break;
+      case "policy.automation.save":
+        result = await saveCommercialAutomation(body.input, session);
         break;
       case "principal.issue":
         result = await issueAgentPrincipal(body.input, session);
@@ -169,6 +179,7 @@ export async function POST(request: NextRequest) {
   }
 }
 function failure(error: unknown) {
+  if (error instanceof JsonRequestError) return NextResponse.json({ error: error.message, code: "INPUT_INVALID" }, { status: error.status, headers: commercialNoStoreHeaders });
   if (error instanceof CommercialError)
     return NextResponse.json(
       { error: error.message, code: error.code },

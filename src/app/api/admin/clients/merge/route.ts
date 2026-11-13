@@ -1,3 +1,4 @@
+import { publicBusinessErrorMessage, publicBusinessErrorStatus } from "@/lib/public-business-error";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
@@ -32,10 +33,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true }, { headers: noStoreHeaders });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Clientii nu au putut fi combinati.";
+    const message = publicBusinessErrorMessage(error, "Clientii nu au putut fi combinati.", "clients.merge", request);
     return NextResponse.json(
       { error: message },
-      { status: message.includes("nu exista") ? 404 : 400, headers: noStoreHeaders }
+      { status: publicBusinessErrorStatus(error, message.includes("nu exista") ? 404 : 400), headers: noStoreHeaders }
     );
   }
 }

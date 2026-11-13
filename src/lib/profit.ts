@@ -12,12 +12,16 @@ export type ProfitInput = {
 };
 
 export function calculateLocationProfit(input: ProfitInput) {
-  const revenueCurrency = input.revenueCurrency || "EUR";
+  const revenueCurrency = ["RON", "EUR"].includes(input.revenueCurrency || "") ? input.revenueCurrency! : null;
   const revenue = calculateProrata(input.monthlyRevenue || 0, input.periodStart, input.periodEnd, input.reportStart, input.reportEnd).amount;
   const costStatus =
-    input.monthlyCost == null
+    !revenueCurrency
+      ? "unknown_revenue_currency"
+      : input.monthlyCost == null
       ? "missing_cost"
-      : input.costCurrency && input.costCurrency !== revenueCurrency
+      : !["RON", "EUR"].includes(input.costCurrency || "")
+        ? "unknown_cost_currency"
+        : input.costCurrency !== revenueCurrency
         ? "needs_fx"
         : "ok";
   const cost = costStatus === "ok"

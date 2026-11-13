@@ -35,10 +35,10 @@ assert.match(header, /aria-current=\{active \? "page" : undefined\}/, "Active ad
 assert.match(header, /Portal public/, "Admin public link should use the clearer label.");
 assert.match(header, /<FocusLogo href="\/admin\/dashboard" prefetch=\{false\} \/>/, "Admin logo should not prefetch the dashboard shell.");
 assert.match(header, /prefetch=\{false\}/, "Admin navigation links should disable automatic Next.js prefetching.");
-assert.match(header, /label="Comercial"/, "AdminHeader should group sales workflows under Comercial.");
+assert.match(header, /label="Vânzări"/, "AdminHeader should group sales workflows under Vânzări.");
 assert(
-  header.indexOf('label="Comercial"') < header.indexOf('href="/admin/selectie-locatii"'),
-  "Selector oferta should live inside the Comercial workflow menu."
+  header.indexOf('label="Vânzări"') < header.indexOf('href="/admin/selectie-locatii"'),
+  "Location selection should remain inside the sales workflow menu."
 );
 assert.match(header, /label="Financiar"/, "AdminHeader should group finance workflows under Financiar.");
 assert.match(header, /label="Facturi clienți"/, "Finance navigation should use the customer invoice workflow label.");
@@ -47,7 +47,11 @@ assert(
   header.indexOf('label="Financiar"') < header.indexOf('href="/admin/furnizori"'),
   "Furnizori should live inside the Financiar workflow menu."
 );
-assert.match(header, /label="Setari"/, "AdminHeader should expose Setari instead of a vague Admin button.");
+assert.match(header, /hasAdministrativeMenu \? "Administrare" : "Cont"/, "Administration and personal account navigation should be distinguished by role.");
+assert.match(header, /label="Campanii"/, "Campaign work and contractual control should have their own domain.");
+assert.match(header, /href="\/admin\/onboarding"/, "Every employee should have a reachable role-specific work guide.");
+assert.equal(header.includes("Campanii in Clienti"), false, "Obsolete combined-workspace wording should not be visible.");
+assert.match(header, /canManageAi \? <AdminMenuLink href="\/admin\/ai"/, "AI administration must stay outside the ordinary seller workflow.");
 assert.match(header, /href="\/admin\/integrari\/saga"/, "AdminHeader should expose SAGA only through the integrations settings context.");
 assert.match(header, /href="\/admin\/operational"/, "AdminHeader should expose a dedicated Operational workspace.");
 assert.match(header, /session\.role === "FIELD_OPERATOR"/, "AdminHeader should treat field operators as a restricted navigation role.");

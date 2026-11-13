@@ -4,11 +4,12 @@ import { prisma } from "../src/lib/prisma";
 import type { AuthSession } from "../src/lib/auth";
 import {
   createReservation,
-  updateReservation,
-  updateReservationGroup,
-  updateReservationGroupStatus,
+  updateReservation as rawUpdateReservation,
+  updateReservationGroup as rawUpdateReservationGroup,
+  updateReservationGroupStatus as rawUpdateReservationGroupStatus,
   extendReservationHold,
 } from "../src/lib/reservations";
+const { updateReservation, updateReservationGroup, updateReservationGroupStatus }: { updateReservation: typeof rawUpdateReservation; updateReservationGroup: typeof rawUpdateReservationGroup; updateReservationGroupStatus: typeof rawUpdateReservationGroupStatus } = require("./reservation-test-commands.cjs").versionedReservationCommands({ updateReservation: rawUpdateReservation, updateReservationGroup: rawUpdateReservationGroup, updateReservationGroupStatus: rawUpdateReservationGroupStatus }, prisma);
 import {
   saveDoohProfile,
   checkDoohCapacity,
@@ -70,8 +71,9 @@ async function main() {
       sellerUserId: seller.id,
       accountOwnerUserId: seller.id,
       currency: "RON",
+      companyEntity: "Focus Media",
       paymentTermType: "7_days",
-      paymentTermDays: 7,
+      paymentTermDays: 7, billingRule: "manual_per_contract", billingFrequency: "monthly",
       status: "active",
     },
   });

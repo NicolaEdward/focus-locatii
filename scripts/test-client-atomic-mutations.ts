@@ -71,19 +71,20 @@ async function main() {
 
   const name = `${tag}-upsert-rollback`;
   const failedCreate = await failAudit("client.upsert", () => upsert(request("/api/admin/clients", a, { companyName: name })));
-  assert.equal(failedCreate.status, 400);
+  assert.equal(failedCreate.status, 500, "an internal audit failure must not be presented as invalid user input");
+  assert.equal(JSON.stringify(await failedCreate.json()).includes("Synthetic audit failure"), false, "internal audit details stay private");
   assert.equal(await prisma.clientAccount.count({ where: { companyName: name } }), 0, "Creation and its earlier domain audit roll back when the final audit fails");
   assert.equal(await prisma.auditLog.count({ where: { action: "client.create", metadata: { path: "$.companyName", equals: name } } }), 0);
 
   const originalPrimary = await prisma.clientContact.create({ data: { clientId: own.id, name: "Original primary", isPrimary: true } });
   const failedContact = await failAudit("client.contact_create", () => contact(request(`/api/admin/clients/${own.id}/contacts`, a, { name: "Failed primary", isPrimary: true }), { params: Promise.resolve({ id: own.id }) }));
-  assert.equal(failedContact.status, 400);
+  assert.equal(failedContact.status, 500);
   assert.equal(await prisma.clientContact.count({ where: { clientId: own.id } }), 1);
   assert.equal((await prisma.clientContact.findUniqueOrThrow({ where: { id: originalPrimary.id } })).isPrimary, true);
 
   const ownerChange = { accountOwnerUserId: b.id, ownerChangeReason: "Synthetic approved transfer", notes: "Owner transfer" };
   const failedOwner = await failAudit("client.update", () => patch(request(`/api/admin/clients/${own.id}`, coo, ownerChange, "PATCH"), { params: Promise.resolve({ id: own.id }) }));
-  assert.equal(failedOwner.status, 400);
+  assert.equal(failedOwner.status, 500);
   assert.equal((await prisma.clientAccount.findUniqueOrThrow({ where: { id: own.id } })).accountOwnerUserId, a.id);
   const updatedOwner = await patch(request(`/api/admin/clients/${own.id}`, coo, ownerChange, "PATCH"), { params: Promise.resolve({ id: own.id }) });
   assert.equal(updatedOwner.status, 200);

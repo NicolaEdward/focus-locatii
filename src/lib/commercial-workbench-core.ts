@@ -47,6 +47,37 @@ export function canonicalJson(value: unknown): string {
 export function commercialHash(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
+type CommercialEconomicTerms = {
+  vatRateBps: number;
+  vatTreatment: string;
+  rateCardCurrency: string;
+  quoteValidityDays: number;
+  approvalHours: number;
+};
+
+/** Automation budgets and kill switches have their own live authorization
+ * checks. They must not change the economic terms of a human-reviewed offer. */
+export function commercialPolicyHash(policy: CommercialEconomicTerms) {
+  const { vatRateBps, vatTreatment, rateCardCurrency, quoteValidityDays, approvalHours } = policy;
+  return commercialHash({ vatRateBps, vatTreatment, rateCardCurrency, quoteValidityDays, approvalHours });
+}
+
+export function matchesCommercialPolicy(
+  offer: { policyVersion: number; commercialPolicyHash?: string },
+  policy: CommercialEconomicTerms & { version: number },
+) {
+  // Existing immutable revisions do not carry the economic fingerprint. Keep
+  // their conservative version rule instead of rewriting historical payloads.
+  return offer.commercialPolicyHash === undefined
+    ? offer.policyVersion === policy.version
+    : offer.commercialPolicyHash === commercialPolicyHash(policy);
+}
+
+export function hasConfirmedCommercialCalendar(offer: { billingRule?: string | null; billingFrequency?: string | null }) {
+  // The current immutable offer format has no custom-date/calendar field.
+  // Such a draft must not acquire an approval that could promise guessed dates.
+  return offer.billingRule !== "fixed_custom_date" && offer.billingFrequency !== "custom";
+}
 export function tokenHash(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }

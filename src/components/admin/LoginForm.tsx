@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import { ArrowLeft, Copy, KeyRound, Link2, Lock, LogIn, Mail, ShieldCheck } from "lucide-react";
+import { safeLoginContinuation } from "@/lib/login-continuation";
 
 type Step = "credentials" | "mfa" | "enrollment" | "recovery" | "reset";
 
 export function LoginForm({ passwordResetAvailable, returnTo }: { passwordResetAvailable: boolean; returnTo?: string }) {
-  // Only the local consent page may continue authentication; never accept a
-  // client-supplied external callback as a post-login destination.
-  const continuation = returnTo?.startsWith("/oauth/authorize?") ? returnTo : undefined;
+  // The welcome guide and validated OAuth consent are the only continuations.
+  const continuation = safeLoginContinuation(returnTo);
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

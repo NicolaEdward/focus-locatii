@@ -1,3 +1,4 @@
+import { publicBusinessErrorMessage, publicBusinessErrorStatus } from "@/lib/public-business-error";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest, context: Context) {
   try {
     return NextResponse.json({ contacts: await getClientContacts(session, id) }, { headers: noStoreHeaders });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Contactele nu pot fi afisate." }, { status: 403, headers: noStoreHeaders });
+    return NextResponse.json({ error: publicBusinessErrorMessage(error, "Contactele nu pot fi afisate.", "clients.detail.contacts", request) }, { status: publicBusinessErrorStatus(error, 403), headers: noStoreHeaders });
   }
 }
 
@@ -75,8 +76,8 @@ export async function POST(request: NextRequest, context: Context) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Contactul nu a putut fi salvat." },
-      { status: error instanceof ClientMutationError ? error.status : 400, headers: noStoreHeaders }
+      { error: publicBusinessErrorMessage(error, "Contactul nu a putut fi salvat.", "clients.detail.contacts", request) },
+      { status: publicBusinessErrorStatus(error, 400), headers: noStoreHeaders }
     );
   }
 }

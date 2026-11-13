@@ -1,11 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { readQuoteSelectionDraft } from "@/lib/quote-selection-bridge";
+import { CommercialQuoteEditor } from "@/components/admin/CommercialQuoteEditor";
 import {
   useCallback,
   useEffect,
   useState,
-  type FormEvent,
+  cloneElement,
+  isValidElement,
+  type ReactElement,
   type ReactNode,
 } from "react";
 
@@ -40,6 +44,10 @@ type QuotePayload = {
     code: string;
     city: string | null;
     monthlyRate: string;
+    listMonthlyRate?: string;
+    discountBps?: number;
+    pricingReason?: string;
+    pricingApprovalRequired?: boolean;
     net: string;
     tax: string;
     gross: string;
@@ -54,7 +62,7 @@ type Revision = {
   expiresAt: string;
   createdAt: string;
 };
-type Quote = {
+export type Quote = {
   id: string;
   latestRevision: number;
   state: string;
@@ -69,7 +77,10 @@ type Approval = {
   holdExpiresAt: string | null;
   principalId: string | null;
 };
-type Workspace = {
+export type Workspace = {
+  userId: string;
+  quotePage?: { page: number; pageSize: number; total: number; totalPages: number; ids: string[] };
+  revisionPage?: { quoteId: string; page: number; pageSize: number; total: number; totalPages: number; ids: string[] } | null;
   documents: {
     id: string;
     clientId: string | null;
@@ -78,12 +89,19 @@ type Workspace = {
   }[];
   policy: Policy | null;
   quotes: Quote[];
-  clients: { id: string; companyName: string }[];
+  clients: { id: string; companyName: string; generalEmail?: string | null; primaryContact?: { name: string; email: string | null; phone: string | null } | null }[];
   campaigns: {
     id: string;
     clientId: string;
     campaignName: string;
     currency: string | null;
+    companyEntity?: string | null;
+    paymentTermType?: string | null;
+    paymentTermDays?: number | null;
+    billingRule?: string | null;
+    billingFrequency?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
   }[];
   opportunities: { id: string; name: string; stage: string; version: number }[];
   locations: {
@@ -218,7 +236,7 @@ type Capacity = {
   requestedShareBps: number;
   validUntil: string;
 };
-type Run = (action: string, input: unknown) => Promise<unknown>;
+export type Run = (action: string, input: unknown) => Promise<unknown>;
 const panel =
   "min-w-0 rounded-lg border border-focus-line bg-focus-ink/70 p-4 sm:p-5";
 const inputClass = "focus-input min-w-0 w-full";
@@ -226,13 +244,13 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="grid min-w-0 gap-1 text-sm font-bold text-slate-300">
       <span>{label}</span>
-      {children}
+      {isValidElement(children) && typeof children.type === "string" ? cloneElement(children as ReactElement<{ "aria-label"?: string }>, { "aria-label": label }) : children}
     </label>
   );
 }
-function Submit({ busy, children }: { busy: boolean; children: ReactNode }) {
+function Submit({ busy, disabled = false, children }: { busy: boolean; disabled?: boolean; children: ReactNode }) {
   return (
-    <button type="submit" className="focus-button mt-2" disabled={busy}>
+    <button type="submit" className="focus-button mt-2" disabled={busy || disabled}>
       {busy ? "Se verifică…" : children}
     </button>
   );
@@ -272,11 +290,24 @@ function status(value: string) {
   return statusLabels[value] || value;
 }
 
+type QuoteQuery = { q: string; state: string; page: number; quoteId: string; revisionPage: number };
+function quoteQueryParams(query: QuoteQuery) {
+  const params = new URLSearchParams({ page: String(query.page), pageSize: "25", revisionPage: String(query.revisionPage), revisionPageSize: "20" });
+  if (query.q) params.set("q", query.q);
+  if (query.state) params.set("state", query.state);
+  if (query.quoteId) params.set("quoteId", query.quoteId);
+  return params.toString();
+}
+function PageControls({ page, busy, onPage, label }: { page: { page: number; total: number; totalPages: number }; busy: boolean; onPage: (page: number) => void; label: string }) {
+  return <nav aria-label={`Paginare ${label.toLowerCase()}`} className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-300"><span>{page.total} {label.toLowerCase()} · pagina {page.page} din {Math.max(1, page.totalPages)}</span><div className="flex gap-2"><button type="button" className="focus-button secondary" disabled={busy || page.page <= 1} onClick={() => onPage(page.page - 1)}>Anterior</button><button type="button" className="focus-button secondary" disabled={busy || page.page >= page.totalPages} onClick={() => onPage(page.page + 1)}>Următor</button></div></nav>;
+}
+
 export function CommercialWorkbench({
   tab,
 }: {
-  tab: "quotes" | "dooh" | "ai";
+  tab: "quotes" | "dooh" | "ai" | "settings";
 }) {
+  const [query, setQuery] = useState<QuoteQuery>({ q: "", state: "", page: 1, quoteId: "", revisionPage: 1 });
   const [data, setData] = useState<Workspace | null>(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState<string | null>(null),
@@ -287,7 +318,7 @@ export function CommercialWorkbench({
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/commercial-workbench", {
+      const response = await fetch("/api/admin/commercial-workbench?" + quoteQueryParams(query), {
         cache: "no-store",
         signal,
       });
@@ -304,6 +335,10 @@ export function CommercialWorkbench({
     } finally {
       setLoading(false);
     }
+  }, [query]);
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("quoteId");
+    if (requested) setQuery((current) => ({ ...current, quoteId: requested }));
   }, []);
   useEffect(() => {
     const controller = new AbortController();
@@ -344,19 +379,17 @@ export function CommercialWorkbench({
     <main className="focus-container grid min-w-0 gap-5 py-6">
       <header className={panel}>
         <p className="text-sm font-bold text-focus-yellow">
-          Spațiu comercial verificabil
+          {tab === "settings" ? "Administrare comercială" : "Vânzări OOH"}
         </p>
         <h1 className="text-2xl font-black text-white sm:text-3xl">
           {tab === "quotes"
             ? "Oferte comerciale și aprobări"
             : tab === "dooh"
               ? "Capacitate DOOH și dovada difuzării"
-              : "Copilot și pilot AI"}
+              : tab === "settings" ? "Reguli comerciale" : "Administrare AI"}
         </h1>
         <p className="mt-2 max-w-4xl text-sm text-slate-300">
-          Versiuni de ofertă, acțiuni aprobate și rezultate urmărite.
-          Disponibilitatea verificată nu reprezintă o rezervare. Confirmarea
-          BOOKED rămâne în fluxul comercial autorizat.
+          {tab === "quotes" ? "Construiește oferta, propune prețurile și urmărește aprobarea și răspunsul clientului." : tab === "settings" ? "TVA, moneda tarifelor și valabilitatea ofertelor, configurate de un responsabil autorizat." : "Configurează integrările și verifică rezultatele înainte de a acorda acces."}
         </p>
         <nav
           aria-label="Spații comerciale"
@@ -369,9 +402,9 @@ export function CommercialWorkbench({
             Oferte
           </Link>
           {process.env.NEXT_PUBLIC_DOOH_ENABLED === "true" ? <Link className="focus-button secondary" href="/admin/dooh">DOOH</Link> : null}
-          <Link className="focus-button secondary" href="/admin/ai">
-            Copilot și pilot
-          </Link>
+          <Link className="focus-button secondary" href="/admin/selectie-locatii">Alege locațiile</Link>
+          {data?.permissions.configure ? <Link className="focus-button secondary" href="/admin/commercial-settings">Reguli comerciale</Link> : null}
+          {data?.permissions.manage && tab !== "quotes" ? <Link className="focus-button secondary" href="/admin/ai">Administrare AI</Link> : null}
         </nav>
       </header>
       {error && (
@@ -417,7 +450,8 @@ export function CommercialWorkbench({
               Acces de citire. Acțiunile comerciale cer drepturi distincte.
             </p>
           )}
-          {tab === "quotes" && <Quotes data={data} run={run} busy={busy} />}
+          {tab === "quotes" && <Quotes data={data} run={run} busy={busy} query={query} onBrowse={(patch) => setQuery((current) => ({ ...current, ...patch }))} />}
+          {tab === "settings" && <CommercialSettings data={data} run={run} busy={busy} />}
           {tab === "dooh" && <Dooh data={data} run={run} busy={busy} />}
           {tab === "ai" && <Ai data={data} run={run} busy={busy} />}
         </>
@@ -480,29 +514,46 @@ function Quotes({
   data,
   run,
   busy,
+  query,
+  onBrowse,
 }: {
   data: Workspace;
   run: Run;
   busy: boolean;
+  query: QuoteQuery;
+  onBrowse: (patch: Partial<QuoteQuery>) => void;
 }) {
-  const [selected, setSelected] = useState<string | null>(null),
-    [revise, setRevise] = useState<string | null>(null),
+  const selected = query.quoteId;
+  const [search, setSearch] = useState(query.q);
+  const [editorOpen, setEditorOpen] = useState(true);
+  const [handoffChecked, setHandoffChecked] = useState(false);
+  useEffect(() => {
+    if (handoffChecked || !data.userId) return;
+    const params = new URLSearchParams(window.location.search);
+    const selectionKey = params.get("selection");
+    const draft = selectionKey ? readQuoteSelectionDraft(selectionKey, data.userId) : null;
+    if (params.get("edit") === "1" && draft?.quoteId) { setRevise(draft.quoteId); setEditorOpen(true); }
+    setHandoffChecked(true);
+  }, [data.userId, handoffChecked]);
+  const [revise, setRevise] = useState<string | null>(null),
     [epoch, setEpoch] = useState(0);
   const [versionId, setVersionId] = useState<string | null>(null);
   const [acceptanceKey, setAcceptanceKey] = useState(uuid),
     [draftKey, setDraftKey] = useState(uuid);
+  const listedQuotes = data.quotePage?.ids ? data.quotes.filter((quote) => data.quotePage!.ids.includes(quote.id)) : data.quotes;
   const q = data.quotes.find((x) => x.id === selected),
     revision = q?.revisions.find((r) => r.id === versionId) || q?.revisions[0];
+  const quotedCampaign = revision ? data.campaigns.find((campaign) => campaign.id === revision.payload.campaignId) : null;
+  const termsMissing = Boolean(quotedCampaign && (!quotedCampaign.paymentTermType || quotedCampaign.paymentTermDays == null || !quotedCampaign.billingRule || !quotedCampaign.billingFrequency));
   return (
     <>
       {!data.policy && (
         <p className={panel}>
-          Politica de TVA și moneda tarifelor trebuie aprobate în Copilot și
-          pilot AI înainte de creare ofertă. Nu se presupun automat valori
-          fiscale sau conversii valutare.
+          Un responsabil trebuie să configureze TVA și moneda tarifelor în {data.permissions.configure ? <Link className="text-focus-yellow underline" href="/admin/commercial-settings">Reguli comerciale</Link> : "Reguli comerciale"} înainte de prima ofertă. Datele fiscale nu sunt presupuse automat.
         </p>
       )}
-      {data.permissions.write && data.policy && (
+      {data.permissions.write && data.policy && !editorOpen ? <button type="button" className="focus-button justify-self-start" onClick={() => { setRevise(null); setEpoch((value) => value + 1); setEditorOpen(true); }}>Ciornă nouă</button> : null}
+      {data.permissions.write && data.policy && editorOpen && (
         <section className={panel}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-black text-white">
@@ -519,32 +570,36 @@ function Quotes({
               Ciornă nouă
             </button>
           </div>
-          <QuoteEditor
+          {revise && !data.quotes.some((quote) => quote.id === revise) ? <p role="status" className="mt-4 text-slate-300">Se încarcă oferta pentru revizuire…</p> : <CommercialQuoteEditor
             key={revise || epoch}
             data={data}
             quote={data.quotes.find((x) => x.id === revise)}
             run={run}
             busy={busy}
-          />
+            onSaved={(quoteId) => { setRevise(null); setEditorOpen(false); window.history.replaceState(null, "", `/admin/commercial-quotes?quoteId=${encodeURIComponent(quoteId)}`); onBrowse({ quoteId, revisionPage: 1 }); }}
+          />}
         </section>
       )}
       <section className={panel}>
-        <h2 className="text-lg font-black text-white">
-          Ultimele 100 de oferte
-        </h2>
-        {!data.quotes.length ? (
+        <h2 className="text-lg font-black text-white">Ofertele mele și istoricul comercial</h2>
+        <form className="mt-3 flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); onBrowse({ q: search, page: 1 }); }}>
+          <div className="min-w-0 flex-1"><Field label="Caută în toate ofertele"><input className={inputClass} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Client, campanie sau ID ofertă" /></Field></div>
+          <Field label="Stare"><select className={inputClass} value={query.state} onChange={(event) => onBrowse({ state: event.target.value, page: 1 })}><option value="">Toate</option><option value="draft">Ciornă</option><option value="accepted">Acceptată</option><option value="rejected">Respinsă</option></select></Field>
+          <button type="submit" className="focus-button secondary">Caută</button>
+        </form>
+        {!listedQuotes.length ? (
           <p className="mt-3 text-slate-300">
             Nu există oferte în portofoliul autorizat.
           </p>
         ) : (
           <div className="mt-3 grid min-w-0 gap-2">
-            {data.quotes.map((quote) => (
+            {listedQuotes.map((quote) => (
               <button
                 key={quote.id}
                 type="button"
                 className={`min-w-0 rounded-lg border p-3 text-left ${selected === quote.id ? "border-focus-yellow" : "border-focus-line"}`}
                 onClick={() => {
-                  setSelected(quote.id);
+                  onBrowse({ quoteId: quote.id, revisionPage: 1 });
                   setVersionId(null);
                   setAcceptanceKey(uuid());
                   setDraftKey(uuid());
@@ -563,6 +618,7 @@ function Quotes({
             ))}
           </div>
         )}
+        {data.quotePage ? <PageControls page={data.quotePage} busy={busy} label="Oferte" onPage={(page) => onBrowse({ page })} /> : null}
       </section>
       {q && revision && (
         <section className={panel}>
@@ -570,11 +626,12 @@ function Quotes({
             <h2 className="text-lg font-black text-white">
               {revision.payload.clientName} · versiunea {revision.revision}
             </h2>
+            <Link className="focus-button secondary" href={`/admin/commercial-quotes/${encodeURIComponent(q.id)}/print?revision=${encodeURIComponent(revision.id)}`} target="_blank" rel="noopener noreferrer" prefetch={false}>Deschide oferta pentru PDF</Link>
             {data.permissions.write && (
               <button
                 type="button"
                 className="focus-button secondary"
-                onClick={() => setRevise(q.id)}
+                onClick={() => { setRevise(q.id); setEditorOpen(true); }}
               >
                 Pregătește o versiune nouă
               </button>
@@ -609,7 +666,7 @@ function Quotes({
                 {revision.payload.lines.map((l) => (
                   <tr className="border-t border-focus-line" key={l.locationId}>
                     <td className="p-2">{l.code}</td>
-                    <td className="p-2 whitespace-nowrap">{l.monthlyRate}</td>
+                    <td className="p-2 whitespace-nowrap">{l.monthlyRate}{l.listMonthlyRate && l.listMonthlyRate !== l.monthlyRate ? <small className="block whitespace-normal text-slate-400">Listă {l.listMonthlyRate} · {l.pricingReason}</small> : null}</td>
                     <td className="p-2">{l.net}</td>
                     <td className="p-2">{l.tax}</td>
                     <td className="p-2">{l.gross}</td>
@@ -642,7 +699,7 @@ function Quotes({
               Hash: {revision.payloadHash}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
-              {q.revisions.map((v) => (
+              {(data.revisionPage?.quoteId === q.id && data.revisionPage.ids ? q.revisions.filter((v) => data.revisionPage!.ids.includes(v.id)) : q.revisions).map((v) => (
                 <button
                   type="button"
                   key={v.id}
@@ -653,17 +710,19 @@ function Quotes({
                 </button>
               ))}
             </div>
+            {data.revisionPage?.quoteId === q.id ? <PageControls page={data.revisionPage} busy={busy} label="Versiuni" onPage={(revisionPage) => { setVersionId(null); onBrowse({ revisionPage }); }} /> : null}
             <p className="mt-1 text-sm text-slate-300">
               Versiunile salvate sunt imuabile; o modificare creează o versiune
               și invalidează aprobările vechi.
             </p>
           </details>
+          {termsMissing && quotedCampaign ? <p role="status" className="mt-3 rounded-lg border border-amber-300/35 p-3 text-sm text-amber-100">Completează <Link className="underline" href={`/admin/campanii?campaignId=${encodeURIComponent(quotedCampaign.id)}`}>termenii de plată și facturare ai campaniei</Link>, apoi salvează o versiune nouă. Ciorna poate fi păstrată; expedierea și rezervarea cer condiții comerciale verificate.</p> : null}
           {data.permissions.write && (
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
                 className="focus-button"
-                disabled={busy}
+                disabled={busy || termsMissing}
                 onClick={() =>
                   void run("approval.request", {
                     revisionId: revision.id,
@@ -673,7 +732,7 @@ function Quotes({
               >
                 Cere aprobarea expedierii
               </button>
-              <button
+              {data.policy?.generationEnabled && data.capabilities.generationConfigured ? <button
                 type="button"
                 className="focus-button secondary"
                 disabled={
@@ -689,9 +748,10 @@ function Quotes({
                 }
               >
                 Generează introducere internă
-              </button>
+              </button> : null}
             </div>
           )}
+          {(!data.policy?.outboundEnabled || !data.capabilities.outboundConfigured) ? <p className="mt-3 text-sm text-slate-400">Expedierea automată nu este configurată. Poți pregăti, aproba și salva PDF-ul ofertei; aplicația nu trimite mesaje clientului.</p> : null}
           <form
             className="mt-3 flex flex-wrap items-end gap-3"
             onSubmit={(e) => {
@@ -713,7 +773,7 @@ function Quotes({
                 className={inputClass}
               />
             </Field>
-            <Submit busy={busy}>Cere aprobare HOLD</Submit>
+            <Submit busy={busy} disabled={termsMissing}>Cere aprobare HOLD</Submit>
           </form>
           <p className="mt-3 text-sm text-slate-300">
             Crearea HOLD și BOOKED nu rezultă automat din acceptarea ofertei.
@@ -790,7 +850,7 @@ function Quotes({
                       )}
                     {data.permissions.write &&
                       a.state === "approved" &&
-                      a.action === "send_quote" && (
+                      a.action === "send_quote" && data.policy?.outboundEnabled && data.capabilities.outboundConfigured && (
                         <button
                           type="button"
                           className="focus-button secondary"
@@ -893,7 +953,7 @@ function Quotes({
                     Verifică furnizorul; nu repeta automat trimiterea.
                   </p>
                 )}
-                {data.permissions.manage && d.state === "queued" && (
+                {data.permissions.manage && d.state === "queued" && data.policy?.outboundEnabled && data.capabilities.outboundConfigured && (
                   <button
                     type="button"
                     disabled={
@@ -915,163 +975,11 @@ function Quotes({
   );
 }
 
-function QuoteEditor({
-  data,
-  quote,
-  run,
-  busy,
-}: {
-  data: Workspace;
-  quote?: Quote;
-  run: Run;
-  busy: boolean;
-}) {
-  const old = quote?.revisions[0]?.payload;
-  const [clientId, setClientId] = useState(old?.clientId || "");
-  const [key] = useState(uuid);
-  return (
-    <form
-      className="mt-4 grid min-w-0 gap-3 md:grid-cols-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const f = e.currentTarget;
-        void run("quote.create", {
-          ...(quote
-            ? { quoteId: quote.id, expectedRevision: quote.latestRevision }
-            : {}),
-          clientId,
-          campaignId: field(f, "campaignId"),
-          recipient: field(f, "recipient"),
-          companyEntity: field(f, "companyEntity"),
-          periodStart: field(f, "periodStart"),
-          periodEnd: field(f, "periodEnd"),
-          locationIds: new FormData(f).getAll("locationIds").map(String),
-          assumptions: field(f, "assumptions"),
-          requestKey: key,
-        });
-      }}
-    >
-      <Field label="Client">
-        <select
-          required
-          className={inputClass}
-          value={clientId}
-          onChange={(e) => setClientId(e.target.value)}
-        >
-          <option value="">Selectează clientul</option>
-          {data.clients.map((x) => (
-            <option key={x.id} value={x.id}>
-              {x.companyName}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Campanie și monedă">
-        <select
-          required
-          className={inputClass}
-          name="campaignId"
-          defaultValue={old?.campaignId || ""}
-          key={clientId}
-        >
-          <option value="">Selectează campania</option>
-          {data.campaigns
-            .filter((x) => x.clientId === clientId)
-            .map((x) => (
-              <option key={x.id} value={x.id}>
-                {x.campaignName} · {x.currency || "monedă nesetată"}
-              </option>
-            ))}
-        </select>
-      </Field>
-      <Field label="Destinatarul exact pentru aprobare">
-        <input
-          type="email"
-          required
-          maxLength={254}
-          className={inputClass}
-          name="recipient"
-          defaultValue={old?.recipient}
-        />
-      </Field>
-      <Field label="Firma contractantă">
-        <select
-          name="companyEntity"
-          className={inputClass}
-          defaultValue={old?.companyEntity || ""}
-          required
-        >
-          <option value="">Alege firma</option>
-          <option>Focus Media</option>
-          <option>Excellence Media</option>
-          <option>Focus BG / Focus Media LLC EOOD</option>
-        </select>
-      </Field>
-      <Field label="Prima zi inclusă">
-        <input
-          type="date"
-          required
-          className={inputClass}
-          name="periodStart"
-          defaultValue={old?.periodStart}
-        />
-      </Field>
-      <Field label="Ultima zi inclusă">
-        <input
-          type="date"
-          required
-          className={inputClass}
-          name="periodEnd"
-          defaultValue={old?.periodEnd}
-        />
-      </Field>
-      <Field label="Amplasamente statice din inventar">
-        <select
-          name="locationIds"
-          required
-          multiple
-          size={6}
-          className={inputClass}
-          defaultValue={old?.lines.map((l) => l.locationId) || []}
-        >
-          {data.locations
-            .filter(
-              (x) =>
-                !/digital|led|ecran|screen|lcd|display|dooh/i.test(
-                  x.type || "",
-                ),
-            )
-            .map((x) => (
-              <option key={x.id} value={x.id}>
-                {x.code} · {x.city || "oraș nesetat"} ·{" "}
-                {x.rateCardValue ?? "preț lipsă"}
-              </option>
-            ))}
-        </select>
-      </Field>
-      <Field label="Ipoteze pentru revizuire">
-        <textarea
-          maxLength={2000}
-          rows={6}
-          name="assumptions"
-          className={inputClass}
-          defaultValue={old?.assumptions}
-        />
-      </Field>
-      <p className="text-sm text-slate-300 md:col-span-2">
-        Tarifele sunt recitite din inventar; moneda trebuie să corespundă
-        politicii aprobate. TVA și totalurile se calculează pe server. O ofertă
-        nu blochează inventarul. Pentru altă intenție folosește Ciornă nouă.
-      </p>
-      <Submit busy={busy}>Verifică și salvează versiunea</Submit>
-    </form>
-  );
+function minutes(value: string) {
+  const [hours, minute] = value.split(":").map(Number);
+  return hours * 60 + minute;
 }
 
-function minutes(value: string) {
-  const [h, m] = value.split(":").map(Number);
-  return h * 60 + m;
-}
 function Dooh({
   data,
   run,
@@ -1582,140 +1490,20 @@ function Ai({ data, run, busy }: { data: Workspace; run: Run; busy: boolean }) {
           </button>
         )}
       </section>
-      {data.permissions.configure && (
-        <details className={panel} open={!p}>
-          <summary className="cursor-pointer text-lg font-black text-white">
-            Politica comercială aprobată
-          </summary>
-          <p className="mt-2 text-sm text-slate-300">
-            Completează valorile fiscale și moneda reală a tarifelor. Salvarea
-            unei noi versiuni invalidează aprobările bazate pe politica veche.
-            Nu activa furnizori sau canale până când datele, costurile și
-            dreptul de contact sunt aprobate.
-          </p>
-          <form
-            className="mt-3 grid gap-3 md:grid-cols-2"
-            key={p?.version || "new"}
-            onSubmit={(e) => {
-              e.preventDefault();
-              const f = e.currentTarget;
-              void run("policy.save", {
-                vatRateBps: Math.round(numberField(f, "vat") * 100),
-                vatTreatment: field(f, "vatTreatment"),
-                rateCardCurrency: field(f, "currency"),
-                quoteValidityDays: numberField(f, "validity"),
-                approvalHours: numberField(f, "approvalHours"),
-                maxDailyModelCalls: numberField(f, "modelCalls"),
-                agentToolsEnabled: new FormData(f).has("tools"),
-                generationEnabled: new FormData(f).has("generation"),
-                outboundEnabled: new FormData(f).has("outbound"),
-              });
-            }}
-          >
-            <Field label="Cota TVA validată procente">
-              <input
-                required
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                name="vat"
-                defaultValue={p ? p.vatRateBps / 100 : undefined}
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Tratament TVA">
-              <select
-                name="vatTreatment"
-                defaultValue={p?.vatTreatment || ""}
-                required
-                className={inputClass}
-              >
-                <option value="">Selectează tratamentul</option>
-                <option value="exclusive">TVA adăugat la net</option>
-                <option value="inclusive">Tariful include TVA</option>
-                <option value="exempt">Scutit cu rată zero</option>
-              </select>
-            </Field>
-            <Field label="Moneda tarifelor numerice din inventar">
-              <select
-                name="currency"
-                defaultValue={p?.rateCardCurrency || ""}
-                required
-                className={inputClass}
-              >
-                <option value="">Selectează moneda verificată</option>
-                <option>EUR</option>
-                <option>RON</option>
-              </select>
-            </Field>
-            <Field label="Valabilitate ofertă zile">
-              <input
-                required
-                name="validity"
-                type="number"
-                min={1}
-                max={30}
-                defaultValue={p?.quoteValidityDays || 7}
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Valabilitate aprobare ore">
-              <input
-                required
-                name="approvalHours"
-                type="number"
-                min={1}
-                max={72}
-                defaultValue={p?.approvalHours || 24}
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Apeluri model maxime pe persoană pe zi">
-              <input
-                required
-                name="modelCalls"
-                type="number"
-                min={1}
-                max={100}
-                defaultValue={p?.maxDailyModelCalls || 20}
-                className={inputClass}
-              />
-            </Field>
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input
-                type="checkbox"
-                name="tools"
-                defaultChecked={p?.agentToolsEnabled || false}
-              />
-              Activez instrumentele pentru delegările aprobate
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input
-                type="checkbox"
-                name="generation"
-                defaultChecked={p?.generationEnabled || false}
-              />
-              Aprob generarea internă pe datele minimizate
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-300 md:col-span-2">
-              <input
-                type="checkbox"
-                name="outbound"
-                defaultChecked={p?.outboundEnabled || false}
-              />
-              Aprob folosirea canalului comercial configurat, cu aprobare
-              individuală și execuție umană
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-300 md:col-span-2">
-              <input required type="checkbox" />
-              Am verificat TVA, moneda, prețurile și regulile de utilizare a
-              datelor.
-            </label>
-            <Submit busy={busy}>Aprob și salvez politica</Submit>
-          </form>
-        </details>
-      )}
+      {data.permissions.configure ? <section className={panel}>
+        <h2 className="text-lg font-black text-white">Permisiunile integrărilor</h2>
+        {!p ? <p className="mt-2 text-slate-300">Configurează mai întâi <Link className="text-focus-yellow underline" href="/admin/commercial-settings">regulile comerciale</Link>.</p> : <form className="mt-3 grid gap-3" key={`integration-${p.version}`} onSubmit={(event) => {
+          event.preventDefault(); const f = event.currentTarget;
+          void run("policy.automation.save", { expectedVersion: p.version, maxDailyModelCalls: numberField(f, "modelCalls"), agentToolsEnabled: new FormData(f).has("tools"), generationEnabled: new FormData(f).has("generation"), outboundEnabled: new FormData(f).has("outbound") });
+        }}>
+          <Field label="Apeluri model maxime pe persoană pe zi"><input name="modelCalls" required type="number" min={1} max={100} className={inputClass} defaultValue={p.maxDailyModelCalls} /></Field>
+          <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="tools" defaultChecked={p.agentToolsEnabled} />Activez instrumentele pentru delegările aprobate</label>
+          <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="generation" defaultChecked={p.generationEnabled} />Aprob generarea internă pe date minimizate</label>
+          <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="outbound" defaultChecked={p.outboundEnabled} />Aprob canalul comercial configurat, cu aprobare individuală și execuție umană</label>
+          <label className="flex items-center gap-2 text-sm text-slate-300"><input required type="checkbox" />Am verificat furnizorii, accesul, costurile și dreptul de contact.</label>
+          <Submit busy={busy}>Salvează permisiunile integrărilor</Submit>
+        </form>}
+      </section> : null}
       {data.permissions.manage && (
         <>
           <section className={panel}>
@@ -2342,4 +2130,25 @@ function CaseReview({
       </form>
     </details>
   );
+}
+
+function CommercialSettings({ data, run, busy }: { data: Workspace; run: Run; busy: boolean }) {
+  const p = data.policy;
+  if (!data.permissions.configure) return <section className={panel}><p className="text-slate-300">Configurarea regulilor comerciale este disponibilă administratorului autorizat. Cere-i să verifice TVA, moneda și condițiile de ofertare.</p><Link className="focus-button secondary mt-3" href="/admin/commercial-quotes">Înapoi la oferte</Link></section>;
+  return <section className={panel}>
+    <h2 className="text-lg font-black text-white">Regulile folosite de toate ofertele</h2>
+    <p className="mt-2 text-sm text-slate-300">Verifică tratamentul fiscal cu responsabilul financiar. O versiune nouă invalidează aprobările bazate pe regulile vechi. Prețurile negociate păstrează tariful de listă și se aprobă pentru fiecare ofertă.</p>
+    <form className="mt-4 grid gap-4 md:grid-cols-2" key={p?.version || "new"} onSubmit={(event) => {
+      event.preventDefault(); const f = event.currentTarget;
+      void run("policy.commercial.save", { expectedVersion: p?.version ?? null, vatRateBps: Math.round(numberField(f, "vat") * 100), vatTreatment: field(f, "vatTreatment"), rateCardCurrency: field(f, "currency"), quoteValidityDays: numberField(f, "validity"), approvalHours: numberField(f, "approvalHours") });
+    }}>
+      <Field label="Cota TVA verificată (%)"><input required type="number" min="0" max="100" step="0.01" name="vat" defaultValue={p ? p.vatRateBps / 100 : undefined} className={inputClass} /></Field>
+      <Field label="Tratament TVA"><select required name="vatTreatment" className={inputClass} defaultValue={p?.vatTreatment || ""}><option value="">Selectează tratamentul</option><option value="exclusive">TVA adăugat la net</option><option value="inclusive">Tariful include TVA</option><option value="exempt">Scutit cu rată zero</option></select></Field>
+      <Field label="Moneda tarifelor de listă"><select required name="currency" defaultValue={p?.rateCardCurrency || ""} className={inputClass}><option value="">Selectează moneda verificată</option><option>EUR</option><option>RON</option></select></Field>
+      <Field label="Valabilitate ofertă (zile)"><input required name="validity" type="number" min={1} max={30} defaultValue={p?.quoteValidityDays || 7} className={inputClass} /></Field>
+      <Field label="Valabilitate aprobare (ore)"><input required name="approvalHours" type="number" min={1} max={72} defaultValue={p?.approvalHours || 24} className={inputClass} /></Field>
+      <label className="flex items-center gap-2 text-sm text-slate-300 md:col-span-2"><input required type="checkbox" />Am verificat TVA, moneda tarifelor și condițiile comerciale.</label>
+      <Submit busy={busy}>Salvează regulile comerciale</Submit>
+    </form>
+  </section>;
 }

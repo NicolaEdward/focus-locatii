@@ -1,5 +1,8 @@
 # Focus Media Platform Roadmap
 
+> Historical planning snapshot. For the current OOH workflow and implemented
+> workspaces, read [OOH_COMPANY_WORKSPACE.md](OOH_COMPANY_WORKSPACE.md).
+
 Date: 2026-06-29
 
 Scope: product and architecture roadmap for evolving the Focus Media locations app into a complete sales, operations and finance platform. This document is planning-only. It does not propose enabling OperationTask flags in production, running backfills, deploying, or implementing quote/offer flows immediately.

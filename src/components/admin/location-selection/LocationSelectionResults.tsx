@@ -148,7 +148,7 @@ function sqm(value: number | null) {
 
 function price(location: LocationSelectionLocationDTO) {
   if (location.suggestedBasePrice == null) return "-";
-  return `${location.suggestedBasePrice.toLocaleString("ro-RO")} ${location.currency || "EUR"}`;
+  return `${location.suggestedBasePrice.toLocaleString("ro-RO")} ${location.currency || "monedă de verificat"}`;
 }
 
 function rateCardLabel(location: LocationSelectionLocationDTO) {

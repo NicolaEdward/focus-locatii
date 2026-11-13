@@ -9,29 +9,24 @@ import { effectiveHoldExpiresAt, effectiveHoldWhere } from "@/lib/reservation-li
 import { addUtcDays, daysFromToday, decimalString, startOfUtcDay } from "@/lib/dashboard/dashboard-utils";
 import { bucharestDateKey, campaignEffectiveStatusWhere } from "@/lib/campaigns/campaign-effective-status";
 import { receivableOwnershipWhere } from "@/lib/receivables-ownership";
+import { getInventoryAvailabilitySummary } from "@/lib/inventory-availability-summary";
+import { bucharestDayBounds, dateKeyAsStorageDate } from "@/lib/dashboard/executive/time";
+import { emitStructuredLog } from "@/lib/observability";
+import { sortSalesAgenda, type SalesAgendaItem } from "@/lib/dashboard/sales-agenda";
 
-export type SalesAgendaItem = {
-  id: string;
-  kind: "invoice" | "follow_up" | "campaign_start" | "campaign_end" | "operation" | "hold";
-  urgency: "critical" | "high" | "medium" | "normal";
-  title: string;
-  context: string;
-  dueDate: string | null;
-  amount: string | null;
-  currency: string | null;
-  href: string;
-  actionLabel: string;
-};
+export type { SalesAgendaItem } from "@/lib/dashboard/sales-agenda";
 
 export type SalesDashboardData = Awaited<ReturnType<typeof getSalesDashboardData>>;
 
 export async function getSalesDashboardData(session: AuthSession, now = new Date()) {
   if (!["SALES_AGENT", "SALES_DIRECTOR"].includes(session.role)) throw new Error("Dashboard Sales nepermis pentru acest rol.");
-  const today = startOfUtcDay(now);
+  const snapshotDate = bucharestDateKey(now);
+  const today = dateKeyAsStorageDate(snapshotDate);
+  const instantDay = bucharestDayBounds(snapshotDate);
   const tomorrow = addUtcDays(today, 1);
   const inSevenDays = addUtcDays(today, 7);
   const campaignWindowEnd = addUtcDays(today, 8);
-  const snapshotDate = bucharestDateKey(now);
+  const renewalWindowEnd = addUtcDays(today, 61);
   const ownerId = session.id;
 
   const invoiceOwnership: Prisma.FinancialReceivableWhereInput = receivableOwnershipWhere(ownerId);
@@ -42,7 +37,7 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
     OR: [{ sellerUserId: ownerId }, { ownerId }, { client: { is: { accountOwnerUserId: ownerId } } }]
   };
 
-  const [actions, invoices, campaigns, operations, holds, summaryCounts] = await Promise.all([
+  const [actions, invoices, campaigns, operations, holds, summaryCounts, inventory] = await Promise.all([
     prisma.crmNextAction.findMany({
       where: { ownerId, status: "open", dueAt: { lte: inSevenDays } },
       select: {
@@ -50,7 +45,7 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
         company: { select: { name: true } },
         prospect: { select: { id: true } }, opportunity: { select: { id: true, name: true } }
       },
-      orderBy: [{ dueAt: "asc" }, { priority: "desc" }], take: 40
+      orderBy: [{ dueAt: "asc" }, { priority: "desc" }, { id: "asc" }], take: 500
     }),
     prisma.financialReceivable.findMany({
       where: { includedInReport: true, needsReview: false, remainingAmount: { gt: 0 }, ...invoiceOwnership, dueDate: { lte: inSevenDays } },
@@ -58,7 +53,7 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
         id: true, invoiceNumber: true, dueDate: true, remainingAmount: true, currency: true, status: true, clientId: true,
         client: { select: { companyName: true } }, clientName: true
       },
-      orderBy: [{ dueDate: "asc" }, { remainingAmount: "desc" }], take: 60
+      orderBy: [{ dueDate: "asc" }, { remainingAmount: "desc" }, { id: "asc" }], take: 500
     }),
     prisma.campaign.findMany({
       where: {
@@ -68,36 +63,40 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
           {
             OR: [
               { startDate: { lt: campaignWindowEnd }, endDate: { gte: today } },
-              { endDate: { gte: today, lt: campaignWindowEnd } }
+              { endDate: { gte: today, lt: renewalWindowEnd } }
             ]
           }
         ]
       },
       select: { id: true, campaignName: true, startDate: true, endDate: true, client: { select: { companyName: true } } },
-      orderBy: [{ startDate: "asc" }, { endDate: "asc" }], take: 60
+      orderBy: [{ endDate: "asc" }, { id: "asc" }], take: 500
     }),
     prisma.reservation.findMany({
       where: { status: "BOOKED", ...reservationOwnership, periodEnd: { gte: addUtcDays(today, -90) } },
       select: {
         id: true, campaignId: true, clientName: true, campaignName: true, periodStart: true, periodEnd: true,
         installationDate: true, neutralizationDate: true, productionNotes: true, location: { select: { code: true } },
-        _count: { select: { documents: { where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active" } } } }
+        _count: { select: { documents: { where: { documentType: OPERATIONAL_PROOF_DOCUMENT_TYPE, status: "active", OR: [{ expiryDate: null }, { expiryDate: { gte: now } }] } } } }
       },
-      orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }], take: 180
+      orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }, { id: "asc" }], take: 500
     }),
     prisma.reservation.findMany({
       where: { AND: [effectiveHoldWhere(now), reservationOwnership] },
       select: { id: true, status: true, clientName: true, campaignName: true, holdExpiresAt: true, createdAt: true, location: { select: { code: true } } },
-      orderBy: { holdExpiresAt: "asc" }, take: 30
+      orderBy: [{ holdExpiresAt: "asc" }, { id: "asc" }], take: 500
     }),
     Promise.all([
-      prisma.crmNextAction.count({ where: { ownerId, status: "open", dueAt: { lt: today } } }),
-      prisma.crmNextAction.count({ where: { ownerId, status: "open", dueAt: { gte: today, lt: tomorrow } } }),
+      prisma.crmNextAction.count({ where: { ownerId, status: "open", dueAt: { lt: instantDay.start } } }),
+      prisma.crmNextAction.count({ where: { ownerId, status: "open", dueAt: { gte: instantDay.start, lt: instantDay.endExclusive } } }),
       prisma.financialReceivable.count({ where: { includedInReport: true, needsReview: false, remainingAmount: { gt: 0 }, dueDate: { lt: today }, ...invoiceOwnership } }),
       prisma.financialReceivable.count({ where: { includedInReport: true, needsReview: false, remainingAmount: { gt: 0 }, dueDate: { gte: today, lte: inSevenDays }, ...invoiceOwnership } }),
       prisma.campaign.count({ where: { AND: [campaignOwnership, { OR: [campaignEffectiveStatusWhere("ACTIVE", now), campaignEffectiveStatusWhere("SCHEDULED", now)] }, { startDate: { gte: today, lt: campaignWindowEnd } }] } }),
       prisma.campaign.count({ where: { AND: [campaignOwnership, campaignEffectiveStatusWhere("ACTIVE", now), { endDate: { gte: today, lt: campaignWindowEnd } }] } })
-    ])
+    ]),
+    getInventoryAvailabilitySummary({ now }).catch(() => {
+      emitStructuredLog("error", "sales_inventory_snapshot_failed", { route: "/admin/dashboard", operation: "inventory_snapshot", role: session.role });
+      return null;
+    })
   ]);
 
   const operationalItems = operations.flatMap((row) => {
@@ -121,7 +120,7 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
       };
     }),
     ...actions.map((row): SalesAgendaItem => ({
-      id: `follow-${row.id}`, kind: "follow_up", urgency: row.dueAt < today ? "critical" : row.dueAt < tomorrow ? "high" : "normal",
+      id: `follow-${row.id}`, kind: "follow_up", urgency: row.dueAt < instantDay.start ? "critical" : row.dueAt < instantDay.endExclusive ? "high" : "normal",
       title: row.company.name, context: row.description || row.opportunity?.name || `Follow-up ${row.type}`,
       dueDate: row.dueAt.toISOString(), amount: null, currency: null,
       href: row.opportunityId
@@ -138,19 +137,29 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
         context: `${row.campaignName} începe curând`, dueDate: row.startDate.toISOString(), amount: null, currency: null,
         href: `/admin/campanii?campaignId=${encodeURIComponent(row.id)}`, actionLabel: "Vezi campania"
       });
-      if (row.endDate && row.endDate >= today && row.endDate < campaignWindowEnd) items.push({
-        id: `campaign-end-${row.id}`, kind: "campaign_end", urgency: "normal", title: row.client.companyName,
-        context: `${row.campaignName} se termină curând`, dueDate: row.endDate.toISOString(), amount: null, currency: null,
-        href: `/admin/campanii?campaignId=${encodeURIComponent(row.id)}`, actionLabel: "Vezi campania"
+      if (row.endDate && row.endDate >= today && row.endDate < renewalWindowEnd) items.push({
+        id: `campaign-end-${row.id}`, kind: "campaign_end", urgency: row.endDate < campaignWindowEnd ? "high" : "normal", title: row.client.companyName,
+        context: `${row.campaignName} · pregătește reînnoirea; final în ${daysFromToday(row.endDate, today)} zile`, dueDate: row.endDate.toISOString(), amount: null, currency: null,
+        href: `/admin/campanii?campaignId=${encodeURIComponent(row.id)}`, actionLabel: "Pregătește reînnoirea"
       });
       return items;
     }),
     ...operationalItems.map((row): SalesAgendaItem => ({
       id: row.id, kind: "operation", urgency: row.overdue ? "high" : "medium", title: `${row.locationCode} · ${row.clientName}`,
-      context: `${row.kind === "decoration" ? "Decorare" : "Neutralizare"} ${row.overdue ? "întârziată" : "programată"}`,
+      context: `${row.kind === "decoration" ? "Decorare" : "Neutralizare"} ${row.overdue ? "întârziată" : "programată"}${row.proofPhotoCount ? ` · ${row.proofPhotoCount} poze dovadă în dosar` : " · dovadă foto lipsă în dosar"}`,
       dueDate: row.dueDate, amount: null, currency: null, href: row.href, actionLabel: "Vezi operațional"
-    }))
-  ].sort(agendaSort).slice(0, 16);
+    })),
+    ...holds.map((row): SalesAgendaItem => {
+      const expires = effectiveHoldExpiresAt(row);
+      const remaining = expires.getTime() - now.getTime();
+      return {
+        id: `hold-${row.id}`, kind: "hold", urgency: remaining <= 2 * 3_600_000 ? "critical" : remaining <= 86_400_000 ? "high" : "medium",
+        title: `${row.location.code} · ${row.clientName}`, context: `${row.campaignName || "Rezervare temporară"} · HOLD expiră ${expires.toLocaleString("ro-RO", { timeZone: "Europe/Bucharest" })}`,
+        dueDate: expires.toISOString(), amount: null, currency: null,
+        href: `/admin/locatii?reservationId=${encodeURIComponent(row.id)}#rezervari`, actionLabel: "Verifică HOLD-ul",
+      };
+    }),
+  ].sort(sortSalesAgenda);
 
   const invoiceRows = invoices.map((row) => ({
     id: row.id, clientId: row.clientId, clientName: row.client?.companyName || row.clientName || "Client",
@@ -167,6 +176,12 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
     role: session.role,
     userName: session.name,
     generatedAt: now.toISOString(),
+    inventory,
+    agendaCoverage: {
+      cappedSources: [actions.length >= 500 ? "follow-up-uri" : null, invoices.length >= 500 ? "facturi" : null,
+        campaigns.length >= 500 ? "campanii" : null, operations.length >= 500 ? "lucrări" : null,
+        holds.length >= 500 ? "HOLD-uri" : null].filter((value): value is string => Boolean(value)),
+    },
     links: {
       campaignsStarting: campaignDrillDownHref("STARTS_WITHIN_7_DAYS", snapshotDate, ownerId, summaryCounts[4], startingCampaigns),
       campaignsEnding: campaignDrillDownHref("ENDS_WITHIN_7_DAYS", snapshotDate, ownerId, summaryCounts[5], endingCampaigns)
@@ -181,7 +196,7 @@ export async function getSalesDashboardData(session: AuthSession, now = new Date
     invoices: invoiceRows.slice(0, 12),
     followUps: actions.slice(0, 10).map((row) => ({
       id: row.id, companyName: row.company.name, description: row.description || row.opportunity?.name || row.type,
-      dueDate: row.dueAt.toISOString(), overdue: row.dueAt < today,
+      dueDate: row.dueAt.toISOString(), overdue: row.dueAt < instantDay.start,
       href: row.opportunityId ? `/admin/crm?view=today&kind=opportunity&record=${encodeURIComponent(row.opportunityId)}` : "/admin/crm?view=today"
     })),
     campaigns: campaigns.slice(0, 12).map((row) => ({
@@ -219,12 +234,4 @@ function salesOperation(row: any, kind: "decoration" | "neutralization", date: D
     overdue: Boolean(date && startOfUtcDay(date) < today),
     href: `/admin/operational?panel=${kind === "decoration" ? "decorations" : "neutralizations"}&reservationId=${encodeURIComponent(row.id)}`
   };
-}
-
-function agendaSort(left: SalesAgendaItem, right: SalesAgendaItem) {
-  const urgency = { critical: 0, high: 1, medium: 2, normal: 3 };
-  const type = { invoice: 0, follow_up: 1, campaign_start: 2, operation: 3, campaign_end: 4, hold: 5 };
-  return urgency[left.urgency] - urgency[right.urgency]
-    || type[left.kind] - type[right.kind]
-    || String(left.dueDate || "9999").localeCompare(String(right.dueDate || "9999"));
 }

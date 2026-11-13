@@ -27,6 +27,7 @@ import {
   X
 } from "lucide-react";
 import { CrmCommandRecovery, useCrmCommandFlow } from "@/components/admin/crm/CrmCommandRecovery";
+import { PrepareCommercialOffer } from "@/components/admin/crm/PrepareCommercialOffer";
 import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   CRM_NEXT_ACTION_CATALOG,
@@ -419,11 +420,8 @@ function RecordDrawer({ sessionUserId, selected, canEdit, onClose, onChanged }: 
           {!canEdit ? <p className="rounded-md border border-slate-700 bg-focus-navy/40 px-4 py-3 text-sm text-slate-300">Ai acces complet la informații și istoric, fără drept de modificare.</p> : null}
           {canEdit && selected.kind === "prospect" && ["prospecting", "qualified"].includes(detail.status) ? <QualifyPanel detail={detail} pending={pending || !flow.ready || Boolean(flow.blocked)} onSubmit={(payload) => command(payload, payload.action === "qualify_prospect" ? "Prospectul a fost calificat." : "Oportunitatea a fost creată.")} /> : null}
           {canEdit && selected.kind === "opportunity" && ["opportunity", "quoted", "negotiation", "contracting"].includes(detail.stage) ? <OpportunityTransitionPanel detail={detail} pending={pending || !flow.ready || Boolean(flow.blocked)} onSubmit={(payload) => command(payload, "Etapa oportunității a fost actualizată.")} /> : null}
-          {selected.kind === "opportunity" && detail.stage === "won" ? <section className="rounded-lg border border-emerald-400/25 bg-emerald-950/25 p-4">
-            <SectionTitle title="Predare catre portofoliul comercial" count={0} />
-            <p className="text-sm text-slate-300">CRM-ul si portofoliul de clienti raman separate. Clientul si campania se creeaza sau se confirma numai printr-o actiune explicita.</p>
-            {canEdit ? <div className="mt-4 flex justify-end"><Link className={primaryButton} href={`/admin/clienti?crmOpportunityId=${encodeURIComponent(detail.id)}`}><ArrowRight size={17} /> Pregateste clientul si campania</Link></div> : null}
-          </section> : null}
+          {canEdit && selected.kind === "opportunity" && ["opportunity", "quoted", "negotiation", "contracting", "won"].includes(detail.stage) ? <PrepareCommercialOffer key={`${detail.id}:${detail.version}`} opportunity={detail} sessionUserId={sessionUserId} onReload={() => void load()} /> : null}
+          {selected.kind === "opportunity" && detail.stage === "won" ? <details className="rounded-lg border border-slate-700 bg-focus-navy/25"><summary className="cursor-pointer px-4 py-3 font-black text-white">Legături comerciale existente</summary><div className="border-t border-slate-700 p-4"><p className="text-sm text-slate-300">Verifică asocierea unei oportunități câștigate cu un client sau o campanie existente. Confirmarea istorică a legăturii rămâne o acțiune explicită.</p>{canEdit ? <Link className={`${secondaryButton} mt-4`} href={`/admin/clienti?crmOpportunityId=${encodeURIComponent(detail.id)}`}><ArrowRight size={17} /> Verifică legătura cu portofoliul</Link> : null}</div></details> : null}
           {canEdit ? <ActivityPanel detail={detail} pending={pending || !flow.ready || Boolean(flow.blocked)} onSubmit={(payload) => command(payload, "Update-ul a fost adăugat în istoric.")} /> : null}
           <details className="rounded-lg border border-slate-700 bg-focus-navy/25"><summary className="cursor-pointer px-4 py-3 font-black text-white">Firmă și contacte</summary><div className="border-t border-slate-700 p-4"><CompanyContacts detail={detail} canEdit={canEdit} pending={pending || !flow.ready || Boolean(flow.blocked)} command={command} /></div></details>
           <section><SectionTitle title="Istoric" count={events.length} /><Timeline rows={events} /></section>

@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export default async function AssistantConnectionsPage() {
   const session = await getAuthSession();
   if (!session) redirect("/admin/login");
+  if (session.role === "FIELD_OPERATOR") redirect("/admin/operational");
   const state = JSON.parse(
     JSON.stringify(await assistantConnectionsState(session)),
   );

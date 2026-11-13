@@ -1,5 +1,7 @@
 "use client";
 
+import { FinanceQualityNotice } from "@/components/admin/client-campaigns/FinanceQualityNotice";
+
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -294,13 +296,14 @@ function CampaignsPanel({ campaigns, clientId, canEdit }: { campaigns: CampaignL
 
 function FinancePanel({ finance, clientId }: { finance?: FinanceSummary; clientId: string }) {
   if (!finance) return <Panel><EmptyState>Nu exista rezumat financiar.</EmptyState></Panel>;
-  return <Panel title="Rezumat financiar" action={<Link className="focus-button secondary" href={`/admin/financiar/incasari?clientId=${clientId}`}>Facturi client</Link>}><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Sold RON" value={moneyLabel(finance.remainingRon, "RON")} /><Metric label="Sold EUR" value={moneyLabel(finance.remainingEur, "EUR")} /><Metric label="Restant RON" value={moneyLabel(finance.overdueRon, "RON")} /><Metric label="Restant EUR" value={moneyLabel(finance.overdueEur, "EUR")} /></div><div className="mt-4 grid gap-2">{finance.rows.slice(0, 12).map((row) => <article className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-focus-line p-3" key={row.id}><span><strong className="text-white">{row.invoiceNumber || "Factura fara numar"}</strong><small className="block text-slate-400">Scadenta {dateLabel(row.dueDate)}</small></span><span className="font-black text-white">{moneyLabel(row.remaining, row.currency)}</span></article>)}</div></Panel>;
+  return <Panel title="Rezumat financiar" action={<Link className="focus-button secondary" href={`/admin/financiar/incasari?clientId=${clientId}`}>Facturi client</Link>}><FinanceQualityNotice finance={finance} /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Sold RON" value={moneyLabel(finance.remainingRon, "RON")} /><Metric label="Sold EUR" value={moneyLabel(finance.remainingEur, "EUR")} /><Metric label="Restant RON" value={moneyLabel(finance.overdueRon, "RON")} /><Metric label="Restant EUR" value={moneyLabel(finance.overdueEur, "EUR")} /></div><div className="mt-4 grid gap-2">{finance.rows.slice(0, 12).map((row) => <article className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-focus-line p-3" key={row.id}><span><strong className="text-white">{row.invoiceNumber || "Factura fara numar"}</strong><small className="block text-slate-400">Scadenta {dateLabel(row.dueDate)}</small></span><span className="font-black text-white">{moneyLabel(row.remaining, row.currency)}</span></article>)}</div></Panel>;
 }
 
 function PortfolioFinancePanel({ finance, loading, onClose }: { finance: FinanceSummary | null; loading: boolean; onClose: () => void }) {
   if (loading && !finance) return <Panel><LoadingState text="Incarcam facturile portofoliului..." /></Panel>;
   if (!finance) return <Panel><EmptyState>Nu exista facturi vizibile in portofoliul tau.</EmptyState></Panel>;
   return <Panel title="Facturile clientilor mei" action={<button className="focus-button secondary" type="button" onClick={onClose}>Inapoi la clienti</button>}>
+    <FinanceQualityNotice finance={finance} />
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Sold RON" value={moneyLabel(finance.remainingRon, "RON")} /><Metric label="Sold EUR" value={moneyLabel(finance.remainingEur, "EUR")} /><Metric label="Restant RON" value={moneyLabel(finance.overdueRon, "RON")} /><Metric label="Restant EUR" value={moneyLabel(finance.overdueEur, "EUR")} /></div>
     <div className="mt-4 grid gap-2">{finance.rows.length ? finance.rows.map((row) => <article className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-focus-line bg-focus-navy/25 p-3" key={row.id}><span><strong className="text-white">{row.invoiceNumber || "Factura fara numar"}</strong><small className="block text-slate-400">Scadenta {dateLabel(row.dueDate)}</small></span><span className="font-black text-white">{moneyLabel(row.remaining, row.currency)}</span></article>) : <EmptyState>Nu exista facturi deschise.</EmptyState>}</div>
   </Panel>;

@@ -1,3 +1,4 @@
+import { publicBusinessErrorMessage, publicBusinessErrorStatus } from "@/lib/public-business-error";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
@@ -45,8 +46,12 @@ export async function GET(request: NextRequest) {
     const query = request.nextUrl.searchParams.get("q")?.trim() || "";
     const cursor = request.nextUrl.searchParams.get("cursor");
     const limit = Number(request.nextUrl.searchParams.get("limit") || 30);
-    const page = await getClientsPage(session, { query, cursor, limit });
-    return NextResponse.json({ clients: page.items, page }, { headers: noStoreHeaders });
+    try {
+      const page = await getClientsPage(session, { query, cursor, limit });
+      return NextResponse.json({ clients: page.items, page }, { headers: noStoreHeaders });
+    } catch (error) {
+      return NextResponse.json({ error: publicBusinessErrorMessage(error, "Lista clienților nu poate fi încărcată.", "clients", request) }, { status: publicBusinessErrorStatus(error, 503), headers: noStoreHeaders });
+    }
   });
 }
 
@@ -113,8 +118,8 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Clientul nu a putut fi salvat." },
-      { status: error instanceof ClientMutationError ? error.status : 400, headers: noStoreHeaders }
+      { error: publicBusinessErrorMessage(error, "Clientul nu a putut fi salvat.", "clients", request) },
+      { status: publicBusinessErrorStatus(error, 400), headers: noStoreHeaders }
     );
   }
 }

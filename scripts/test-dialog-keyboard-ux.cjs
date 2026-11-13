@@ -17,7 +17,6 @@ assert.match(escapeHook, /escapeStack\.splice/, "Closed dialogs must be removed 
 const sharedDialogFiles = [
   "src/components/admin/CrmWorkspaceV4.tsx",
   "src/components/admin/client-campaigns/WorkspaceUi.tsx",
-  "src/components/admin/ClientCampaignsWorkspace.tsx",
   "src/components/admin/ReceivablesWorkspace.tsx",
   "src/components/admin/AdminReservationsPanel.tsx",
   "src/components/admin/ReservationPeriodChangeDialog.tsx",

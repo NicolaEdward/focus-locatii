@@ -4,7 +4,7 @@ import type { AuthSession } from "@/lib/auth";
 import { recordTransactionalAudit } from "@/lib/transactional-audit";
 import { normalizeReceivableInvoiceNumber } from "@/lib/receivables-domain";
 import { canonicalTaxId } from "@/lib/tax-id";
-import { companyCodeForEntity } from "@/lib/company-entities";
+import { companyCodeForEntity, normalizeCompanyEntity } from "@/lib/company-entities";
 import { assertDocumentAuditWriter } from "@/lib/document-source-service";
 import { canonicalDocumentValue, documentFactSchema, documentHash, DocumentAuditError, mayManageDocumentAudit, type DocumentFact } from "@/lib/document-source-domain";
 import { isEffectiveBlockingReservation } from "@/lib/reservation-lifecycle-domain";
@@ -138,7 +138,7 @@ async function compareReservationFact(tx: Tx, fact: Extract<DocumentFact, { kind
   const location = await tx.location.findUnique({ where: { code: fact.locationCode }, select: { id: true } });
   if (!location) return { compared: false, findings: [{ code: "LOCATION_NOT_FOUND", severity: "difference", title: "Codul din contract nu există în inventarul aplicației." }] as FindingContent[] };
   const rows = await tx.reservation.findMany({ where: { locationId: location.id, ...(fact.reservationId ? { id: fact.reservationId } : { status: { in: ["BOOKED", "HOLD", "RESERVED"] } }) }, orderBy: { id: "asc" }, take: 201,
-    select: { id: true, status: true, periodStart: true, periodEnd: true, holdExpiresAt: true, createdAt: true, contractNumber: true, currency: true, monthlyRentShare: true, amount: true, client: { select: { taxId: true } } } });
+    select: { id: true, status: true, periodStart: true, periodEnd: true, holdExpiresAt: true, createdAt: true, contractNumber: true, contractCompany: true, currency: true, monthlyRentShare: true, amount: true, client: { select: { taxId: true } } } });
   if (rows.length > 200) return { compared: false, findings: [{ code: "RESERVATION_SCOPE_TOO_LARGE", severity: "review", title: "Codul are prea multe înregistrări pentru asociere sigură; indică rezervarea exactă." }] as FindingContent[] };
   let candidates = rows;
   if (!fact.reservationId) {
@@ -156,6 +156,7 @@ async function compareReservationFact(tx: Tx, fact: Extract<DocumentFact, { kind
   if (row.status !== "BOOKED") findings.push({ ...base, code: "BOOKING_STATUS_DIFFERS", severity: "difference", title: "Contractul verificat nu este înregistrat ca rezervare confirmată.", current: { status: row.status }, proposed: { status: "BOOKED" } });
   if (day(row.periodStart) !== fact.periodStart || day(row.periodEnd) !== fact.periodEnd) findings.push({ ...base, code: "BOOKING_PERIOD_DIFFERS", severity: "difference", title: "Perioada din aplicație diferă de faptele confirmate din contract.", current: { periodStart: day(row.periodStart), periodEnd: day(row.periodEnd) }, proposed: { periodStart: fact.periodStart, periodEnd: fact.periodEnd } });
   if (fact.currency && row.currency !== fact.currency) findings.push({ ...base, code: "BOOKING_CURRENCY_DIFFERS", severity: "difference", title: "Moneda rezervării diferă de moneda explicită din document.", current: { currency: row.currency }, proposed: { currency: fact.currency } });
+  if (fact.companyEntity && normalizeCompanyEntity(row.contractCompany) !== fact.companyEntity) findings.push({ ...base, code: "BOOKING_COMPANY_DIFFERS", severity: "difference", title: "Firma contractantă diferă de firma confirmată din original.", current: { companyEntity: normalizeCompanyEntity(row.contractCompany) }, proposed: { companyEntity: fact.companyEntity } });
   if (fact.monthlyRent !== undefined) {
     if (!fact.currency) findings.push({ ...base, code: "RENT_CURRENCY_UNVERIFIED", severity: "review", title: "Chiria nu poate fi comparată fără moneda explicită din document." });
     else if (row.currency === fact.currency && cents(row.monthlyRentShare ?? row.amount) !== cents(fact.monthlyRent)) findings.push({ ...base, code: "BOOKING_MONTHLY_RENT_DIFFERS", severity: "difference", title: "Chiria lunară pe cod diferă de valoarea explicită verificată.", current: { monthlyRent: cents(row.monthlyRentShare ?? row.amount), currency: row.currency }, proposed: { monthlyRent: cents(fact.monthlyRent), currency: fact.currency } });

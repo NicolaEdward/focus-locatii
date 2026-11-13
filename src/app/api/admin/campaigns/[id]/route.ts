@@ -1,3 +1,4 @@
+import { publicBusinessErrorMessage, publicBusinessErrorStatus } from "@/lib/public-business-error";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest, context: Context) {
     if (!campaign) return NextResponse.json({ error: "Campania nu exista." }, { status: 404, headers: noStoreHeaders });
     return NextResponse.json({ campaign }, { headers: noStoreHeaders });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Nu ai acces la campanie." }, { status: 403, headers: noStoreHeaders });
+    return NextResponse.json({ error: publicBusinessErrorMessage(error, "Dosarul campaniei nu poate fi încărcat.", "campaigns.detail", request) }, { status: publicBusinessErrorStatus(error, 403), headers: noStoreHeaders });
   }
 }
 
@@ -48,8 +49,8 @@ export async function PATCH(request: NextRequest, context: Context) {
     return NextResponse.json({ campaign }, { headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Campania nu a putut fi actualizata." },
-      { status: 400, headers: noStoreHeaders }
+      { error: publicBusinessErrorMessage(error, "Campania nu a putut fi actualizata.", "campaigns.detail", request) },
+      { status: publicBusinessErrorStatus(error, 400), headers: noStoreHeaders }
     );
   }
 }
@@ -75,8 +76,8 @@ export async function DELETE(request: NextRequest, context: Context) {
     return NextResponse.json({ campaign }, { headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Campania nu a putut fi arhivata." },
-      { status: 400, headers: noStoreHeaders }
+      { error: publicBusinessErrorMessage(error, "Campania nu a putut fi arhivata.", "campaigns.detail", request) },
+      { status: publicBusinessErrorStatus(error, 400), headers: noStoreHeaders }
     );
   }
 }

@@ -18,6 +18,8 @@ export type OperationalProofNotes = {
   purpose: OperationalProofPurpose;
   kind: OperationKind;
   taskId?: string | null;
+  operationTaskId?: string | null;
+  isBaseTask?: boolean;
   completionNote?: string | null;
   uploadedByUserId?: string | null;
   expiresInDays: number;
@@ -54,6 +56,8 @@ export function safeOperationalProofFileName(value: string) {
 export function operationalProofNotes(input: {
   kind: OperationKind;
   taskId?: string | null;
+  operationTaskId?: string | null;
+  isBaseTask?: boolean;
   completionNote?: string | null;
   uploadedByUserId?: string | null;
 }) {
@@ -61,6 +65,8 @@ export function operationalProofNotes(input: {
     purpose: operationalProofPurpose(input.kind),
     kind: input.kind,
     taskId: input.taskId || null,
+    operationTaskId: input.operationTaskId || null,
+    ...(input.isBaseTask !== undefined ? { isBaseTask: input.isBaseTask } : {}),
     completionNote: input.completionNote || null,
     uploadedByUserId: input.uploadedByUserId || null,
     expiresInDays: OPERATIONAL_PROOF_RETENTION_DAYS
@@ -77,6 +83,8 @@ export function parseOperationalProofNotes(value?: string | null): OperationalPr
       purpose: parsed.purpose || operationalProofPurpose(parsed.kind),
       kind: parsed.kind,
       taskId: parsed.taskId || null,
+      operationTaskId: parsed.operationTaskId || null,
+      ...(typeof parsed.isBaseTask === "boolean" ? { isBaseTask: parsed.isBaseTask } : {}),
       completionNote: parsed.completionNote || null,
       uploadedByUserId: parsed.uploadedByUserId || null,
       expiresInDays: OPERATIONAL_PROOF_RETENTION_DAYS

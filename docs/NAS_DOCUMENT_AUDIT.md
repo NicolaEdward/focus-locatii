@@ -1,5 +1,13 @@
 # Contract and invoice evidence kept on the NAS
 
+## Commercial contract control
+
+`/admin/control-contractual` provides a read-only, paginated view of BOOKED supports, dates, applicable monthly rent, legal entities, responsible seller and missing terms. It compares the application's rows with explicit human-reviewed facts from current indexed originals. A reservation ID is an explicit association; otherwise automatic evidence matching requires exact code, period, contract number and client tax ID. A shared location code or a PDF attachment is insufficient.
+
+Sellers see only their authorized reservations and a minimized evidence status. NAS document names, hashes, citations and document links are returned only to roles already permitted to read the NAS audit. Company ownership totals are omitted from seller responses. Company-entity review is optional for old facts, but missing it prevents full-field verification. Price changes across intervals remain flagged for amendment review; an applicable monthly figure does not certify every historical segment.
+
+CSV export is explicitly the current report page, applies the same portfolio controls and escapes spreadsheet formulas. All responses are private/no-store. No report call updates rentals, contract terms, prices, invoices or payments; proposed differences must pass the existing authorized mutation and effective-date workflow. No NAS connection, source coverage or contractual match is fabricated when originals are unavailable.
+
 ## Delivered boundary and actual status
 
 This module is a working connection, review and reconciliation mechanism. It does **not** establish that the real NAS was connected, its files were opened, or any actual business records matched the originals. Existing `file://nas/…` references identify a private network share; a reference alone does not grant this cloud runtime access to that LAN. No real contract, invoice, reservation or payment was changed by developing this module.

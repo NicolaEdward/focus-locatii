@@ -135,8 +135,11 @@ async function main() {
         sellerUserId: owner.id,
         accountOwnerUserId: owner.id,
         currency: "RON",
+        companyEntity: "Focus Media",
         paymentTermDays: 7,
         paymentTermType: "7_days",
+        billingRule: "manual_per_contract",
+        billingFrequency: "monthly",
         status: "active",
       },
     });

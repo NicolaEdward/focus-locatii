@@ -630,7 +630,7 @@ async function main() {
     const groupedStatusResponse = await fetch(`${BASE_URL}/api/reservations/${reservationPayload.reservation.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie: adminCookie },
-      body: JSON.stringify({ status: "BOOKED", applyToGroup: true })
+      body: JSON.stringify({ status: "BOOKED", applyToGroup: true, expectedVersions: Object.fromEntries((await (await fetch(`${BASE_URL}/api/reservations/${reservationPayload.reservation.id}`, { headers: { cookie: adminCookie } })).json()).reservations.map((row) => [row.id, row.updatedAt])) })
     });
     assert(groupedStatusResponse.status === 400, "Hold converted to BOOKED without real client/campaign");
 
@@ -641,6 +641,7 @@ async function main() {
         headers: { "content-type": "application/json", cookie: adminCookie },
         body: JSON.stringify({
           status: "BOOKED",
+          expectedUpdatedAt: (await (await fetch(`${BASE_URL}/api/reservations/${reservation.id}`, { headers: { cookie: adminCookie } })).json()).reservation.updatedAt,
           clientId: smokeClient.id,
           campaignId: smokeCampaign.id,
           amount: 1000,
@@ -711,15 +712,18 @@ async function main() {
 
     const bookedEditTarget = convertedReservations[0];
     assert(bookedEditTarget?.clientId && bookedEditTarget?.campaignId, `Converted target is missing client/campaign: ${JSON.stringify(bookedEditTarget)}`);
-    const bookedEditResponse = await fetch(`${BASE_URL}/api/reservations/${bookedEditTarget.id}`, {
+    const bookedEditResponse = await fetch(`${BASE_URL}/api/reservations/${bookedEditTarget.id}/group`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie: adminCookie },
       body: JSON.stringify({
+        expectedVersions: Object.fromEntries((await (await fetch(`${BASE_URL}/api/reservations/${bookedEditTarget.id}`, { headers: { cookie: adminCookie } })).json()).reservations.map((row) => [row.id, row.updatedAt])),
+        groupRentShares: convertedReservations.map((row, index) => ({ reservationId: row.id, monthlyRent: index === 0 ? 1100 : 1000 })),
+        amendmentEffectiveDate: "2036-01-10", amendmentMode: "correction", amendmentReference: "Synthetic signed contract correction",
         clientName: "Smoke Test Edited",
         contractCompany: "Smoke Contract Updated SRL",
         campaignName: "Smoke Conflict Edited",
         amount: 1100,
-        monthlyRentTotal: 2200,
+        monthlyRentTotal: 2100,
         monthlyRentShare: 1100,
         periodStart: "2036-01-10",
         periodEnd: "2036-01-20",
@@ -866,12 +870,14 @@ async function main() {
     for (const reservation of reservationPayload.reservations) {
       await fetch(`${BASE_URL}/api/reservations/${reservation.id}`, {
         method: "DELETE",
-        headers: { cookie: adminCookie }
+        headers: { cookie: adminCookie, "content-type": "application/json" },
+        body: JSON.stringify({ expectedUpdatedAt: (await (await fetch(`${BASE_URL}/api/reservations/${reservation.id}`, { headers: { cookie: adminCookie } })).json()).reservation.updatedAt })
       });
     }
     await fetch(`${BASE_URL}/api/reservations/${directNoDecoration.id}`, {
       method: "DELETE",
-      headers: { cookie: adminCookie }
+      headers: { cookie: adminCookie, "content-type": "application/json" },
+      body: JSON.stringify({ expectedUpdatedAt: (await (await fetch(`${BASE_URL}/api/reservations/${directNoDecoration.id}`, { headers: { cookie: adminCookie } })).json()).reservation.updatedAt })
     });
 
     const staleHold = await prisma.reservation.create({

@@ -45,7 +45,7 @@ export function DashboardHoldActions({
       const response = await fetch("/api/admin/command-center", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ reservationId: row.id, action, ...body })
+        body: JSON.stringify({ reservationId: row.id, action, expectedUpdatedAt: row.updatedAt, ...body })
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error || "Actiunea nu a putut fi executata.");

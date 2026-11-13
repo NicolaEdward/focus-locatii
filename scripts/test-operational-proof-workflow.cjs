@@ -67,7 +67,8 @@ function completionRouteIsScopedAndDoesNotCreateReservations() {
   assert(source.includes('"dashboard.operations.view"'), "field installer operational permission should be supported");
   assert(source.includes("canCompleteOperationalReservation"), "completion API must enforce scoped operational access");
   assert(source.includes("client: { select:") && source.includes("accountOwnerUserId: true"), "completion API must load client owner for seller access checks");
-  assert(source.includes("validateOperationalProofFile"), "completion API must validate uploaded files");
+  const imageValidation = read("src", "lib", "operational-proof-image.ts");
+  assert(source.includes("prepareOperationalProofImage") && imageValidation.includes("validateOperationalProofFile"), "completion API must validate and decode uploaded image bytes");
   assert(source.includes("clientDocument.create"), "proof photos should be stored as internal documents");
   assert(source.includes("withOperationCompletion"), "base operation completion should use operation metadata");
   assert(source.includes("withOperationTaskCompletion"), "extra task completion should use operation metadata");
@@ -171,15 +172,19 @@ function sellerDashboardShowsScopedProofPhotos() {
   assert(dashboard.includes("OPERATIONAL_PROOF_DOCUMENT_TYPE"), "sales dashboard should count only operational proof documents");
   assert(dashboard.includes("proofPhotoCount: row._count.documents"), "sales dashboard should expose a lightweight proof count");
   assert(!dashboard.includes("operationalProofDownloadPath"), "sales dashboard must not preload proof-photo URLs");
-  assert(commandCenter.includes("row.proofPhotoCount"), "sales dashboard should render proof photo availability");
-  assert(commandCenter.includes("poze dovadă"), "seller dashboard should clearly label proof photos");
+  const queue = read("src", "components", "admin", "SalesWorkQueue.tsx");
+  assert(commandCenter.includes("SalesWorkQueue") && queue.includes("item.context"), "sales dashboard should render operational evidence through its unified queue");
+  assert(dashboard.includes("poze dovadă"), "seller agenda should clearly label proof photo availability");
 }
 
 function operationalDateDelayWorkflowIsAudited() {
   const route = read("src", "app", "api", "admin", "operational", "tasks", "reschedule", "route.ts");
   const status = read("src", "lib", "operation-status.ts");
   assert(route.includes("Motivul intarzierii este obligatoriu."), "date delay route must require a delay reason");
-  assert(route.includes("Confirma impactul asupra perioadei si pro-rata."), "date delay route must require explicit impact confirmation");
+  assert(route.includes("Confirmă noua dată a lucrării."), "date delay route must require explicit scheduling confirmation");
+  assert(route.includes('{ installationDate: formatDateInput(newDate) }'), "a delayed installation changes physical execution timing");
+  assert(!route.includes('{ periodStart: formatDateInput(newDate)'), "physical delay cannot silently amend the contractual rental period");
+  assert(!route.includes("updateReservationProductionNotes("), "schedule and delay history must commit in one version-checked mutation");
   assert(route.includes("canRescheduleOperationalReservation"), "date delay route must enforce scoped reschedule access");
   assert(route.includes("client: { select:") && route.includes("accountOwnerUserId: true"), "date delay route must load client owner for seller access checks");
   assert(route.includes("updateReservation("), "date delay route should use existing reservation update safety logic");

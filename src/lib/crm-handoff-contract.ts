@@ -4,6 +4,7 @@ export type CrmHandoffProposal = {
   opportunityId: string;
   version: number;
   ready: boolean;
+  canPrepareOffer?: boolean;
   stage: string;
   company: {
     name: string;

@@ -1,3 +1,4 @@
+import { publicBusinessErrorMessage, publicBusinessErrorStatus } from "@/lib/public-business-error";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { getClientDocuments } from "@/lib/client-campaign-workspaces";
@@ -12,6 +13,6 @@ export async function GET(request: NextRequest, context: Context) {
   try {
     return NextResponse.json({ documents: await getClientDocuments(session, id) }, { headers });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Documentele nu pot fi afisate." }, { status: 403, headers });
+    return NextResponse.json({ error: publicBusinessErrorMessage(error, "Documentele nu pot fi afisate.", "clients.detail.documents", request) }, { status: publicBusinessErrorStatus(error, 403), headers });
   }
 }

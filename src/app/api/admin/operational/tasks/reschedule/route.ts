@@ -5,7 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { withOperationDelayChange, type OperationKind } from "@/lib/operation-status";
 import { canRescheduleOperationalReservation } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
-import { updateReservation, updateReservationProductionNotes } from "@/lib/reservations";
+import { updateReservation } from "@/lib/reservations";
 import { createOperationalNotifications } from "@/lib/notifications";
 import { emitStructuredLog } from "@/lib/observability";
 
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Motivul intarzierii este obligatoriu." }, { status: 400, headers: noStoreHeaders });
     }
     if (!confirmed) {
-      return NextResponse.json({ error: "Confirma impactul asupra perioadei si pro-rata." }, { status: 400, headers: noStoreHeaders });
+      return NextResponse.json({ error: "Confirmă noua dată a lucrării." }, { status: 400, headers: noStoreHeaders });
     }
 
     const newDate = parseDateOnly(newDateText);
@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
       where: { id: reservationId },
       select: {
         id: true,
+        updatedAt: true,
         status: true,
         periodStart: true,
         periodEnd: true,
@@ -99,17 +100,18 @@ export async function POST(request: NextRequest) {
       kind === "decoration"
         ? existing.installationDate || existing.periodStart
         : existing.neutralizationDate || existing.periodEnd;
-    const patch =
-      kind === "decoration"
-        ? { periodStart: formatDateInput(newDate), installationDate: formatDateInput(newDate) }
-        : { neutralizationDate: formatDateInput(newDate) };
-    const updated = await updateReservation(reservationId, patch, session);
-    const nextNotes = withOperationDelayChange(updated.productionNotes, {
+    // Physical installation timing does not amend a signed rental or its billable period.
+    // Commercial period changes use the explicit documented amendment command.
+    const patch = {
+      expectedUpdatedAt: textValue(body?.expectedUpdatedAt) || existing.updatedAt.toISOString(),
+      ...(kind === "decoration" ? { installationDate: formatDateInput(newDate) } : { neutralizationDate: formatDateInput(newDate) })
+    };
+    const nextNotes = withOperationDelayChange(existing.productionNotes, {
       id: randomUUID(),
       kind: kind as OperationKind,
       taskId,
       oldStartDate: existing.periodStart.toISOString(),
-      newStartDate: kind === "decoration" ? `${formatDateInput(newDate)}T00:00:00.000Z` : updated.periodStart,
+      newStartDate: existing.periodStart.toISOString(),
       oldTaskDate: oldTaskDate.toISOString(),
       newTaskDate: `${formatDateInput(newDate)}T00:00:00.000Z`,
       reason,
@@ -117,7 +119,7 @@ export async function POST(request: NextRequest) {
       changedByUserId: session.id,
       financeReviewRequired: existing.billingItems.length > 0
     });
-    const reservation = await updateReservationProductionNotes(reservationId, nextNotes, session);
+    const reservation = await updateReservation(reservationId, { ...patch, productionNotes: nextNotes }, session);
 
     await recordAudit({
       actor: session,
@@ -128,7 +130,7 @@ export async function POST(request: NextRequest) {
         kind,
         taskId,
         oldStartDate: existing.periodStart.toISOString(),
-        newStartDate: kind === "decoration" ? `${formatDateInput(newDate)}T00:00:00.000Z` : updated.periodStart,
+        newStartDate: reservation.periodStart,
         oldTaskDate: oldTaskDate.toISOString(),
         newTaskDate: `${formatDateInput(newDate)}T00:00:00.000Z`,
         reason,
@@ -177,7 +179,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Data operationala nu a putut fi modificata." },
-      { status: 400, headers: noStoreHeaders }
+      { status: error instanceof Error && "status" in error && typeof error.status === "number" && [403, 409, 428].includes(error.status) ? error.status : 400, headers: noStoreHeaders }
     );
   }
 }

@@ -47,6 +47,21 @@ const allowed = {
   FIELD_OPERATOR: new Set(["/admin/operational", "/admin/securitate"]),
 };
 
+// Every new entry point participates in the same authenticated role matrix.
+// Hiding an administration link is not a substitute for a server-side guard.
+const workspaceRoutes = [
+  { route: "/admin/onboarding", roles: accounts.map((account) => account.role) },
+  { route: "/admin/commercial-settings", roles: ["SUPER_ADMIN", "COO"] },
+  { route: "/admin/control-contractual", roles: ["SUPER_ADMIN", "COO", "D_CEO", "SALES_DIRECTOR", "SALES_AGENT"] },
+  { route: "/admin/ai", roles: ["SUPER_ADMIN", "COO", "SALES_DIRECTOR"] },
+  { route: "/admin/document-audit", roles: ["SUPER_ADMIN", "COO", "D_CEO"] },
+  { route: "/admin/assistant-connections", roles: accounts.filter((account) => account.role !== "FIELD_OPERATOR").map((account) => account.role) },
+];
+for (const entry of workspaceRoutes) {
+  adminRoutes.push(entry.route);
+  for (const role of entry.roles) allowed[role].add(entry.route);
+}
+
 async function main() {
   const businessCountsBefore = await businessCounts();
   await ensureVercelShareCookie();
@@ -83,6 +98,16 @@ async function main() {
         assert(Boolean(target), `${account.role} unexpectedly accessed ${route}: ${response.status}`);
       }
     }
+    const onboarding = await request("/api/admin/onboarding", { headers: { cookie } });
+    const onboardingPayload = await onboarding.json().catch(() => null);
+    assert(onboarding.status === 200 && onboardingPayload?.state?.role === account.role,
+      `${account.role} cannot read its own role guide state.`);
+    assert(onboarding.headers.get("cache-control")?.includes("no-store"), "Personal guide state must not be cached.");
+    const contractual = await request("/api/admin/contract-control", { headers: { cookie } });
+    const contractualAllowed = workspaceRoutes.find((entry) => entry.route === "/admin/control-contractual").roles.includes(account.role);
+    assert(contractual.status === (contractualAllowed ? 200 : 403),
+      `${account.role} contractual report permission does not match the page guard: ${contractual.status}.`);
+    assert(contractual.headers.get("cache-control")?.includes("no-store"), "Contractual report must not be cached.");
     roleResults.push({ role: account.role, redirectTo: payload.redirectTo, allowedRoutes: [...allowed[account.role]] });
   }
 

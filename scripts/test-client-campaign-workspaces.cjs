@@ -46,8 +46,8 @@ assert(clientsUi.includes("merge/preview") && clientsUi.includes("Confirma merge
 assert(service.includes('if (!["COO", "SUPER_ADMIN"].includes(session.role))'), "Merge preview must remain restricted to global managers.");
 assert(campaignDomain.includes("Campania trebuie legata de un client activ") && campaignDomain.includes("resolveRequiredSalesOwner"), "Campaign creation must keep client and explicit owner validation.");
 assert(!campaignDomain.includes("startDate: optionalDate") && !campaignDomain.includes("totalContractValue: optionalMoney"), "Campaign period and value must not be accepted as manual campaign input.");
-assert(campaignsUi.includes("Perioada, moneda si valoarea campaniei nu se introduc manual"), "Campaign editor must explain the BOOKED-derived commercial summary.");
-assert(campaignDomain.includes("effectiveBlockingReservationWhere") && campaignDomain.includes("Campania are inchirieri/hold-uri active"), "Campaign archive must remain blocked by active occupancy.");
+assert(campaignsUi.includes("Moneda propunerii comerciale") && campaignsUi.includes("valoarea realizată se calculează din închirierile confirmate"), "Campaign editor must accept proposal currency while explaining booked-derived realized totals.");
+assert(campaignDomain.includes("effectiveBlockingReservationWhere") && campaignDomain.includes("Campania are inchirieri/hold-uri curente sau viitoare"), "Campaign archive must remain blocked by active occupancy.");
 assert(campaignsUi.includes("/api/reservations/${reservation.id}/operations"), "Redecoration mutation must remain available from campaign rental detail.");
 assert(clientsUi.includes("/api/admin/clients/finance") && clientsPage.includes("initialPortfolioFinance"), "Legacy sales invoice deep links must open the lazy owned-finance view.");
 

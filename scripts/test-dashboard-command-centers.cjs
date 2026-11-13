@@ -13,6 +13,7 @@ const cooService = read("src", "lib", "dashboard", "coo-dashboard.ts");
 const salesService = read("src", "lib", "dashboard", "sales-dashboard.ts");
 const coo = read("src", "components", "admin", "CooCommandCenter.tsx");
 const sales = read("src", "components", "admin", "SalesCommandCenter.tsx");
+const salesQueue = read("src", "components", "admin", "SalesWorkQueue.tsx");
 const financePage = read("src", "app", "admin", "financiar", "incasari", "page.tsx");
 const clientsPage = read("src", "app", "admin", "clienti", "page.tsx");
 
@@ -52,7 +53,7 @@ assert(!coo.includes("SmartBillDashboard") && !coo.includes("FinancialDashboardP
 assert(!cooService.includes("prisma.mediaPlan"), "the fallback service must remain free of Media Plan");
 
 assert(sales.includes("Agenda mea"), "sales dashboard must lead with the daily agenda");
-assert(sales.includes("Scaden") && sales.includes("Follow-up-uri") && sales.includes("Campaniile mele"), "sales workflow sections must be present");
+assert(sales.includes("Scaden") && salesQueue.includes("Follow-up-uri") && sales.includes("Campaniile mele") && sales.includes("SalesWorkQueue"), "sales workflow categories must be present in the integrated work queue");
 assert(!sales.includes("Facturat companie") && !sales.includes("Venit global"), "regular sales dashboard must not expose company-wide finance totals");
 assert(salesService.includes("accountOwnerUserId: ownerId"), "seller invoice ownership must be explicit");
 assert(salesService.includes("sellerUserId: ownerId"), "seller campaign ownership must be explicit");

@@ -22,6 +22,7 @@ export type ClientForm = {
 };
 
 export type CampaignForm = {
+  currency: string;
   clientId: string;
   campaignName: string;
   campaignCode: string;
@@ -43,9 +44,10 @@ export const emptyClientForm: ClientForm = {
 };
 
 export const emptyCampaignForm: CampaignForm = {
+  currency: "",
   clientId: "", campaignName: "", campaignCode: "", status: "draft", companyEntity: "Focus Media",
-  sellerUserId: "", accountOwnerUserId: "", paymentTermType: "30_days", paymentTermDays: "30",
-  billingRule: "manual_per_contract", billingFrequency: "monthly", notes: ""
+  sellerUserId: "", accountOwnerUserId: "", paymentTermType: "", paymentTermDays: "",
+  billingRule: "", billingFrequency: "", notes: ""
 };
 
 export function WorkspaceHeader({ eyebrow, title, description, actions }: { eyebrow: string; title: string; description: string; actions?: React.ReactNode }) {
@@ -85,7 +87,7 @@ export function Field({ label, value, onChange, type = "text", disabled, placeho
 
 export function SelectField({ label, value, onChange, disabled, children }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean; children: React.ReactNode }) {
   return <label className="grid min-w-0 gap-1 text-sm font-bold text-slate-200">{label}
-    <select className="focus-input min-w-0" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{children}</select>
+    <select aria-label={label} className="focus-input min-w-0" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{children}</select>
   </label>;
 }
 
@@ -194,7 +196,8 @@ export function dateLabel(value?: string | null) {
   return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(value));
 }
 
-export function moneyLabel(value: number, currency = "") {
+export function moneyLabel(value: number | null | undefined, currency = "") {
+  if (value == null || !Number.isFinite(value)) return "Necesită verificare";
   return `${new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 }).format(value || 0)} ${currency}`.trim();
 }
 

@@ -14,10 +14,11 @@ const {
   extendReservationHold,
   markReservationHoldLost,
   releaseReservationHold,
-  updateReservation,
-  updateReservationGroup,
-  updateReservationGroupStatus
+  updateReservation: rawUpdateReservation,
+  updateReservationGroup: rawUpdateReservationGroup,
+  updateReservationGroupStatus: rawUpdateReservationGroupStatus
 } = loadTsModule(path.join(process.cwd(), "src", "lib", "reservations.ts"));
+const { updateReservation, updateReservationGroup, updateReservationGroupStatus } = require("./reservation-test-commands.cjs").versionedReservationCommands({ updateReservation: rawUpdateReservation, updateReservationGroup: rawUpdateReservationGroup, updateReservationGroupStatus: rawUpdateReservationGroupStatus }, prisma);
 const { loadAvailabilityDecisions } = loadTsModule(path.join(process.cwd(), "src", "lib", "availability-service.ts"));
 const { getLocationSelectionAvailability } = loadTsModule(path.join(process.cwd(), "src", "lib", "location-selection-availability.ts"));
 const { publicAvailability } = loadTsModule(path.join(process.cwd(), "src", "lib", "availability.ts"));
@@ -315,7 +316,7 @@ async function setup() {
       status: "active",
       accountOwnerUserId: agent.id,
       sellerUserId: agent.id,
-      currency: "EUR"
+      currency: "EUR", companyEntity: "Focus Media", paymentTermType: "30_days", paymentTermDays: 30, billingRule: "manual_per_contract", billingFrequency: "monthly"
     }
   });
   created.campaigns.push(campaign.id);

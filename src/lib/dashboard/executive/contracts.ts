@@ -130,6 +130,11 @@ export type ExecutiveAttentionItem = {
 
 export type ExecutiveOverview = {
   kind: "executive";
+  contractControl?: {
+    generatedAt: string; complete: boolean; sourceState: string;
+    current: number; unpriced: number; entityMismatches: number;
+    missingReferences: number; unassignedClients: number | null;
+  } | null;
   role: ExecutiveScope["role"];
   viewer: {
     id: string;

@@ -1,3 +1,4 @@
+import { publicBusinessErrorMessage, publicBusinessErrorStatus } from "@/lib/public-business-error";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
@@ -37,18 +38,22 @@ export async function GET(request: NextRequest) {
       ? requestedDateFilter as CampaignDateFilter
       : null;
     const limit = Number(request.nextUrl.searchParams.get("limit") || (clientId ? 50 : 30));
-    const page = await getCampaignsPage(session, {
-      clientId,
-      ownerUserId,
-      query,
-      cursor,
-      limit,
-      effectiveStatus,
-      snapshotDate,
-      companyEntityValues,
-      dateFilter
-    });
-    return NextResponse.json({ campaigns: page.items, page }, { headers: noStoreHeaders });
+    try {
+      const page = await getCampaignsPage(session, {
+        clientId,
+        ownerUserId,
+        query,
+        cursor,
+        limit,
+        effectiveStatus,
+        snapshotDate,
+        companyEntityValues,
+        dateFilter
+      });
+      return NextResponse.json({ campaigns: page.items, page }, { headers: noStoreHeaders });
+    } catch (error) {
+      return NextResponse.json({ error: publicBusinessErrorMessage(error, "Lista campaniilor nu poate fi încărcată.", "campaigns", request) }, { status: publicBusinessErrorStatus(error, 503), headers: noStoreHeaders });
+    }
   });
 }
 
@@ -72,8 +77,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ campaign }, { status: 201, headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Campania nu a putut fi salvata." },
-      { status: 400, headers: noStoreHeaders }
+      { error: publicBusinessErrorMessage(error, "Campania nu a putut fi salvata.", "campaigns", request) },
+      { status: publicBusinessErrorStatus(error, 400), headers: noStoreHeaders }
     );
   }
 }

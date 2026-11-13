@@ -57,6 +57,13 @@ export function ExecutiveCommandCenter({ data }: { data: ExecutiveOverview }) {
 
         <ExecutiveFilters data={data} />
 
+        {data.contractControl !== undefined ? <section className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300/30 bg-amber-400/5 p-4" aria-label="Controlul datelor contractuale">
+          <div className="min-w-0"><p className="text-sm font-black text-white">Contracte și date comerciale · situația firmei astăzi</p>
+            {data.contractControl ? <p className="mt-1 text-sm text-slate-300">{data.contractControl.current} închirieri active · {data.contractControl.unpriced} cu preț lipsă · {data.contractControl.entityMismatches} neconcordanțe de firmă · {data.contractControl.missingReferences} fără număr de contract înregistrat · {data.contractControl.unassignedClients ?? "—"} clienți fără responsabil.</p> : <p role="status" className="mt-1 text-sm text-amber-100">Controlul contractual nu a putut fi încărcat; situația nu este verificată.</p>}
+            {data.contractControl && (data.contractControl.sourceState !== "indexed" || !data.contractControl.complete) ? <p className="mt-1 text-xs text-amber-100">Verificarea cu documentele originale este incompletă. Indicatorii din aplicație nu confirmă singuri concordanța contractuală.</p> : null}
+          </div><Link className="focus-button secondary shrink-0" href="/admin/control-contractual" prefetch={false}>Verifică neconcordanțele<ArrowRight size={15} /></Link>
+        </section> : null}
+
         <section className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_minmax(280px,0.8fr)]" aria-labelledby="executive-priority-title">
           <h2 className="sr-only" id="executive-priority-title">Priorități executive</h2>
           <FactPanel

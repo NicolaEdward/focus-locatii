@@ -1730,10 +1730,27 @@ async function capacitySnapshot(raw: unknown, db: Db = prisma) {
       "Amplasamentul nu mai este activ.",
       409,
     );
+  // Static reservations occupy inclusive commercial calendar days. Convert
+  // DOOH instants to the profile's local days; end is exclusive, so subtract 1ms.
+  const localDate = (instant: Date) => {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: profile.timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(instant);
+    const part = (kind: string) => parts.find((p) => p.type === kind)!.value;
+    return `${part("year")}-${part("month")}-${part("day")}`;
+  };
+  const legacyDays = checkedPeriod(
+    localDate(from),
+    localDate(new Date(to.getTime() - 1)),
+  );
   const legacy = await loadAvailabilityDecisions({
     locationIds: [profile.locationId],
-    periodStart: from,
-    periodEnd: to,
+    periodStart: legacyDays.from,
+    periodEnd: new Date(legacyDays.to.getTime() + 86400000 - 1),
+    purpose: "DOOH_LEGACY_BLOCK_CHECK",
     db,
     requireOverrideStorage: true,
   });
@@ -1815,7 +1832,31 @@ export async function bookDoohCapacity(raw: unknown, actor: AuthSession) {
   const hash = commercialHash(input);
   return prisma.$transaction(
     async (tx) => {
+      const initialProfile = await tx.doohProfile.findUnique({
+        where: { id: input.capacity.profileId },
+        select: { locationId: true },
+      });
+      if (!initialProfile)
+        throw new CommercialError(
+          "DOOH_UNVERIFIED",
+          "Profilul DOOH nu există.",
+          409,
+        );
+      await tx.$queryRaw`SELECT id FROM portfolio_locations WHERE id = ${initialProfile.locationId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM portfolio_dooh_profiles WHERE id = ${input.capacity.profileId} FOR UPDATE`;
+      const lockedProfile = await tx.doohProfile.findUnique({
+        where: { id: input.capacity.profileId },
+        select: { locationId: true },
+      });
+      if (
+        !lockedProfile ||
+        lockedProfile.locationId !== initialProfile.locationId
+      )
+        throw new CommercialError(
+          "CAPACITY_CHANGED",
+          "Profilul DOOH s-a schimbat.",
+          409,
+        );
       const key = "dooh:" + tokenHash(actor.id + ":" + input.requestKey);
       const existing = await tx.doohCapacityBooking.findUnique({
         where: { requestKey: key },
@@ -1897,6 +1938,17 @@ export async function cancelDoohCapacity(
     });
     if (!existing)
       throw new CommercialError("NOT_FOUND", "Alocarea nu există.", 404);
+    const profile = await tx.doohProfile.findUnique({
+      where: { id: existing.profileId },
+      select: { locationId: true },
+    });
+    if (!profile)
+      throw new CommercialError(
+        "DOOH_UNVERIFIED",
+        "Profilul DOOH nu există.",
+        409,
+      );
+    await tx.$queryRaw`SELECT id FROM portfolio_locations WHERE id = ${profile.locationId} FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM portfolio_dooh_profiles WHERE id = ${existing.profileId} FOR UPDATE`;
     const row = await tx.doohCapacityBooking.update({
       where: { id: bookingId },

@@ -34,6 +34,7 @@ export type AvailabilityInput = {
 export type AvailabilityDecisionStatus = "AVAILABLE" | "PARTIAL" | "CONFLICT" | "BLOCKED" | "UNKNOWN";
 
 export type AvailabilityReasonCode =
+  | "DOOH_CAPACITY_MANAGED"
   | "AVAILABLE_NO_BLOCKERS"
   | "INVALID_PERIOD"
   | "LOCATION_INACTIVE"

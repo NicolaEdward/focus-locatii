@@ -166,7 +166,8 @@
     "audit:remediation-history": "tsx scripts/audit-remediation-history.ts",
     "test:remediation-history": "tsx scripts/test-remediation-history.ts",
     "test:crm-outcomes": "tsx scripts/test-crm-command-outcomes.ts",
-    "smoke:crm-recovery": "node scripts/release/smoke-crm-command-recovery.cjs"
+    "smoke:crm-recovery": "node scripts/release/smoke-crm-command-recovery.cjs",
+    "test:dooh-static-capacity": "tsx scripts/test-dooh-static-capacity.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",

@@ -17,6 +17,7 @@ import type { OccupancySummaryDTO, ReservationDTO, ReservationListItemDTO, Reser
 import type { AuthSession } from "@/lib/auth";
 import { assertReservationInitialStatus, assertReservationTransition, ReservationPermissionError } from "@/lib/reservation-workflow";
 import { allocateMoneyAcrossRows } from "@/lib/money-allocation";
+import { isDigitalLocationType } from "@/lib/location-medium";
 import { bookingPeriodsConflict } from "@/lib/availability";
 import { emitStructuredLog } from "@/lib/observability";
 import { resolveSellerForMutation } from "@/lib/seller-users";
@@ -786,7 +787,7 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
       (parsed.locationId !== undefined && parsed.locationId !== existing.locationId) ||
       (parsed.periodStart != null && parsed.periodStart.getTime() !== existing.periodStart.getTime()) ||
       (parsed.periodEnd != null && parsed.periodEnd.getTime() !== existing.periodEnd.getTime()) ||
-      (parsed.status !== undefined && parsed.status !== existing.status);
+      (parsed.status !== undefined && (parsed.status !== existing.status || parsed.status === "HOLD" || parsed.status === "RESERVED"));
 
     if (parsed.status && actor) {
       assertReservationTransition(existing.status as ReservationDTO["status"], parsed.status, actor.role);
@@ -980,7 +981,8 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
         periodEnd: parsed.periodEnd || reservation.periodEnd,
         status: parsed.status || reservation.status
       };
-      await assertCanonicalReservationAvailabilityForWrite(tx, next.locationId, next.periodStart, next.periodEnd, next.status, reservation.id, validatedIds);
+      const capacityChanged = next.locationId !== reservation.locationId || next.periodStart.getTime() !== reservation.periodStart.getTime() || next.periodEnd.getTime() !== reservation.periodEnd.getTime() || next.status !== reservation.status || parsed.status === "HOLD" || parsed.status === "RESERVED";
+      if (capacityChanged) await assertCanonicalReservationAvailabilityForWrite(tx, next.locationId, next.periodStart, next.periodEnd, next.status, reservation.id, validatedIds);
 
       prepared.push({
         reservation,
@@ -1538,6 +1540,14 @@ export async function assertCanonicalReservationAvailabilityForWrite(
   }
 
   if (!activeReservationStatuses.includes(status as never)) return;
+
+  // Every caller already holds the sorted location locks. Capacity writers use
+  // the same location -> profile order, so neither model can race the other.
+  const profiles = await client.$queryRaw<Array<{ id: string }>>`SELECT id FROM portfolio_dooh_profiles WHERE locationId = ${locationId} FOR UPDATE`;
+  const medium = await client.location.findUnique({ where: { id: locationId }, select: { type: true } });
+  if (profiles.length || isDigitalLocationType(medium?.type)) {
+    throw Object.assign(new Error("Amplasamentul digital se aloca exclusiv prin capacitatea DOOH; rezervarile statice noi sau modificarile de perioada/status nu sunt permise. Istoricul poate fi adnotat sau anulat."), { code: "DOOH_CAPACITY_MANAGED", status: 409 });
+  }
 
   const batch = await loadAvailabilityDecisions({
     locationIds: [locationId],

@@ -5,7 +5,9 @@ async function main() {
   if (!apply && process.env.RUN_REMEDIATION_SCHEMA_CHECK !== 'true') {
     console.log(JSON.stringify({ event:'remediation_schema', skipped:true })); return;
   }
-  const result = await run({apply}); console.log(JSON.stringify(result));
+  const result = await run({apply});
+  console.log(JSON.stringify({ ...result, pending: undefined, adaptations: undefined, pendingCount: result.pending.length, adaptationCount: result.adaptations.length }));
+  for (const adaptation of result.adaptations) console.log(JSON.stringify({ event: 'remediation_collation_adaptation', ...adaptation }));
   if (apply && result.pending.length) throw new Error('ADDITIVE_SCHEMA_PENDING');
 }
 main().catch((error) => { console.error(JSON.stringify({ event:'remediation_schema',ok:false,code:/^[A-Z][A-Z0-9_]+$/.test(error.message||'') ? error.message : /^ER_[A-Z_]+$/.test(error.code||'') ? error.code : 'SCHEMA_PREPARATION_FAILED' })); process.exitCode=1; });

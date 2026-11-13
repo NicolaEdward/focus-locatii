@@ -1,8 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import { emitStructuredLog, prismaSlowQueryThresholdMs, recordPrismaQuery } from "@/lib/observability";
+import { databaseConnectionUrl } from "@/lib/database-connection-policy";
 
 function createPrismaClient(): PrismaClient {
+  const url = databaseConnectionUrl();
   const client = new PrismaClient({
+    ...(url ? { datasources: { db: { url } } } : {}),
     log: [
       { emit: "event", level: "error" },
       { emit: "event", level: "warn" }

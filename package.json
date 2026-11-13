@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/release/prepare-remediation.cjs && node scripts/release/diagnose-database.cjs && next build",
+    "build": "node scripts/release/prepare-remediation.cjs && node scripts/release/diagnose-database.cjs && node scripts/release/run-historical-inventory.cjs && next build",
     "postinstall": "prisma generate",
     "start": "next start",
     "start:laptop": "next start -p 3001 -H 0.0.0.0",
@@ -162,7 +162,11 @@
     "db:check-remediation": "node scripts/release/apply-remediation-schema.cjs",
     "db:apply-remediation": "node scripts/release/apply-remediation-schema.cjs --apply",
     "backup:encrypted": "node scripts/release/database-backup.cjs backup",
-    "backup:verify-restore": "node scripts/release/database-backup.cjs restore"
+    "backup:verify-restore": "node scripts/release/database-backup.cjs restore",
+    "audit:remediation-history": "tsx scripts/audit-remediation-history.ts",
+    "test:remediation-history": "tsx scripts/test-remediation-history.ts",
+    "test:crm-outcomes": "tsx scripts/test-crm-command-outcomes.ts",
+    "smoke:crm-recovery": "node scripts/release/smoke-crm-command-recovery.cjs"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",

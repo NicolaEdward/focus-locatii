@@ -31,7 +31,7 @@ async function main() {
     return;
   }
 
-  let prisma;
+  let prisma, temporaryCaDirectory;
   try {
     const originalUrl = new URL(process.env.DATABASE_URL);
     if (originalUrl.protocol !== "mysql:") throw new Error();
@@ -45,7 +45,7 @@ async function main() {
       try {
         const caPath = originalUrl.searchParams.get("sslcert");
         strict = await mysql.createConnection({ host: originalUrl.hostname, port: Number(originalUrl.port || 3306), user: decodeURIComponent(originalUrl.username), password: decodeURIComponent(originalUrl.password), database,
-          ssl: { rejectUnauthorized: true, ...(caPath ? { ca: require("node:fs").readFileSync(caPath) } : {}) }, connectTimeout: 10000 });
+          ssl: { rejectUnauthorized: true, ...(process.env.DATABASE_CA_PEM ? { ca: process.env.DATABASE_CA_PEM } : caPath ? { ca: require("node:fs").readFileSync(caPath) } : {}) }, connectTimeout: 10000 });
         await strict.query("SELECT 1");
         console.log(JSON.stringify({ event: "database_strict_tls_probe", ok: true, databaseFingerprint }));
       } catch {
@@ -60,6 +60,15 @@ async function main() {
 
     const diagnosticUrl = new URL(originalUrl);
     diagnosticUrl.searchParams.set("connection_limit", "1");
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(diagnosticUrl.hostname)) diagnosticUrl.searchParams.set("sslaccept", "strict");
+    if (process.env.DATABASE_CA_PEM) {
+      const fs = require("node:fs"), path = require("node:path");
+      temporaryCaDirectory = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "focus-diagnostic-ca-"));
+      fs.chmodSync(temporaryCaDirectory, 0o700);
+      const file = path.join(temporaryCaDirectory, "ca.pem");
+      fs.writeFileSync(file, process.env.DATABASE_CA_PEM, { mode: 0o600, flag: "wx" });
+      diagnosticUrl.searchParams.set("sslcert", file);
+    }
     const { PrismaClient } = require("@prisma/client");
     prisma = new PrismaClient({ log: [], datasources: { db: { url: diagnosticUrl.toString() } } });
 
@@ -114,7 +123,7 @@ async function main() {
     console.log(JSON.stringify({
       event: "database_diagnostics", ok: true, capturedAt: new Date().toISOString(),
       databaseFingerprint, poolParameters, diagnosticConnectionLimit: 1,
-      tlsConfiguration: { verification: ["strict", "accept_invalid_certs"].includes(originalUrl.searchParams.get("sslaccept")) ? originalUrl.searchParams.get("sslaccept") : "driver-default", providerCaConfigured: originalUrl.searchParams.has("sslcert") },
+      tlsConfiguration: { verification: diagnosticUrl.searchParams.get("sslaccept") || "local", legacyUrlVerification: originalUrl.searchParams.get("sslaccept") || "driver-default", providerCaConfigured: diagnosticUrl.searchParams.has("sslcert") },
       serverVariables, serverStatus, counts,
       readProbe: { candidateFound: Boolean(candidate), clientFound, campaignFound, relationshipMatches }
     }));
@@ -130,6 +139,7 @@ async function main() {
         process.exitCode = 1;
       }
     }
+    if (temporaryCaDirectory) require("node:fs").rmSync(temporaryCaDirectory, { recursive: true, force: true });
   }
 }
 

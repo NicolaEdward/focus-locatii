@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "dataset_id": "focus-ooh-real-company-v1",
+  "isolation": {
+    "database_scope_verified": false,
+    "network_internal_verified": false,
+    "clean_runtime_verified": false
+  },
+  "database": {
+    "host": "127.0.0.1",
+    "port": 33407,
+    "name": "focus_preview_simulation_ooh_20261113",
+    "user": "ooh_simulation_scoped"
+  },
+  "application": {
+    "origin": "http://127.0.0.1:3050"
+  },
+  "network": {
+    "name": "focus-ooh-simulation-internal",
+    "internal": true
+  }
+}

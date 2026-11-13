@@ -4,6 +4,8 @@ import { assertReceivablePaymentTransition } from "@/lib/financial-state-machine
 import { receivableAdjustmentEntries, receivableNetAmount } from "@/lib/receivable-adjustments";
 import { money, receivableStatus } from "@/lib/receivables-domain";
 import { prisma } from "@/lib/prisma";
+import { synchronizeBankTransaction } from "@/lib/financial-bank-ledger";
+import { assertSameFinancialIntent, financialRequestFingerprint } from "@/lib/financial-request-intent";
 
 export type ReceivablePaymentInput = {
   receivableId: string;
@@ -13,15 +15,20 @@ export type ReceivablePaymentInput = {
   paymentReference?: string | null;
   notes?: string | null;
   confirmOverpayment?: boolean;
-  requestKey?: string | null;
+  requestKey: string;
   actor: AuthSession;
 };
 
 export async function recordReceivablePayment(input: ReceivablePaymentInput) {
+  if (!/^[A-Za-z0-9_-]{8,191}$/.test(input.requestKey)) throw new Error("Cheia încasării este obligatorie și trebuie păstrată la reîncercare.");
+  const fingerprint = paymentFingerprint(input);
   return prisma.$transaction(async (tx) => {
     if (input.requestKey) {
       const existing = await tx.financialReceivablePayment.findUnique({ where: { requestKey: input.requestKey } });
-      if (existing) return paymentMutationResult(tx, existing.receivableId, existing.id, true);
+      if (existing) {
+        await assertPaymentReplay(tx, existing, input, fingerprint, "receivable.payment_created");
+        return paymentMutationResult(tx, existing.receivableId, existing.id, true);
+      }
     }
     const receivable = await tx.financialReceivable.findUnique({ where: { id: input.receivableId } });
     if (!receivable || !receivable.includedInReport) throw new Error("Factura nu există sau este exclusă.");
@@ -32,7 +39,7 @@ export async function recordReceivablePayment(input: ReceivablePaymentInput) {
     const previousCollected = await activeReceivablePaymentTotal(tx, receivable.id);
     const nextCollected = previousCollected.plus(amount);
     const invoiceAmount = receivableNetAmount(receivable.invoicedAmount, receivable.rawRowJson);
-    if (nextCollected.greaterThan(invoiceAmount.plus("0.01")) && !input.confirmOverpayment) {
+    if (nextCollected.greaterThan(invoiceAmount) && !input.confirmOverpayment) {
       throw new Error(`Suma depășește soldul cu ${nextCollected.minus(invoiceAmount).toFixed(2)} ${receivable.currency}. Confirmă explicit creditul clientului.`);
     }
     const payment = await tx.financialReceivablePayment.create({
@@ -63,7 +70,8 @@ export async function recordReceivablePayment(input: ReceivablePaymentInput) {
           currency: receivable.currency,
           previousCollected: previousCollected.toFixed(2),
           newCollected: nextCollected.toFixed(2),
-          source: "manual"
+          source: "manual",
+          requestKey: input.requestKey || null, requestFingerprint: fingerprint
         }
       }
     });
@@ -85,6 +93,7 @@ export async function cancelReceivablePayment(input: {
     if (!payment) throw new Error("Încasarea nu există.");
     if (payment.status === "cancelled") return paymentMutationResult(tx, payment.receivableId, payment.id, true);
     assertReceivablePaymentTransition(payment.status, "cancelled");
+    assertCreditReversible(payment.credit);
     await tx.financialReceivablePayment.update({
       where: { id: payment.id },
       data: {
@@ -101,6 +110,7 @@ export async function cancelReceivablePayment(input: {
       });
     }
     await synchronizeReceivableLedger(tx, payment.receivableId);
+    if (payment.bankTransactionId) await synchronizeBankTransaction(tx, payment.bankTransactionId);
     await tx.auditLog.create({
       data: {
         userId: input.actor.id,
@@ -118,6 +128,7 @@ export async function correctReceivablePayment(input: Omit<ReceivablePaymentInpu
   paymentId: string;
   reason: string;
 }) {
+  if (!/^[A-Za-z0-9_-]{8,191}$/.test(input.requestKey)) throw new Error("Cheia corecției este obligatorie și trebuie păstrată la reîncercare.");
   if (!input.reason.trim()) throw new Error("Motivul corecției este obligatoriu.");
   return prisma.$transaction(async (tx) => {
     const original = await tx.financialReceivablePayment.findUnique({
@@ -125,7 +136,18 @@ export async function correctReceivablePayment(input: Omit<ReceivablePaymentInpu
       include: { receivable: true, credit: true }
     });
     if (!original) throw new Error("Încasarea nu există.");
+    const intent = { ...input, receivableId: original.receivableId };
+    const fingerprint = paymentFingerprint(intent, { correctsPaymentId: original.id, reason: input.reason.trim() });
+    if (input.requestKey) {
+      const existing = await tx.financialReceivablePayment.findUnique({ where: { requestKey: input.requestKey } });
+      if (existing) {
+        await assertPaymentReplay(tx, existing, intent, fingerprint, "receivable.payment_corrected");
+        return paymentMutationResult(tx, existing.receivableId, existing.id, true);
+      }
+    }
+    if (original.bankTransactionId) throw new Error("O încasare bancară se corectează prin anularea alocării și realocare în Reconciliere bancară, pentru a păstra referința și capacitatea tranzacției.");
     if (original.status !== "active") throw new Error("Doar o încasare activă poate fi corectată.");
+    assertCreditReversible(original.credit);
     assertReceivablePaymentTransition(original.status, "cancelled");
     const amount = money(input.amount);
     if (!amount.greaterThan(0)) throw new Error("Suma corectată trebuie să fie mai mare decât zero.");
@@ -133,7 +155,7 @@ export async function correctReceivablePayment(input: Omit<ReceivablePaymentInpu
     const totalWithoutOriginal = currentTotal.minus(original.amount);
     const nextTotal = totalWithoutOriginal.plus(amount);
     const invoiceAmount = receivableNetAmount(original.receivable.invoicedAmount, original.receivable.rawRowJson);
-    if (nextTotal.greaterThan(invoiceAmount.plus("0.01")) && !input.confirmOverpayment) {
+    if (nextTotal.greaterThan(invoiceAmount) && !input.confirmOverpayment) {
       throw new Error(`Corecția produce un credit de ${nextTotal.minus(invoiceAmount).toFixed(2)} ${original.currency}. Confirmă explicit.`);
     }
     await tx.financialReceivablePayment.update({
@@ -174,12 +196,49 @@ export async function correctReceivablePayment(input: Omit<ReceivablePaymentInpu
           previousPaymentId: original.id,
           previousAmount: original.amount.toFixed(2),
           newAmount: amount.toFixed(2),
-          reason: input.reason.trim()
+          reason: input.reason.trim(),
+          requestKey: input.requestKey || null, requestFingerprint: fingerprint
         }
       }
     });
     return paymentMutationResult(tx, original.receivableId, replacement.id, false);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15_000 });
+}
+
+function paymentFingerprint(input: ReceivablePaymentInput, correction?: { correctsPaymentId: string; reason: string }) {
+  return financialRequestFingerprint({
+    receivableId: input.receivableId, actorId: input.actor.id, amount: money(input.amount).toFixed(2),
+    receivedAt: input.receivedAt.toISOString(), paymentMethod: input.paymentMethod || null,
+    paymentReference: input.paymentReference || null, notes: input.notes || null,
+    confirmOverpayment: Boolean(input.confirmOverpayment), correction: correction || null
+  });
+}
+
+async function assertPaymentReplay(tx: Prisma.TransactionClient, payment: {
+  id: string; receivableId: string; amount: Prisma.Decimal; createdByUserId: string | null;
+  receivedAt: Date; paymentMethod: string | null; paymentReference: string | null; notes: string | null;
+}, input: ReceivablePaymentInput, fingerprint: string, action: string) {
+  const audit = await tx.auditLog.findFirst({ where: { action, entityId: payment.id }, select: { metadata: true } });
+  const metadata = audit?.metadata as Record<string, unknown> | null;
+  if (metadata?.requestFingerprint) {
+    assertSameFinancialIntent(metadata.requestFingerprint, fingerprint);
+    return;
+  }
+  // Compatibility for request keys created before fingerprints were recorded.
+  // A different target, actor, operation or value must never be replayed.
+  const matches = action === "receivable.payment_created" && payment.receivableId === input.receivableId
+    && payment.createdByUserId === input.actor.id && payment.amount.equals(money(input.amount))
+    && payment.receivedAt.getTime() === input.receivedAt.getTime()
+    && (payment.paymentMethod || null) === (input.paymentMethod || null)
+    && (payment.paymentReference || null) === (input.paymentReference || null)
+    && (payment.notes || null) === (input.notes || null);
+  if (!matches) throw new Error("Cheia operației este deja utilizată pentru alte date. Verifică istoricul încasărilor.");
+}
+
+function assertCreditReversible(credit: { amount: Prisma.Decimal; remainingAmount: Prisma.Decimal } | null) {
+  if (credit && credit.remainingAmount.lessThan(credit.amount)) {
+    throw new Error("Creditul aferent a fost deja utilizat. Reconcilierea lui este necesară înainte de anularea sau corectarea plății.");
+  }
 }
 
 export async function bootstrapLegacyReceivablePayment(tx: Prisma.TransactionClient, receivable: {

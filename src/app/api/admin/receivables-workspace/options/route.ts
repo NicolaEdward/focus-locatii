@@ -6,11 +6,11 @@ import { searchReceivableOptions } from "@/lib/receivables-workspace-service";
 
 export const dynamic = "force-dynamic";
 
-const optionType = z.enum(["clients", "campaigns", "locations", "receivables"]);
+const optionType = z.enum(["clients", "campaigns", "locations", "receivables", "fiscal_documents"]);
 
 export async function GET(request: NextRequest) {
   return observeRoute(request, { route: "/api/admin/receivables-workspace/options", operation: "receivables.options" }, async () => {
-    const { session, response } = await requireAnyPermission(request, ["finance.validate", "finance.manage"]);
+    const { session, response } = await requireAnyPermission(request, ["finance.view", "finance.validate", "finance.manage"]);
     if (response || !session) return response;
     setObservabilityRole(session.role);
     const parsed = optionType.safeParse(request.nextUrl.searchParams.get("type"));

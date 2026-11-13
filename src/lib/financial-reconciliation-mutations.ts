@@ -5,7 +5,8 @@ import { excludedBankClassification, type ReconciliationDirection } from "@/lib/
 import {
   activeReceivablePaymentTotal,
   bootstrapLegacyReceivablePayment,
-  synchronizeReceivableLedger
+  synchronizeReceivableLedger,
+  cancelReceivablePayment
 } from "@/lib/receivables-payment-service";
 import {
   activePayablePaymentTotal,
@@ -16,8 +17,9 @@ import {
 import { money } from "@/lib/receivables-domain";
 import { prisma } from "@/lib/prisma";
 import { ensureFinancialPartnerAlias } from "@/lib/financial-partners";
-
-const TOLERANCE = new Prisma.Decimal("0.01");
+import { receivableNetAmount } from "@/lib/receivable-adjustments";
+import { activeBankAllocationTotal, synchronizeBankTransaction } from "@/lib/financial-bank-ledger";
+import { financialRequestFingerprint, assertSameFinancialIntent } from "@/lib/financial-request-intent";
 
 export type BankAllocationInput = {
   bankTransactionId: string;
@@ -30,9 +32,24 @@ export type BankAllocationInput = {
 
 export async function allocateBankTransaction(input: BankAllocationInput) {
   if (!input.allocations.length) throw new Error("Adauga cel putin o alocare.");
+  if (!/^[A-Za-z0-9_-]{8,100}$/.test(input.requestKey)) throw new Error("Cheia operației bancare nu este validă.");
+  const fingerprint = financialRequestFingerprint({
+    transactionId: input.bankTransactionId, actorId: input.actor.id,
+    allocations: input.allocations.map((row) => ({ ...row, amount: money(row.amount).toFixed(2) })),
+    notes: input.notes || null, rememberMerchantAlias: Boolean(input.rememberMerchantAlias)
+  });
   return prisma.$transaction(async (tx) => {
     const duplicate = await findDuplicateRequest(tx, input.requestKey, input.allocations[0].direction);
-    if (duplicate) return { duplicate: true, transactionId: input.bankTransactionId };
+    if (duplicate) {
+      const audit = await tx.auditLog.findFirst({
+        where: { action: "financial.bank_transaction_allocated", entityId: input.bankTransactionId,
+          metadata: { path: "$.requestKey", equals: input.requestKey } },
+        select: { metadata: true }
+      });
+      const metadata = audit?.metadata as Record<string, unknown> | null;
+      assertSameFinancialIntent(metadata?.requestFingerprint, fingerprint);
+      return { duplicate: true, transactionId: input.bankTransactionId };
+    }
     const transaction = await tx.financialBankTransaction.findUnique({
       where: { id: input.bankTransactionId },
       include: {
@@ -56,7 +73,7 @@ export async function allocateBankTransaction(input: BankAllocationInput) {
       .reduce((sum, payment) => sum.plus(payment.amount), money(0));
     const requested = input.allocations.reduce((sum, allocation) => sum.plus(money(allocation.amount)), money(0));
     if (input.allocations.some((allocation) => !money(allocation.amount).greaterThan(0))) throw new Error("Sumele alocate trebuie sa fie pozitive.");
-    if (alreadyAllocated.plus(requested).greaterThan(transactionAmount.plus(TOLERANCE))) {
+    if (alreadyAllocated.plus(requested).greaterThan(transactionAmount)) {
       throw new Error(`Alocarile depasesc valoarea disponibila a tranzactiei cu ${alreadyAllocated.plus(requested).minus(transactionAmount).toFixed(2)} ${transaction.currency}.`);
     }
 
@@ -73,8 +90,8 @@ export async function allocateBankTransaction(input: BankAllocationInput) {
         assertSameScope(transaction, receivable, amount);
         await bootstrapLegacyReceivablePayment(tx, receivable, input.actor.id);
         const current = await activeReceivablePaymentTotal(tx, receivable.id);
-        const available = Prisma.Decimal.max(money(receivable.invoicedAmount).minus(current), 0);
-        if (amount.greaterThan(available.plus(TOLERANCE))) throw new Error(`Alocarea depaseste soldul facturii ${receivable.invoiceNumber || receivable.id}.`);
+        const available = Prisma.Decimal.max(receivableNetAmount(receivable.invoicedAmount, receivable.rawRowJson).minus(current), 0);
+        if (amount.greaterThan(available)) throw new Error(`Alocarea depaseste soldul net al facturii ${receivable.invoiceNumber || receivable.id}. Alocă diferența separat numai printr-un flux de credit aprobat.`);
         const payment = await tx.financialReceivablePayment.create({
           data: {
             receivableId: receivable.id,
@@ -107,7 +124,7 @@ export async function allocateBankTransaction(input: BankAllocationInput) {
           .filter((payment) => payment.verificationStatus !== "presumed")
           .reduce((sum, payment) => sum.plus(payment.amount), money(0));
         const verifiedCapacity = Prisma.Decimal.max(money(payable.amountToPay).minus(confirmed), 0);
-        if (amount.greaterThan(verifiedCapacity.plus(TOLERANCE))) throw new Error(`Alocarea depaseste soldul verificabil al documentului ${payable.invoiceNumber || payable.id}.`);
+        if (amount.greaterThan(verifiedCapacity)) throw new Error(`Alocarea depaseste soldul verificabil al documentului ${payable.invoiceNumber || payable.id}.`);
         const payment = await tx.financialPayablePayment.create({
           data: {
             payableId: payable.id,
@@ -159,6 +176,7 @@ export async function allocateBankTransaction(input: BankAllocationInput) {
           direction,
           paymentIds,
           requestKey: input.requestKey,
+          requestFingerprint: fingerprint,
           merchantAliasSaved: Boolean(input.rememberMerchantAlias && transaction.merchantName && allocatedPartnerIds.size === 1)
         }
       }
@@ -182,7 +200,7 @@ export async function classifyBankTransaction(input: {
     if (excludedBankClassification(input.classification) && hasAllocations.greaterThan(0)) {
       throw new Error("Anuleaza alocarile active inainte de a marca tranzactia drept transfer, taxa sau comision.");
     }
-    const updated = await tx.financialBankTransaction.update({
+    await tx.financialBankTransaction.update({
       where: { id: existing.id },
       data: {
         classification: input.classification,
@@ -198,7 +216,8 @@ export async function classifyBankTransaction(input: {
         metadata: { before: existing.classification, after: input.classification, reason: input.reason.trim() }
       }
     });
-    return updated;
+    await synchronizeBankTransaction(tx, existing.id);
+    return tx.financialBankTransaction.findUniqueOrThrow({ where: { id: existing.id } });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15_000 });
 }
 
@@ -209,53 +228,30 @@ export async function reverseBankAllocation(input: {
   actor: AuthSession;
 }) {
   if (!input.reason.trim()) throw new Error("Motivul anularii este obligatoriu.");
+  if (input.direction === "receivable") {
+    return cancelReceivablePayment({ paymentId: input.paymentId, reason: input.reason, actor: input.actor });
+  }
   return prisma.$transaction(async (tx) => {
-    if (input.direction === "receivable") {
-      const payment = await tx.financialReceivablePayment.findUnique({ where: { id: input.paymentId } });
-      if (!payment) throw new Error("Alocarea nu exista.");
-      if (payment.status === "cancelled") return { duplicate: true };
-      await tx.financialReceivablePayment.update({ where: { id: payment.id }, data: { status: "cancelled", cancelledByUserId: input.actor.id, cancelledAt: new Date(), cancellationReason: input.reason.trim() } });
-      await synchronizeReceivableLedger(tx, payment.receivableId);
-      if (payment.bankTransactionId) await synchronizeBankTransaction(tx, payment.bankTransactionId);
-    } else {
+
       const payment = await tx.financialPayablePayment.findUnique({ where: { id: input.paymentId } });
       if (!payment) throw new Error("Alocarea nu exista.");
       if (payment.status === "cancelled") return { duplicate: true };
       await tx.financialPayablePayment.update({ where: { id: payment.id }, data: { status: "cancelled", cancelledByUserId: input.actor.id, cancelledAt: new Date(), cancellationReason: input.reason.trim() } });
       await synchronizePayableLedger(tx, payment.payableId);
       if (payment.bankTransactionId) await synchronizeBankTransaction(tx, payment.bankTransactionId);
-    }
     await tx.auditLog.create({ data: { userId: input.actor.id, action: "financial.bank_allocation_reversed", entityType: "financial_payment_allocation", entityId: input.paymentId, metadata: { direction: input.direction, reason: input.reason.trim() } } });
     return { duplicate: false };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15_000 });
 }
 
-async function synchronizeBankTransaction(tx: Prisma.TransactionClient, transactionId: string) {
-  const transaction = await tx.financialBankTransaction.findUnique({ where: { id: transactionId } });
-  if (!transaction) return;
-  if (excludedBankClassification(transaction.classification)) {
-    await tx.financialBankTransaction.update({ where: { id: transactionId }, data: { reconciliationStatus: "ignored" } });
-    return;
-  }
-  const amount = transaction.creditAmount.greaterThan(0) ? transaction.creditAmount : transaction.debitAmount;
-  const allocated = await activeBankAllocationTotal(tx, transactionId);
-  const status = allocated.lessThanOrEqualTo(TOLERANCE) ? "unmatched" : allocated.plus(TOLERANCE).greaterThanOrEqualTo(amount) ? "matched" : "partial";
-  await tx.financialBankTransaction.update({ where: { id: transactionId }, data: { reconciliationStatus: status } });
-}
-
-async function activeBankAllocationTotal(tx: Prisma.TransactionClient, transactionId: string) {
-  const [receivable, payable] = await Promise.all([
-    tx.financialReceivablePayment.aggregate({ where: { bankTransactionId: transactionId, status: "active" }, _sum: { amount: true } }),
-    tx.financialPayablePayment.aggregate({ where: { bankTransactionId: transactionId, status: "active" }, _sum: { amount: true } })
-  ]);
-  return money(receivable._sum.amount).plus(money(payable._sum.amount));
-}
-
 async function findDuplicateRequest(tx: Prisma.TransactionClient, requestKey: string, direction: ReconciliationDirection) {
-  const prefix = `${requestKey}:0:${direction}:`;
-  return direction === "receivable"
-    ? tx.financialReceivablePayment.findFirst({ where: { requestKey: { startsWith: prefix } }, select: { id: true } })
-    : tx.financialPayablePayment.findFirst({ where: { requestKey: { startsWith: prefix } }, select: { id: true } });
+  void direction;
+  const prefix = `${requestKey}:0:`;
+  const [receivable, payable] = await Promise.all([
+    tx.financialReceivablePayment.findFirst({ where: { requestKey: { startsWith: prefix } }, select: { id: true } }),
+    tx.financialPayablePayment.findFirst({ where: { requestKey: { startsWith: prefix } }, select: { id: true } })
+  ]);
+  return receivable || payable;
 }
 
 function assertSameScope(

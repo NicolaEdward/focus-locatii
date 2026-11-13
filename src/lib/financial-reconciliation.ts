@@ -3,6 +3,8 @@ import { normalizeClientName, normalizeInvoiceNumber } from "@/lib/clients";
 import { normalizeFiscalCode } from "@/lib/smartbill-import";
 import { money } from "@/lib/receivables-domain";
 import { prisma } from "@/lib/prisma";
+import { receivableNetAmount, receivableNetRemaining } from "@/lib/receivable-adjustments";
+import { receivableStatus } from "@/lib/receivables-domain";
 
 export const INFORMATIONAL_BANK_CLASSIFICATIONS = [
   "internal_transfer",
@@ -160,14 +162,14 @@ export async function listFinancialReconciliation(input: {
   const [receivables, payables, aliases] = combinations.length ? await Promise.all([
     prisma.financialReceivable.findMany({
       where: {
-        includedInReport: true,
-        remainingAmount: { gt: new Prisma.Decimal("0.01") },
+        includedInReport: true, needsReview: false,
+        invoicedAmount: { gt: 0 },
         OR: combinations,
         status: { notIn: ["cancelled", "archived"] }
       },
       select: {
         id: true, legalEntityId: true, currency: true, invoiceNumber: true, invoiceDate: true, dueDate: true,
-        invoicedAmount: true, remainingAmount: true, clientName: true, client: { select: { taxId: true } },
+        invoicedAmount: true, collectedAmount: true, rawRowJson: true, remainingAmount: true, clientName: true, client: { select: { taxId: true } },
         partner: { select: { id: true, legalName: true } }
       },
       take: 5000
@@ -201,7 +203,7 @@ export async function listFinancialReconciliation(input: {
         ? "payable"
         : null;
     const amount = direction === "receivable" ? transaction.creditAmount : transaction.debitAmount;
-    const candidates = direction === "receivable" ? receivables : payables;
+    const candidates = direction === "receivable" ? receivables.map(row => ({ ...row, invoicedAmount: receivableNetAmount(row.invoicedAmount, row.rawRowJson), remainingAmount: receivableNetRemaining(row) })).filter(row => row.remainingAmount.greaterThan(0)) : payables;
     const scored = direction ? candidates
       .filter((candidate) => candidate.legalEntityId === transaction.legalEntityId && candidate.currency === transaction.currency)
       .map((candidate) => {
@@ -291,23 +293,17 @@ export async function financialReconciliationSummary(input: { legalEntityId?: st
   };
   const receivableWhere: Prisma.FinancialReceivableWhereInput = documentScope;
   const payableWhere: Prisma.FinancialPayableWhereInput = documentScope;
-  const [entities, partnerRoles, receivables, payables, receivableStatuses, payableStatuses, payablePayments, bankGroups, unmatched] = await Promise.all([
+  const [entities, partnerRoles, receivableRows, payables, payableStatuses, payablePayments, bankGroups, unmatched] = await Promise.all([
     prisma.financialLegalEntity.findMany({ where: { active: true }, select: { id: true, code: true, legalName: true }, orderBy: { legalName: "asc" } }),
     prisma.financialPartnerRole.findMany({ where: { active: true, ...(input.legalEntityId ? { legalEntityId: input.legalEntityId } : {}) }, select: { partnerId: true, role: true } }),
-    prisma.financialReceivable.groupBy({
-      by: ["legalEntityId", "currency"],
-      where: { ...receivableWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
-      _count: { _all: true }, _sum: { invoicedAmount: true, collectedAmount: true, remainingAmount: true }
+    prisma.financialReceivable.findMany({
+      where: { ...receivableWhere, includedInReport: true, needsReview: false, status: { notIn: ["cancelled", "archived"] } },
+      select: { legalEntityId: true, currency: true, invoicedAmount: true, collectedAmount: true, rawRowJson: true, dueDate: true }
     }),
     prisma.financialPayable.groupBy({
       by: ["legalEntityId", "currency"],
       where: { ...payableWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
       _count: { _all: true }, _sum: { amountToPay: true, amountPaid: true, remainingAmount: true }
-    }),
-    prisma.financialReceivable.groupBy({
-      by: ["legalEntityId", "currency", "status"],
-      where: { ...receivableWhere, includedInReport: true, status: { notIn: ["cancelled", "archived"] } },
-      _count: { _all: true }, _sum: { remainingAmount: true }
     }),
     prisma.financialPayable.groupBy({
       by: ["legalEntityId", "currency", "status"],
@@ -330,6 +326,12 @@ export async function financialReconciliationSummary(input: { legalEntityId?: st
       }
     })
   ]);
+  const netRows = receivableRows.map(row => ({ ...row,
+    invoicedAmount: receivableNetAmount(row.invoicedAmount, row.rawRowJson), remainingAmount: receivableNetRemaining(row),
+    status: receivableStatus({ invoiceAmount: receivableNetAmount(row.invoicedAmount, row.rawRowJson), collectedAmount: row.collectedAmount, dueDate: row.dueDate })
+  }));
+  const receivables = groupNetReceivables(netRows, false);
+  const receivableStatuses = groupNetReceivables(netRows, true);
   const customerPartners = new Set(partnerRoles.filter((role) => role.role === "customer").map((role) => role.partnerId));
   const supplierPartners = new Set(partnerRoles.filter((role) => role.role === "supplier").map((role) => role.partnerId));
   const both = [...customerPartners].filter((id) => supplierPartners.has(id)).length;
@@ -379,4 +381,15 @@ function utcDay(value: Date) {
 
 function normalizeSearchText(value: unknown) {
   return normalizeClientName(String(value || "")).replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function groupNetReceivables(rows: Array<{ legalEntityId: string | null; currency: string | null; status: string; invoicedAmount: Prisma.Decimal; collectedAmount: Prisma.Decimal | null; remainingAmount: Prisma.Decimal }>, byStatus: boolean) {
+  const groups = new Map<string, { legalEntityId: string | null; currency: string | null; status: string; _count: { _all: number }; _sum: { invoicedAmount: Prisma.Decimal; collectedAmount: Prisma.Decimal; remainingAmount: Prisma.Decimal } }>();
+  for (const row of rows) {
+    const key = JSON.stringify([row.legalEntityId, row.currency, byStatus ? row.status : null]);
+    const value = groups.get(key) || { legalEntityId: row.legalEntityId, currency: row.currency, status: row.status, _count: { _all: 0 }, _sum: { invoicedAmount: money(0), collectedAmount: money(0), remainingAmount: money(0) } };
+    value._count._all++; value._sum.invoicedAmount = value._sum.invoicedAmount.plus(row.invoicedAmount); value._sum.collectedAmount = value._sum.collectedAmount.plus(money(row.collectedAmount)); value._sum.remainingAmount = value._sum.remainingAmount.plus(row.remainingAmount);
+    groups.set(key, value);
+  }
+  return [...groups.values()];
 }

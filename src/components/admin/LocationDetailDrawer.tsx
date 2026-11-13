@@ -9,6 +9,7 @@ import type { AuthSession } from "@/lib/auth";
 import type { AdminLocationListItemDTO, LocationDTO } from "@/types/location";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { LocationAvailabilityControls, type ActiveLocationOverride } from "@/components/admin/inventory/LocationAvailabilityControls";
+import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
 type LocationTimelineResponse = {
   location: LocationDTO;
@@ -55,7 +56,7 @@ type LocationTimelineResponse = {
       isBookable: boolean;
       reasons: string[];
       explanation: string;
-      dateSemantics: "INCLUSIVE_WITH_SAME_DAY_HANDOFF";
+      dateSemantics: "INCLUSIVE_CALENDAR_DAYS";
       activeOverride: ActiveLocationOverride;
     };
     periods: LocationTimelinePeriod[];
@@ -143,16 +144,6 @@ export function LocationDetailDrawer({
     };
   }, [location.id, refreshKey]);
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape" && event.code !== "Escape") return;
-      event.preventDefault();
-      onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   async function copyPublicLink() {
     const absolute = typeof window === "undefined" ? publicHref : `${window.location.origin}${publicHref}`;
     try {
@@ -165,7 +156,8 @@ export function LocationDetailDrawer({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Detalii locatie ${displayLocation.code}`}>
-      <button className="absolute inset-0 h-full w-full cursor-default" type="button" aria-label="Inchide detaliile locatiei" onClick={onClose} />
+      <EscapeCloseHandler onClose={onClose} />
+      <button className="absolute inset-0 h-full w-full cursor-default" tabIndex={-1} type="button" aria-label="Inchide detaliile locatiei" onClick={onClose} />
       <aside className="absolute right-0 top-0 flex h-full w-full max-w-6xl flex-col overflow-hidden border-l border-focus-line bg-focus-navy shadow-2xl md:w-[min(92vw,1120px)]">
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-focus-line bg-focus-ink/70 p-4">
           <div>

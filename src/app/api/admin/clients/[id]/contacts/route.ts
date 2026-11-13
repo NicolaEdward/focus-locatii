@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
-import { recordAudit } from "@/lib/audit";
-import { prisma } from "@/lib/prisma";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
+import { withAuthorizedClientMutation, assertClientEditable, ClientMutationError } from "@/lib/clients";
 import { getClientContacts } from "@/lib/client-campaign-workspaces";
 
 type Context = {
@@ -43,41 +43,40 @@ export async function POST(request: NextRequest, context: Context) {
 
   try {
     const input = contactSchema.parse(await request.json());
-    const client = await prisma.clientAccount.findUnique({ where: { id }, select: { id: true, accountOwnerUserId: true } });
-    if (!client) return NextResponse.json({ error: "Clientul nu exista." }, { status: 404, headers: noStoreHeaders });
-    if (session.role === "SALES_AGENT" && client.accountOwnerUserId !== session.id) {
-      return NextResponse.json({ error: "Poti edita doar clientii tai." }, { status: 403, headers: noStoreHeaders });
-    }
-    const contact = await prisma.clientContact.create({
-      data: {
-        clientId: id,
-        name: input.name,
-        role: input.role || null,
-        email: input.email || null,
-        phone: input.phone || null,
-        isPrimary: Boolean(input.isPrimary),
-        notes: input.notes || null
-      }
-    });
-    if (input.isPrimary) {
-      await prisma.clientContact.updateMany({
-        where: { clientId: id, id: { not: contact.id } },
-        data: { isPrimary: false }
+    return await withAuthorizedClientMutation(session, [id], async (tx) => {
+      const client = await tx.clientAccount.findUnique({ where: { id }, select: { id: true, accountOwnerUserId: true, status: true } });
+      if (!client) return NextResponse.json({ error: "Clientul nu exista." }, { status: 404, headers: noStoreHeaders });
+      assertClientEditable(client, session);
+      const contact = await tx.clientContact.create({
+        data: {
+          clientId: id,
+          name: input.name,
+          role: input.role || null,
+          email: input.email || null,
+          phone: input.phone || null,
+          isPrimary: Boolean(input.isPrimary),
+          notes: input.notes || null
+        }
       });
-    }
-    await recordAudit({
-      actor: session,
-      action: "client.contact_create",
-      entityType: "client_contact",
-      entityId: contact.id,
-      metadata: { clientId: id, name: input.name },
-      request
+      if (input.isPrimary) {
+        await tx.clientContact.updateMany({
+          where: { clientId: id, id: { not: contact.id } },
+          data: { isPrimary: false }
+        });
+      }
+      await recordTransactionalAudit(tx, {
+        actor: session,
+        action: "client.contact_create",
+        entityType: "client_contact",
+        entityId: contact.id,
+        metadata: { clientId: id, name: input.name },
+      });
+      return NextResponse.json({ contact }, { status: 201, headers: noStoreHeaders });
     });
-    return NextResponse.json({ contact }, { status: 201, headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Contactul nu a putut fi salvat." },
-      { status: 400, headers: noStoreHeaders }
+      { status: error instanceof ClientMutationError ? error.status : 400, headers: noStoreHeaders }
     );
   }
 }

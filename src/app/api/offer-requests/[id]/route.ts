@@ -32,7 +32,7 @@ export async function PATCH(request: NextRequest, context: Context) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Solicitarea nu a putut fi actualizata." },
-      { status: 400 }
+      { status: error instanceof Error && "status" in error && error.status === 403 ? 403 : 400 }
     );
   }
 }
@@ -42,7 +42,12 @@ export async function DELETE(request: NextRequest, context: Context) {
   if (response || !session) return response;
 
   const { id } = await context.params;
-  const offerRequest = await softDeleteOfferRequest(id, session);
-  await recordAudit({ actor: session, action: "lead.archive", entityType: "offer_request", entityId: id, request });
-  return NextResponse.json({ request: offerRequest });
+  try {
+    const offerRequest = await softDeleteOfferRequest(id, session);
+    await recordAudit({ actor: session, action: "lead.archive", entityType: "offer_request", entityId: id, request });
+    return NextResponse.json({ request: offerRequest });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Solicitarea nu a putut fi arhivata." },
+      { status: error instanceof Error && "status" in error && error.status === 403 ? 403 : 400 });
+  }
 }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateCredentials, establishAuthenticatedSession } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { emitStructuredLog, observeRoute, setObservabilityRole } from "@/lib/observability";
-import { issueMfaLoginChallenge, mfaEnrollmentRequired } from "@/lib/mfa";
+import { issueMfaLoginChallenge, issueMfaEnrollmentChallenge, mfaEnrollmentRequired, MfaAuthenticationChangedError } from "@/lib/mfa";
 import { mutationRequestError, rateLimitIdentity, rateLimitSubject } from "@/lib/request-security";
 import { clearRateLimit, consumeRateLimit } from "@/lib/security-rate-limit";
 
@@ -43,24 +43,34 @@ export async function POST(request: NextRequest) {
     }
 
     setObservabilityRole(user.role);
-    if (user.mfaEnrolled) {
-      const challenge = await issueMfaLoginChallenge(user.id);
-      await Promise.all([
-        clearRateLimit("auth.login.ip", ipIdentifier),
-        clearRateLimit("auth.login.account", accountIdentifier)
-      ]);
-      emitStructuredLog("info", "mfa_challenge_issued", { status: 200, role: user.role });
-      return NextResponse.json({ ok: true, mfaRequired: true, challengeToken: challenge.token });
-    }
-    if (mfaEnrollmentRequired(user.role)) {
-      emitStructuredLog("warn", "mfa_enrollment_required", { status: 403, role: user.role, errorCode: "MFA_ENROLLMENT_REQUIRED" });
-      return NextResponse.json(
-        { error: "MFA este obligatoriu pentru acest rol. Contacteaza administratorul pentru inscriere sigura.", mfaEnrollmentRequired: true },
-        { status: 403 }
-      );
+    try {
+      if (user.mfaEnrolled) {
+        const challenge = await issueMfaLoginChallenge(user.id, user.tokenVersion);
+        await Promise.all([
+          clearRateLimit("auth.login.ip", ipIdentifier),
+          clearRateLimit("auth.login.account", accountIdentifier)
+        ]);
+        emitStructuredLog("info", "mfa_challenge_issued", { status: 200, role: user.role });
+        return NextResponse.json({ ok: true, mfaRequired: true, challengeToken: challenge.token }, { headers: { "Cache-Control": "no-store" } });
+      }
+      if (mfaEnrollmentRequired(user.role)) {
+        const enrollment = await issueMfaEnrollmentChallenge(user.id, user.tokenVersion);
+        await Promise.all([
+          clearRateLimit("auth.login.ip", ipIdentifier),
+          clearRateLimit("auth.login.account", accountIdentifier)
+        ]);
+        emitStructuredLog("info", "mfa_enrollment_required", { status: 200, role: user.role, errorCode: "MFA_ENROLLMENT_REQUIRED" });
+        return NextResponse.json(
+          { ok: true, mfaEnrollmentRequired: true, enrollmentToken: enrollment.token, expiresAt: enrollment.expiresAt.toISOString() },
+          { headers: { "Cache-Control": "no-store" } }
+        );
+      }
+    } catch (error) {
+      if (!(error instanceof MfaAuthenticationChangedError)) throw error;
+      return NextResponse.json({ error: error.message }, { status: 401, headers: { "Cache-Control": "no-store" } });
     }
 
-    const response = NextResponse.json({ ok: true, redirectTo: user.dashboardPath });
+    const response = NextResponse.json({ ok: true, redirectTo: user.dashboardPath }, { headers: { "Cache-Control": "no-store" } });
     await Promise.all([
       clearRateLimit("auth.login.ip", ipIdentifier),
       clearRateLimit("auth.login.account", accountIdentifier)

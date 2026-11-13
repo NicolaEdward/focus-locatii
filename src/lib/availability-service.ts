@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { decideAvailability, type AvailabilityDecision } from "@/lib/availability";
 import { listActiveLocationAvailabilityOverrides } from "@/lib/location-availability-overrides";
 import { prisma } from "@/lib/prisma";
+import { isDigitalLocationType } from "@/lib/location-medium";
 import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
 
 type AvailabilityDb = typeof prisma | Prisma.TransactionClient;
@@ -9,6 +10,7 @@ type AvailabilityDb = typeof prisma | Prisma.TransactionClient;
 const availabilityLocationSelect = {
   id: true,
   code: true,
+  type: true,
   status: true,
   lifecycleStatus: true,
   availabilityText: true,
@@ -54,14 +56,18 @@ export async function loadAvailabilityDecisions(input: {
   periodEnd?: Date | null;
   referenceDate?: Date | null;
   ignoreReservationId?: string | null;
+  ignoreReservationIds?: string[];
   now?: Date;
   db?: AvailabilityDb;
   requireOverrideStorage?: boolean;
+  /** Server-internal: inspect legacy whole-location blockers for the DOOH capacity service. */
+  purpose?: "STATIC_RESERVATION" | "DOOH_LEGACY_BLOCK_CHECK";
 }): Promise<AvailabilityBatchResult> {
   const locationIds = [...new Set(input.locationIds.filter(Boolean))].slice(0, 500);
   const db = input.db || prisma;
   const now = input.now || new Date();
   const referenceDate = input.referenceDate || input.periodStart || input.periodEnd || startOfUtcDay(now);
+  const ignoredIds = [...new Set([...(input.ignoreReservationIds || []), ...(input.ignoreReservationId ? [input.ignoreReservationId] : [])])];
   if (!locationIds.length) {
     return { decisionsByLocationId: {}, locationsById: new Map(), reservationsById: new Map() };
   }
@@ -73,7 +79,7 @@ export async function loadAvailabilityDecisions(input: {
       }
     : { periodEnd: { gte: referenceDate } };
 
-  const [locations, reservations, overrides] = await Promise.all([
+  const [locations, reservations, overrides, profiles] = await Promise.all([
     db.location.findMany({
       where: { id: { in: locationIds } },
       select: availabilityLocationSelect
@@ -83,7 +89,7 @@ export async function loadAvailabilityDecisions(input: {
         locationId: { in: locationIds },
         ...effectiveBlockingReservationWhere(now),
         ...reservationPeriodWhere,
-        ...(input.ignoreReservationId ? { id: { not: input.ignoreReservationId } } : {})
+        ...(ignoredIds.length ? { id: { notIn: ignoredIds } } : {})
       },
       select: availabilityReservationSelect,
       orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }, { id: "asc" }]
@@ -95,14 +101,17 @@ export async function loadAvailabilityDecisions(input: {
       referenceDate,
       db,
       requireStorage: input.requireOverrideStorage
+    }),
+    input.purpose === "DOOH_LEGACY_BLOCK_CHECK" ? Promise.resolve([]) : db.doohProfile.findMany({
+      where: { locationId: { in: locationIds } }, select: { locationId: true }
     })
   ]);
 
   const reservationsByLocation = groupBy(reservations, (row) => row.locationId);
   const overridesByLocation = groupBy(overrides, (row) => row.locationId);
-  const decisionsByLocationId = Object.fromEntries(locations.map((location) => [
-    location.id,
-    decideAvailability({
+  const profiledIds = new Set(profiles.map((profile) => profile.locationId));
+  const decisionsByLocationId = Object.fromEntries(locations.map((location) => {
+    const decision = decideAvailability({
       ...location,
       periodStart: input.periodStart,
       periodEnd: input.periodEnd,
@@ -111,8 +120,12 @@ export async function loadAvailabilityDecisions(input: {
       now,
       reservations: reservationsByLocation.get(location.id) || [],
       availabilityOverrides: overridesByLocation.get(location.id) || []
-    })
-  ]));
+    });
+    if (input.purpose !== "DOOH_LEGACY_BLOCK_CHECK" && (isDigitalLocationType(location.type) || profiledIds.has(location.id))) {
+      return [location.id, { ...decision, status: "BLOCKED", isBookable: false, availableWindows: [], reasons: [{ code: "DOOH_CAPACITY_MANAGED" }, ...decision.reasons] } satisfies AvailabilityDecision];
+    }
+    return [location.id, decision];
+  }));
 
   return {
     decisionsByLocationId,

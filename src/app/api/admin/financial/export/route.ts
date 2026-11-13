@@ -5,6 +5,8 @@ import { recordAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { moneyNumber } from "@/lib/money";
 import { sanitizeSpreadsheetRows } from "@/lib/spreadsheet-export";
+import { currentFinancialReportScope } from "@/lib/financial-report-scope";
+import { receivableNetAmount, receivableNetRemaining, receivableAdjustmentTotal } from "@/lib/receivable-adjustments";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -14,17 +16,17 @@ export async function GET(request: NextRequest) {
   const { session, response } = await requireAnyPermission(request, ["finance.export", "finance.manage"]);
   if (response || !session) return response;
 
-  const upload = await prisma.financialReportUpload.findFirst({
-    where: { activeVersion: true, status: "confirmed" },
-    orderBy: { uploadedAt: "desc" }
-  });
-  if (!upload) {
-    return NextResponse.json({ error: "Nu exista un raport financiar confirmat." }, { status: 404 });
-  }
+  const snapshot = request.nextUrl.searchParams.get("scope") === "snapshot";
+  const uploadId = request.nextUrl.searchParams.get("uploadId");
+  const upload = snapshot && uploadId ? await prisma.financialReportUpload.findFirst({ where: { id: uploadId, status: "confirmed" }, select: { id: true } }) : null;
+  if (snapshot && !upload) return NextResponse.json({ error: "Exportul de versiune necesită un upload confirmat explicit." }, { status: 400 });
+  const scope = await currentFinancialReportScope();
+  const validated = request.nextUrl.searchParams.get("includeReview") !== "1";
+  const included = { includedInReport: true, ...(validated ? { needsReview: false } : {}) };
 
   const [payables, receivables] = await Promise.all([
-    prisma.financialPayable.findMany({ where: { uploadId: upload.id }, orderBy: [{ companyName: "asc" }, { dueDate: "asc" }] }),
-    prisma.financialReceivable.findMany({ where: { uploadId: upload.id }, orderBy: [{ companyName: "asc" }, { dueDate: "asc" }] })
+    prisma.financialPayable.findMany({ where: { ...(upload ? { uploadId: upload.id } : scope.payables), ...included }, orderBy: [{ companyName: "asc" }, { dueDate: "asc" }] }),
+    prisma.financialReceivable.findMany({ where: { ...(upload ? { uploadId: upload.id } : scope.receivables), ...included }, orderBy: [{ companyName: "asc" }, { dueDate: "asc" }] })
   ]);
 
   const workbook = XLSX.utils.book_new();
@@ -49,9 +51,11 @@ export async function GET(request: NextRequest) {
     Client: row.clientName,
     "Data scadenta": dateValue(row.dueDate),
     "Suma facturata": moneyNumber(row.invoicedAmount),
+    "Ajustări storno": moneyNumber(receivableAdjustmentTotal(row.rawRowJson)),
+    "Valoare netă ajustată": moneyNumber(receivableNetAmount(row.invoicedAmount, row.rawRowJson)),
     Moneda: row.currency,
     Incasat: moneyNumber(row.collectedAmount),
-    "Rest de incasat": moneyNumber(row.remainingAmount),
+    "Rest de incasat": moneyNumber(receivableNetRemaining(row)),
     Status: row.status,
     "Needs review": row.needsReview ? "Da" : "Nu",
     Observatii: row.reviewNote
@@ -61,15 +65,16 @@ export async function GET(request: NextRequest) {
   await recordAudit({
     actor: session,
     action: "financial.export",
-    entityType: "financial_report_upload",
-    entityId: upload.id,
+    entityType: upload ? "financial_report_upload" : "financial_registry",
+    entityId: upload?.id,
+    metadata: { scope: snapshot ? "snapshot" : "canonical-current", includedReview: !validated, receivableCount: receivables.length, payableCount: payables.length },
     request
   });
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "content-disposition": `attachment; filename="situatie-financiara-${new Date().toISOString().slice(0, 10)}.xlsx"`,
+      "content-disposition": `attachment; filename="situatie-financiara-${snapshot ? "versiune" : "registru-curent"}-${new Date().toISOString().slice(0, 10)}.xlsx"`,
       "cache-control": "no-store"
     }
   });

@@ -1,11 +1,23 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { currentCorrelationId, emitStructuredLog, safeErrorCode } from "@/lib/observability";
+import { safeAuditMetadata } from "@/lib/transactional-audit";
+import type { Prisma } from "@prisma/client";
 
 export type AuditActor = {
   id: string;
   email: string;
+  auditRequestId?: string;
 };
+
+export class AuditPersistenceError extends Error {
+  readonly code = "AUDIT_PERSISTENCE_FAILED";
+  readonly outcome = "verify_before_retry";
+  constructor() {
+    super("Jurnalul operatiunii nu a putut fi completat. Verifica rezultatul si identificatorul cererii inainte de a reincerca.");
+    this.name = "AuditPersistenceError";
+  }
+}
 
 export async function recordAudit(input: {
   actor?: AuditActor | null;
@@ -16,7 +28,7 @@ export async function recordAudit(input: {
   request?: NextRequest;
 }) {
   try {
-    const correlationId = currentCorrelationId();
+    const correlationId = input.actor?.auditRequestId || currentCorrelationId();
     await prisma.auditLog.create({
       data: {
         userId: input.actor?.id || null,
@@ -24,7 +36,7 @@ export async function recordAudit(input: {
         entityType: input.entityType,
         entityId: input.entityId || null,
         metadata: input.metadata || correlationId
-          ? JSON.parse(JSON.stringify({ ...(input.metadata || {}), ...(correlationId ? { correlationId } : {}) }))
+          ? safeAuditMetadata({ ...(input.metadata || {}), ...(correlationId ? { correlationId } : {}) }) as Prisma.InputJsonValue
           : undefined,
         ipAddress: requestIp(input.request),
         userAgent: input.request?.headers.get("user-agent")?.slice(0, 1000) || null
@@ -32,6 +44,11 @@ export async function recordAudit(input: {
     });
   } catch (error) {
     reportAuditWriteFailure(input, error);
+    // Critical commands also audit inside their business transaction. For any
+    // legacy caller, make an incomplete post-write outcome explicit rather than
+    // claiming success and silently dropping the event. Stable command keys must
+    // be consulted before replaying a write with an unknown outcome.
+    throw new AuditPersistenceError();
   }
 }
 

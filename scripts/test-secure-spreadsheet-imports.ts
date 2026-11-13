@@ -137,11 +137,11 @@ async function main() {
   const crmExport = fs.readFileSync(path.join(root, "src/app/api/admin/crm/export.xlsx/route.ts"), "utf8");
   const decorationExport = fs.readFileSync(path.join(root, "src/lib/decoration-billing.ts"), "utf8");
   assert.doesNotMatch(secureSource, /@\/lib\/prisma|prisma\./, "the common parser must stay DB-independent");
-  assert.ok(inventorySource.indexOf("parseInventoryWorkbook") < inventorySource.indexOf("prisma.importBatch.create"), "inventory validation must finish before the first import write");
+  assert.doesNotMatch(inventorySource, /prisma\.(?:location|importBatch)\.(?:create|update|upsert)/, "workbook parser and preview wrapper must not write inventory");
   assert.doesNotMatch(smartBillPreview, /\.(create|update|upsert|delete)\(/, "SmartBill preview must remain read-only");
   assert.match(jsonImport, /MAX_JSON_BYTES/);
   assert.match(jsonImport, /UNSAFE_KEYS/);
-  assert.ok(jsonImport.indexOf("const plan = locations.map") < jsonImport.indexOf("for (const item of plan)"), "JSON rows must all validate before writes");
+  assert.doesNotMatch(jsonImport, /prisma\.(?:location|category)\.(?:create|update|upsert)/, "JSON requests must use the reviewed atomic import command");
   assert.match(styledExport, /escapeSpreadsheetFormula/);
   assert.match(csvExport, /escapeSpreadsheetFormula/);
   assert.match(financialExport, /sanitizeSpreadsheetRows/);

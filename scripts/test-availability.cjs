@@ -37,7 +37,7 @@ const cases = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "pana la data de 01.07.2026"
+    expectedLabelIncludes: "pana la data de 30.06.2026"
   },
   {
     name: "locatie libera doar la final",
@@ -48,7 +48,7 @@ const cases = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "din data de 30.06.2026"
+    expectedLabelIncludes: "din data de 01.07.2026"
   },
   {
     name: "locatie libera intre doua inchirieri",
@@ -62,7 +62,7 @@ const cases = [
     from: "2026-06-01",
     to: "2026-07-31",
     expectedStatus: "PARTIAL",
-    expectedLabelIncludes: "din data de 10.06.2026 pana la data de 01.07.2026"
+    expectedLabelIncludes: "din data de 11.06.2026 pana la data de 30.06.2026"
   },
   {
     name: "status legacy necunoscut nu suprascrie disponibilitatea derivata",
@@ -207,9 +207,9 @@ const canonicalCases = [
     expected: "AVAILABLE"
   },
   {
-    name: "BOOKED permite changeover in aceeasi zi",
+    name: "BOOKED ocupa inclusiv ultima zi",
     input: { lifecycleStatus: "ACTIVE", periodStart: "2026-08-10", periodEnd: "2026-08-12", now, reservations: [{ id: "inclusive", status: "BOOKED", periodStart: "2026-08-01", periodEnd: "2026-08-10", createdAt: now }] },
-    expected: "AVAILABLE"
+    expected: "PARTIAL"
   },
   {
     name: "HOLD nu permite predare in aceeasi zi",
@@ -226,7 +226,7 @@ const canonicalCases = [
 for (const testCase of canonicalCases) {
   const result = decideAvailability(testCase.input);
   assert(result.status === testCase.expected, `${testCase.name}: expected ${testCase.expected}, got ${result.status}`);
-  assert(result.dateSemantics === "INCLUSIVE_WITH_SAME_DAY_HANDOFF", `${testCase.name}: date semantics must expose same-day BOOKED handoff`);
+  assert(result.dateSemantics === "INCLUSIVE_CALENDAR_DAYS", `${testCase.name}: date semantics must declare inclusive calendar days`);
   assert(result.isBookable === (testCase.expected === "AVAILABLE"), `${testCase.name}: isBookable mismatch`);
 }
 
@@ -245,10 +245,10 @@ const futurePublic = publicAvailability({
   status: "AVAILABLE",
   reservations: [{ id: "future", status: "BOOKED", periodStart: "2026-09-15", periodEnd: "2026-12-15" }]
 }, new Date("2026-08-06T12:00:00.000Z"));
-assert(futurePublic.label === "Disponibil pana la 15.09.2026", `Future BOOKED label is incomplete: ${futurePublic.label}`);
+assert(futurePublic.label === "Disponibil pana la 14.09.2026", `Future BOOKED label is incomplete: ${futurePublic.label}`);
 assert(futurePublic.detail?.includes("Inchiriat intre 15.09.2026 si 15.12.2026"), `Future BOOKED detail is missing: ${futurePublic.detail}`);
 assert(
-  adminAvailabilityExplanation(futureDecision).includes("Disponibila pana la 15.09.2026"),
+  adminAvailabilityExplanation(futureDecision).includes("Disponibila pana la 14.09.2026"),
   "Admin timeline must describe a future booking without presenting it as occupied today."
 );
 
@@ -262,7 +262,7 @@ const sameDayHandoffPublic = publicAvailability({
 }, new Date("2026-08-06T12:00:00.000Z"));
 assert(sameDayHandoffPublic.label === "Inchiriat pana la 15.12.2026", `Same-day bookings must be presented as one occupied chain: ${sameDayHandoffPublic.label}`);
 assert(!sameDayHandoffPublic.detail?.includes("15.09.2026"), `The shared handoff day must not be advertised as a free date: ${sameDayHandoffPublic.detail}`);
-assert(sameDayHandoffPublic.detail === "Disponibil pentru inchiriere din 15.12.2026", `Public copy must describe rental availability without internal terminology: ${sameDayHandoffPublic.detail}`);
+assert(sameDayHandoffPublic.detail === "Disponibil pentru inchiriere din 16.12.2026", `Public copy must describe rental availability without internal terminology: ${sameDayHandoffPublic.detail}`);
 assert(!sameDayHandoffPublic.detail?.toLowerCase().includes("changeover"), "Internal operational terminology must not be exposed publicly.");
 
 const shortGapPublic = publicAvailability({
@@ -273,8 +273,8 @@ const shortGapPublic = publicAvailability({
     { id: "next-gap", status: "BOOKED", periodStart: "2026-09-17", periodEnd: "2026-12-15" }
   ]
 }, new Date("2026-08-06T12:00:00.000Z"));
-assert(shortGapPublic.detail?.includes("Disponibil 2 zile"), `A bounded gap must display its duration: ${shortGapPublic.detail}`);
-assert(shortGapPublic.detail?.includes("intre 15.09.2026 si 17.09.2026"), `A bounded gap must display both boundaries: ${shortGapPublic.detail}`);
+assert(shortGapPublic.detail?.includes("Disponibil 1 zi"), `A bounded gap must display its duration: ${shortGapPublic.detail}`);
+assert(shortGapPublic.detail?.includes("intre 16.09.2026 si 16.09.2026"), `A bounded gap must display both boundaries: ${shortGapPublic.detail}`);
 
 console.log(JSON.stringify({
   ok: true,

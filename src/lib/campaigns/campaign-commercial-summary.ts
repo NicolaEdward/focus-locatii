@@ -46,6 +46,7 @@ export function deriveCampaignCommercialSummary(
 
   const totals = { RON: new Prisma.Decimal(0), EUR: new Prisma.Decimal(0) };
   const dataQualityReasons = new Set<string>();
+  const monthlyGroups = new Map<string, { monthlyRent: Prisma.Decimal; currency: "RON" | "EUR"; periodStart: Date; periodEnd: Date }>();
 
   for (const reservation of booked) {
     const monthlyRent = canonicalMonthlyRent(reservation);
@@ -58,14 +59,16 @@ export function deriveCampaignCommercialSummary(
       dataQualityReasons.add("BOOKED_MONTHLY_RENT_MISSING");
       continue;
     }
-    const prorata = calculateProrata(
-      monthlyRent,
-      reservation.periodStart,
-      reservation.periodEnd,
-      reservation.periodStart,
-      reservation.periodEnd
-    );
-    totals[currency] = totals[currency].plus(prorata.amount);
+    // Prorate a shared contractual period once, after summing persisted row
+    // shares. Rounding each face first can create a cent on partial months.
+    const key = `${reservation.contractGroupId || `single:${monthlyGroups.size}`}|${currency}|${reservation.periodStart.toISOString()}|${reservation.periodEnd.toISOString()}`;
+    const group = monthlyGroups.get(key);
+    if (group) group.monthlyRent = group.monthlyRent.plus(monthlyRent);
+    else monthlyGroups.set(key, { monthlyRent: new Prisma.Decimal(monthlyRent), currency, periodStart: reservation.periodStart, periodEnd: reservation.periodEnd });
+  }
+  for (const group of monthlyGroups.values()) {
+    const prorata = calculateProrata(group.monthlyRent.toNumber(), group.periodStart, group.periodEnd, group.periodStart, group.periodEnd);
+    totals[group.currency] = totals[group.currency].plus(prorata.amount);
   }
 
   const currencies = (["RON", "EUR"] as const).filter((currency) => totals[currency].gt(0));

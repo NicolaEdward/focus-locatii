@@ -3,6 +3,8 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const accounts = require("./preview-accounts.json");
+const { createBrowserRuntime } = require("./browser-runtime.cjs");
+const { renderedUiAudit } = require("./ui-accessibility-audit.cjs");
 
 loadEnvFile(process.env.ENV_FILE);
 const baseUrl = String(process.env.CAPTURE_BASE_URL || "http://127.0.0.1:3015").replace(/\/$/, "");
@@ -10,9 +12,12 @@ const password = process.env.PREVIEW_TEST_PASSWORD;
 const vercelShareToken = process.env.VERCEL_SHARE_TOKEN;
 let vercelShareCookie = null;
 const debugPort = Number(process.env.CAPTURE_CHROME_PORT || 9231);
+const { findChrome, waitForChrome, createTarget, connect, waitForExpression, wait } = createBrowserRuntime(debugPort);
 const outDir = path.resolve(process.cwd(), process.env.CAPTURE_OUT_DIR || "artifacts/release-screenshots");
 const workflowChecks = process.env.CAPTURE_WORKFLOW_CHECKS === "true";
 const performanceRuns = Math.max(1, Math.min(10, Number(process.env.CAPTURE_PERFORMANCE_RUNS || 1)));
+const themes = String(process.env.CAPTURE_THEMES || "light,dark").split(",").map((theme) => theme.trim()).filter((theme) => ["light", "dark"].includes(theme));
+if (!themes.length) throw new Error("CAPTURE_THEMES must include light or dark.");
 if (!password) throw new Error("PREVIEW_TEST_PASSWORD lipsește.");
 
 const viewports = [
@@ -33,6 +38,8 @@ const pages = [
   { name: "sales-director-dashboard", route: "/admin/dashboard", role: "SALES_DIRECTOR", expected: "Agenda mea" },
   { name: "sales-agent-dashboard", route: "/admin/dashboard", role: "SALES_AGENT", expected: "Agenda mea" },
   { name: "finance-invoices", route: "/admin/financiar/incasari", role: "FINANCE_OPERATOR", expected: "Facturi clien" },
+  { name: "finance-invoices-to-issue", route: "/admin/financiar/facturi-de-emis", role: "FINANCE_OPERATOR", expected: "Facturi de emis" },
+  { name: "finance-campaign-allocations", route: "/admin/financiar/alocari", role: "FINANCE_OPERATOR", expected: "Alocări de facturi" },
   { name: "finance-reconciliation", route: "/admin/financiar/reconciliere", role: "FINANCE_OPERATOR", expected: "Import și reconciliere" },
   { name: "finance-saga-integration", route: "/admin/integrari/saga", role: "FINANCE_OPERATOR", expected: "SAGA" },
   { name: "field-operational", route: "/admin/operational", role: "FIELD_OPERATOR", expected: "Munca mea" },
@@ -44,14 +51,18 @@ const pages = [
   { name: "sales-campaigns", route: "/admin/campanii", role: "SALES_AGENT", expected: "Campanii" },
   { name: "sales-reservations", route: "/admin/locatii", role: "SALES_AGENT", expected: "Loca" },
   { name: "crm", route: "/admin/crm", role: "SALES_AGENT", expected: "CRM" },
+  { name: "commercial-quotes", route: "/admin/commercial-quotes", role: "COO", expected: "Oferte comerciale și aprobări" },
+  { name: "dooh-capacity", route: "/admin/dooh", role: "COO", expected: "Capacitate DOOH" },
+  { name: "ai-copilot-pilot", route: "/admin/ai", role: "COO", expected: "Copilot și pilot AI" },
   { name: "operational", route: "/admin/operational", role: "COO", expected: "Workspace operational" },
   { name: "suppliers", route: "/admin/furnizori", role: "COO", expected: "Furnizori" },
   { name: "finance-suppliers", route: "/admin/furnizori", role: "FINANCE_OPERATOR", expected: "Furnizori" },
-  { name: "location-import", route: "/admin/locatii/import", role: "COO", expected: "Import locatii" },
+  { name: "location-import", route: "/admin/locatii/import", role: "COO", expected: "Import loca" },
   { name: "gps-audit", route: "/admin/locatii/gps", role: "COO", expected: "GPS AUDIT" },
   { name: "users", route: "/admin/utilizatori", role: "COO", expected: "Utilizatori" },
   { name: "ownership-integrity", route: "/admin/integritate-date", role: "COO", expected: "Integritate ownership" },
   { name: "account-security", route: "/admin/securitate", role: "COO", expected: "Securitate si sesiuni" },
+  { name: "operations-control", route: "/admin/operations-control", role: "COO", expected: "Control operațional" },
   { name: "public-locations", route: "/locatii", expected: "loca" }
 ];
 
@@ -60,7 +71,7 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
   const chromePath = findChrome();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "focus-release-chrome-"));
-  const chrome = spawn(chromePath, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${userDataDir}`, "about:blank"], { stdio: "ignore" });
+  const chrome = spawn(chromePath, ["--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--no-default-browser-check", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${userDataDir}`, "about:blank"], { stdio: "ignore" });
   try {
     await waitForChrome();
     const cookies = {};
@@ -72,12 +83,15 @@ async function main() {
 
     const manifest = [];
     const pageFilter = String(process.env.CAPTURE_PAGE_FILTER || "").trim();
-    const selectedPages = pageFilter ? pages.filter((page) => page.name.includes(pageFilter)) : pages;
+    const pageFilters = pageFilter.split(",").map((filter) => filter.trim()).filter(Boolean);
+    const selectedPages = pageFilters.length ? pages.filter((page) => pageFilters.some((filter) => page.name.includes(filter))) : pages;
     if (!selectedPages.length) throw new Error(`No capture page matches CAPTURE_PAGE_FILTER=${pageFilter}.`);
     for (const page of selectedPages) {
       for (const viewport of viewports) {
-        const capture = await capturePage(page, viewport, page.role ? cookies[page.role] : null);
-        manifest.push({ page: page.name, role: page.role || "PUBLIC", viewport: viewport.name, width: viewport.width, height: viewport.height, ...capture });
+        for (const theme of page.route.startsWith("/admin") ? themes : ["dark"]) {
+          const capture = await capturePage(page, viewport, page.role ? cookies[page.role] : null, theme);
+          manifest.push({ page: page.name, role: page.role || "PUBLIC", viewport: viewport.name, theme, width: viewport.width, height: viewport.height, ...capture });
+        }
       }
     }
     const manifestPath = path.join(outDir, "manifest.json");
@@ -95,16 +109,17 @@ async function main() {
   }
 }
 
-async function capturePage(page, viewport, cookie) {
+async function capturePage(page, viewport, cookie, theme) {
   const target = await createTarget("about:blank");
   const client = connect(target.webSocketDebuggerUrl);
-  const filePath = path.join(outDir, `${page.name}-${viewport.name}.png`);
+  const filePath = path.join(outDir, `${page.name}-${viewport.name}-${theme}.png`);
   await client.send("Page.enable");
   await client.send("Runtime.enable");
   await client.send("Log.enable");
   await client.send("Network.enable");
   await client.send("Page.addScriptToEvaluateOnNewDocument", {
-    source: `window.__focusLcpMs = 0;
+    source: `localStorage.setItem("focus-admin-theme", ${JSON.stringify(theme)});
+      window.__focusLcpMs = 0;
       new PerformanceObserver((list) => {
         const entries = list.getEntries();
         const latest = entries[entries.length - 1];
@@ -127,6 +142,7 @@ async function capturePage(page, viewport, cookie) {
   }
   await client.send("Page.navigate", { url: `${baseUrl}${page.route}` });
   await waitForExpression(client, "document.readyState === 'complete'", 30000);
+  if (page.role) await waitForExpression(client, "!!document.querySelector('nav.admin-nav')?.getClientRects().length", 90000);
   await wait(1200);
   if (page.name === "finance-reconciliation") {
     await client.send("Runtime.evaluate", {
@@ -148,6 +164,10 @@ async function capturePage(page, viewport, cookie) {
   const overflow = await client.send("Runtime.evaluate", { expression: "document.documentElement.scrollWidth > document.documentElement.clientWidth + 1", returnByValue: true });
   if (overflow.result?.value) throw new Error(`${page.name}/${viewport.name} are overflow orizontal.`);
   const accessibility = await auditAccessibility(client);
+  const rendered = await client.send("Runtime.evaluate", { expression: `(${renderedUiAudit.toString()})()`, returnByValue: true });
+  accessibility.rendered = rendered.result?.value;
+  if (accessibility.rendered?.critical?.length) accessibility.critical.push(...accessibility.rendered.critical);
+  accessibility.coverage = { names: true, semanticContrast: true, structuralReflow: true, keyboardAndStates: "separate smoke-ui-regressions.cjs", fullWcagCertification: false };
   if (accessibility.critical.length) {
     throw new Error(`${page.name}/${viewport.name} are probleme critice de accesibilitate: ${accessibility.critical.join("; ")} ${JSON.stringify(accessibility.samples)}`);
   }
@@ -449,63 +469,6 @@ async function ensureVercelShareCookie() {
   vercelShareCookie = response.headers.get("set-cookie")?.split(";")[0] || null;
   if (!vercelShareCookie) throw new Error("Vercel share token did not produce a bypass cookie.");
 }
-
-function findChrome() {
-  const candidates = [process.env.CHROME_PATH, "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe", "/usr/bin/google-chrome", "/usr/bin/chromium", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].filter(Boolean);
-  const found = candidates.find((candidate) => fs.existsSync(candidate));
-  if (!found) throw new Error("Chrome/Chromium nu a fost găsit. Setează CHROME_PATH.");
-  return found;
-}
-
-async function waitForChrome() {
-  const started = Date.now();
-  while (Date.now() - started < 20000) {
-    try { if ((await fetch(`http://127.0.0.1:${debugPort}/json/version`)).ok) return; } catch {}
-    await wait(250);
-  }
-  throw new Error("Chrome CDP nu a pornit.");
-}
-
-async function createTarget(url) {
-  const response = await fetch(`http://127.0.0.1:${debugPort}/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
-  if (!response.ok) throw new Error(`Nu am putut crea target Chrome: ${response.status}`);
-  return response.json();
-}
-
-function connect(wsUrl) {
-  const socket = new WebSocket(wsUrl);
-  const pending = new Map();
-  const events = [];
-  let id = 0;
-  const ready = new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }); });
-  socket.addEventListener("message", (event) => {
-    const payload = JSON.parse(event.data);
-    if (payload.id && pending.has(payload.id)) {
-      const item = pending.get(payload.id); pending.delete(payload.id);
-      payload.error ? item.reject(new Error(payload.error.message)) : item.resolve(payload.result);
-    } else if (payload.method) events.push(payload);
-  });
-  return {
-    events,
-    async send(method, params = {}) {
-      await ready; const callId = ++id; socket.send(JSON.stringify({ id: callId, method, params }));
-      return new Promise((resolve, reject) => { pending.set(callId, { resolve, reject }); setTimeout(() => { if (pending.delete(callId)) reject(new Error(`CDP timeout: ${method}`)); }, 15000); });
-    },
-    close() { socket.close(); }
-  };
-}
-
-async function waitForExpression(client, expression, timeout) {
-  const started = Date.now();
-  while (Date.now() - started < timeout) {
-    const result = await client.send("Runtime.evaluate", { expression, returnByValue: true });
-    if (result.result?.value === true) return;
-    await wait(250);
-  }
-  throw new Error(`Timeout: ${expression}`);
-}
-
-function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 function loadEnvFile(fileName) {
   if (!fileName) return;

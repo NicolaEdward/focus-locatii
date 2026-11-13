@@ -66,12 +66,12 @@ const cases: Case[] = [
     expectedLabelIncludes: "din data de 11.06.2026 pana la data de 30.06.2026"
   },
   {
-    name: "locatie suspendata",
+    name: "statusul legacy necunoscut nu ascunde disponibilitatea derivata",
     input: { status: "UNKNOWN", reservations: [] },
     from: "2026-06-01",
     to: "2026-07-31",
-    expectedStatus: "SUSPENDED",
-    expectedLabelIncludes: "Suspendata"
+    expectedStatus: "AVAILABLE",
+    expectedLabelIncludes: "Disponibila"
   },
   {
     name: "rezervare suprapusa cu perioada ceruta",

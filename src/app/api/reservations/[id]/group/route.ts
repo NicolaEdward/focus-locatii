@@ -34,7 +34,7 @@ export async function PATCH(request: NextRequest, context: Context) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Contractul nu a putut fi actualizat." },
-      { status: 400, headers: noStoreHeaders }
+      { status: error instanceof Error && "status" in error && error.status === 403 ? 403 : 400, headers: noStoreHeaders }
     );
   }
 }

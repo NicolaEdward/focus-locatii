@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireNotificationAccess } from "@/lib/notification-access";
 import { listNotificationsForUser } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ const noStoreHeaders = {
 };
 
 export async function GET(request: NextRequest) {
-  const { session, response } = await requireAdmin(request);
+  const { session, response } = await requireNotificationAccess(request);
   if (response || !session) return response;
   const notifications = await listNotificationsForUser(session);
   return NextResponse.json({ notifications }, { headers: noStoreHeaders });

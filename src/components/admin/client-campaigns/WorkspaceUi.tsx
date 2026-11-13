@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { FileArchive, Upload, X } from "lucide-react";
 import type { AccountOwnerOption } from "@/lib/client-campaigns";
 import type { WorkspaceDocument } from "@/lib/client-campaign-workspaces";
@@ -182,8 +182,9 @@ export function DocumentUploadDialog({ target, onClose, onSaved }: { target: { c
 }
 
 export function Dialog({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/75 p-4" role="dialog" aria-modal="true"><EscapeCloseHandler onClose={onClose} /><div className="my-auto w-full max-w-3xl rounded-lg border border-focus-line bg-focus-ink p-5 shadow-2xl">
-    <div className="mb-4 flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase text-focus-yellow">{title}</p>{subtitle ? <h3 className="mt-1 text-xl font-black text-white">{subtitle}</h3> : null}</div><button className="grid h-10 w-10 place-items-center rounded-md border border-focus-line text-slate-300 hover:text-white" type="button" onClick={onClose} aria-label="Inchide"><X size={18} /></button></div>
+  const titleId = useId();
+  return <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/75 p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}><EscapeCloseHandler onClose={onClose} /><div className="my-auto w-full min-w-0 max-w-3xl rounded-lg border border-focus-line bg-focus-ink p-5 shadow-2xl">
+    <div className="mb-4 flex items-start justify-between gap-3"><div className="min-w-0"><h2 id={titleId} className="break-words text-xl font-black text-white">{title}</h2>{subtitle ? <p className="mt-1 break-words text-sm text-slate-400">{subtitle}</p> : null}</div><button className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-focus-line text-slate-300 hover:text-white" type="button" onClick={onClose} aria-label="Inchide"><X size={18} /></button></div>
     {children}
   </div></div>;
 }

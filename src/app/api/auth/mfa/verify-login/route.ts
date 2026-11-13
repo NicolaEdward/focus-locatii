@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       const user = await verifyMfaLoginChallenge(challengeToken, code);
       if (!user) return NextResponse.json({ error: "Contul nu mai este activ." }, { status: 401 });
       setObservabilityRole(user.role);
-      const response = NextResponse.json({ ok: true, redirectTo: dashboardPathForRole(user.role) });
+      const response = NextResponse.json({ ok: true, redirectTo: dashboardPathForRole(user.role) }, { headers: { "Cache-Control": "no-store" } });
       await establishAuthenticatedSession(response, user, request, new Date());
       await recordAudit({ actor: user, action: "auth.mfa.login", entityType: "user", entityId: user.id, request });
       emitStructuredLog("info", "mfa_login_succeeded", { status: 200, role: user.role });

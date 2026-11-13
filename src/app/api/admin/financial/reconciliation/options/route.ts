@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { receivableNetRemaining } from "@/lib/receivable-adjustments";
 
 export async function GET(request: NextRequest) {
   const { session, response } = await requireAnyPermission(request, ["finance.view", "finance.validate", "finance.confirm", "finance.manage"]);
@@ -12,14 +13,14 @@ export async function GET(request: NextRequest) {
   if (transaction.creditAmount.greaterThan(0)) {
     const documents = await prisma.financialReceivable.findMany({
       where: {
-        legalEntityId: transaction.legalEntityId, currency: transaction.currency, includedInReport: true,
-        remainingAmount: { gt: 0.01 }, status: { notIn: ["cancelled", "archived"] },
+        legalEntityId: transaction.legalEntityId, currency: transaction.currency, includedInReport: true, needsReview: false,
+        invoicedAmount: { gt: 0 }, status: { notIn: ["cancelled", "archived"] },
         ...(query ? { OR: [{ invoiceNumber: { contains: query } }, { clientName: { contains: query } }, { client: { companyName: { contains: query } } }] } : {})
       },
-      select: { id: true, invoiceNumber: true, clientName: true, remainingAmount: true, currency: true, dueDate: true },
+      select: { id: true, invoiceNumber: true, clientName: true, invoicedAmount: true, collectedAmount: true, rawRowJson: true, remainingAmount: true, currency: true, dueDate: true },
       orderBy: [{ dueDate: "asc" }, { invoiceNumber: "asc" }], take: 30
     });
-    return NextResponse.json({ direction: "receivable", options: documents.map((document) => ({ id: document.id, documentNumber: document.invoiceNumber, partnerName: document.clientName, remainingAmount: document.remainingAmount?.toFixed(2) || "0.00", currency: document.currency, dueDate: document.dueDate?.toISOString() || null })) }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ direction: "receivable", options: documents.filter(document => receivableNetRemaining(document).greaterThan(0)).map((document) => ({ id: document.id, documentNumber: document.invoiceNumber, partnerName: document.clientName, remainingAmount: receivableNetRemaining(document).toFixed(2), currency: document.currency, dueDate: document.dueDate?.toISOString() || null })) }, { headers: { "Cache-Control": "no-store" } });
   }
   const documents = await prisma.financialPayable.findMany({
     where: {

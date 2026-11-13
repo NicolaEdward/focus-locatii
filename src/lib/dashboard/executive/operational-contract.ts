@@ -1,3 +1,5 @@
+import { isDigitalLocationType } from "@/lib/location-medium";
+
 export const OPERATIONAL_NEUTRALIZATION_SLA = {
   planningBusinessDaysBeforeEnd: numberSetting("OPERATIONAL_NEUTRALIZATION_PLANNING_BUSINESS_DAYS", 3),
   executionHoursAfterEnd: numberSetting("OPERATIONAL_NEUTRALIZATION_EXECUTION_HOURS", 24)
@@ -21,7 +23,7 @@ export function operationalRequirementForBooked(input: {
   if (!type) {
     return { medium: "UNKNOWN", requiredKinds: [], proofRequirement: "DATA_INSUFFICIENT", reasonCodes: ["LOCATION_MEDIUM_UNKNOWN"] };
   }
-  if (/(digital|led|ecran|screen|lcd)/i.test(type)) {
+  if (isDigitalLocationType(type)) {
     return {
       medium: "DIGITAL",
       requiredKinds: [],

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
-import { recordAudit } from "@/lib/audit";
 import { mergeClientAccounts } from "@/lib/clients";
 
 export const dynamic = "force-dynamic";
@@ -29,22 +28,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const input = mergeSchema.parse(await request.json());
-    const result = await mergeClientAccounts(input, session);
-
-    await recordAudit({
-      actor: session,
-      action: "client.merge",
-      entityType: "client_account",
-      entityId: result.primary.id,
-      metadata: {
-        primaryClientId: result.primary.id,
-        duplicateClientId: result.duplicate.id,
-        duplicateName: result.duplicate.companyName,
-        reason: input.reason || null,
-        counts: result.counts
-      },
-      request
-    });
+    await mergeClientAccounts(input, session);
 
     return NextResponse.json({ ok: true }, { headers: noStoreHeaders });
   } catch (error) {

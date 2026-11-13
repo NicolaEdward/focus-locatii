@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "audit_commit": "ba83e0dbed5d50575e51ec735505dce54e9b20fc",
+  "implementation_scope": ["T06", "T07-finance", "T08-financial-alerts", "T12-billing-and-analytical-finance", "FIN-009-summary"],
+  "implemented_findings": {
+    "FIN-001": "Shared net-after-storno capacity in bank writes, reconciliation previews/summaries, client invoice views and financial exports. Excess bank allocation is refused; manual overpayment requires explicit confirmation.",
+    "FIN-002": "Generic receivable cancellation atomically synchronizes invoice, linked unused credit and bank state. Consumed credit blocks reversal. Bank-origin corrections require controlled reversal and reallocation.",
+    "FIN-003": "Stable per-intent UI keys in receivables, legacy client invoices and bank reconciliation; server fingerprints bind immutable intent. API request keys are required. Persisted payment lookup supports unknown-result recovery.",
+    "FIN-004": "Default export uses canonical current registry including older confirmed imports; explicit snapshot mode remains available. Adjustment, adjusted gross and canonical outstanding are exported separately.",
+    "FIN-005": "Live internal billing-plan generator, paginated work queue, responsibility/status and fiscal-document linkage. Generation is explicit, atomic and repeatable; linked history is protected from changed terms or periods.",
+    "FIN-006": "Outstanding-debt lifetime is independent of reminder cadence; all deterministic pages are visited, including debts older than 90 days. A call does not settle debt, and manual resolution is blocked while canonical outstanding remains.",
+    "FIN-007": "Explicit net/VAT/gross invoice allocations across campaigns with optional reservation/location/billing links; sourced draft/approved costs; currency/entity separation; margin is unavailable until current full-period cost coverage is human confirmed and fiscal consistency holds.",
+    "FIN-009": "Summary groups persisted shares before prorating and billing distributes partial-period rounding residuals deterministically. Reservation allocation itself is owned by the reservation implementation lane."
+  },
+  "pages": ["/admin/financiar/facturi-de-emis", "/admin/financiar/alocari"],
+  "commands": ["generate internal billing plan", "allocate imported fiscal document", "reverse allocation", "attest original invoice or credit-note tax split with evidence", "create sourced draft cost", "approve or reverse cost with expected version", "confirm cost coverage against current source fingerprint"],
+  "migration": "prisma/migrations/202611130001_finance_commands/migration.sql",
+  "migration_kind": "three new CREATE TABLE statements plus additive indexes/foreign keys; no historical rewrite",
+  "tests": [
+    {"file": "scripts/test-finance-remediation.ts", "proof": "Baseline rejects the expected-rejection assertion (bank 900 against 1000 minus 200 was accepted). Remediated code passes: net capacity, bank cancellation, replay binding, concurrent intents and consumed-credit reversal protection."},
+    {"file": "scripts/test-finance-plan-and-alerts.ts", "proof": "Synthetic DB: repeatable billing generation, half-month group total 50.00, issued linkage, protected regeneration, signed tax attestation, multi-campaign capacity, human completeness gating and invalidation, older canonical imports, 505 old unpaid debts on non-reminder days."},
+    {"file": "scripts/test-campaign-commercial-summary.ts", "proof": "Existing 30 commercial-summary checks pass."},
+    {"file": "scripts/test-financial-bank-reconciliation.ts", "proof": "Existing reconciliation domain tests pass."},
+    {"file": "scripts/test-finance-consistency.cjs", "proof": "Existing consistency suite passes."},
+    {"file": "scripts/test-billing.cjs", "proof": "Existing invoice/due-date and prorata suite passes."}
+  ],
+  "verification_environment": "isolated localhost synthetic MySQL focus_preview_impl_finance; own fixtures removed",
+  "integration_verification_remaining": ["Root consolidated build with upgraded Next/Zod", "Root browser verification of new pages at desktop/mobile widths", "Hash-checked additive migration in an approved deployment environment"],
+  "commercial_boundaries": ["No fiscal invoice is issued by these commands", "No real bank payment or customer contact is triggered", "No automatic FX conversion", "No historical reconciliation corrections", "No margin claim when fiscal allocation or cost completeness is uncertain"],
+  "owner_decisions_before_external_activation": ["Fiscal issuer/ERP and its verified integration contract", "Any change to explicit manual overpayment/credit policy", "Any historical invoice/payment/allocation correction", "Commercial treatment of planned contract amounts as net, verified against signed terms before issuance"]
+}

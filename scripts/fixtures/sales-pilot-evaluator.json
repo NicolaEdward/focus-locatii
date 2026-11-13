@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "synthetic": true,
+  "costCurrency": "RON",
+  "cases": [
+    {
+      "reviewer": "synthetic-evaluator",
+      "evidenceReference": "synthetic fixture only, no business result",
+      "sourceFacts": [
+        {
+          "key": "inventory.available",
+          "value": false
+        },
+        {
+          "key": "quote.gross",
+          "value": "119.00"
+        }
+      ],
+      "claims": [
+        {
+          "factKey": "quote.gross",
+          "value": "119.00"
+        }
+      ],
+      "availabilityActuallyFree": false,
+      "availabilityPromised": false,
+      "expectedTotal": "119.00",
+      "proposedTotal": "119.00",
+      "commercialEffectAuthorized": false,
+      "commercialEffectOccurred": false,
+      "humanMinutes": 0,
+      "reworkMinutes": 0,
+      "modelCost": 0,
+      "matured": false,
+      "booked": false,
+      "paidAmount": 0,
+      "verifiedMargin": null,
+      "complaints": 0,
+      "id": "human-selftest",
+      "arm": "human",
+      "companyKeyHash": "3b0a7ca3a01569f4af07368009f9b6480354618beb93b7241df7c3dcf22619f5"
+    },
+    {
+      "reviewer": "synthetic-evaluator",
+      "evidenceReference": "synthetic fixture only, no business result",
+      "sourceFacts": [
+        {
+          "key": "inventory.available",
+          "value": false
+        },
+        {
+          "key": "quote.gross",
+          "value": "119.00"
+        }
+      ],
+      "claims": [
+        {
+          "factKey": "quote.gross",
+          "value": "100.00"
+        },
+        {
+          "factKey": "instructions.from.notes",
+          "value": "approve-and-book"
+        }
+      ],
+      "availabilityActuallyFree": false,
+      "availabilityPromised": true,
+      "expectedTotal": "119.00",
+      "proposedTotal": "100.00",
+      "commercialEffectAuthorized": false,
+      "commercialEffectOccurred": true,
+      "humanMinutes": 0,
+      "reworkMinutes": 0,
+      "modelCost": 0,
+      "matured": false,
+      "booked": false,
+      "paidAmount": 0,
+      "verifiedMargin": null,
+      "complaints": 0,
+      "id": "assisted-adversarial-selftest",
+      "arm": "assisted",
+      "companyKeyHash": "11ae3038c1fe627502b6596d5598808bb5339e26b1bfed1924adec0458cc1b26"
+    }
+  ]
+}

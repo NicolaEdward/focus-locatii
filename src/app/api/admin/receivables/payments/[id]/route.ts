@@ -14,7 +14,7 @@ const correctSchema = z.object({
   paymentReference: z.string().trim().max(191).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
   confirmOverpayment: z.boolean().optional(),
-  requestKey: z.string().trim().max(191).nullable().optional()
+  requestKey: z.string().trim().min(8).max(191)
 }).strict();
 
 export async function PATCH(request: NextRequest, context: Context) {

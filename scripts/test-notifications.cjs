@@ -13,13 +13,23 @@ const users = [
 ];
 const notifications = [];
 let nextNotificationId = 1;
+const receivableReads = [];
 
 const prisma = {
   financialReportUpload: {
     findFirst: async () => ({ id: "active-upload" })
   },
   financialReceivable: {
-    findMany: async () => receivables
+    findMany: async ({ where = {}, orderBy, cursor, skip = 0, take } = {}) => {
+      receivableReads.push({ cursor: cursor?.id || null, skip, take });
+      const rows = receivables.filter((row) => matchesReceivable(row, where));
+      if (orderBy?.id) rows.sort((a, b) => orderBy.id === "asc" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id));
+      const cursorIndex = cursor ? rows.findIndex((row) => row.id === cursor.id) : 0;
+      if (cursor && cursorIndex < 0) return [];
+      const start = cursor ? cursorIndex + skip : skip;
+      return rows.slice(Math.max(0, start), take == null ? undefined : Math.max(0, start) + take);
+    },
+    findUnique: async ({ where }) => receivables.find((row) => row.id === where.id) || null
   },
   user: {
     findMany: async ({ where } = {}) => users.filter((user) => {
@@ -140,6 +150,35 @@ async function main() {
   assert(!openNotification("soon-1", "receivable_due_soon"), "due-soon transition archives stale due-soon notification");
   assert(openNotification("soon-1", "receivable_overdue"), "due-soon transition leaves current overdue notification");
 
+  // A debt remains actionable every day, independently of reminder cadence.
+  // The mock implements deterministic cursor pages so a missing second page is
+  // observable instead of returning the entire fixture on every findMany call.
+  receivables = Array.from({ length: 505 }, (_, index) => receivable(`old-debt-${String(index).padStart(4, "0")}`, "2025-01-01", "seller-1"));
+  receivables.push({ ...receivable("fully-storno", "2025-01-01", "seller-1"), rawRowJson: { smartBillAdjustments: [{ adjustmentReceivableId: "storno-document", adjustmentAmount: 100 }] } });
+  receivables.push({ ...receivable("paid-stale-snapshot", "2025-01-01", "seller-1"), collectedAmount: 100 });
+  receivables.push({ ...receivable("excluded-debt", "2025-01-01", "seller-1"), includedInReport: false });
+  receivableReads.length = 0;
+  assert.equal(await syncFinancialNotifications(now), 505, "every old unpaid debt creates an alert, beyond one page and outside reminder windows");
+  assert.equal(receivableReads.length, 2, "cursor pagination reads the second page");
+  assert.equal(receivableReads[1].cursor, "old-debt-0498", "cursor starts after the final row of the deterministic first page");
+  assert.equal(notifications.filter((row) => row.entityId?.startsWith("old-debt-") && ["open", "in_progress"].includes(row.status)).length, 505);
+  assert(!openNotification("fully-storno", "receivable_overdue"), "a full storno leaves no canonical debt despite a stale stored remainingAmount");
+  assert(!openNotification("paid-stale-snapshot", "receivable_overdue"), "a paid invoice leaves no canonical debt despite a stale stored remainingAmount");
+  assert(!openNotification("excluded-debt", "receivable_overdue"), "excluded documents are not actionable debt");
+  const activeDebt = openNotification("old-debt-0000", "receivable_overdue");
+  activeDebt.metadata.lastNote = "Seller has contacted the client";
+  assert.equal(activeDebt.metadata.reminderEligible, false, "non-reminder days still retain an open debt alert");
+  assert.equal(await syncFinancialNotifications(new Date("2026-06-27T00:00:00Z")), 0);
+  assert.equal(openNotification("old-debt-0000", "receivable_overdue").metadata.lastNote, "Seller has contacted the client", "canonical refresh preserves seller notes");
+  assert.equal(notifications.filter((row) => row.entityId?.startsWith("old-debt-") && ["open", "in_progress"].includes(row.status)).length, 505, "the next non-reminder day does not archive unpaid debt");
+  const sellerSession = { id: "seller-1", role: "SALES_AGENT" };
+  await updateNotificationAction(activeDebt.id, "called", "Client contacted", sellerSession);
+  assert.equal(notificationById(activeDebt.id).status, "in_progress", "a call does not settle an invoice");
+  await assert.rejects(() => updateNotificationAction(activeDebt.id, "resolve", "Hide debt", sellerSession), /încă sold/, "open debt cannot be manually marked settled");
+  receivables.find((row) => row.id === "old-debt-0000").collectedAmount = 100;
+  await syncFinancialNotifications(new Date("2026-06-27T00:00:00Z"));
+  assert.equal(notificationById(activeDebt.id).status, "archived", "actual settlement archives the debt alert");
+
   crmActions = [
     crmAction("crm-overdue", "Client restant", "2026-06-25", { prospect: crmProspectRef("crm-overdue", "qualified", "2026-06-25") }),
     crmAction("crm-today", "Client azi", "2026-06-26", { opportunity: crmOpportunityRef("crm-today", "quoted", "2026-06-25") }),
@@ -214,6 +253,9 @@ async function main() {
       "stale receivable notifications cleaned",
       "due-soon transitions to overdue without stale duplicate",
       "duplicate notification not repeatedly created",
+      "505 old debts survive cursor pagination and non-reminder days",
+      "canonical storno and payments override stale stored balances",
+      "seller notes and calls do not resolve unpaid debt",
       "CRM due and missing-next-step notifications are idempotent",
       "CRM tomorrow and missing-action reminders are generated without duplicate noise",
       "CRM stalled-stage and decision-date reminders are generated without duplicate noise",
@@ -234,9 +276,27 @@ function receivable(id, dueDate, ownerId, directOwnerId = null) {
     dueDate: new Date(`${dueDate}T00:00:00.000Z`),
     clientName: `Client ${id}`,
     currency: "RON",
+    invoicedAmount: 100,
+    collectedAmount: 0,
+    rawRowJson: null,
+    includedInReport: true,
+    needsReview: false,
+    status: "in_term",
     remainingAmount: 100,
     client: { accountOwnerUserId: ownerId, companyName: `Client ${id}` }
   };
+}
+
+function matchesReceivable(row, where) {
+  if (where.OR && !where.OR.some((condition) => matchesReceivable(row, condition))) return false;
+  if (where.uploadId && row.uploadId !== where.uploadId) return false;
+  if (where.canonicalKey?.not === null && row.canonicalKey == null) return false;
+  for (const key of ["includedInReport", "needsReview"]) if (where[key] !== undefined && row[key] !== where[key]) return false;
+  if (where.status?.notIn?.includes(row.status)) return false;
+  for (const key of ["invoicedAmount", "remainingAmount"]) if (where[key]?.gt != null && !(Number(row[key]) > Number(where[key].gt))) return false;
+  if (where.dueDate?.lte && (!row.dueDate || row.dueDate > where.dueDate.lte)) return false;
+  if (where.dueDate?.gte && (!row.dueDate || row.dueDate < where.dueDate.gte)) return false;
+  return true;
 }
 
 function crmAction(id, companyName, dueDate, related) {

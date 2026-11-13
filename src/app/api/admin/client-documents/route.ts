@@ -1,22 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
-import { recordAudit } from "@/lib/audit";
-import { evaluateDocumentAccess, resolveDocumentAccess } from "@/lib/client-document-access";
+import { evaluateDocumentAccess, lockDocumentLinks, resolveDocumentAccess } from "@/lib/client-document-access";
 import { OPERATIONAL_PROOF_DOCUMENT_TYPE } from "@/lib/operational-proof";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const noStoreHeaders = {
-  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"
+  "Cache-Control": "private, no-store, no-cache, must-revalidate, proxy-revalidate",
+  "Vary": "Cookie"
 };
 
 const maxFileSize = 5 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
   const { session, response } = await requireAnyPermission(request, ["clients.manage", "clients.manage.own"]);
-  if (response || !session) return response;
+  if (response || !session) {
+    if (response) for (const [key, value] of Object.entries(noStoreHeaders)) response.headers.set(key, value);
+    return response;
+  }
 
   try {
     const form = await request.formData();
@@ -56,8 +60,12 @@ export async function POST(request: NextRequest) {
     }
 
     const storageUrl = uploadedFile ? await fileToDataUrl(uploadedFile) : safeExternalDocumentUrl(url as string);
-    const document = await prisma.clientDocument.create({
-      data: {
+    const links = { clientId, campaignId, reservationId, billingItemId, financialReceivableId, financialPayableId };
+    const document = await prisma.$transaction(async (tx) => {
+      await lockDocumentLinks(tx, links);
+      const lockedAccessError = evaluateDocumentAccess(session, await resolveDocumentAccess(links, tx), "manage");
+      if (lockedAccessError) throw Object.assign(new Error(lockedAccessError.error), { status: lockedAccessError.status });
+      const created = await tx.clientDocument.create({ data: {
         clientId,
         campaignId,
         reservationId,
@@ -73,17 +81,13 @@ export async function POST(request: NextRequest) {
         notes,
         storageUrl,
         status: "active"
-      }
-    });
-
-    await recordAudit({
-      actor: session,
-      action: "document.upload",
-      entityType: "client_document",
-      entityId: document.id,
-      metadata: { clientId, campaignId, reservationId, billingItemId, financialReceivableId, financialPayableId, documentType, fileName: document.fileName },
-      request
-    });
+      } });
+      await tx.auditLog.create({ data: {
+        userId: session.id, action: "document.upload", entityType: "client_document", entityId: created.id,
+        metadata: { durability: "business-transaction", ...links, documentType, fileName: created.fileName }
+      } });
+      return created;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 
     return NextResponse.json({
       document: {
@@ -98,9 +102,10 @@ export async function POST(request: NextRequest) {
       }
     }, { status: 201, headers: noStoreHeaders });
   } catch (error) {
+    const status = error && typeof error === "object" && "status" in error && [400, 403, 404, 409, 422].includes(Number(error.status)) ? Number(error.status) : 503;
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Documentul nu a putut fi salvat." },
-      { status: 400, headers: noStoreHeaders }
+      { error: status === 503 ? "Salvarea documentului este temporar indisponibilă." : (error as Error).message },
+      { status, headers: noStoreHeaders }
     );
   }
 }
@@ -124,9 +129,10 @@ async function fileToDataUrl(file: File) {
 }
 
 function safeExternalDocumentUrl(value: string) {
-  const url = new URL(value);
+  let url: URL;
+  try { url = new URL(value); } catch { throw Object.assign(new Error("Linkul documentului nu este valid."), { status: 400 }); }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error("Linkul documentului trebuie sa foloseasca HTTP sau HTTPS.");
+    throw Object.assign(new Error("Linkul documentului trebuie sa foloseasca HTTP sau HTTPS."), { status: 400 });
   }
   return url.toString();
 }

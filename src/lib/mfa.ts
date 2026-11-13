@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { authActionTokenHash, findUsableAuthActionToken, issueAuthActionToken } from "@/lib/auth-action-tokens";
 import { authSecret, securityHash } from "@/lib/security-secrets";
 import type { UserRole } from "@/lib/rbac";
 import { verifyPassword } from "@/lib/auth";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
 
 const TOTP_STEP_SECONDS = 30;
 const TOTP_DIGITS = 6;
@@ -24,108 +26,173 @@ export async function getMfaStatus(userId: string) {
   };
 }
 
-export async function beginMfaEnrollment(user: { id: string; email: string }, currentPassword: string) {
-  const passwordOwner = await prisma.user.findFirst({ where: { id: user.id, active: true }, select: { passwordHash: true } });
-  if (!passwordOwner || !(await verifyPassword(currentPassword, passwordOwner.passwordHash))) {
-    throw new Error("Parola curenta nu este corecta.");
-  }
-  const existing = await prisma.authMfaCredential.findUnique({ where: { userId: user.id }, select: { enabledAt: true } });
-  if (existing?.enabledAt) throw new Error("MFA este deja activat pentru acest cont.");
+const mfaUserSelect = { id: true, email: true, name: true, role: true, tokenVersion: true, active: true } as const;
+type MfaUser = Prisma.UserGetPayload<{ select: typeof mfaUserSelect }>;
+type MfaChallengeType = "MFA_LOGIN" | "MFA_ENROLLMENT";
 
+export class MfaAuthenticationChangedError extends Error {
+  constructor() {
+    super("Autentificarea a expirat sau datele contului s-au schimbat. Reia autentificarea.");
+    this.name = "MfaAuthenticationChangedError";
+  }
+}
+
+function invalidChallenge(): never {
+  throw new MfaAuthenticationChangedError();
+}
+
+async function lockMfaUser(tx: Prisma.TransactionClient, userId: string, expectedVersion?: number) {
+  // Serialize enrollment/verification with password, role and MFA-reset writes.
+  await tx.$queryRaw`SELECT id FROM portfolio_users WHERE id = ${userId} FOR UPDATE`;
+  const user = await tx.user.findUnique({ where: { id: userId }, select: mfaUserSelect });
+  if (!user?.active || expectedVersion !== undefined && user.tokenVersion !== expectedVersion) invalidChallenge();
+  return user;
+}
+
+function challengeMatchesUser(metadata: Prisma.JsonValue | null, user: MfaUser) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
+  return metadata.credentialVersion === user.tokenVersion && metadata.role === user.role;
+}
+
+async function readBoundChallenge(tx: Prisma.TransactionClient, type: MfaChallengeType, token: string, user: MfaUser, now: Date) {
+  const challenge = await tx.authActionToken.findFirst({
+    where: { type, userId: user.id, tokenHash: authActionTokenHash(type, token), usedAt: null, expiresAt: { gt: now } }
+  });
+  // Tokens issued before credential-version binding are deliberately rejected.
+  if (!challenge || !challengeMatchesUser(challenge.metadata, user)) invalidChallenge();
+  return challenge;
+}
+
+async function issueMfaChallenge(type: MfaChallengeType, userId: string, expectedVersion?: number) {
+  const user = await prisma.user.findFirst({ where: { id: userId, active: true }, select: mfaUserSelect });
+  if (!user || expectedVersion !== undefined && user.tokenVersion !== expectedVersion) invalidChallenge();
+  return issueAuthActionToken({
+    type, userId, ttlSeconds: type === "MFA_LOGIN" ? 5 * 60 : 10 * 60,
+    metadata: { credentialVersion: user.tokenVersion, role: user.role }
+  });
+}
+
+async function prepareEnrollment(tx: Prisma.TransactionClient, user: MfaUser) {
+  const existing = await tx.authMfaCredential.findUnique({ where: { userId: user.id }, select: { enabledAt: true } });
+  if (existing?.enabledAt) throw new Error("MFA este deja activat pentru acest cont.");
   const secret = base32Encode(crypto.randomBytes(20));
   const encrypted = encryptSecret(secret);
-  await prisma.$transaction(async (tx) => {
-    const credential = await tx.authMfaCredential.upsert({
-      where: { userId: user.id },
-      update: { ...encrypted, enabledAt: null, lastUsedStep: null },
-      create: { userId: user.id, ...encrypted }
-    });
-    await tx.authRecoveryCode.deleteMany({ where: { credentialId: credential.id } });
+  const credential = await tx.authMfaCredential.upsert({
+    where: { userId: user.id },
+    update: { ...encrypted, enabledAt: null, lastUsedStep: null },
+    create: { userId: user.id, ...encrypted }
   });
+  await tx.authRecoveryCode.deleteMany({ where: { credentialId: credential.id } });
+  await recordTransactionalAudit(tx, { actor: user, action: "auth.mfa.enroll.started", entityType: "user", entityId: user.id });
   const issuer = "Focus Media OOH";
-  const label = `${issuer}:${user.email}`;
-  const uri = `otpauth://totp/${encodeURIComponent(label)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_STEP_SECONDS}`;
+  const uri = `otpauth://totp/${encodeURIComponent(`${issuer}:${user.email}`)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_STEP_SECONDS}`;
   return { secret, uri };
 }
 
-export async function confirmMfaEnrollment(userId: string, code: string, now = new Date()) {
-  const credential = await prisma.authMfaCredential.findUnique({ where: { userId } });
+async function completeEnrollment(tx: Prisma.TransactionClient, user: MfaUser, code: string, now: Date) {
+  const credential = await tx.authMfaCredential.findUnique({ where: { userId: user.id } });
   if (!credential) throw new Error("Porneste mai intai configurarea MFA.");
   if (credential.enabledAt) throw new Error("MFA este deja activat.");
   const step = verifyTotpCode(decryptSecret(credential), code, now, credential.lastUsedStep);
   if (step == null) throw new Error("Codul de verificare nu este valid.");
-
-  const recoveryCodes = generateRecoveryCodes();
-  await prisma.$transaction(async (tx) => {
-    await tx.authMfaCredential.update({
-      where: { id: credential.id },
-      data: { enabledAt: now, lastUsedStep: step }
-    });
-    await tx.authRecoveryCode.deleteMany({ where: { credentialId: credential.id } });
-    await tx.authRecoveryCode.createMany({
-      data: recoveryCodes.map((recoveryCode) => ({
-        credentialId: credential.id,
-        codeHash: recoveryCodeHash(recoveryCode)
-      }))
-    });
+  const enabled = await tx.authMfaCredential.updateMany({
+    where: { id: credential.id, enabledAt: null }, data: { enabledAt: now, lastUsedStep: step }
   });
+  if (enabled.count !== 1) throw new Error("Configurarea MFA a fost deja folosita. Reia autentificarea.");
+  const recoveryCodes = generateRecoveryCodes();
+  await tx.authRecoveryCode.deleteMany({ where: { credentialId: credential.id } });
+  await tx.authRecoveryCode.createMany({
+    data: recoveryCodes.map((recoveryCode) => ({ credentialId: credential.id, codeHash: recoveryCodeHash(recoveryCode) }))
+  });
+  await recordTransactionalAudit(tx, { actor: user, action: "auth.mfa.enroll.completed", entityType: "user", entityId: user.id, metadata: { issuedCount: recoveryCodes.length } });
   return recoveryCodes;
 }
 
-export async function issueMfaLoginChallenge(userId: string) {
-  return issueAuthActionToken({ type: "MFA_LOGIN", userId, ttlSeconds: 5 * 60 });
+export async function beginMfaEnrollment(user: { id: string; email: string; tokenVersion?: number }, currentPassword: string) {
+  // Verify the password again under the user lock to avoid a password-reset race.
+  return prisma.$transaction(async (tx) => {
+    const current = await lockMfaUser(tx, user.id, user.tokenVersion);
+    const passwordOwner = await tx.user.findUnique({ where: { id: user.id }, select: { passwordHash: true } });
+    if (!passwordOwner || !(await verifyPassword(currentPassword, passwordOwner.passwordHash))) {
+      throw new Error("Parola curenta nu este corecta.");
+    }
+    return prepareEnrollment(tx, current);
+  });
+}
+
+export async function confirmMfaEnrollment(userId: string, code: string, now = new Date(), expectedVersion?: number) {
+  return prisma.$transaction(async (tx) => {
+    const user = await lockMfaUser(tx, userId, expectedVersion);
+    return completeEnrollment(tx, user, code, now);
+  });
+}
+
+export async function issueMfaLoginChallenge(userId: string, expectedVersion?: number) {
+  return issueMfaChallenge("MFA_LOGIN", userId, expectedVersion);
+}
+
+// This opaque token authorizes only enrollment. It is never an application session.
+export async function issueMfaEnrollmentChallenge(userId: string, expectedVersion?: number) {
+  return issueMfaChallenge("MFA_ENROLLMENT", userId, expectedVersion);
+}
+
+export async function beginRequiredMfaEnrollment(enrollmentToken: string) {
+  const preliminary = await findUsableAuthActionToken("MFA_ENROLLMENT", enrollmentToken);
+  if (!preliminary?.userId) invalidChallenge();
+  return prisma.$transaction(async (tx) => {
+    const user = await lockMfaUser(tx, preliminary.userId!);
+    await readBoundChallenge(tx, "MFA_ENROLLMENT", enrollmentToken, user, new Date());
+    return { user, enrollment: await prepareEnrollment(tx, user) };
+  });
+}
+
+export async function confirmRequiredMfaEnrollment(enrollmentToken: string, code: string, now = new Date()) {
+  const preliminary = await findUsableAuthActionToken("MFA_ENROLLMENT", enrollmentToken);
+  if (!preliminary?.userId) invalidChallenge();
+  return prisma.$transaction(async (tx) => {
+    const user = await lockMfaUser(tx, preliminary.userId!);
+    const challenge = await readBoundChallenge(tx, "MFA_ENROLLMENT", enrollmentToken, user, now);
+    const recoveryCodes = await completeEnrollment(tx, user, code, now);
+    const consumed = await tx.authActionToken.updateMany({ where: { id: challenge.id, usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now } });
+    if (consumed.count !== 1) invalidChallenge();
+    return { user, recoveryCodes };
+  });
 }
 
 export async function verifyMfaLoginChallenge(challengeToken: string, code: string, now = new Date()) {
-  const challenge = await findUsableAuthActionToken("MFA_LOGIN", challengeToken);
-  if (!challenge?.userId) throw new Error("Provocarea MFA a expirat. Reia autentificarea.");
-  const credential = await prisma.authMfaCredential.findUnique({ where: { userId: challenge.userId } });
-  if (!credential?.enabledAt) throw new Error("MFA nu este configurat pentru acest cont.");
-
-  const normalizedRecovery = normalizeRecoveryCode(code);
-  if (/^[a-z0-9]{4}-[a-z0-9]{4}$/.test(normalizedRecovery)) {
-    const recovery = await prisma.authRecoveryCode.findUnique({ where: { codeHash: recoveryCodeHash(normalizedRecovery) } });
-    if (!recovery || recovery.credentialId !== credential.id || recovery.usedAt) throw new Error("Codul de recuperare nu este valid.");
-    const result = await prisma.$transaction(async (tx) => {
-      const consumedRecovery = await tx.authRecoveryCode.updateMany({ where: { id: recovery.id, usedAt: null }, data: { usedAt: now } });
-      const consumedChallenge = await tx.authActionToken.updateMany({
-        where: { id: challenge.id, usedAt: null, expiresAt: { gt: now } },
-        data: { usedAt: now }
+  if (code.length > 128) throw new Error("Codul MFA nu este valid.");
+  const preliminary = await findUsableAuthActionToken("MFA_LOGIN", challengeToken);
+  if (!preliminary?.userId) invalidChallenge();
+  return prisma.$transaction(async (tx) => {
+    const user = await lockMfaUser(tx, preliminary.userId!);
+    const challenge = await readBoundChallenge(tx, "MFA_LOGIN", challengeToken, user, now);
+    const credential = await tx.authMfaCredential.findUnique({ where: { userId: user.id } });
+    if (!credential?.enabledAt) throw new Error("MFA nu este configurat pentru acest cont.");
+    const normalizedRecovery = normalizeRecoveryCode(code);
+    if (/^[a-z0-9]{4}-[a-z0-9]{4}$/.test(normalizedRecovery)) {
+      const consumed = await tx.authRecoveryCode.updateMany({
+        where: { credentialId: credential.id, codeHash: recoveryCodeHash(normalizedRecovery), usedAt: null }, data: { usedAt: now }
       });
-      return consumedRecovery.count === 1 && consumedChallenge.count === 1;
+      if (consumed.count !== 1) throw new Error("Codul de recuperare nu este valid sau a fost deja utilizat.");
+    } else {
+      const step = verifyTotpCode(decryptSecret(credential), code, now, credential.lastUsedStep);
+      if (step == null) throw new Error("Codul de autentificare nu este valid.");
+      const consumed = await tx.authMfaCredential.updateMany({
+        where: { id: credential.id, OR: [{ lastUsedStep: null }, { lastUsedStep: { lt: step } }] }, data: { lastUsedStep: step }
+      });
+      if (consumed.count !== 1) throw new Error("Codul a fost deja utilizat.");
+    }
+    const consumedChallenge = await tx.authActionToken.updateMany({
+      where: { id: challenge.id, usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now }
     });
-    if (!result) throw new Error("Codul a fost deja utilizat.");
-  } else {
-    const step = verifyTotpCode(decryptSecret(credential), code, now, credential.lastUsedStep);
-    if (step == null) throw new Error("Codul de autentificare nu este valid.");
-    const result = await prisma.$transaction(async (tx) => {
-      const consumedCredential = await tx.authMfaCredential.updateMany({
-        where: { id: credential.id, OR: [{ lastUsedStep: null }, { lastUsedStep: { lt: step } }] },
-        data: { lastUsedStep: step }
-      });
-      const consumedChallenge = await tx.authActionToken.updateMany({
-        where: { id: challenge.id, tokenHash: authActionTokenHash("MFA_LOGIN", challengeToken), usedAt: null, expiresAt: { gt: now } },
-        data: { usedAt: now }
-      });
-      return consumedCredential.count === 1 && consumedChallenge.count === 1;
-    });
-    if (!result) throw new Error("Codul a fost deja utilizat.");
-  }
-
-  const user = await prisma.user.findFirst({
-    where: { id: challenge.userId, active: true },
-    select: { id: true, email: true, name: true, role: true, tokenVersion: true }
+    // Throw inside the transaction so recovery/TOTP consumption rolls back too.
+    if (consumedChallenge.count !== 1) invalidChallenge();
+    await recordTransactionalAudit(tx, { actor: user, action: "auth.mfa.challenge.verified", entityType: "user", entityId: user.id, metadata: { method: /^[a-z0-9]{4}-[a-z0-9]{4}$/.test(normalizedRecovery) ? "recovery" : "totp" } });
+    return { id: user.id, email: user.email, name: user.name, role: user.role as UserRole, tokenVersion: user.tokenVersion };
   });
-  return user ? { ...user, role: user.role as UserRole } : null;
 }
 
-export function mfaEnrollmentRequired(role: UserRole, now = new Date()) {
-  if (process.env.MFA_ENFORCEMENT_MODE !== "required") return false;
-  const requiredRoles = new Set((process.env.MFA_REQUIRED_ROLES || "SUPER_ADMIN,COO,D_CEO").split(",").map((value) => value.trim()));
-  if (!requiredRoles.has(role)) return false;
-  const graceUntil = process.env.MFA_GRACE_UNTIL ? new Date(process.env.MFA_GRACE_UNTIL) : null;
-  return !graceUntil || Number.isNaN(graceUntil.getTime()) || graceUntil <= now;
-}
+export { mfaEnrollmentRequired } from "@/lib/mfa-policy";
 
 export function generateTotpForStep(secret: string, step: bigint) {
   const counter = Buffer.alloc(8);

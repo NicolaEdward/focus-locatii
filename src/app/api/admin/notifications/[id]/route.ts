@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAdmin } from "@/lib/auth";
+import { requireNotificationAccess } from "@/lib/notification-access";
 import { updateNotificationAction } from "@/lib/notifications";
 
 type Context = {
@@ -20,7 +20,7 @@ const schema = z.object({
 });
 
 export async function PATCH(request: NextRequest, context: Context) {
-  const { session, response } = await requireAdmin(request);
+  const { session, response } = await requireNotificationAccess(request);
   if (response || !session) return response;
   const { id } = await context.params;
   try {

@@ -64,7 +64,7 @@ export async function PATCH(request: NextRequest, context: Context) {
     } catch (error) {
       return NextResponse.json(
         { error: error instanceof Error ? error.message : "Rezervarea nu a putut fi actualizata." },
-        { status: 400, headers: noStoreHeaders }
+        { status: error instanceof Error && "status" in error && error.status === 403 ? 403 : 400, headers: noStoreHeaders }
       );
     }
   });
@@ -75,7 +75,7 @@ export async function DELETE(request: NextRequest, context: Context) {
   if (response || !session) return response;
 
   const { id } = await context.params;
-  await deleteReservation(id);
+  await deleteReservation(id, session);
   await recordAudit({ actor: session, action: "reservation.cancel", entityType: "reservation", entityId: id, request });
 
   return NextResponse.json({ ok: true }, { headers: noStoreHeaders });

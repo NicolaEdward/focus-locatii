@@ -8,6 +8,8 @@ import { isProductionSketchImage } from "@/lib/location-images";
 import { displayPhotoUrl, samplePhotoForCode } from "@/lib/photos";
 import { effectiveBlockingReservationWhere, isEffectiveBlockingReservation } from "@/lib/reservation-lifecycle";
 import { sortOperationalLocations } from "@/lib/location-order";
+import { canReadReservationDetails, reservationDetailsWhere, type ReservationReader } from "@/lib/reservation-read-access";
+import { isDigitalLocationType } from "@/lib/location-medium";
 import type {
   AdminLocationListItemDTO,
   AdminLocationPageDTO,
@@ -219,6 +221,8 @@ type SerializeLocationOptions = {
   includeHiddenCommercials?: boolean;
   includePrivateFields?: boolean;
   includeReservationDetails?: boolean;
+  reservationViewer?: ReservationReader | null;
+  reservationDetails?: AdminLocationWithRelations["reservations"];
 };
 
 export function serializeLocation(location: LocationWithRelations, options: SerializeLocationOptions = {}): LocationDTO {
@@ -287,9 +291,9 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
     bookedUntil: toIso(location.bookedUntil),
     status: normalizedStatus,
     lifecycleStatus: location.lifecycleStatus,
-    publicStatus: availability.publicStatus,
-    availabilityLabel: availability.label,
-    availabilityDetail: availability.detail,
+    publicStatus: isDigitalLocationType(type) && availability.publicStatus === "AVAILABLE" ? "UNKNOWN" : availability.publicStatus,
+    availabilityLabel: isDigitalLocationType(type) && availability.publicStatus === "AVAILABLE" ? "Capacitate DOOH de verificat" : availability.label,
+    availabilityDetail: isDigitalLocationType(type) && availability.publicStatus === "AVAILABLE" ? "Disponibilitatea digitală depinde de perioadă, slot și frecvență. Verifică alocările DOOH înainte de confirmare." : availability.detail,
     latReal: exposePrivateFields ? latReal : null,
     lngReal: exposePrivateFields ? lngReal : null,
     latDisplay,
@@ -346,7 +350,9 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
       isMain: image.isMain
     })),
     reservations: exposePrivateFields && options.includeReservationDetails !== false
-      ? (location.reservations as AdminLocationWithRelations["reservations"]).map((reservation) => ({
+      ? (options.reservationDetails || location.reservations as AdminLocationWithRelations["reservations"])
+        .filter((reservation) => canReadReservationDetails(options.reservationViewer, reservation))
+        .map((reservation) => ({
           id: reservation.id,
           locationId: reservation.locationId,
           clientId: reservation.clientId,
@@ -489,11 +495,11 @@ function defaultCampaignDetails(location: { installationRemoval?: string | null 
   return [location.installationRemoval || "Montare/neutralizare disponibile", "Productie la cerere"];
 }
 
-export async function getOrCreateCategory(name: string, sortOrder = 0) {
+export async function getOrCreateCategory(name: string, sortOrder = 0, db: Pick<typeof prisma, "category"> = prisma) {
   const cleanName = name.trim() || "General";
   const slug = makeSlug(cleanName);
 
-  return prisma.category.upsert({
+  return db.category.upsert({
     where: { slug },
     update: { name: cleanName, sortOrder },
     create: { name: cleanName, slug, sortOrder }
@@ -589,13 +595,22 @@ export async function getPublicLocation(id: string) {
   return location ? serializeLocation(location) : null;
 }
 
-export async function getAdminLocation(id: string) {
+export async function getAdminLocation(id: string, viewer?: ReservationReader | null) {
   const location = await prisma.location.findUnique({
     where: { id },
-    include: adminLocationInclude
+    include: publicLocationInclude(new Date())
   });
-
-  return location ? serializeLocation(location, { includeHiddenCommercials: true, includePrivateFields: true }) : null;
+  if (!location) return null;
+  // Fetch only authorized private rows. Occupancy still includes every blocker
+  // through the separate, minimal availability projection above.
+  const details = viewer ? await prisma.reservation.findMany({
+    where: { AND: [{ locationId: id }, reservationDetailsWhere(viewer)] },
+    orderBy: [{ periodStart: "asc" }, { periodEnd: "asc" }]
+  }) : [];
+  return serializeLocation(location, {
+    includeHiddenCommercials: true, includePrivateFields: true,
+    reservationViewer: viewer, reservationDetails: details
+  });
 }
 
 function adminLocationListWhere(filters: AdminLocationListFilters): Prisma.LocationWhereInput {
@@ -624,6 +639,8 @@ function adminLocationListWhere(filters: AdminLocationListFilters): Prisma.Locat
 
 function serializeAdminLocationListItem(row: AdminLocationSummaryRow, now: Date): AdminLocationListItemDTO {
   const availability = publicAvailability(row, now);
+  const type = normalizeMediaType(row.type, row.category.name, row.address, row.code);
+  const digitalCapacity = isDigitalLocationType(type) && availability.publicStatus === "AVAILABLE";
   return {
     id: row.id,
     code: row.code,
@@ -633,7 +650,7 @@ function serializeAdminLocationListItem(row: AdminLocationSummaryRow, now: Date)
     city: row.city,
     county: row.county,
     address: row.address,
-    type: normalizeMediaType(row.type, row.category.name, row.address, row.code),
+    type,
     size: row.size,
     sqm: row.sqm,
     rateCard: row.rateCard,
@@ -642,10 +659,10 @@ function serializeAdminLocationListItem(row: AdminLocationSummaryRow, now: Date)
     installationRemovalValue: row.installationRemovalValue,
     status: row.status,
     lifecycleStatus: row.lifecycleStatus as LocationLifecycleStatus,
-    publicStatus: availability.publicStatus,
+    publicStatus: digitalCapacity ? "UNKNOWN" : availability.publicStatus,
     availabilityText: row.availabilityText,
-    availabilityLabel: availability.label,
-    availabilityDetail: availability.detail,
+    availabilityLabel: digitalCapacity ? "Capacitate DOOH de verificat" : availability.label,
+    availabilityDetail: digitalCapacity ? "Disponibilitatea digitală depinde de perioadă, slot și frecvență. Verifică alocările DOOH înainte de confirmare." : availability.detail,
     latDisplay: row.latDisplay,
     lngDisplay: row.lngDisplay,
     mapsUrl: row.mapsUrl,

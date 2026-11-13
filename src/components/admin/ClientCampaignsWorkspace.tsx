@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Archive,
@@ -189,6 +189,8 @@ export function ClientCampaignsWorkspace({
   const [query, setQuery] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
   const [busy, setBusy] = useState(false);
+  const paymentInFlight = useRef(false);
+  const paymentIntents = useRef<Record<string, { amount: number; notes: string; collectedAt: string; requestKey: string }>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [clientForm, setClientForm] = useState<ClientForm>(emptyClientForm);
   const [contactForm, setContactForm] = useState<ContactForm>(emptyContactForm);
@@ -519,16 +521,26 @@ export function ClientCampaignsWorkspace({
   }
 
   async function recordPayment(invoice: ClientReceivableRow, mode: "full" | "partial") {
-    if (!canRecordPayments) return;
+    if (!canRecordPayments || paymentInFlight.current) return;
+    if (!invoice.currency) { setError("Factura nu are moneda verificată. Rezolvă documentul în registrul financiar înainte de încasare."); return; }
     const amountText = mode === "full"
       ? String(invoice.remaining)
       : window.prompt(`Suma incasata (${invoice.currency || "RON"})`, String(invoice.remaining));
     if (!amountText) return;
     const amount = Number(amountText.replace(",", "."));
-    if (!Number.isFinite(amount) || amount < 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       setError("Suma introdusa nu este valida.");
       return;
     }
+    const notes = mode === "full" ? "Marcata incasata din modul Facturi." : "Incasare partiala din modul Facturi.";
+    const previous = paymentIntents.current[invoice.id];
+    if (previous && (previous.amount !== amount || previous.notes !== notes)) {
+      setError("O încercare anterioară are rezultat necunoscut. Reîncearcă aceeași sumă sau verifică istoricul încasărilor înainte de o plată nouă.");
+      return;
+    }
+    const intent = previous || { amount, notes, collectedAt: new Date().toISOString().slice(0, 10), requestKey: crypto.randomUUID() };
+    paymentIntents.current[invoice.id] = intent;
+    paymentInFlight.current = true;
     setBusy(true);
     setError(null);
     setMessage(null);
@@ -538,18 +550,21 @@ export function ClientCampaignsWorkspace({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           mode: "add",
-          amount,
-          collectedAt: new Date().toISOString().slice(0, 10),
-          notes: mode === "full" ? "Marcata incasata din modul Facturi." : "Incasare partiala din modul Facturi."
+          ...intent
         })
       });
       const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.error || "Incasarea nu a putut fi salvata.");
+      if (!response.ok) {
+        if (response.status >= 400 && response.status < 500) delete paymentIntents.current[invoice.id];
+        throw new Error(payload?.error || "Incasarea nu a putut fi salvata.");
+      }
+      delete paymentIntents.current[invoice.id];
       setMessage(mode === "full" ? "Factura a fost marcata incasata." : "Incasarea partiala a fost salvata.");
       await refreshData();
     } catch (paymentError) {
       setError(paymentError instanceof Error ? paymentError.message : "Incasarea nu a putut fi salvata.");
     } finally {
+      paymentInFlight.current = false;
       setBusy(false);
     }
   }

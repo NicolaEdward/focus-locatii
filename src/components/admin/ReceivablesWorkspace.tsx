@@ -116,6 +116,11 @@ export function ReceivablesWorkspace({
   const [aliasAction, setAliasAction] = useState<{ alias: JsonMap; type: "delete" | "edit" } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const allocationMutationRef = useRef(false);
+  const paymentIntentRef = useRef<string | null>(null);
+  const correctionIntentRef = useRef<string | null>(null);
+  const paymentMutationRef = useRef(false);
+  useEffect(() => { paymentIntentRef.current = null; }, [paymentTarget?.id]);
+  useEffect(() => { correctionIntentRef.current = null; }, [paymentAction?.payment.id, paymentAction?.type]);
 
   async function api(url: string, init?: RequestInit) {
     const response = await fetch(url, init);
@@ -343,7 +348,9 @@ export function ReceivablesWorkspace({
 
   async function submitPayment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!paymentTarget) return;
+    if (!paymentTarget || paymentMutationRef.current) return;
+    paymentMutationRef.current = true;
+    paymentIntentRef.current ||= crypto.randomUUID();
     const data = new FormData(event.currentTarget);
     setBusy(true); setError(null);
     try {
@@ -357,7 +364,7 @@ export function ReceivablesWorkspace({
           paymentReference: nullableFormValue(data, "paymentReference"),
           notes: nullableFormValue(data, "notes"),
           confirmOverpayment: data.get("confirmOverpayment") === "on",
-          requestKey: crypto.randomUUID()
+          requestKey: paymentIntentRef.current
         })
       });
       setPaymentTarget(null); setPaymentAmount("");
@@ -366,16 +373,18 @@ export function ReceivablesWorkspace({
       await refresh();
     } catch (paymentError) {
       setError(paymentError instanceof Error ? paymentError.message : "Încasarea nu a putut fi salvată.");
-    } finally { setBusy(false); }
+    } finally { paymentMutationRef.current = false; setBusy(false); }
   }
 
   async function submitPaymentAction(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!paymentAction) return;
+    if (!paymentAction || paymentMutationRef.current) return;
     const data = new FormData(event.currentTarget);
     const reason = String(data.get("reason") || "").trim();
     if (!reason) { setError("Motivul este obligatoriu."); return; }
     const payment = paymentAction.payment;
+    paymentMutationRef.current = true;
+    correctionIntentRef.current ||= crypto.randomUUID();
     setBusy(true); setError(null);
     try {
       if (paymentAction.type === "cancel") {
@@ -393,7 +402,7 @@ export function ReceivablesWorkspace({
             paymentReference: payment.paymentReference || null,
             notes: payment.notes || null,
             confirmOverpayment: false,
-            requestKey: crypto.randomUUID()
+            requestKey: correctionIntentRef.current
           })
         });
         setMessage("Încasarea a fost corectată; operația inițială rămâne în audit.");
@@ -402,7 +411,7 @@ export function ReceivablesWorkspace({
       await Promise.all([refresh(), loadTabData("payments", true)]);
     } catch (paymentError) {
       setError(paymentError instanceof Error ? paymentError.message : "Încasarea nu a putut fi actualizată.");
-    } finally { setBusy(false); }
+    } finally { paymentMutationRef.current = false; setBusy(false); }
   }
 
   async function submitAliasAction(event: React.FormEvent<HTMLFormElement>) {
@@ -435,7 +444,7 @@ export function ReceivablesWorkspace({
     if (!paymentTarget) return null;
     const previous = Number(paymentTarget.collectedAmount || 0);
     const amount = Number(paymentAmount.replace(",", ".") || 0);
-    const invoice = Number(paymentTarget.invoicedAmount || 0);
+    const invoice = Number(paymentTarget.netInvoiceAmount ?? paymentTarget.invoicedAmount ?? 0);
     return { previous, amount, nextCollected: previous + amount, nextRemaining: Math.max(invoice - previous - amount, 0) };
   }, [paymentAmount, paymentTarget]);
   const activeGroupRows = preview?.groups?.[previewGroup] || [];
@@ -451,6 +460,7 @@ export function ReceivablesWorkspace({
         </div>
         {canImport ? <button className="focus-button" type="button" onClick={() => { setTab("import"); setTimeout(() => fileRef.current?.focus(), 0); }}><Plus size={18} /> Import nou</button> : null}
       </header>
+      <nav className="mt-4 flex flex-wrap gap-4 text-focus-yellow" aria-label="Fluxuri financiare"><a href="/admin/financiar/facturi-de-emis">Facturi de emis</a><a href="/admin/financiar/alocari">Alocări și costuri pe campanie</a><a href="/admin/financiar/reconciliere">Reconciliere bancară</a></nav>
 
       <nav className="mt-5 flex min-w-0 gap-2 overflow-x-auto pb-2" aria-label="Secțiuni facturi clienți">
         {tabs.filter(([value]) => value !== "reconciliation" || canManage).map(([value, label, Icon]) => (
@@ -525,13 +535,13 @@ export function ReceivablesWorkspace({
       ) : null}
 
       {tab === "history" ? <LazySection data={lazyData.history} fallback="Se încarcă istoricul importurilor..."><SimpleTable title="Istoric importuri" headers={["Fișier", "Data raport", "Încărcat de", "Stare", "Rezultat"]} rows={(lazyData.history?.items || []).map((upload) => [<button className="font-bold text-focus-yellow hover:underline" type="button" onClick={() => void openImport(upload.id)}>{upload.originalFileName}</button>, formatDate(upload.reportDate), upload.uploadedBy?.name || "-", <StatusBadge value={upload.status} />, `${upload._count.receivableImportRows || upload._count.receivables} rânduri · ${upload._count.issues} probleme`])} /><LazyPagination data={lazyData.history} onChange={(page) => loadTabData("history", true, page)} /></LazySection> : null}
-      {tab === "payments" ? <LazySection data={lazyData.payments} fallback="Se încarcă istoricul încasărilor..."><SimpleTable title="Istoric încasări" headers={["Client / factură", "Data", "Sumă", "Sursă", "Utilizator", "Stare", "Acțiune"]} rows={(lazyData.payments?.items || []).map((payment) => [`${payment.receivable?.clientName || "-"} · ${payment.receivable?.invoiceNumber || "-"}`, formatDate(payment.receivedAt), moneyLabel(payment.amount, payment.currency), payment.source, payment.createdBy?.name || "Sistem", <StatusBadge value={payment.status} />, canValidate && payment.status === "active" ? <div className="flex gap-2"><button className="focus-button secondary" type="button" onClick={() => setPaymentAction({ payment, type: "correct" })}>Corectează</button><button className="focus-button secondary" type="button" onClick={() => setPaymentAction({ payment, type: "cancel" })}><Trash2 size={15} /> Anulează</button></div> : "-"])} /><LazyPagination data={lazyData.payments} onChange={(page) => loadTabData("payments", true, page)} /></LazySection> : null}
+      {tab === "payments" ? <LazySection data={lazyData.payments} fallback="Se încarcă istoricul încasărilor..."><SimpleTable title="Istoric încasări" headers={["Client / factură", "Data", "Sumă", "Sursă", "Utilizator", "Stare", "Acțiune"]} rows={(lazyData.payments?.items || []).map((payment) => [`${payment.receivable?.clientName || "-"} · ${payment.receivable?.invoiceNumber || "-"}`, formatDate(payment.receivedAt), moneyLabel(payment.amount, payment.currency), payment.source, payment.createdBy?.name || "Sistem", <StatusBadge value={payment.status} />, canValidate && payment.status === "active" ? <div className="flex gap-2">{!payment.bankTransactionId ? <button className="focus-button secondary" type="button" onClick={() => setPaymentAction({ payment, type: "correct" })}>Corectează</button> : <a className="focus-button secondary" href="/admin/financiar/reconciliere">Realocă în bancă</a>}<button className="focus-button secondary" type="button" onClick={() => setPaymentAction({ payment, type: "cancel" })}><Trash2 size={15} /> Anulează</button></div> : "-"])} /><LazyPagination data={lazyData.payments} onChange={(page) => loadTabData("payments", true, page)} /></LazySection> : null}
       {tab === "credits" ? <LazySection data={lazyData.credits} fallback="Se încarcă avansurile și creditele..."><SimpleTable title="Credite clienți" subtitle="Diferențele confirmate explicit ca avans sau supraplată." headers={["Client", "Firmă", "Valoare", "Disponibil", "Motiv", "Data"]} rows={(lazyData.credits?.items || []).map((credit) => [credit.client?.companyName || credit.companyName, credit.companyName, moneyLabel(credit.amount, credit.currency), moneyLabel(credit.remainingAmount, credit.currency), credit.reason || "-", formatDate(credit.createdAt)])} /><LazyPagination data={lazyData.credits} onChange={(page) => loadTabData("credits", true, page)} /></LazySection> : null}
       {tab === "aliases" ? <LazySection data={lazyData.aliases} fallback="Se încarcă aliasurile..."><SimpleTable title="Aliasuri clienți" subtitle="Mapările apar numai după confirmarea unui utilizator." headers={["Firmă", "Alias raport", "Client canonic", "Creat de", "Acțiune"]} rows={(lazyData.aliases?.items || []).map((alias) => [alias.companyCode, alias.aliasName, alias.client.companyName, alias.createdBy?.name || "-", canManage ? <div className="flex gap-2"><button className="focus-button secondary" type="button" onClick={() => setAliasAction({ alias, type: "edit" })}>Editează</button><button className="focus-button secondary" type="button" onClick={() => setAliasAction({ alias, type: "delete" })}><Trash2 size={15} /> Șterge</button></div> : "-"])} /><LazyPagination data={lazyData.aliases} onChange={(page) => loadTabData("aliases", true, page)} /></LazySection> : null}
       {tab === "reconciliation" && canManage ? <ReconciliationPanel data={reconciliation} /> : null}
 
       {paymentTarget ? <Modal title="Înregistrează încasare" subtitle={`${paymentTarget.client?.companyName || paymentTarget.clientName || "Client"} · ${paymentTarget.invoiceNumber || "Fără număr"}`} onClose={() => { setPaymentTarget(null); setPaymentAmount(""); }}><form onSubmit={submitPayment}>
-        <div className="grid grid-cols-2 gap-3 rounded-lg bg-focus-navy/65 p-4 sm:grid-cols-4"><PaymentPreviewMetric label="Facturat" value={moneyLabel(paymentTarget.invoicedAmount, paymentTarget.currency)} /><PaymentPreviewMetric label="Încasat anterior" value={moneyLabel(paymentPreview?.previous, paymentTarget.currency)} tone="green" /><PaymentPreviewMetric label="După această plată" value={moneyLabel(paymentPreview?.nextCollected, paymentTarget.currency)} tone="green" /><PaymentPreviewMetric label="Sold rămas" value={moneyLabel(paymentPreview?.nextRemaining, paymentTarget.currency)} tone="yellow" /></div>
+        <div className="grid grid-cols-2 gap-3 rounded-lg bg-focus-navy/65 p-4 sm:grid-cols-4"><PaymentPreviewMetric label="Facturat net după ajustări" value={moneyLabel(paymentTarget.netInvoiceAmount ?? paymentTarget.invoicedAmount, paymentTarget.currency)} /><PaymentPreviewMetric label="Încasat anterior" value={moneyLabel(paymentPreview?.previous, paymentTarget.currency)} tone="green" /><PaymentPreviewMetric label="După această plată" value={moneyLabel(paymentPreview?.nextCollected, paymentTarget.currency)} tone="green" /><PaymentPreviewMetric label="Sold rămas" value={moneyLabel(paymentPreview?.nextRemaining, paymentTarget.currency)} tone="yellow" /></div>
         <p className="mt-2 text-xs text-slate-400">Noua sumă se adaugă la încasările anterioare. Istoricul nu este suprascris.</p>
         <div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Suma plătită"><input className="focus-input" required name="amount" inputMode="decimal" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} /></Field><Field label="Moneda"><input className="focus-input" value={paymentTarget.currency || ""} readOnly /></Field><button className="focus-button secondary sm:col-span-2 sm:justify-self-start" type="button" onClick={() => setPaymentAmount(String(paymentTarget.remainingAmount || ""))}><Banknote size={16} /> Încasează tot soldul</button><Field label="Data încasării"><input className="focus-input" required name="receivedAt" type="date" defaultValue={new Date().toISOString().slice(0, 10)} /></Field><Field label="Metoda de plată"><select className="focus-input" name="paymentMethod"><option value="transfer_bancar">Transfer bancar</option><option value="numerar">Numerar</option><option value="card">Card</option><option value="alta">Altă metodă</option></select></Field><Field label="Referință operațiune" wide><input className="focus-input" name="paymentReference" /></Field><Field label="Observații" wide><textarea className="focus-input min-h-20" name="notes" /></Field><label className="flex items-start gap-2 text-sm text-amber-100 sm:col-span-2"><input className="mt-1" type="checkbox" name="confirmOverpayment" /> Confirm explicit înregistrarea diferenței ca avans / credit client dacă suma depășește soldul.</label></div>
         <button className="focus-button mt-5 w-full justify-center" disabled={busy || !paymentAmount} type="submit"><Banknote size={18} /> {busy ? "Se salvează..." : "Salvează plata"}</button>
@@ -586,7 +596,7 @@ export function ReceivablesWorkspace({
 }
 
 function ReceivablesTable({ rows, canValidate = false, onPayment }: { rows: JsonMap[]; canValidate?: boolean; onPayment?: (row: JsonMap) => void }) {
-  return <><div className="mt-4 overflow-x-auto rounded-lg border border-focus-line"><table className="w-full min-w-[1120px] text-left text-sm"><thead className="bg-focus-navy text-xs uppercase text-slate-300"><tr><th className="p-3">Client / factură</th><th className="p-3">Account manager / responsabil</th><th className="p-3">Firmă</th><th className="p-3">Scadență</th><th className="p-3 text-right">Facturat</th><th className="p-3 text-right">Încasat</th><th className="p-3 text-right">Rest</th><th className="p-3">Stare</th>{onPayment ? <th className="p-3">Acțiune</th> : null}</tr></thead><tbody>{rows.map((row) => <tr key={row.id} className="border-t border-focus-line bg-focus-panel/50"><td className="p-3"><strong className="block text-white">{row.client?.companyName || row.clientName || "Client nealocat"}</strong><span className="text-slate-400">{row.invoiceNumber || "Fără număr"}</span></td><td className="p-3"><strong className="block text-white">{row.responsibleUser?.name || "Nealocat"}</strong><small className="text-slate-500">{row.responsibleUser ? "Vânzătorul clientului" : "Client fără vânzător alocat"}</small></td><td className="p-3 text-slate-200"><span className="block">{row.companyName}</span><small className="text-slate-500">{row.companyCode || "-"}</small></td><td className="p-3 text-slate-200">{formatDate(row.dueDate)}</td><td className="p-3 text-right font-bold text-white">{moneyLabel(row.invoicedAmount, row.currency)}</td><td className="p-3 text-right text-emerald-300">{moneyLabel(row.collectedAmount, row.currency)}</td><td className="p-3 text-right font-black text-focus-yellow">{moneyLabel(row.remainingAmount, row.currency)}</td><td className="p-3"><StatusBadge value={row.status} /></td>{onPayment ? <td className="p-3">{canValidate && Number(row.remainingAmount || 0) > 0 ? <button className="focus-button min-w-44 justify-center" type="button" onClick={() => onPayment(row)}><Banknote size={16} /> Înregistrează plată</button> : <span className="text-xs text-slate-500">Doar vizualizare</span>}</td> : null}</tr>)}</tbody></table></div>{!rows.length ? <Empty text="Nu există facturi pentru filtrele selectate." /> : null}</>;
+  return <><div className="mt-4 overflow-x-auto rounded-lg border border-focus-line"><table className="w-full min-w-[1120px] text-left text-sm"><thead className="bg-focus-navy text-xs uppercase text-slate-300"><tr><th className="p-3">Client / factură</th><th className="p-3">Account manager / responsabil</th><th className="p-3">Firmă</th><th className="p-3">Scadență</th><th className="p-3 text-right">Facturat</th><th className="p-3 text-right">Încasat</th><th className="p-3 text-right">Rest</th><th className="p-3">Stare</th>{onPayment ? <th className="p-3">Acțiune</th> : null}</tr></thead><tbody>{rows.map((row) => <tr key={row.id} className="border-t border-focus-line bg-focus-panel/50"><td className="p-3"><strong className="block text-white">{row.client?.companyName || row.clientName || "Client nealocat"}</strong><span className="text-slate-400">{row.invoiceNumber || "Fără număr"}</span></td><td className="p-3"><strong className="block text-white">{row.responsibleUser?.name || "Nealocat"}</strong><small className="text-slate-500">{row.responsibleUser ? "Vânzătorul clientului" : "Client fără vânzător alocat"}</small></td><td className="p-3 text-slate-200"><span className="block">{row.companyName}</span><small className="text-slate-500">{row.companyCode || "-"}</small></td><td className="p-3 text-slate-200">{formatDate(row.dueDate)}</td><td className="p-3 text-right font-bold text-white">{moneyLabel(row.netInvoiceAmount ?? row.invoicedAmount, row.currency)}</td><td className="p-3 text-right text-emerald-300">{moneyLabel(row.collectedAmount, row.currency)}</td><td className="p-3 text-right font-black text-focus-yellow">{moneyLabel(row.remainingAmount, row.currency)}</td><td className="p-3"><StatusBadge value={row.status} /></td>{onPayment ? <td className="p-3">{canValidate && Number(row.remainingAmount || 0) > 0 ? <button className="focus-button min-w-44 justify-center" type="button" onClick={() => onPayment(row)}><Banknote size={16} /> Înregistrează plată</button> : <span className="text-xs text-slate-500">Doar vizualizare</span>}</td> : null}</tr>)}</tbody></table></div>{!rows.length ? <Empty text="Nu există facturi pentru filtrele selectate." /> : null}</>;
 }
 
 function ReconciliationPanel({ data }: { data: JsonMap | null }) {

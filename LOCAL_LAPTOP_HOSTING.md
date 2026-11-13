@@ -29,8 +29,8 @@ ngrok config add-authtoken TOKENUL_TAU
 4. Porneste aplicatia:
 
 ```powershell
-npm run build
-npm run start:laptop
+pnpm run build
+pnpm run start:laptop
 ```
 
 5. In alt terminal:
@@ -109,21 +109,21 @@ Iframe-ul poate fi mai dificil pe mobile si la print/PDF. Pentru aplicatia asta,
 Prima instalare:
 
 ```powershell
-npm install
-npm run db:init
+corepack pnpm install --frozen-lockfile
+pnpm run db:init
 ```
 
 Pornire productie:
 
 ```powershell
-npm run build
-npm run start:laptop
+pnpm run build
+pnpm run start:laptop
 ```
 
 Pornire dezvoltare:
 
 ```powershell
-npm run dev -- -p 3001
+pnpm run dev -- -p 3001
 ```
 
 ## Checklist inainte sa dai link clientilor

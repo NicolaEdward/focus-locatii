@@ -41,13 +41,13 @@ export function withOfferRequestMeta(value: string | null | undefined, patch: Om
   const source = stripOfferRequestMeta(value) || "portal-client";
   const current = parseOfferRequestMeta(value);
   const next = {
-    salesperson: patch.salesperson ?? current.salesperson ?? null,
-    deletedAt: patch.deletedAt ?? current.deletedAt ?? null,
-    crmStatus: patch.crmStatus ?? current.crmStatus ?? null,
-    estimatedValue: patch.estimatedValue ?? current.estimatedValue ?? null,
-    nextFollowUpAt: patch.nextFollowUpAt ?? current.nextFollowUpAt ?? null,
-    notes: patch.notes ?? current.notes ?? null,
-    lastActivityAt: patch.lastActivityAt ?? current.lastActivityAt ?? null
+    salesperson: patch.salesperson === undefined ? current.salesperson ?? null : patch.salesperson,
+    deletedAt: patch.deletedAt === undefined ? current.deletedAt ?? null : patch.deletedAt,
+    crmStatus: patch.crmStatus === undefined ? current.crmStatus ?? null : patch.crmStatus,
+    estimatedValue: patch.estimatedValue === undefined ? current.estimatedValue ?? null : patch.estimatedValue,
+    nextFollowUpAt: patch.nextFollowUpAt === undefined ? current.nextFollowUpAt ?? null : patch.nextFollowUpAt,
+    notes: patch.notes === undefined ? current.notes ?? null : patch.notes,
+    lastActivityAt: patch.lastActivityAt === undefined ? current.lastActivityAt ?? null : patch.lastActivityAt
   };
 
   return `${source}\n<!--focus-request:${JSON.stringify(next)}-->`;

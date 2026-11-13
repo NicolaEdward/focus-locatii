@@ -1,3 +1,4 @@
+import { receivableNetAmount } from "@/lib/receivable-adjustments";
 import { Prisma } from "@prisma/client";
 import type { AuthSession } from "@/lib/auth";
 import { invoiceNumberLookupPrefix, invoiceNumberLookupVariants, normalizeClientName } from "@/lib/clients";
@@ -809,6 +810,7 @@ export async function getCustomerInvoiceDashboardData() {
       currency: true,
       dueDate: true,
       invoicedAmount: true,
+      rawRowJson: true,
       collectedAmount: true,
       remainingAmount: true,
       status: true,
@@ -828,7 +830,7 @@ export async function getCustomerInvoiceDashboardData() {
     dueDate: row.dueDate?.toISOString() || null,
     remainingAmount: decimalString(row.remainingAmount),
     status: receivableStatus({
-      invoiceAmount: row.invoicedAmount,
+      invoiceAmount: receivableNetAmount(row.invoicedAmount, row.rawRowJson),
       collectedAmount: row.collectedAmount,
       dueDate: row.dueDate,
       now: today
@@ -1103,11 +1105,12 @@ function serializeReceivableLedger(row: Record<string, any>) {
   return {
     ...row,
     status: receivableStatus({
-      invoiceAmount: row.invoicedAmount,
+      invoiceAmount: receivableNetAmount(row.invoicedAmount, row.rawRowJson),
       collectedAmount: row.collectedAmount,
       dueDate: row.dueDate
     }),
     invoicedAmount: decimalString(row.invoicedAmount),
+    netInvoiceAmount: receivableNetAmount(row.invoicedAmount, row.rawRowJson).toFixed(2),
     collectedAmount: decimalString(row.collectedAmount),
     remainingAmount: decimalString(row.remainingAmount),
     dueDate: row.dueDate?.toISOString() || null,

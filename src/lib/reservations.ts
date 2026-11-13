@@ -1,19 +1,24 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
 import { retryClosedConnectionRead } from "@/lib/database-read-retry";
 import { loadAvailabilityDecisions } from "@/lib/availability-service";
 import {
   effectiveBlockingReservationWhere,
   effectiveHoldWhere,
   expireStaleHolds,
+  HOLD_DURATION_DAYS,
   reservationLifecycleData
 } from "@/lib/reservation-lifecycle";
 import { occupancySummaryFromCounts } from "@/lib/reservation-lifecycle-domain";
 import type { OccupancySummaryDTO, ReservationDTO, ReservationListItemDTO, ReservationPageDTO } from "@/types/location";
 import type { AuthSession } from "@/lib/auth";
-import { assertReservationTransition } from "@/lib/reservation-workflow";
+import { assertReservationInitialStatus, assertReservationTransition, ReservationPermissionError } from "@/lib/reservation-workflow";
+import { allocateMoneyAcrossRows } from "@/lib/money-allocation";
+import { isDigitalLocationType } from "@/lib/location-medium";
+import { bookingPeriodsConflict } from "@/lib/availability";
 import { emitStructuredLog } from "@/lib/observability";
 import { resolveSellerForMutation } from "@/lib/seller-users";
 import { paymentTermDays } from "@/lib/billing";
@@ -34,7 +39,9 @@ const activeReservationStatuses = ["HOLD", "RESERVED", "BOOKED"] as const;
 const operationalReservationStatuses = ["BOOKED"] as const;
 type SellerPatch = { ownerId?: string | null; sellerUserId?: string | null; salesperson?: string | null };
 type ReservationDbClient = typeof prisma | Prisma.TransactionClient;
-const reservationUpdateTransactionOptions = { maxWait: 5_000, timeout: 30_000 } as const;
+// A wait on a location lock must be followed by a fresh read, not a REPEATABLE READ snapshot.
+const reservationUpdateTransactionOptions = { maxWait: 5_000, timeout: 30_000, isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted } as const;
+export const reservationWriteTransactionOptions = reservationUpdateTransactionOptions;
 
 const reservationInclude = {
   client: { select: { accountOwnerUserId: true } },
@@ -164,7 +171,7 @@ const optionalInt = z.preprocess((value) => {
 
 export const reservationInputSchema = z.object({
   locationId: z.string().trim().min(1).nullable().optional(),
-  locationIds: z.array(z.string().trim().min(1)).nullable().optional(),
+  locationIds: z.array(z.string().trim().min(1)).max(500).nullable().optional(),
   clientId: optionalText,
   campaignId: optionalText,
   status: reservationStatusSchema.default("RESERVED"),
@@ -578,9 +585,12 @@ export async function listOperationReservations(session: AuthSession) {
 
 export async function createReservation(input: unknown, actor?: AuthSession | null) {
   await expireStaleHolds();
-  const parsed = withBillingDefaults(normalizeReservationInput(reservationInputSchema.parse(input)));
-  const seller = await resolveCreateSeller(parsed, actor);
-  const rentalContext = await resolveRentalContext(parsed);
+  const initial = normalizeReservationInput(reservationInputSchema.parse(input));
+  assertReservationInitialStatus(initial.status, actor?.role);
+  if (initial.contractGroupId) throw new ReservationPermissionError("Grupurile sunt generate de server; nu poti adauga o rezervare unui grup furnizat manual.");
+  const seller = await resolveCreateSeller(initial, actor);
+  await resolveRentalContext(initial);
+  const parsed = initial;
   assertHoldHasClientName(parsed.status, parsed.clientName);
   const locationIds = selectedLocationIds(parsed);
   if (!locationIds.length) {
@@ -596,31 +606,37 @@ export async function createReservation(input: unknown, actor?: AuthSession | nu
   }
 
   const monthlyRentTotal = parsed.monthlyRentTotal ?? parsed.amount ?? null;
-  const monthlyRentShare =
-    monthlyRentTotal == null ? parsed.monthlyRentShare ?? null : roundMoney(monthlyRentTotal / locationIds.length);
-  const contractGroupId = parsed.contractGroupId || (locationIds.length > 1 ? randomUUID() : null);
-  const reservationData = baseReservationData(parsed, rentalContext);
+  const monthlyRentShares = monthlyRentTotal == null
+    ? locationIds.map(() => parsed.monthlyRentShare ?? null)
+    : allocateMoneyAcrossRows(monthlyRentTotal, locationIds.length);
+  assertBookedPrice(parsed.status, monthlyRentTotal ?? parsed.monthlyRentShare);
+  for (const share of monthlyRentShares) assertBookedPrice(parsed.status, share);
+  const contractGroupId = locationIds.length > 1 ? randomUUID() : null;
   const lifecycleData = reservationLifecycleData(parsed.status);
 
   const reservations = await prisma.$transaction(async (tx) => {
     await lockReservationLocationsForWrite(tx, locationIds);
+    const currentContext = parsed.status === "BOOKED" ? await loadAndValidateRentalContext(parsed.clientId!, parsed.campaignId!, tx, actor) : null;
+    const currentInput = withBillingDefaults(parsed, currentContext);
+    const currentReservationData = baseReservationData(currentInput, currentContext);
     for (const locationId of locationIds) {
       await assertCanonicalReservationAvailabilityForWrite(tx, locationId, parsed.periodStart, parsed.periodEnd, parsed.status);
     }
 
     const created = [];
     for (const [locationIndex, locationId] of locationIds.entries()) {
+      const monthlyRentShare = monthlyRentShares[locationIndex];
       const reservation = await tx.reservation.create({
         data: {
-          ...reservationData,
+          ...currentReservationData,
           productionNotes: splitDecorationCostForGroup(
-            reservationData.productionNotes,
+            currentReservationData.productionNotes,
             locationIds.length,
             locationIndex
           ),
           locationId,
-          clientId: rentalContext?.client.id || null,
-          campaignId: rentalContext?.campaign.id || null,
+          clientId: currentContext?.client.id || null,
+          campaignId: currentContext?.campaign.id || null,
           amount: monthlyRentShare,
           monthlyRentTotal,
           monthlyRentShare,
@@ -639,7 +655,7 @@ export async function createReservation(input: unknown, actor?: AuthSession | nu
             effectiveFrom: parsed.periodStart,
             effectiveTo: parsed.periodEnd,
             monthlyRent: monthlyRentShare ?? monthlyRentTotal ?? 0,
-            currency: parsed.currency || rentalContext?.campaign.currency || "EUR",
+            currency: currentReservationData.currency || "EUR",
             reason: "Segment initial la creare inchiriere.",
             createdByUserId: actor?.id || null
           }
@@ -649,8 +665,8 @@ export async function createReservation(input: unknown, actor?: AuthSession | nu
             rentalId: reservation.id,
             action: "created",
             nextJson: {
-              clientId: rentalContext?.client.id,
-              campaignId: rentalContext?.campaign.id,
+              clientId: currentContext?.client.id,
+              campaignId: currentContext?.campaign.id,
               periodStart: parsed.periodStart.toISOString(),
               periodEnd: parsed.periodEnd.toISOString(),
               monthlyRent: monthlyRentShare ?? monthlyRentTotal ?? 0
@@ -661,13 +677,83 @@ export async function createReservation(input: unknown, actor?: AuthSession | nu
       }
       created.push(reservation);
     }
-    if (parsed.status === "BOOKED" && rentalContext?.campaign.id) {
-      await syncCampaignCommercialSummary(tx, rentalContext.campaign.id);
+    if (parsed.status === "BOOKED" && currentContext?.campaign.id) {
+      await syncCampaignCommercialSummary(tx, currentContext.campaign.id);
     }
+    await recordTransactionalAudit(tx, { actor, action: "reservation.create.committed", entityType: "reservation", entityId: created[0]?.id, metadata: { reservationIds: created.map((row) => row.id), contractGroupId } });
     return created;
-  });
+  }, reservationUpdateTransactionOptions);
 
   return reservations.map(serializeReservation);
+}
+
+/**
+ * Narrow entry point for an approved agent command. The caller owns the outer
+ * ReadCommitted transaction and must atomically consume its payload-bound human
+ * approval and persist the command receipt there. This function never opens a
+ * transaction, confirms BOOKED, sends a message, or accepts arbitrary columns.
+ */
+export async function createApprovedAgentHold(
+  tx: Prisma.TransactionClient,
+  input: {
+    locationIds: string[]; periodStart: Date; periodEnd: Date;
+    clientId: string; campaignId: string; ownerUserId: string;
+    requestKey: string; holdExpiresAt: Date;
+  },
+  actor: AuthSession
+): Promise<ReservationDTO[]> {
+  if (!["SALES_DIRECTOR", "COO", "SUPER_ADMIN"].includes(actor.role)) {
+    throw new ReservationPermissionError("Hold-ul agentului necesita aprobarea unui manager comercial.");
+  }
+  const plan = reservationInputSchema.parse({
+    locationIds: input.locationIds, periodStart: input.periodStart, periodEnd: input.periodEnd,
+    clientId: input.clientId, campaignId: input.campaignId,
+    ownerId: input.ownerUserId, sellerUserId: input.ownerUserId, status: "HOLD"
+  });
+  const locationIds = selectedLocationIds(plan);
+  const now = new Date();
+  const maximumExpiry = now.getTime() + HOLD_DURATION_DAYS * 86400000;
+  if (!locationIds.length || !input.requestKey?.trim() || input.requestKey.length > 191 ||
+      !Number.isFinite(input.holdExpiresAt?.getTime()) || input.holdExpiresAt <= now ||
+      input.holdExpiresAt.getTime() > maximumExpiry) {
+    throw new Error("Intentia hold sau expirarea nu este valida.");
+  }
+  const seller = await resolveSellerForMutation({ actor, sellerUserId: input.ownerUserId, db: tx });
+  const externalIds = locationIds.map((id) => "agent-hold:" + createHash("sha256").update(input.requestKey + ":" + id).digest("hex"));
+  await lockReservationLocationsForWrite(tx, locationIds);
+  const context = await loadAndValidateRentalContext(input.clientId, input.campaignId, tx);
+  if (context.client.accountOwnerUserId !== input.ownerUserId ||
+      ![context.campaign.accountOwnerUserId, context.campaign.sellerUserId].includes(input.ownerUserId)) {
+    throw new ReservationPermissionError("Clientul si campania nu apartin portofoliului aprobat.");
+  }
+  const prior = await tx.reservation.findMany({ where: { externalId: { in: externalIds } }, include: reservationInclude });
+  if (prior.length) {
+    if (prior.length !== locationIds.length || prior.some((row) =>
+      row.status !== "HOLD" || row.ownerId !== input.ownerUserId || row.clientId !== input.clientId ||
+      row.campaignId !== input.campaignId || row.periodStart.getTime() !== plan.periodStart.getTime() ||
+      row.periodEnd.getTime() !== plan.periodEnd.getTime() || row.holdExpiresAt?.getTime() !== input.holdExpiresAt.getTime()
+    )) throw new Error("Cheia hold-ului a fost deja utilizata pentru un rezultat diferit.");
+    return prior.map(serializeReservation);
+  }
+  for (const locationId of locationIds) {
+    await assertCanonicalReservationAvailabilityForWrite(tx, locationId, plan.periodStart, plan.periodEnd, "HOLD");
+  }
+  const contractGroupId = locationIds.length > 1 ? randomUUID() : null;
+  const created = [];
+  for (const [index, locationId] of locationIds.entries()) {
+    created.push(await tx.reservation.create({ data: {
+      locationId, clientId: context.client.id, campaignId: context.campaign.id,
+      clientName: context.client.companyName, clientCompany: context.client.companyName,
+      campaignName: context.campaign.campaignName, status: "HOLD", contractGroupId,
+      periodStart: plan.periodStart, periodEnd: plan.periodEnd,
+      holdExpiresAt: input.holdExpiresAt, bookedAt: null,
+      ownerId: seller.ownerId, sellerUserId: seller.sellerUserId, salesperson: seller.salesperson,
+      externalSource: "approved-sales-agent", externalId: externalIds[index], invoiceGenerationMode: "manual"
+    }, include: reservationInclude }));
+  }
+  await recordTransactionalAudit(tx, { actor, action: "agent.hold.create.committed", entityType: "reservation",
+    entityId: created[0]?.id, metadata: { reservationIds: created.map((row) => row.id), requestKey: input.requestKey, ownerUserId: input.ownerUserId } });
+  return created.map(serializeReservation);
 }
 
 export async function updateReservation(id: string, input: unknown, actor?: AuthSession | null) {
@@ -675,11 +761,19 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
   const parsed = normalizeReservationInput(reservationPatchSchema.parse(input));
 
   const reservation = await prisma.$transaction(async (tx) => {
-    const existing = await tx.reservation.findUniqueOrThrow({ where: { id }, include: { client: true, campaign: true } });
+    let existing = await tx.reservation.findUniqueOrThrow({ where: { id }, include: { client: true, campaign: true } });
     assertReservationOwnership(existing, actor);
+    const originalLocationId = existing.locationId;
+    await lockReservationLocationsForWrite(tx, [existing.locationId, parsed.locationId || existing.locationId]);
+    await lockReservationRowsForWrite(tx, [id]);
+    existing = await tx.reservation.findUniqueOrThrow({ where: { id }, include: { client: true, campaign: true } });
+    if (existing.locationId !== originalLocationId) throw concurrentReservationChange();
+    assertReservationOwnership(existing, actor);
+    assertGroupIdUnchanged(parsed, existing);
     const ownershipPatch: SellerPatch = await resolveUpdateSeller(parsed, existing, actor, tx);
     const nextStatusForClient = parsed.status || existing.status;
-    const rentalContext = await resolveRentalContextForUpdate(parsed, existing, tx);
+    if (nextStatusForClient === "BOOKED" && existing.status !== "BOOKED") assertReservationInitialStatus("BOOKED", actor?.role);
+    const rentalContext = await resolveRentalContextForUpdate(parsed, existing, tx, undefined, actor);
     if (nextStatusForClient !== "BOOKED") {
       assertHoldHasClientName(nextStatusForClient, parsed.clientName === undefined ? existing.clientName : parsed.clientName);
     }
@@ -693,17 +787,19 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
       (parsed.locationId !== undefined && parsed.locationId !== existing.locationId) ||
       (parsed.periodStart != null && parsed.periodStart.getTime() !== existing.periodStart.getTime()) ||
       (parsed.periodEnd != null && parsed.periodEnd.getTime() !== existing.periodEnd.getTime()) ||
-      (parsed.status !== undefined && parsed.status !== existing.status);
+      (parsed.status !== undefined && (parsed.status !== existing.status || parsed.status === "HOLD" || parsed.status === "RESERVED"));
 
     if (parsed.status && actor) {
       assertReservationTransition(existing.status as ReservationDTO["status"], parsed.status, actor.role);
     }
 
     if (availabilityChanged) {
-      await lockReservationLocationsForWrite(tx, [existing.locationId, next.locationId]);
       await assertCanonicalReservationAvailabilityForWrite(tx, next.locationId, next.periodStart, next.periodEnd, next.status, id);
     }
 
+    if (existing.status !== "BOOKED" || isCommercialReservationPatch(parsed)) {
+      assertBookedPrice(nextStatusForClient, proposedReservationRent(parsed, existing));
+    }
     const patchData = reservationPatchData(parsed, rentalContext, nextStatusForClient, existing);
     if (parsed.status === "CANCELLED" && parsed.cancellationReason) {
       patchData.notes = appendReservationNote(existing.notes, `Anulare: ${parsed.cancellationReason}`);
@@ -731,7 +827,7 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
       include: reservationInclude
     });
 
-    if (nextStatusForClient === "BOOKED" && (parsed.amount !== undefined || parsed.monthlyRentShare !== undefined || parsed.monthlyRentTotal !== undefined)) {
+    if (nextStatusForClient === "BOOKED" && (existing.status !== "BOOKED" || parsed.amount !== undefined || parsed.monthlyRentShare !== undefined || parsed.monthlyRentTotal !== undefined)) {
       await ensureCurrentPriceSegment(
         tx,
         updated.id,
@@ -753,6 +849,7 @@ export async function updateReservation(id: string, input: unknown, actor?: Auth
       }
     }
 
+    await recordTransactionalAudit(tx, { actor, action: "reservation.update.committed", entityType: "reservation", entityId: updated.id });
     return updated;
   }, reservationUpdateTransactionOptions);
 
@@ -773,20 +870,21 @@ export async function updateReservationGroupStatus(
   await expireStaleHolds();
   const status = reservationStatusSchema.parse(inputStatus);
   const updated = await prisma.$transaction(async (tx) => {
-    const existing = await tx.reservation.findUniqueOrThrow({ where: { id } });
-    assertReservationOwnership(existing, actor);
-    const reservations = existing.contractGroupId
-      ? await tx.reservation.findMany({ where: { contractGroupId: existing.contractGroupId } })
-      : [existing];
+    const reservations = await loadLockedReservationGroupForCommand(tx, id, actor);
+    const validatedIds = reservations.map((reservation) => reservation.id);
+    assertNoPlannedReservationConflicts(reservations.map((reservation) => ({ ...reservation, status })));
 
-    await lockReservationLocationsForWrite(tx, reservations.map((reservation) => reservation.locationId));
-
+    const contexts = new Map<string, RentalContext>();
+    const rentalContextCache = new Map<string, ReturnType<typeof loadAndValidateRentalContext>>();
     for (const reservation of reservations) {
       if (actor) {
         assertReservationTransition(reservation.status as ReservationDTO["status"], status, actor.role);
       }
       if (status === "BOOKED") {
-        await assertExistingBookedLink(reservation.clientId, reservation.campaignId, tx);
+        if (reservation.status !== "BOOKED") assertReservationInitialStatus("BOOKED", actor?.role);
+        assertBookedPrice(status, reservation.amount ?? reservation.monthlyRentShare ?? reservation.monthlyRentTotal);
+        const context = await resolveRentalContextForUpdate({ status: "BOOKED" }, reservation, tx, rentalContextCache, actor);
+        contexts.set(reservation.id, context);
       }
       await assertCanonicalReservationAvailabilityForWrite(
         tx,
@@ -794,41 +892,38 @@ export async function updateReservationGroupStatus(
         reservation.periodStart,
         reservation.periodEnd,
         status,
-        reservation.id
+        reservation.id,
+        validatedIds
       );
     }
 
-    const statusData = {
+    for (const reservation of reservations) {
+      const context = contexts.get(reservation.id);
+      const statusData = {
         status,
         ...(status === "BOOKED" ? {
-          currency: existing.currency || "EUR",
-          paymentTermType: existing.paymentTermType || "30_days",
-          paymentTermDays: existing.paymentTermDays ?? 30,
-          billingRule: existing.billingRule || "month_start",
-          billingFrequency: existing.billingFrequency || "monthly",
-          invoiceGenerationMode: existing.invoiceGenerationMode || "manual",
-          neutralizationDate: existing.neutralizationDate || existing.periodEnd
-        } : ["CANCELLED", "EXPIRED"].includes(status) ? {
-          neutralizationDate: null
-        } : {}),
-        ...reservationLifecycleData(status, existing.bookedAt)
+          currency: normalizeCurrency((reservation.status === "BOOKED" ? reservation.currency : null) || context?.campaign.currency),
+          paymentTermType: (reservation.status === "BOOKED" ? reservation.paymentTermType : null) || context?.campaign.paymentTermType || "30_days",
+          paymentTermDays: (reservation.status === "BOOKED" ? reservation.paymentTermDays : null) ?? context?.campaign.paymentTermDays ?? 30,
+          billingRule: (reservation.status === "BOOKED" ? reservation.billingRule : null) || context?.campaign.billingRule || "manual_per_contract",
+          billingFrequency: (reservation.status === "BOOKED" ? reservation.billingFrequency : null) || context?.campaign.billingFrequency || "monthly",
+          invoiceGenerationMode: "manual",
+          neutralizationDate: reservation.neutralizationDate || reservation.periodEnd,
+          ...(context ? {
+            clientName: context.client.companyName, clientCompany: context.client.companyName,
+            clientEmail: context.client.generalEmail, clientPhone: context.client.generalPhone,
+            campaignName: context.campaign.campaignName
+          } : {})
+        } : ["CANCELLED", "EXPIRED"].includes(status) ? { neutralizationDate: null } : {}),
+        ...reservationLifecycleData(status, reservation.bookedAt),
+        ...(status === "CANCELLED" && options.cancellationReason ? { notes: appendReservationNote(reservation.notes, `Anulare: ${options.cancellationReason}`) } : {})
       };
-
-    if (status === "CANCELLED" && options.cancellationReason) {
-      for (const reservation of reservations) {
-        await tx.reservation.update({
-          where: { id: reservation.id },
-          data: {
-            ...statusData,
-            notes: appendReservationNote(reservation.notes, `Anulare: ${options.cancellationReason}`)
-          }
-        });
+      const next = await tx.reservation.update({ where: { id: reservation.id }, data: statusData });
+      if (status === "BOOKED" && reservation.status !== "BOOKED") {
+        await ensureCurrentPriceSegment(tx, next.id, next.periodStart, next.periodEnd,
+          next.amount ?? next.monthlyRentShare ?? next.monthlyRentTotal!, next.currency || "EUR", actor?.id || null);
       }
-    } else {
-      await tx.reservation.updateMany({
-        where: existing.contractGroupId ? { contractGroupId: existing.contractGroupId } : { id },
-        data: statusData
-      });
+      await logRentalCorrection(tx, reservation, next, actor?.id || null);
     }
     const affectedCampaignIds = new Set(
       reservations.map((reservation) => reservation.campaignId).filter((campaignId): campaignId is string => Boolean(campaignId))
@@ -837,12 +932,13 @@ export async function updateReservationGroupStatus(
       await syncCampaignCommercialSummary(tx, campaignId);
     }
 
+    await recordTransactionalAudit(tx, { actor, action: "reservation.group_status.committed", entityType: "reservation", entityId: id, metadata: { reservationIds: validatedIds } });
     return tx.reservation.findMany({
-      where: existing.contractGroupId ? { contractGroupId: existing.contractGroupId } : { id },
+      where: { id: { in: validatedIds } },
       include: reservationInclude,
       orderBy: [{ createdAt: "asc" }]
     });
-  });
+  }, reservationUpdateTransactionOptions);
 
   return updated.map(serializeReservation);
 }
@@ -852,18 +948,17 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
   const parsed = normalizeReservationInput(reservationPatchSchema.parse(input));
 
   const updated = await prisma.$transaction(async (tx) => {
-    const anchor = await tx.reservation.findUniqueOrThrow({ where: { id } });
-    assertReservationOwnership(anchor, actor);
-    const reservations = anchor.contractGroupId
-      ? await tx.reservation.findMany({ where: { contractGroupId: anchor.contractGroupId }, orderBy: [{ createdAt: "asc" }] })
-      : [anchor];
-    if (!reservations.length) throw new Error("Contractul nu mai exista.");
-
-    const locationIdsToLock = reservations.flatMap((reservation) => [
-      reservation.locationId,
-      parsed.locationId || reservation.locationId
-    ]);
-    await lockReservationLocationsForWrite(tx, locationIdsToLock);
+    const reservations = await loadLockedReservationGroupForCommand(tx, id, actor, parsed.locationId ? [parsed.locationId] : []);
+    const validatedIds = reservations.map((reservation) => reservation.id);
+    for (const reservation of reservations) assertGroupIdUnchanged(parsed, reservation);
+    const groupShares = parsed.monthlyRentTotal != null ? allocateMoneyAcrossRows(parsed.monthlyRentTotal, reservations.length) : null;
+    assertNoPlannedReservationConflicts(reservations.map((reservation) => ({
+      ...reservation,
+      locationId: parsed.locationId || reservation.locationId,
+      periodStart: parsed.periodStart || reservation.periodStart,
+      periodEnd: parsed.periodEnd || reservation.periodEnd,
+      status: parsed.status || reservation.status
+    })));
 
     const prepared = [];
     const rentalContextCache = new Map<string, ReturnType<typeof loadAndValidateRentalContext>>();
@@ -871,7 +966,8 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
       assertReservationOwnership(reservation, actor);
       const ownershipPatch: SellerPatch = await resolveUpdateSeller(parsed, reservation, actor, tx);
       const nextStatusForClient = parsed.status || reservation.status;
-      const rentalContext = await resolveRentalContextForUpdate(parsed, reservation, tx, rentalContextCache);
+      if (nextStatusForClient === "BOOKED" && reservation.status !== "BOOKED") assertReservationInitialStatus("BOOKED", actor?.role);
+      const rentalContext = await resolveRentalContextForUpdate(parsed, reservation, tx, rentalContextCache, actor);
       if (nextStatusForClient !== "BOOKED") {
         assertHoldHasClientName(nextStatusForClient, parsed.clientName === undefined ? reservation.clientName : parsed.clientName);
       }
@@ -885,7 +981,8 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
         periodEnd: parsed.periodEnd || reservation.periodEnd,
         status: parsed.status || reservation.status
       };
-      await assertCanonicalReservationAvailabilityForWrite(tx, next.locationId, next.periodStart, next.periodEnd, next.status, reservation.id);
+      const capacityChanged = next.locationId !== reservation.locationId || next.periodStart.getTime() !== reservation.periodStart.getTime() || next.periodEnd.getTime() !== reservation.periodEnd.getTime() || next.status !== reservation.status || parsed.status === "HOLD" || parsed.status === "RESERVED";
+      if (capacityChanged) await assertCanonicalReservationAvailabilityForWrite(tx, next.locationId, next.periodStart, next.periodEnd, next.status, reservation.id, validatedIds);
 
       prepared.push({
         reservation,
@@ -896,7 +993,11 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
     }
 
     for (const [itemIndex, item] of prepared.entries()) {
-      const patchData = reservationPatchData(parsed, item.rentalContext, item.nextStatusForClient, item.reservation);
+      const rowInput = groupShares ? { ...parsed, amount: groupShares[itemIndex], monthlyRentShare: groupShares[itemIndex] } : parsed;
+      if (item.reservation.status !== "BOOKED" || isCommercialReservationPatch(rowInput)) {
+        assertBookedPrice(item.nextStatusForClient, proposedReservationRent(rowInput, item.reservation));
+      }
+      const patchData = reservationPatchData(rowInput, item.rentalContext, item.nextStatusForClient, item.reservation);
       if (parsed.productionNotes !== undefined) {
         patchData.productionNotes = splitDecorationCostForGroup(
           parsed.productionNotes,
@@ -953,8 +1054,9 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
       }
     }
 
+    await recordTransactionalAudit(tx, { actor, action: "reservation.group_update.committed", entityType: "reservation", entityId: id, metadata: { reservationIds: validatedIds } });
     return tx.reservation.findMany({
-      where: anchor.contractGroupId ? { contractGroupId: anchor.contractGroupId } : { id },
+      where: { id: { in: validatedIds } },
       include: reservationInclude,
       orderBy: [{ createdAt: "asc" }]
     });
@@ -963,8 +1065,8 @@ export async function updateReservationGroup(id: string, input: unknown, actor?:
   return updated.map(serializeReservation);
 }
 
-export async function updateReservationProductionNotes(id: string, productionNotes: string, actor?: AuthSession | null) {
-  return updateReservationProductionNotesWithClient(prisma, id, productionNotes, actor);
+export async function updateReservationProductionNotes(id: string, productionNotes: string, actor?: AuthSession | null): Promise<ReservationDTO> {
+  return prisma.$transaction((tx) => updateReservationProductionNotesWithClient(tx, id, productionNotes, actor), reservationUpdateTransactionOptions);
 }
 
 export async function updateReservationProductionNotesWithClient(
@@ -972,7 +1074,8 @@ export async function updateReservationProductionNotesWithClient(
   id: string,
   productionNotes: string,
   actor?: AuthSession | null
-) {
+): Promise<ReservationDTO> {
+  if (client === prisma) return updateReservationProductionNotes(id, productionNotes, actor);
   const existing = await client.reservation.findUniqueOrThrow({
     where: { id },
     include: { client: { select: { accountOwnerUserId: true } } }
@@ -983,15 +1086,35 @@ export async function updateReservationProductionNotesWithClient(
     data: { productionNotes },
     include: reservationInclude
   });
+  await recordTransactionalAudit(client, { actor, action: "reservation.production_notes.committed", entityType: "reservation", entityId: id });
   return serializeReservation(reservation);
 }
 
-export async function deleteReservation(id: string) {
+/** Append operational context only; every group member is authorized and audited atomically. */
+export async function appendReservationGroupProductionNote(id: string, note: string, actor: AuthSession) {
+  const line = z.string().trim().min(1).max(4000).parse(note);
+  const updated = await prisma.$transaction(async (tx) => {
+    const reservations = await loadLockedReservationGroupForCommand(tx, id, actor);
+    for (const reservation of reservations) {
+      await tx.reservation.update({
+        where: { id: reservation.id },
+        data: { productionNotes: appendReservationNote(reservation.productionNotes, line) }
+      });
+    }
+    const ids = reservations.map((reservation) => reservation.id);
+    await recordTransactionalAudit(tx, { actor, action: "reservation.group_production_note.committed", entityType: "reservation", entityId: id, metadata: { reservationIds: ids } });
+    return refreshedReservationsByIds(tx, ids);
+  }, reservationUpdateTransactionOptions);
+  return updated.map(serializeReservation);
+}
+
+export async function deleteReservation(id: string, actor?: AuthSession | null) {
   await prisma.$transaction(async (tx) => {
-    const existing = await tx.reservation.findUniqueOrThrow({ where: { id }, select: { campaignId: true } });
+    const existing = (await loadLockedReservationGroupForCommand(tx, id, actor)).find((row) => row.id === id)!;
     await tx.reservation.update({ where: { id }, data: { status: "CANCELLED", holdExpiresAt: null } });
     if (existing.campaignId) await syncCampaignCommercialSummary(tx, existing.campaignId);
-  });
+    await recordTransactionalAudit(tx, { actor, action: "reservation.cancel.committed", entityType: "reservation", entityId: id });
+  }, reservationUpdateTransactionOptions);
 }
 
 export async function extendReservationHold(id: string, days: number, actor?: AuthSession | null) {
@@ -1000,11 +1123,11 @@ export async function extendReservationHold(id: string, days: number, actor?: Au
   expiresAt.setUTCDate(expiresAt.getUTCDate() + days);
 
   const updated = await prisma.$transaction(async (tx) => {
-    const reservations = await loadReservationGroupForCommand(tx, id, actor);
+    const reservations = await loadLockedReservationGroupForCommand(tx, id, actor);
     assertAllStatuses(reservations, ["HOLD", "RESERVED"], "Poti prelungi doar holduri active.");
-    await lockReservationLocationsForWrite(tx, reservations.map((reservation) => reservation.locationId));
+    assertNoPlannedReservationConflicts(reservations);
     for (const reservation of reservations) {
-      await assertCanonicalReservationAvailabilityForWrite(tx, reservation.locationId, reservation.periodStart, reservation.periodEnd, "RESERVED", reservation.id);
+      await assertCanonicalReservationAvailabilityForWrite(tx, reservation.locationId, reservation.periodStart, reservation.periodEnd, "RESERVED", reservation.id, reservations.map((row) => row.id));
     }
     await tx.reservation.updateMany({
       where: { id: { in: reservations.map((reservation) => reservation.id) } },
@@ -1014,8 +1137,9 @@ export async function extendReservationHold(id: string, days: number, actor?: Au
         holdExpiresAt: expiresAt
       }
     });
+    await recordTransactionalAudit(tx, { actor, action: "reservation.hold_extend.committed", entityType: "reservation", metadata: { reservationIds: reservations.map((row) => row.id) } });
     return refreshedReservationsByIds(tx, reservations.map((reservation) => reservation.id));
-  });
+  }, reservationUpdateTransactionOptions);
 
   return updated.map(serializeReservation);
 }
@@ -1023,7 +1147,7 @@ export async function extendReservationHold(id: string, days: number, actor?: Au
 export async function releaseReservationHold(id: string, actor?: AuthSession | null) {
   await expireStaleHolds();
   const updated = await prisma.$transaction(async (tx) => {
-    const reservations = await loadReservationGroupForCommand(tx, id, actor);
+    const reservations = await loadLockedReservationGroupForCommand(tx, id, actor);
     assertAllStatuses(reservations, ["HOLD", "RESERVED"], "Poti elibera doar holduri active.");
     for (const reservation of reservations) {
       if (actor) assertReservationTransition(reservation.status as ReservationDTO["status"], "CANCELLED", actor.role);
@@ -1032,8 +1156,9 @@ export async function releaseReservationHold(id: string, actor?: AuthSession | n
       where: { id: { in: reservations.map((reservation) => reservation.id) } },
       data: { status: "CANCELLED", holdExpiresAt: null, neutralizationDate: null }
     });
+    await recordTransactionalAudit(tx, { actor, action: "reservation.hold_release.committed", entityType: "reservation", metadata: { reservationIds: reservations.map((row) => row.id) } });
     return refreshedReservationsByIds(tx, reservations.map((reservation) => reservation.id));
-  });
+  }, reservationUpdateTransactionOptions);
 
   return updated.map(serializeReservation);
 }
@@ -1041,7 +1166,7 @@ export async function releaseReservationHold(id: string, actor?: AuthSession | n
 export async function markReservationHoldLost(id: string, note: string | undefined, actor?: AuthSession | null) {
   await expireStaleHolds();
   const updated = await prisma.$transaction(async (tx) => {
-    const reservations = await loadReservationGroupForCommand(tx, id, actor);
+    const reservations = await loadLockedReservationGroupForCommand(tx, id, actor);
     assertAllStatuses(reservations, ["HOLD", "RESERVED"], "Poti marca pierdut doar un hold activ.");
     for (const reservation of reservations) {
       if (actor) assertReservationTransition(reservation.status as ReservationDTO["status"], "CANCELLED", actor.role);
@@ -1057,8 +1182,9 @@ export async function markReservationHoldLost(id: string, note: string | undefin
         }
       });
     }
+    await recordTransactionalAudit(tx, { actor, action: "reservation.hold_lost.committed", entityType: "reservation", metadata: { reservationIds: reservations.map((row) => row.id) } });
     return refreshedReservationsByIds(tx, reservations.map((reservation) => reservation.id));
-  });
+  }, reservationUpdateTransactionOptions);
 
   return updated.map(serializeReservation);
 }
@@ -1068,11 +1194,12 @@ export async function assignReservationSeller(id: string, sellerUserId: string, 
   const seller = await loadAssignableSeller(sellerUserId);
 
   const updated = await prisma.$transaction(async (tx) => {
-    const reservations = await loadReservationGroupForCommand(tx, id, actor);
+    const reservations = await loadLockedReservationGroupForCommand(tx, id, actor);
     const ids = reservations.map((reservation) => reservation.id);
     await assignReservationRowsSeller(tx, ids, seller);
+    await recordTransactionalAudit(tx, { actor, action: "reservation.seller_assign.committed", entityType: "reservation", metadata: { reservationIds: reservations.map((row) => row.id) } });
     return refreshedReservationsByIds(tx, ids);
-  });
+  }, reservationUpdateTransactionOptions);
 
   return updated.map(serializeReservation);
 }
@@ -1090,8 +1217,9 @@ export async function assignReservationsSeller(ids: string[], sellerUserId: stri
     }
     for (const reservation of reservations) assertReservationOwnership(reservation, actor);
     await assignReservationRowsSeller(tx, reservationIds, seller);
+    await recordTransactionalAudit(tx, { actor, action: "reservation.sellers_assign.committed", entityType: "reservation", metadata: { reservationIds: reservations.map((row) => row.id) } });
     return refreshedReservationsByIds(tx, reservationIds);
-  });
+  }, reservationUpdateTransactionOptions);
 
   return updated.map(serializeReservation);
 }
@@ -1123,14 +1251,90 @@ async function assignReservationRowsSeller(
 }
 
 async function loadReservationGroupForCommand(tx: Prisma.TransactionClient, id: string, actor?: AuthSession | null) {
-  const anchor = await tx.reservation.findUniqueOrThrow({ where: { id } });
+  const include = { client: { select: { accountOwnerUserId: true } } } as const;
+  const anchor = await tx.reservation.findUniqueOrThrow({ where: { id }, include });
   assertReservationOwnership(anchor, actor);
   const reservations = anchor.contractGroupId
-    ? await tx.reservation.findMany({ where: { contractGroupId: anchor.contractGroupId }, orderBy: [{ createdAt: "asc" }] })
+    ? await tx.reservation.findMany({ where: { contractGroupId: anchor.contractGroupId }, include, orderBy: [{ createdAt: "asc" }, { id: "asc" }] })
     : [anchor];
   if (!reservations.length) throw new Error("Rezervarea nu exista.");
   for (const reservation of reservations) assertReservationOwnership(reservation, actor);
   return reservations;
+}
+
+function concurrentReservationChange() {
+  return new Error("Rezervarea a fost modificata concurent. Reincarca datele si verifica din nou disponibilitatea.");
+}
+
+async function lockReservationRowsForWrite(tx: Prisma.TransactionClient, ids: string[]) {
+  const uniqueIds = [...new Set(ids)].sort();
+  if (!uniqueIds.length) return;
+  await tx.$queryRaw`
+    SELECT id FROM portfolio_reservations
+    WHERE id IN (${Prisma.join(uniqueIds)}) ORDER BY id FOR UPDATE
+  `;
+}
+
+async function loadLockedReservationGroupForCommand(
+  tx: Prisma.TransactionClient,
+  id: string,
+  actor?: AuthSession | null,
+  additionalLocationIds: string[] = []
+) {
+  const before = await loadReservationGroupForCommand(tx, id, actor);
+  await lockReservationLocationsForWrite(tx, [...before.map((row) => row.locationId), ...additionalLocationIds]);
+  await lockReservationRowsForWrite(tx, before.map((row) => row.id));
+  const fresh = await loadReservationGroupForCommand(tx, id, actor);
+  const previous = new Map(before.map((row) => [row.id, row]));
+  if (fresh.length !== before.length || fresh.some((row) => {
+    const old = previous.get(row.id);
+    return !old || old.locationId !== row.locationId || old.contractGroupId !== row.contractGroupId;
+  })) throw concurrentReservationChange();
+  return fresh;
+}
+
+function assertGroupIdUnchanged(
+  input: { contractGroupId?: string | null },
+  existing: { contractGroupId: string | null }
+) {
+  if (input.contractGroupId !== undefined && input.contractGroupId !== existing.contractGroupId) {
+    throw new ReservationPermissionError("Apartenenta la grup nu poate fi modificata prin editarea rezervarii.");
+  }
+}
+
+function assertBookedPrice(status: string, amount: number | null | undefined) {
+  if (status === "BOOKED" && (amount == null || !Number.isFinite(amount) || amount <= 0)) {
+    throw new Error("Inchirierea confirmata necesita o chirie lunara mai mare decat zero pentru fiecare amplasament.");
+  }
+}
+
+function proposedReservationRent(
+  input: { amount?: number | null; monthlyRentShare?: number | null; monthlyRentTotal?: number | null },
+  existing: { amount: number | null; monthlyRentShare: number | null; monthlyRentTotal: number | null }
+) {
+  return (input.amount === undefined ? existing.amount : input.amount)
+    ?? (input.monthlyRentShare === undefined ? existing.monthlyRentShare : input.monthlyRentShare)
+    ?? (input.monthlyRentTotal === undefined ? existing.monthlyRentTotal : input.monthlyRentTotal);
+}
+
+function isCommercialReservationPatch(input: ReturnType<typeof reservationPatchSchema.parse>) {
+  return ["status", "locationId", "clientId", "campaignId", "periodStart", "periodEnd", "amount", "monthlyRentShare", "monthlyRentTotal", "currency", "paymentTermType", "paymentTermDays", "billingRule", "billingFrequency"]
+    .some((key) => input[key as keyof typeof input] !== undefined);
+}
+
+function assertNoPlannedReservationConflicts(rows: Array<{
+  id: string; locationId: string; periodStart: Date; periodEnd: Date; status: string;
+}>) {
+  const active = rows.filter((row) => activeReservationStatuses.includes(row.status as never));
+  for (let i = 0; i < active.length; i++) {
+    for (let j = i + 1; j < active.length; j++) {
+      if (active[i].locationId === active[j].locationId && bookingPeriodsConflict(
+        active[i].periodStart, active[i].periodEnd, active[j].periodStart, active[j].periodEnd
+      )) {
+        throw new Error("Modificarile propuse ar crea rezervari suprapuse in acelasi grup si pe aceeasi locatie.");
+      }
+    }
+  }
 }
 
 function assertAllStatuses(
@@ -1176,7 +1380,7 @@ function assertReservationOwnership(
     clientOwnerUserId !== actor.id &&
     !(reservation.ownerId == null && legacyOwner)
   ) {
-    throw new Error("Poti modifica doar rezervarile si inchirierile proprii.");
+    throw new ReservationPermissionError("Poti modifica doar rezervarile si inchirierile proprii.");
   }
 }
 
@@ -1208,7 +1412,8 @@ async function resolveRentalContextForUpdate(
     status: string;
   },
   client: ReservationDbClient = prisma,
-  cache?: Map<string, ReturnType<typeof loadAndValidateRentalContext>>
+  cache?: Map<string, ReturnType<typeof loadAndValidateRentalContext>>,
+  actor?: AuthSession | null
 ) {
   const nextStatus = input.status || existing.status;
   if (nextStatus !== "BOOKED") return null;
@@ -1220,7 +1425,7 @@ async function resolveRentalContextForUpdate(
   const cacheKey = `${clientId}:${campaignId}`;
   const cached = cache?.get(cacheKey);
   if (cached) return cached;
-  const context = loadAndValidateRentalContext(clientId, campaignId, client);
+  const context = loadAndValidateRentalContext(clientId, campaignId, client, actor);
   cache?.set(cacheKey, context);
   return context;
 }
@@ -1228,8 +1433,12 @@ async function resolveRentalContextForUpdate(
 async function loadAndValidateRentalContext(
   clientId: string,
   campaignId: string,
-  db: ReservationDbClient = prisma
+  db: ReservationDbClient = prisma,
+  actor?: AuthSession | null
 ) {
+  if (db !== prisma) {
+    await db.$queryRaw`SELECT id FROM portfolio_campaigns WHERE id = ${campaignId} FOR UPDATE`;
+  }
   const readContext = () => Promise.all([
     db.clientAccount.findUnique({ where: { id: clientId } }),
     db.campaign.findUnique({ where: { id: campaignId } })
@@ -1239,6 +1448,12 @@ async function loadAndValidateRentalContext(
   const [clientAccount, campaign] = await (db === prisma
     ? retryClosedConnectionRead(readContext)
     : readContext());
+  if (actor?.role === "SALES_AGENT" && (
+    clientAccount?.accountOwnerUserId !== actor.id ||
+    !campaign || ![campaign.accountOwnerUserId, campaign.sellerUserId].includes(actor.id)
+  )) {
+    throw new ReservationPermissionError("Clientul sau campania nu este disponibil in portofoliul tau.");
+  }
   if (!clientAccount || ["archived", "merged"].includes(clientAccount.status)) {
     throw new Error("Clientul selectat nu exista sau este arhivat.");
   }
@@ -1249,17 +1464,6 @@ async function loadAndValidateRentalContext(
     throw new Error("Campania selectata nu apartine clientului ales.");
   }
   return { client: clientAccount, campaign };
-}
-
-async function assertExistingBookedLink(
-  clientId: string | null,
-  campaignId: string | null,
-  client: ReservationDbClient = prisma
-) {
-  if (!clientId || !campaignId) {
-    throw new Error("Nu poti confirma hold-ul ca inchiriere fara client si campanie reale. Foloseste conversia hold -> inchiriere.");
-  }
-  await loadAndValidateRentalContext(clientId, campaignId, client);
 }
 
 function matchesActorSeller(value: string | null | undefined, actor?: AuthSession | null) {
@@ -1328,7 +1532,8 @@ export async function assertCanonicalReservationAvailabilityForWrite(
   periodStart: Date,
   periodEnd: Date,
   status: string,
-  ignoreId?: string
+  ignoreId?: string,
+  ignoreIds: string[] = []
 ) {
   if (periodStart > periodEnd) {
     throw new Error("Perioada rezervarii nu este valida.");
@@ -1336,11 +1541,20 @@ export async function assertCanonicalReservationAvailabilityForWrite(
 
   if (!activeReservationStatuses.includes(status as never)) return;
 
+  // Every caller already holds the sorted location locks. Capacity writers use
+  // the same location -> profile order, so neither model can race the other.
+  const profiles = await client.$queryRaw<Array<{ id: string }>>`SELECT id FROM portfolio_dooh_profiles WHERE locationId = ${locationId} FOR UPDATE`;
+  const medium = await client.location.findUnique({ where: { id: locationId }, select: { type: true } });
+  if (profiles.length || isDigitalLocationType(medium?.type)) {
+    throw Object.assign(new Error("Amplasamentul digital se aloca exclusiv prin capacitatea DOOH; rezervarile statice noi sau modificarile de perioada/status nu sunt permise. Istoricul poate fi adnotat sau anulat."), { code: "DOOH_CAPACITY_MANAGED", status: 409 });
+  }
+
   const batch = await loadAvailabilityDecisions({
     locationIds: [locationId],
     periodStart,
     periodEnd,
     ignoreReservationId: ignoreId,
+    ignoreReservationIds: ignoreIds,
     requireOverrideStorage: true,
     db: client
   });
@@ -1400,15 +1614,15 @@ function campaignCommercialSummaryAffected(input: ReturnType<typeof reservationP
   ].some((field) => input[field as keyof typeof input] !== undefined);
 }
 
-function withBillingDefaults<T extends ReturnType<typeof reservationInputSchema.parse>>(input: T) {
+function withBillingDefaults<T extends ReturnType<typeof reservationInputSchema.parse>>(input: T, rentalContext: RentalContext) {
   if (input.status !== "BOOKED") return input;
   return {
     ...input,
-    currency: input.currency || "EUR",
-    paymentTermType: input.paymentTermType || "30_days",
-    paymentTermDays: paymentTermDays(input.paymentTermType || "30_days", input.paymentTermDays),
-    billingRule: input.billingRule || "month_start",
-    billingFrequency: input.billingFrequency || "monthly",
+    currency: normalizeCurrency(input.currency || rentalContext?.campaign.currency),
+    paymentTermType: input.paymentTermType || rentalContext?.campaign.paymentTermType || "30_days",
+    paymentTermDays: paymentTermDays(input.paymentTermType || rentalContext?.campaign.paymentTermType || "30_days", input.paymentTermDays ?? (input.paymentTermType ? null : rentalContext?.campaign.paymentTermDays)),
+    billingRule: input.billingRule || rentalContext?.campaign.billingRule || "manual_per_contract",
+    billingFrequency: input.billingFrequency || rentalContext?.campaign.billingFrequency || "monthly",
     invoiceGenerationMode: input.invoiceGenerationMode || "manual"
   };
 }
@@ -1473,12 +1687,18 @@ function reservationPatchData(
   input: ReturnType<typeof reservationPatchSchema.parse>,
   rentalContext: Awaited<ReturnType<typeof resolveRentalContextForUpdate>>,
   nextStatus: string,
-  existing: { status: string; periodEnd: Date; neutralizationDate: Date | null; contractCompany: string | null }
+  existing: {
+    status: string; periodEnd: Date; neutralizationDate: Date | null; contractCompany: string | null;
+    currency: string | null; paymentTermType: string | null; paymentTermDays: number | null;
+    billingRule: string | null; billingFrequency: string | null;
+  }
 ) {
   const data = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
   // The cancellation reason is audit context, not a Reservation column.
   // It is appended to notes below and must never reach Prisma's update payload.
   delete data.cancellationReason;
+  // Group membership changes need their own authorized command; never a free-form patch.
+  delete data.contractGroupId;
   for (const key of ["locationId", "clientName", "status", "periodStart", "periodEnd"]) {
     if (data[key] == null) delete data[key];
   }
@@ -1490,11 +1710,13 @@ function reservationPatchData(
     delete data.clientPhone;
     delete data.campaignName;
     if (rentalContext) {
-      data.currency = data.currency || rentalContext.campaign.currency || "EUR";
-      data.paymentTermType = data.paymentTermType || rentalContext.campaign.paymentTermType || "30_days";
-      data.paymentTermDays = data.paymentTermDays ?? rentalContext.campaign.paymentTermDays ?? 30;
-      data.billingRule = data.billingRule || rentalContext.campaign.billingRule || "manual_per_contract";
-      data.billingFrequency = data.billingFrequency || rentalContext.campaign.billingFrequency || "monthly";
+      const alreadyBooked = existing.status === "BOOKED";
+      data.currency = normalizeCurrency((data.currency as string) || (alreadyBooked ? existing.currency : null) || rentalContext.campaign.currency);
+      data.paymentTermType = data.paymentTermType || (alreadyBooked ? existing.paymentTermType : null) || rentalContext.campaign.paymentTermType || "30_days";
+      const inheritedDays = input.paymentTermType ? null : (alreadyBooked ? existing.paymentTermDays : null) ?? rentalContext.campaign.paymentTermDays;
+      data.paymentTermDays = paymentTermDays(String(data.paymentTermType), (data.paymentTermDays as number | null | undefined) ?? inheritedDays);
+      data.billingRule = data.billingRule || (alreadyBooked ? existing.billingRule : null) || rentalContext.campaign.billingRule || "manual_per_contract";
+      data.billingFrequency = data.billingFrequency || (alreadyBooked ? existing.billingFrequency : null) || rentalContext.campaign.billingFrequency || "monthly";
     }
     if (input.neutralizationDate === undefined && (input.periodEnd !== undefined || !existing.neutralizationDate)) {
       data.neutralizationDate = input.periodEnd || existing.periodEnd;

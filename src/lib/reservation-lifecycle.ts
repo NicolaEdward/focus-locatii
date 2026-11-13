@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
 import { recordAudit, type AuditActor } from "@/lib/audit";
 import {
   HOLD_DURATION_DAYS,
@@ -90,6 +91,7 @@ export async function expireStaleHoldsCommand(input: {
       }
     });
 
+    await recordTransactionalAudit(tx, { actor: input.actor, action: "reservation.holds_expired.committed", entityType: "reservation", metadata: { reservationIds, count: update.count, expiredAt: now.toISOString() } });
     return { count: update.count, reservationIds };
   });
 

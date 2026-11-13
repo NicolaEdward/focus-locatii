@@ -11,10 +11,10 @@ assertSyntheticEnvironment();
 
 async function main() {
   const user = await prisma.user.findFirst({
-    where: { active: true, role: { in: ["SUPER_ADMIN", "COO", "SALES_DIRECTOR"] } },
+    where: { active: true, role: { in: ["COO", "SALES_DIRECTOR"] } },
     orderBy: [{ role: "asc" }, { createdAt: "asc" }]
   });
-  assert(user, "Need an active admin/COO/sales director user for workflow tests.");
+  assert(user, "Need an active COO/sales director commercial owner for workflow tests.");
 
   const now = Math.floor(Date.now() / 1000);
   const session: AuthSession = {

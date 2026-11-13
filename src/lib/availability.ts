@@ -34,6 +34,7 @@ export type AvailabilityInput = {
 export type AvailabilityDecisionStatus = "AVAILABLE" | "PARTIAL" | "CONFLICT" | "BLOCKED" | "UNKNOWN";
 
 export type AvailabilityReasonCode =
+  | "DOOH_CAPACITY_MANAGED"
   | "AVAILABLE_NO_BLOCKERS"
   | "INVALID_PERIOD"
   | "LOCATION_INACTIVE"
@@ -72,7 +73,7 @@ export type AvailabilityDecision = {
   activeOverride: AvailabilityConflictInterval | null;
   lifecycleReason: AvailabilityReasonCode | null;
   effectiveHoldExpiry: Date | null;
-  dateSemantics: "INCLUSIVE_WITH_SAME_DAY_HANDOFF";
+  dateSemantics: "INCLUSIVE_CALENDAR_DAYS";
   periodStart: Date | null;
   periodEnd: Date | null;
 };
@@ -603,28 +604,23 @@ function availableWindows(from: Date, to: Date, occupied: Array<{ from: Date; to
 
   for (const interval of occupied) {
     if (interval.from > cursor) {
-      const windowEnd = allowsSameDayHandoff(interval.status) ? interval.from : addDays(interval.from, -1);
+      const windowEnd = addDays(interval.from, -1);
       windows.push({
         from: cursor,
         to: windowEnd,
         labelFrom: cursor,
-        labelTo: interval.from
+        labelTo: windowEnd
       });
     }
-    if (interval.to >= cursor) cursor = allowsSameDayHandoff(interval.status) ? interval.to : addDays(interval.to, 1);
+    if (interval.to >= cursor) cursor = addDays(interval.to, 1);
     if (cursor > to) break;
   }
 
-  const cursorIsOccupiedBookedBoundary = occupied.some((interval) =>
-    allowsSameDayHandoff(interval.status) &&
-    interval.to.getTime() === cursor.getTime()
-  );
-  if (cursor <= to && (cursor < to || !cursorIsOccupiedBookedBoundary)) {
-    const previous = occupied.filter((interval) => interval.to < cursor).at(-1);
+  if (cursor <= to) {
     windows.push({
       from: cursor,
       to,
-      labelFrom: previous ? previous.to : cursor,
+      labelFrom: cursor,
       labelTo: to
     });
   }
@@ -671,7 +667,7 @@ function decision(input: {
     activeOverride: input.activeOverride || null,
     lifecycleReason: input.lifecycleReason || null,
     effectiveHoldExpiry: input.effectiveHoldExpiry || null,
-    dateSemantics: "INCLUSIVE_WITH_SAME_DAY_HANDOFF",
+    dateSemantics: "INCLUSIVE_CALENDAR_DAYS",
     periodStart: input.periodStart,
     periodEnd: input.periodEnd
   };
@@ -771,7 +767,7 @@ export function summarizeAvailabilityTimeline(
   while (extended) {
     extended = false;
     for (const interval of intervals) {
-      if (interval.from > activeUntil || interval.to <= activeUntil) continue;
+      if (interval.from > addDays(activeUntil, 1) || interval.to <= activeUntil) continue;
       activeUntil = interval.to;
       endingInterval = interval;
       extended = true;
@@ -805,13 +801,7 @@ export function bookingPeriodsConflict(
   if (firstStart > firstEnd || secondStart > secondEnd) return false;
   if (firstStart > secondEnd || firstEnd < secondStart) return false;
 
-  const firstHandsToSecond =
-    firstEnd.getTime() === secondStart.getTime() &&
-    firstStart.getTime() < secondStart.getTime();
-  const secondHandsToFirst =
-    secondEnd.getTime() === firstStart.getTime() &&
-    secondStart.getTime() < firstStart.getTime();
-  return !firstHandsToSecond && !secondHandsToFirst;
+  return true;
 }
 
 function availabilityIntervalConflicts(
@@ -819,22 +809,15 @@ function availabilityIntervalConflicts(
   requestedStart: Date,
   requestedEnd: Date
 ) {
-  if (interval.source === "RESERVATION" && allowsSameDayHandoff(interval.status)) {
-    return bookingPeriodsConflict(interval.from, interval.to, requestedStart, requestedEnd);
-  }
-  return interval.from <= requestedEnd && interval.to >= requestedStart;
-}
-
-function allowsSameDayHandoff(status: string) {
-  return status === "BOOKED";
+  return bookingPeriodsConflict(interval.from, interval.to, requestedStart, requestedEnd);
 }
 
 function availabilityBoundaryBefore(interval: AvailabilityConflictInterval) {
-  return allowsSameDayHandoff(interval.status) ? interval.from : addDays(interval.from, -1);
+  return addDays(interval.from, -1);
 }
 
 function availabilityBoundaryAfter(interval: AvailabilityConflictInterval) {
-  return allowsSameDayHandoff(interval.status) ? interval.to : addDays(interval.to, 1);
+  return addDays(interval.to, 1);
 }
 
 function positiveCalendarDays(from: Date, to: Date) {

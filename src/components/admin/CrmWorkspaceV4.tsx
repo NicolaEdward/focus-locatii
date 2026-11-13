@@ -26,7 +26,8 @@ import {
   Users,
   X
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CrmCommandRecovery, useCrmCommandFlow } from "@/components/admin/crm/CrmCommandRecovery";
+import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   CRM_NEXT_ACTION_CATALOG,
   CRM_NEXT_ACTION_LABELS,
@@ -67,7 +68,7 @@ type WorkspaceData = {
 };
 
 const primaryButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-focus-yellow px-4 py-2 text-sm font-black text-focus-ink transition hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-50";
-const secondaryButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-600 bg-focus-navy/60 px-4 py-2 text-sm font-bold text-white transition hover:border-focus-yellow/60 hover:bg-focus-navy disabled:cursor-not-allowed disabled:opacity-50";
+const secondaryButton = "theme-secondary-control inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-600 bg-focus-navy/60 px-4 py-2 text-sm font-bold text-white transition hover:border-focus-yellow/60 hover:bg-focus-navy disabled:cursor-not-allowed disabled:opacity-50";
 const fieldClass = "min-h-10 w-full rounded-md border border-slate-600 bg-focus-ink/85 px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-focus-yellow focus:ring-2 focus:ring-focus-yellow/15";
 
 export function CrmWorkspaceV4({
@@ -91,6 +92,7 @@ export function CrmWorkspaceV4({
   const [due, setDue] = useState(initial.due);
   const [page, setPage] = useState(initial.page);
   const [data, setData] = useState<WorkspaceData | null>(null);
+  const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -98,6 +100,7 @@ export function CrmWorkspaceV4({
   const [selected, setSelected] = useState<{ kind: RecordKind; id: string } | null>(initial.selected);
   const [notice, setNotice] = useState("");
   const requestId = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setDebouncedQuery(query.trim()); setPage(1); }, 300);
@@ -106,9 +109,15 @@ export function CrmWorkspaceV4({
 
   const load = useCallback(async (silent = false) => {
     const id = ++requestId.current;
-    if (!silent) setLoading(true);
+    controllerRef.current?.abort();
+    setLoading(true);
+    if (!silent) {
+      setData(null);
+      setLoadedAt(null);
+    }
     setError("");
     const controller = new AbortController();
+    controllerRef.current = controller;
     const params = new URLSearchParams({ view, page: String(page), limit: view === "opportunities" ? "25" : "24" });
     if (debouncedQuery) params.set("q", debouncedQuery);
     if (ownerId) params.set("owner", ownerId);
@@ -120,16 +129,22 @@ export function CrmWorkspaceV4({
       const response = await fetch(`/api/admin/crm/workspace?${params}`, { cache: "no-store", signal: controller.signal });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "CRM-ul nu a putut fi incarcat.");
-      if (id === requestId.current) setData(payload);
+      if (!isWorkspaceData(payload)) throw new Error("Datele CRM primite sunt incomplete. Reîncearcă încărcarea.");
+      if (id === requestId.current) {
+        setData(payload);
+        setLoadedAt(new Date().toISOString());
+      }
     } catch (loadError) {
       if (id === requestId.current && (loadError as Error).name !== "AbortError") setError(loadError instanceof Error ? loadError.message : "CRM-ul nu a putut fi incarcat.");
     } finally {
       if (id === requestId.current) setLoading(false);
     }
-    return () => controller.abort();
   }, [view, page, debouncedQuery, ownerId, status, stage, due]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { controllerRef.current?.abort(); };
+  }, [load]);
   useEffect(() => {
     if (!canViewTeam) return;
     fetch("/api/admin/crm/assignees", { cache: "no-store" }).then((response) => response.json()).then((payload) => setOwners(payload.assignees || [])).catch(() => setOwners([]));
@@ -146,8 +161,12 @@ export function CrmWorkspaceV4({
   }
 
   const summary = data?.summary;
+  const snapshotState = !data ? (error ? "error" : "loading") : error ? "stale" : loading ? "refreshing" : "ready";
+  const snapshotLabel = !data
+    ? error ? "Indicatori indisponibili. Datele nu au putut fi citite." : "Se încarcă indicatorii. Valorile nu sunt încă disponibile."
+    : `${snapshotState === "stale" ? "Date neactualizate. Ultimul snapshot verificat" : snapshotState === "refreshing" ? "Se actualizează. Ultimul snapshot verificat" : "Actualizat"}: ${loadedAt ? new Intl.DateTimeFormat("ro-RO", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Bucharest" }).format(new Date(loadedAt)) : "—"}`;
   return <main className="min-w-0 space-y-5 overflow-x-hidden pb-12">
-    <header className="rounded-lg border border-slate-700/80 bg-[linear-gradient(135deg,rgba(7,27,44,.98),rgba(12,46,67,.9))] px-4 py-5 shadow-xl shadow-black/10 sm:px-6">
+    <header className="theme-dark-panel rounded-lg border border-slate-700/80 bg-[linear-gradient(135deg,rgba(7,27,44,.98),rgba(12,46,67,.9))] px-4 py-5 shadow-xl shadow-black/10 sm:px-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-black uppercase text-focus-yellow">Comercial / CRM</p>
@@ -162,14 +181,17 @@ export function CrmWorkspaceV4({
       </div>
     </header>
 
-    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6" aria-label="Indicatori CRM">
-      <Metric label="Pipeline" value={formatCurrencyMap(summary?.forecastByLevel.pipeline)} hint="Valori integrale" icon={<CircleDollarSign size={18} />} />
-      <Metric label="Posibil" value={formatCurrencyMap(summary?.forecastByLevel.possible)} hint="În negociere" icon={<Target size={18} />} />
-      <Metric label="Angajament" value={formatCurrencyMap(summary?.forecastByLevel.commit)} hint="În contractare" icon={<Check size={18} />} />
-      <Metric label="Restante" value={summary?.overdue ?? 0} tone={summary?.overdue ? "danger" : "normal"} icon={<AlertCircle size={18} />} />
-      <Metric label="Oportunități active" value={summary?.activeOpportunities ?? 0} icon={<BriefcaseBusiness size={18} />} />
-      <Metric label="Câștigate luna" value={summary?.wonThisMonth ?? 0} tone="success" icon={<Check size={18} />} />
-    </section>
+    <div data-crm-snapshot={snapshotState}>
+      <p className="mb-2 text-xs font-bold text-slate-400" role="status" aria-live="polite">{snapshotLabel}</p>
+      <section className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-6" aria-label="Indicatori CRM" aria-busy={loading}>
+        <Metric label="Pipeline" value={summary ? formatCurrencyMap(summary.forecastByLevel.pipeline) : "—"} hint="Valori integrale" icon={<CircleDollarSign size={18} />} />
+        <Metric label="Posibil" value={summary ? formatCurrencyMap(summary.forecastByLevel.possible) : "—"} hint="În negociere" icon={<Target size={18} />} />
+        <Metric label="Angajament" value={summary ? formatCurrencyMap(summary.forecastByLevel.commit) : "—"} hint="În contractare" icon={<Check size={18} />} />
+        <Metric label="Restante" value={summary?.overdue ?? "—"} tone={summary?.overdue ? "danger" : "normal"} icon={<AlertCircle size={18} />} />
+        <Metric label="Oportunități active" value={summary?.activeOpportunities ?? "—"} icon={<BriefcaseBusiness size={18} />} />
+        <Metric label="Câștigate luna" value={summary?.wonThisMonth ?? "—"} tone="success" icon={<Check size={18} />} />
+      </section>
+    </div>
 
     <nav className="flex gap-1 overflow-x-auto rounded-lg border border-slate-700 bg-focus-navy/55 p-1" aria-label="Perspective CRM">
       {([
@@ -208,7 +230,7 @@ export function CrmWorkspaceV4({
 
     {data && data.pagination.pages > 1 ? <Pagination pagination={data.pagination} onPage={setPage} /> : null}
     {canEdit && createMode ? <CreateDialog mode={createMode} owners={owners} canAssignOwners={canAssignOwners} sessionUserId={sessionUserId} onClose={() => setCreateMode(null)} onCreated={(message) => { setCreateMode(null); completed(message); }} /> : null}
-    {selected ? <RecordDrawer selected={selected} canEdit={canEdit} onClose={() => setSelected(null)} onChanged={completed} /> : null}
+    {selected ? <RecordDrawer sessionUserId={sessionUserId} selected={selected} canEdit={canEdit} onClose={() => setSelected(null)} onChanged={completed} /> : null}
   </main>;
 }
 
@@ -287,10 +309,13 @@ function CreateDialog({ mode, owners, canAssignOwners, sessionUserId, onClose, o
   const [error, setError] = useState("");
   const [duplicatePayload, setDuplicatePayload] = useState<Record<string, unknown> | null>(null);
   const [prospectStatus, setProspectStatus] = useState<(typeof CRM_PROSPECT_STATUS_OPTIONS)[number]["value"]>("prospecting");
+  const flow = useCrmCommandFlow(`${sessionUserId}:create:${mode}`);
   const qualifiedProspect = mode === "prospect" && prospectStatus === "qualified";
 
   async function submit(event: FormEvent<HTMLFormElement>, allowPotentialDuplicate = false) {
-    event.preventDefault(); setPending(true); setError("");
+    event.preventDefault();
+    if (pending || flow.blocked || !flow.ready) return;
+    setPending(true); setError("");
     const form = new FormData(event.currentTarget);
     const payload: Record<string, unknown> = duplicatePayload && allowPotentialDuplicate ? { ...duplicatePayload, allowPotentialDuplicate: true } : {
       action: mode === "prospect" ? "create_prospect" : "create_inbound",
@@ -300,16 +325,15 @@ function CreateDialog({ mode, owners, canAssignOwners, sessionUserId, onClose, o
       email: textValue(form, "email"), phone: textValue(form, "phone"), nextActionDueAt: textValue(form, "nextActionDueAt"),
       nextActionType: mode === "prospect" ? undefined : "request_full_brief",
       opportunityName: textValue(form, "opportunityName"), needSummary: textValue(form, "needSummary"),
-      geography: textValue(form, "geography"), formats: textValue(form, "formats"), idempotencyKey: crypto.randomUUID()
+      geography: textValue(form, "geography"), formats: textValue(form, "formats")
     };
     try {
-      const response = await fetch("/api/admin/crm/commands", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
-      const result = await response.json();
-      if (!response.ok) {
-        if (result.code === "CRM_POSSIBLE_DUPLICATE") setDuplicatePayload(payload);
-        throw new Error(result.error || "Înregistrarea nu a putut fi creată.");
+      const outcome = await flow.run(payload);
+      if (outcome.outcome !== "committed") {
+        if (outcome.code === "CRM_POSSIBLE_DUPLICATE") setDuplicatePayload(payload);
+        setError(outcome.message); return;
       }
-      onCreated(mode === "prospect" ? "Prospectul a fost creat." : "Oportunitatea inbound a fost creată.");
+      onCreated([mode === "prospect" ? "Prospectul a fost creat." : "Oportunitatea inbound a fost creată.", outcome.message].filter(Boolean).join(" "));
     } catch (submitError) { setError(submitError instanceof Error ? submitError.message : "Înregistrarea nu a putut fi creată."); }
     finally { setPending(false); }
   }
@@ -335,14 +359,16 @@ function CreateDialog({ mode, owners, canAssignOwners, sessionUserId, onClose, o
         <Field label="Nevoie concretă *" wide><textarea className={`${fieldClass} min-h-24`} name="needSummary" required /></Field>
         <Field label="Geografie"><input className={fieldClass} name="geography" /></Field><Field label="Formate"><input className={fieldClass} name="formats" /></Field>
       </div> : null}
+      <CrmCommandRecovery flow={flow} browseHref="/admin/crm" onCommitted={() => onCreated("Rezultatul intenției a fost verificat în istoric. Comanda nu a fost repetată.")} onResolved={() => setError("")} />
       {error ? <p className="rounded-md bg-red-950/60 px-3 py-2 text-sm font-bold text-red-100">{error}</p> : null}
-      {duplicatePayload ? <button className={secondaryButton} type="button" disabled={pending} onClick={(event) => { const form = event.currentTarget.closest("form"); if (form) void submit({ preventDefault() {}, currentTarget: form } as FormEvent<HTMLFormElement>, true); }}>Am verificat, creează separat</button> : null}
-      <div className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-700 bg-focus-navy/95 pt-4"><button className={secondaryButton} type="button" onClick={onClose}>Renunță</button><button className={primaryButton} disabled={pending} type="submit">{pending ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />} Creează</button></div>
+      {duplicatePayload ? <button className={secondaryButton} type="button" disabled={pending || !flow.ready || Boolean(flow.blocked)} onClick={(event) => { const form = event.currentTarget.closest("form"); if (form) void submit({ preventDefault() {}, currentTarget: form } as FormEvent<HTMLFormElement>, true); }}>Am verificat, creează separat</button> : null}
+      <div className="sticky bottom-0 flex justify-end gap-2 border-t border-slate-700 bg-focus-navy/95 pt-4"><button className={secondaryButton} type="button" onClick={onClose}>Renunță</button><button className={primaryButton} disabled={pending || !flow.ready || Boolean(flow.blocked)} type="submit">{pending ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />} Creează</button></div>
     </form>
   </ModalShell>;
 }
 
-function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { kind: RecordKind; id: string }; canEdit: boolean; onClose: () => void; onChanged: (message: string) => void }) {
+function RecordDrawer({ sessionUserId, selected, canEdit, onClose, onChanged }: { sessionUserId: string; selected: { kind: RecordKind; id: string }; canEdit: boolean; onClose: () => void; onChanged: (message: string) => void }) {
+  const flow = useCrmCommandFlow(`${sessionUserId}:record:${selected.kind}:${selected.id}`);
   const [detail, setDetail] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -360,12 +386,13 @@ function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { k
   useEffect(() => { void load(); }, [load]);
 
   async function command(payload: Record<string, unknown>, message: string) {
+    if (pending || flow.blocked || !flow.ready) return;
     setPending(true); setError("");
     try {
-      const response = await fetch("/api/admin/crm/commands", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...payload, idempotencyKey: crypto.randomUUID() }) });
-      const result = await response.json(); if (!response.ok) throw new Error(result.error || "Modificarea nu a putut fi salvată.");
-      await load(); onChanged(message);
-    } catch (commandError) { setError(commandError instanceof Error ? commandError.message : "Modificarea nu a putut fi salvată."); }
+      const outcome = await flow.run(payload);
+      if (outcome.outcome !== "committed") { setError(outcome.message); return; }
+      await load(); onChanged([message, outcome.message].filter(Boolean).join(" "));
+    } catch { setError("Rezultatul trebuie verificat în dosar și istoric înainte de o nouă acțiune."); }
     finally { setPending(false); }
   }
 
@@ -377,6 +404,7 @@ function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { k
         <button className="rounded-md p-2 text-slate-300 hover:bg-white/10 hover:text-white" onClick={onClose} type="button" aria-label="Închide"><X size={22} /></button>
       </div>
       <div className="space-y-5 p-4 sm:p-6">
+        <CrmCommandRecovery flow={flow} browseHref={`/admin/crm?kind=${selected.kind}&record=${encodeURIComponent(selected.id)}`} onCommitted={async () => { await load(); onChanged("Rezultatul intenției a fost verificat. Comanda nu a fost repetată."); }} onResolved={() => { setError(""); void load(); }} />
         {loading ? <LoadingState compact /> : error && !detail ? <ErrorState message={error} onRetry={() => void load()} /> : detail ? <>
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <MiniMetric label="Etapă" value={detail.statusLabel || detail.stageLabel} />
@@ -389,15 +417,15 @@ function RecordDrawer({ selected, canEdit, onClose, onChanged }: { selected: { k
             <ActionSummary action={detail.nextAction} />
           </section>
           {!canEdit ? <p className="rounded-md border border-slate-700 bg-focus-navy/40 px-4 py-3 text-sm text-slate-300">Ai acces complet la informații și istoric, fără drept de modificare.</p> : null}
-          {canEdit && selected.kind === "prospect" && ["prospecting", "qualified"].includes(detail.status) ? <QualifyPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, payload.action === "qualify_prospect" ? "Prospectul a fost calificat." : "Oportunitatea a fost creată.")} /> : null}
-          {canEdit && selected.kind === "opportunity" && ["opportunity", "quoted", "negotiation", "contracting"].includes(detail.stage) ? <OpportunityTransitionPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Etapa oportunității a fost actualizată.")} /> : null}
+          {canEdit && selected.kind === "prospect" && ["prospecting", "qualified"].includes(detail.status) ? <QualifyPanel detail={detail} pending={pending || !flow.ready || Boolean(flow.blocked)} onSubmit={(payload) => command(payload, payload.action === "qualify_prospect" ? "Prospectul a fost calificat." : "Oportunitatea a fost creată.")} /> : null}
+          {canEdit && selected.kind === "opportunity" && ["opportunity", "quoted", "negotiation", "contracting"].includes(detail.stage) ? <OpportunityTransitionPanel detail={detail} pending={pending || !flow.ready || Boolean(flow.blocked)} onSubmit={(payload) => command(payload, "Etapa oportunității a fost actualizată.")} /> : null}
           {selected.kind === "opportunity" && detail.stage === "won" ? <section className="rounded-lg border border-emerald-400/25 bg-emerald-950/25 p-4">
             <SectionTitle title="Predare catre portofoliul comercial" count={0} />
             <p className="text-sm text-slate-300">CRM-ul si portofoliul de clienti raman separate. Clientul si campania se creeaza sau se confirma numai printr-o actiune explicita.</p>
             {canEdit ? <div className="mt-4 flex justify-end"><Link className={primaryButton} href={`/admin/clienti?crmOpportunityId=${encodeURIComponent(detail.id)}`}><ArrowRight size={17} /> Pregateste clientul si campania</Link></div> : null}
           </section> : null}
-          {canEdit ? <ActivityPanel detail={detail} pending={pending} onSubmit={(payload) => command(payload, "Update-ul a fost adăugat în istoric.")} /> : null}
-          <details className="rounded-lg border border-slate-700 bg-focus-navy/25"><summary className="cursor-pointer px-4 py-3 font-black text-white">Firmă și contacte</summary><div className="border-t border-slate-700 p-4"><CompanyContacts detail={detail} canEdit={canEdit} pending={pending} command={command} /></div></details>
+          {canEdit ? <ActivityPanel detail={detail} pending={pending || !flow.ready || Boolean(flow.blocked)} onSubmit={(payload) => command(payload, "Update-ul a fost adăugat în istoric.")} /> : null}
+          <details className="rounded-lg border border-slate-700 bg-focus-navy/25"><summary className="cursor-pointer px-4 py-3 font-black text-white">Firmă și contacte</summary><div className="border-t border-slate-700 p-4"><CompanyContacts detail={detail} canEdit={canEdit} pending={pending || !flow.ready || Boolean(flow.blocked)} command={command} /></div></details>
           <section><SectionTitle title="Istoric" count={events.length} /><Timeline rows={events} /></section>
         </> : null}
       </div>
@@ -483,7 +511,7 @@ function Timeline({ rows }: { rows: any[] }) {
 }
 
 function Metric({ label, value, hint, icon, tone = "normal" }: { label: string; value: string | number; hint?: string; icon: React.ReactNode; tone?: "normal" | "danger" | "success" }) {
-  return <div className={`rounded-lg border p-4 ${tone === "danger" ? "border-red-400/30 bg-red-950/35" : tone === "success" ? "border-emerald-400/25 bg-emerald-950/25" : "border-slate-700 bg-focus-navy/40"}`}><div className="flex items-center justify-between text-slate-400"><p className="text-xs font-black uppercase">{label}</p>{icon}</div><p className="mt-3 break-words text-xl font-black text-white">{value}</p>{hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}</div>;
+  return <div className={`min-w-0 rounded-lg border p-4 ${tone === "danger" ? "border-red-400/30 bg-red-950/35" : tone === "success" ? "border-emerald-400/25 bg-emerald-950/25" : "border-slate-700 bg-focus-navy/40"}`}><div className="flex items-center justify-between text-slate-400"><p className="text-xs font-black uppercase">{label}</p>{icon}</div><p data-crm-metric-value="" data-ui-contrast="" className="mt-3 break-words text-xl font-black text-white">{value}</p>{hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}</div>;
 }
 function MiniMetric({ label, value }: { label: string; value: string }) { return <div className="rounded-md bg-white/[.035] p-3"><p className="text-xs font-black uppercase text-slate-500">{label}</p><p className="mt-1 truncate text-sm font-black text-white" title={value}>{value}</p></div>; }
 function StatusPill({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "green" | "yellow" }) { return <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-black ${tone === "green" ? "bg-emerald-400/12 text-emerald-200" : tone === "yellow" ? "bg-focus-yellow/12 text-focus-yellow" : "bg-white/[.07] text-slate-300"}`}>{children}</span>; }
@@ -492,9 +520,26 @@ function SectionTitle({ title, count }: { title: string; count: number }) { retu
 function Field({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) { return <label className={`block min-w-0 ${wide ? "sm:col-span-2" : ""}`}><span className="mb-1.5 block text-xs font-black uppercase text-slate-400">{label}</span>{children}</label>; }
 function EmptyState({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) { return <div className="rounded-lg border border-dashed border-slate-700 px-5 py-12 text-center"><span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white/5 text-focus-yellow">{icon}</span><h2 className="mt-4 font-black text-white">{title}</h2><p className="mt-1 text-sm text-slate-400">{text}</p></div>; }
 function LoadingState({ compact = false }: { compact?: boolean }) { return <div className={`flex items-center justify-center gap-3 text-sm font-bold text-slate-400 ${compact ? "py-12" : "rounded-lg border border-slate-700 py-20"}`}><Loader2 className="animate-spin text-focus-yellow" size={20} /> Se încarcă...</div>; }
-function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) { return <div className="rounded-lg border border-red-400/25 bg-red-950/25 p-5"><p className="font-bold text-red-100">{message}</p><button className={`${secondaryButton} mt-4`} onClick={onRetry} type="button">Reîncearcă</button></div>; }
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) { return <div role="alert" className="rounded-lg border border-red-400/25 bg-red-950/25 p-5"><p className="font-bold text-status-danger">{message}</p><button data-ui-contrast="" className={`${secondaryButton} mt-4`} onClick={onRetry} type="button">Reîncearcă</button></div>; }
 function Pagination({ pagination, onPage }: { pagination: WorkspaceData["pagination"]; onPage: (page: number) => void }) { return <div className="flex items-center justify-between rounded-lg border border-slate-700 bg-focus-navy/35 p-3 text-sm text-slate-300"><span>{pagination.total} înregistrări · pagina {pagination.page}/{pagination.pages}</span><span className="flex gap-2"><button className={secondaryButton} disabled={pagination.page <= 1} onClick={() => onPage(pagination.page - 1)} aria-label="Pagina anterioară"><ChevronLeft size={17} /></button><button className={secondaryButton} disabled={pagination.page >= pagination.pages} onClick={() => onPage(pagination.page + 1)} aria-label="Pagina următoare"><ChevronRight size={17} /></button></span></div>; }
-function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) { return <div className="fixed inset-0 z-[95] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true"><EscapeCloseHandler onClose={onClose} /><div className="max-h-[95vh] w-full max-w-2xl overflow-y-auto rounded-t-lg border border-slate-700 bg-focus-navy p-4 shadow-2xl sm:rounded-lg sm:p-6"><div className="mb-5 flex items-center justify-between gap-4"><h2 className="text-xl font-black text-white">{title}</h2><button className="rounded-md p-2 text-slate-300 hover:bg-white/10" onClick={onClose} type="button" aria-label="Închide"><X size={21} /></button></div>{children}</div></div>; }
+function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) { const titleId = useId(); return <div className="fixed inset-0 z-[95] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}><EscapeCloseHandler onClose={onClose} /><div className="max-h-[95vh] w-full min-w-0 max-w-2xl overflow-y-auto rounded-t-lg border border-slate-700 bg-focus-navy p-4 shadow-2xl sm:rounded-lg sm:p-6"><div className="mb-5 flex items-center justify-between gap-4"><h2 id={titleId} className="min-w-0 break-words text-xl font-black text-white">{title}</h2><button className="shrink-0 rounded-md p-2 text-slate-300 hover:bg-white/10" onClick={onClose} type="button" aria-label="Închide"><X size={21} /></button></div>{children}</div></div>; }
+
+function isWorkspaceData(value: unknown): value is WorkspaceData {
+  if (!value || typeof value !== "object") return false;
+  const payload = value as Partial<WorkspaceData>;
+  const summary = payload.summary;
+  return Boolean(summary && payload.records && payload.pagination
+    && Array.isArray(payload.records.actions) && Array.isArray(payload.records.prospects) && Array.isArray(payload.records.opportunities)
+    && [summary.activeProspects, summary.activeOpportunities, summary.overdue, summary.dueToday, summary.missingAction, summary.wonThisMonth].every((item) => Number.isFinite(item))
+    && summary.forecastByLevel && typeof summary.forecastByLevel === "object"
+    && [summary.forecastByLevel.pipeline, summary.forecastByLevel.possible, summary.forecastByLevel.commit].every(isCurrencyMap)
+    && [payload.pagination.page, payload.pagination.limit, payload.pagination.total, payload.pagination.pages].every((item) => Number.isFinite(item)));
+}
+
+function isCurrencyMap(value: unknown): value is Record<string, number> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && Object.values(value).every((amount) => typeof amount === "number" && Number.isFinite(amount)));
+}
 
 function readInitialUrlState() {
   if (typeof window === "undefined") return { view: "today" as View, query: "", ownerId: "", status: "", stage: "", due: "all", page: 1, selected: null as { kind: RecordKind; id: string } | null };

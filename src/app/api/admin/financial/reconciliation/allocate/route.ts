@@ -6,7 +6,7 @@ import { allocateBankTransaction } from "@/lib/financial-reconciliation-mutation
 
 const schema = z.object({
   bankTransactionId: z.string().min(1),
-  requestKey: z.string().min(8).max(160),
+  requestKey: z.string().regex(/^[A-Za-z0-9_-]{8,100}$/),
   notes: z.string().trim().max(1000).optional().nullable(),
   rememberMerchantAlias: z.boolean().optional().default(false),
   allocations: z.array(z.object({

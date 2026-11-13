@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
-import { recordAudit } from "@/lib/audit";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
 import {
   findExistingClientAccountByNormalizedName,
   findOrCreateClientAccount,
   hasClientOwnershipConflict,
-  normalizeClientName
+  normalizeClientName,
+  ClientMutationError,
+  withAuthorizedClientMutation,
+  lockClientAccounts,
+  assertClientEditable
 } from "@/lib/clients";
-import { prisma } from "@/lib/prisma";
 import { observeRoute, setObservabilityRole } from "@/lib/observability";
 import { resolveRequiredSalesOwner } from "@/lib/seller-users";
 import { getClientsPage } from "@/lib/client-campaign-workspaces";
@@ -55,58 +58,63 @@ export async function POST(request: NextRequest) {
     if (session.role === "SALES_AGENT" && input.accountOwnerUserId && input.accountOwnerUserId !== session.id) {
       return NextResponse.json({ error: "Nu poti crea client pentru alt owner." }, { status: 403, headers: noStoreHeaders });
     }
-    const existingClient = await findExistingClientAccountByNormalizedName(input.companyName);
-    const owner = await resolveRequiredSalesOwner(session, input.accountOwnerUserId ?? existingClient?.accountOwnerUserId);
-    if (hasClientOwnershipConflict(existingClient, session)) {
-      return NextResponse.json(
-        { error: "Clientul exista deja la alt owner. Cere reasignare sau merge de la COO/SUPER_ADMIN." },
-        { status: 409, headers: noStoreHeaders }
-      );
-    }
-    const client = await findOrCreateClientAccount({
-      companyName: input.companyName,
-      email: input.generalEmail,
-      phone: input.generalPhone,
-      accountOwnerUserId: owner.id
-    }, session);
-    if (!client) throw new Error("Clientul nu a putut fi creat.");
-    const canIntentionallyReassign = ["SUPER_ADMIN", "COO"].includes(session.role);
-    const nextOwnerUserId = existingClient
-      ? canIntentionallyReassign && input.accountOwnerUserId !== undefined
-        ? owner.id
-        : client.accountOwnerUserId
-      : owner.id;
-    const updated = await prisma.clientAccount.update({
-      where: { id: client.id },
-      data: {
+    return await withAuthorizedClientMutation(session, [], async (tx) => {
+      const candidate = await findExistingClientAccountByNormalizedName(input.companyName, tx);
+      if (candidate) await lockClientAccounts(tx, [candidate.id]);
+      const existingClient = candidate ? await tx.clientAccount.findUnique({ where: { id: candidate.id } }) : null;
+      if (existingClient?.status === "merged") throw new ClientMutationError("Clientul a fost combinat. Reia cautarea.", 409);
+      if (hasClientOwnershipConflict(existingClient, session)) {
+        return NextResponse.json(
+          { error: "Clientul exista deja la alt owner. Cere reasignare sau merge de la COO/SUPER_ADMIN." },
+          { status: 409, headers: noStoreHeaders }
+        );
+      }
+      if (existingClient) assertClientEditable(existingClient, session);
+      const owner = await resolveRequiredSalesOwner(session, input.accountOwnerUserId ?? existingClient?.accountOwnerUserId, tx);
+      const client = await findOrCreateClientAccount({
         companyName: input.companyName,
-        normalizedName: normalizeClientName(input.companyName),
-        status: input.status && input.status !== "archived" ? input.status : "active",
-        taxId: input.taxId,
-        clientType: input.clientType || "direct_client",
-        registryNumber: input.registryNumber,
-        billingAddress: input.billingAddress,
-        generalEmail: input.generalEmail,
-        generalPhone: input.generalPhone,
-        website: input.website,
-        accountOwnerUserId: nextOwnerUserId,
-        notes: input.notes
-      },
-      include: { accountOwner: { select: { id: true, name: true, email: true, role: true } } }
+        email: input.generalEmail,
+        phone: input.generalPhone,
+        accountOwnerUserId: owner.id
+      }, session, tx);
+      if (!client) throw new Error("Clientul nu a putut fi creat.");
+      const canIntentionallyReassign = ["SUPER_ADMIN", "COO"].includes(session.role);
+      const nextOwnerUserId = existingClient
+        ? canIntentionallyReassign && input.accountOwnerUserId !== undefined
+          ? owner.id
+          : client.accountOwnerUserId
+        : owner.id;
+      const updated = await tx.clientAccount.update({
+        where: { id: client.id },
+        data: {
+          companyName: input.companyName,
+          normalizedName: normalizeClientName(input.companyName),
+          status: input.status && input.status !== "archived" ? input.status : "active",
+          taxId: input.taxId,
+          clientType: input.clientType || "direct_client",
+          registryNumber: input.registryNumber,
+          billingAddress: input.billingAddress,
+          generalEmail: input.generalEmail,
+          generalPhone: input.generalPhone,
+          website: input.website,
+          accountOwnerUserId: nextOwnerUserId,
+          notes: input.notes
+        },
+        include: { accountOwner: { select: { id: true, name: true, email: true, role: true } } }
+      });
+      await recordTransactionalAudit(tx, {
+        actor: session,
+        action: "client.upsert",
+        entityType: "client_account",
+        entityId: updated.id,
+        metadata: { companyName: input.companyName, previousOwnerUserId: existingClient?.accountOwnerUserId || null, nextOwnerUserId: updated.accountOwnerUserId },
+      });
+      return NextResponse.json({ client: updated }, { status: 201, headers: noStoreHeaders });
     });
-    await recordAudit({
-      actor: session,
-      action: "client.upsert",
-      entityType: "client_account",
-      entityId: updated.id,
-      metadata: { companyName: input.companyName },
-      request
-    });
-    return NextResponse.json({ client: updated }, { status: 201, headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Clientul nu a putut fi salvat." },
-      { status: 400, headers: noStoreHeaders }
+      { status: error instanceof ClientMutationError ? error.status : 400, headers: noStoreHeaders }
     );
   }
 }

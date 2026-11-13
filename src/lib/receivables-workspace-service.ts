@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { money, receivableStatus } from "@/lib/receivables-domain";
 import { deriveCampaignEffectiveStatus } from "@/lib/campaigns/campaign-effective-status";
+import { receivableNetAmount, receivableAdjustmentTotal } from "@/lib/receivable-adjustments";
 import { receivableOwnershipWhere } from "@/lib/receivables-ownership";
 
 const SETTLED_TOLERANCE = new Prisma.Decimal("0.01");
@@ -63,6 +64,7 @@ export async function listReceivableRegistry(input: ReceivableRegistryInput = {}
         clientName: true,
         dueDate: true,
         invoicedAmount: true,
+        rawRowJson: true,
         collectedAmount: true,
         remainingAmount: true,
         collectedAt: true,
@@ -99,13 +101,16 @@ export async function listReceivableRegistry(input: ReceivableRegistryInput = {}
       collectedAt: iso(row.collectedAt),
       updatedAt: row.updatedAt.toISOString(),
       invoicedAmount: decimalString(row.invoicedAmount),
+      netInvoiceAmount: receivableNetAmount(row.invoicedAmount, row.rawRowJson).toFixed(2),
+      adjustmentTotal: receivableAdjustmentTotal(row.rawRowJson).toFixed(2),
+      rawRowJson: undefined,
       collectedAmount: decimalString(row.collectedAmount),
       remainingAmount: decimalString(row.remainingAmount),
       responsibleUser: row.client?.accountOwner
         ? { id: row.client.accountOwner.id, name: row.client.accountOwner.name }
         : null,
       status: receivableStatus({
-        invoiceAmount: row.invoicedAmount,
+        invoiceAmount: receivableNetAmount(row.invoicedAmount, row.rawRowJson),
         collectedAmount: row.collectedAmount,
         dueDate: row.dueDate,
         now: today
@@ -404,7 +409,7 @@ export async function listReceivableReconciliation(input: { category?: string; p
 }
 
 export async function searchReceivableOptions(input: {
-  type: "clients" | "campaigns" | "locations" | "receivables";
+  type: "clients" | "campaigns" | "locations" | "receivables" | "fiscal_documents";
   query?: string;
   clientId?: string;
   selectedId?: string;
@@ -464,7 +469,7 @@ export async function searchReceivableOptions(input: {
   }
   const items = await prisma.financialReceivable.findMany({
     where: {
-      includedInReport: true,
+      ...(input.type === "fiscal_documents" ? { upload: { status: "confirmed" } } : { includedInReport: true }),
       ...(query ? { OR: [{ invoiceNumber: { contains: query } }, { clientName: { contains: query } }] } : {})
     },
     select: { id: true, invoiceNumber: true, clientName: true, currency: true, invoicedAmount: true },

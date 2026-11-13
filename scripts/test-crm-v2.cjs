@@ -200,7 +200,8 @@ function sourceArchitectureRules() {
   }
   assert(service.includes("prisma.$transaction"), "CRM mutations must be transactional");
   assert(service.includes("maxWait: 10_000") && service.includes("timeout: 30_000"), "CRM transactions need an explicit timeout for remote DB latency");
-  assert(commands.includes("CRM_TEMPORARY_DATABASE_DELAY"), "temporary database failures must return a safe CRM error");
+  assert(commands.includes("CRM_COMMAND_OUTCOME_UNKNOWN") && commands.includes("verify_before_retry"), "temporary database failures must require outcome verification before any retry");
+  assert(!commands.includes("Datele nu au fost salvate partial"), "an uncertain outcome must not claim rollback");
   assert(!commands.includes('return NextResponse.json({ error: error instanceof Error ? error.message'), "raw Prisma errors must not be exposed to CRM users");
   assert(commands.includes("crm_notification_resolution_failed"), "post-commit notification failure must not report the CRM command as failed");
   assert.deepEqual(vercelConfig.regions, ["fra1"], "Vercel functions must run near the Amsterdam database");

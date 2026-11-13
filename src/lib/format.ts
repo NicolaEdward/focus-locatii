@@ -1,4 +1,5 @@
 import slugify from "slugify";
+import { isDigitalLocationType } from "@/lib/location-medium";
 
 export function money(value?: number | null, fallback?: string | null) {
   if (fallback && !value) return fallback;
@@ -37,11 +38,12 @@ export function sqm(value?: number | null) {
   return `${new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 }).format(value)} sqm`;
 }
 
-export const MEDIA_TYPE_OPTIONS = ["Autocolant", "Mesh", "Panou", "Pasarela", "Pod", "Pasaj", "Blockout", "Prisma"] as const;
+export const MEDIA_TYPE_OPTIONS = ["Autocolant", "Mesh", "Panou", "Pasarela", "Pod", "Pasaj", "Blockout", "Prisma", "Digital"] as const;
 
 export type MediaType = (typeof MEDIA_TYPE_OPTIONS)[number];
 
 export function normalizeMediaType(value?: string | null, ...context: Array<string | null | undefined>): MediaType | null {
+  if (isDigitalLocationType(value) || (!value?.trim() && isDigitalLocationType(context[0]))) return "Digital";
   const source = [value, ...context].filter(Boolean).join(" ").toLowerCase();
   if (!source.trim()) return null;
 

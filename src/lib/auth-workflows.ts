@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { authActionTokenHash, findUsableAuthActionToken, issueAuthActionToken } from "@/lib/auth-action-tokens";
+import { authActionTokenHash, findUsableAuthActionToken, issueAuthActionToken, invalidatePendingMfaChallenges } from "@/lib/auth-action-tokens";
 import { hashPassword } from "@/lib/auth";
 import { assertRoleAssignmentAllowed, isUserRole, type UserRole } from "@/lib/rbac";
 import { authEmailCapability, authLink, sendAuthEmail } from "@/lib/transactional-email";
-import { revokeAllAuthSessions } from "@/lib/auth-sessions";
+import { recordTransactionalAudit } from "@/lib/transactional-audit";
 
 const passwordSchema = z.string().min(12).max(128);
 const inviteSchema = z.object({
@@ -117,22 +117,31 @@ export async function resetPasswordWithToken(token: string, passwordInput: unkno
   if (!reset?.userId) throw new Error("Linkul de resetare este invalid sau a expirat.");
   const passwordHash = await hashPassword(password);
   const user = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM portfolio_users WHERE id = ${reset.userId!} FOR UPDATE`;
     const consumed = await tx.authActionToken.updateMany({
       where: { id: reset.id, usedAt: null, expiresAt: { gt: new Date() } },
       data: { usedAt: new Date() }
     });
     if (consumed.count !== 1) throw new Error("Linkul a fost deja utilizat.");
-    return tx.user.update({
+    const updated = await tx.user.update({
       where: { id: reset.userId! },
       data: { passwordHash, tokenVersion: { increment: 1 } },
       select: { id: true, email: true, name: true, role: true, tokenVersion: true }
     });
+    await invalidatePendingMfaChallenges(tx, updated.id);
+    await tx.authSessionRecord.updateMany({ where: { userId: updated.id, revokedAt: null }, data: { revokedAt: new Date() } });
+    await recordTransactionalAudit(tx, { actor: updated, action: "auth.password.reset.complete", entityType: "user", entityId: updated.id, metadata: { sessionsRevoked: true } });
+    return updated;
   });
-  await revokeAllAuthSessions(user.id);
   return user;
 }
 
 export function syntheticAuthFlowAllowed() {
+  // A copied preview setting must never expose reset/invitation links in a
+  // production deployment. NODE_ENV=production alone is also denied when the
+  // deployment environment is unknown; Vercel preview builds remain supported.
+  if (process.env.VERCEL_ENV === "production") return false;
+  if (process.env.NODE_ENV === "production" && process.env.VERCEL_ENV !== "preview") return false;
   return process.env.APP_ENV === "preview" && process.env.ALLOW_SYNTHETIC_SEED === "true";
 }
 

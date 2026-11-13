@@ -59,6 +59,8 @@ assert(!legacySyncRoute.includes("syncLegacyReservations"), "retired route must 
 
 const notesOnlyBlock = blockFrom(commandCenterRoute, 'input.action === "approveException"', 'input.action === "createTask"');
 assert(notesOnlyBlock.includes("productionNotes"), "command-center exception/resolution branch must be productionNotes-only");
+assert(notesOnlyBlock.includes("appendReservationGroupProductionNote"), "command-center notes must use the authorized audited group domain helper");
+assert(!/prisma\.reservation\.(update|updateMany)\s*\(/.test(notesOnlyBlock), "command-center notes cannot bypass the transaction audit");
 for (const forbiddenField of ["status", "locationId", "periodStart", "periodEnd", "sellerUserId", "ownerId", "clientId", "campaignId"]) {
   assert(
     !new RegExp(`\\b${forbiddenField}\\s*:`).test(notesOnlyBlock),
@@ -74,7 +76,7 @@ console.log(JSON.stringify({
     "client merge updates reservation denormalized client fields",
     "client merge preserves reservation availability fields",
     "legacy sync writer retained as history but runtime route retired",
-    "command-center direct write classified as notes-only"
+    "command-center notes-only write uses authorized audited group command"
   ]
 }, null, 2));
 

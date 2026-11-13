@@ -1,5 +1,8 @@
 "use client";
 
+import { canConfirmReservation } from "@/lib/reservation-workflow";
+import { canDefaultSalesOwnerToActor } from "@/lib/sales-roles";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -274,14 +277,15 @@ export function AdminReservationsPanel({
   const focusedReservationId = focusedReservationIdProp || searchParams.get("reservationId");
   const requestedPanel = panelFromQuery(searchParams.get("panel"));
   const shouldFocusNewReservation = searchParams.get("newReservation") === "1";
-  const initialForm = { ...emptyForm, salesperson: session.name, sellerUserId: session.id };
+  const requiresExplicitSeller = !canDefaultSalesOwnerToActor(session.role);
+  const initialForm = { ...emptyForm, salesperson: requiresExplicitSeller ? "" : session.name, sellerUserId: requiresExplicitSeller ? "" : session.id };
   const canAssignOtherSeller = ["SALES_DIRECTOR", "COO", "SUPER_ADMIN"].includes(session.role);
-  const canApproveReservations = hasPermission(session.role, "proposals.approve") || session.role === "COO" || session.role === "SUPER_ADMIN";
+  const canApproveReservations = canConfirmReservation(session.role);
   const canUpdateOperationStatus = hasPermission(session.role, "campaigns.operate");
   const canManageLeads = hasAnyPermission(session.role, ["leads.manage", "leads.manage.own"]);
   const canEditReservations = hasAnyPermission(session.role, ["reservations.manage", "reservations.manage.own"]);
   const shouldLoadReservationOptions = !isOperationalWorkspace && canEditReservations && focusedAction !== "cancel";
-  const canCreateBookedReservation = canEditReservations || canApproveReservations;
+  const canCreateBookedReservation = canApproveReservations;
   const canEditOperationTask = useCallback(
     (reservation: ReservationDTO) => canEditOperationalReservation(reservation, session),
     [session]
@@ -305,7 +309,7 @@ export function AdminReservationsPanel({
   const [editCampaigns, setEditCampaigns] = useState<CampaignOption[]>([]);
   const [clientSearch, setClientSearch] = useState("");
   const [editClientSearch, setEditClientSearch] = useState("");
-  const [assignOtherSeller, setAssignOtherSeller] = useState(false);
+  const [assignOtherSeller, setAssignOtherSeller] = useState(requiresExplicitSeller);
   const [locationSearch, setLocationSearch] = useState("");
   const [reservationSearch, setReservationSearch] = useState("");
   const [reservationSort, setReservationSort] = useState<ReservationListSort>("created");
@@ -743,7 +747,7 @@ export function AdminReservationsPanel({
 
   function resetReservationForm() {
     setForm(initialForm);
-    setAssignOtherSeller(false);
+    setAssignOtherSeller(requiresExplicitSeller);
     setResetConfirmOpen(false);
   }
 
@@ -778,8 +782,8 @@ export function AdminReservationsPanel({
         installationDate: form.status === "BOOKED" && form.needsDecoration ? form.periodStart : null,
         neutralizationDate: form.status === "BOOKED" ? form.periodEnd : null,
         productionNotes,
-        sellerUserId: assignOtherSeller ? form.sellerUserId : session.id,
-        salesperson: assignOtherSeller
+        sellerUserId: (requiresExplicitSeller || assignOtherSeller) ? form.sellerUserId : session.id,
+        salesperson: (requiresExplicitSeller || assignOtherSeller)
           ? sellers.find((seller) => seller.id === form.sellerUserId)?.name || form.salesperson
           : session.name,
         locationId: form.locationIds[0],
@@ -1259,12 +1263,12 @@ export function AdminReservationsPanel({
   });
 
   return (
-    <section className="grid scroll-mt-28 gap-5" id="rezervari-workspace">
-      <div className="focus-card rounded-lg p-5">
+    <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] scroll-mt-28 gap-5" id="rezervari-workspace">
+      <div className="focus-card min-w-0 max-w-full rounded-lg p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs font-black uppercase text-focus-yellow">{isOperationalWorkspace ? "Workflow operational OOH" : "Ocupare locatii OOH"}</p>
-            <h2 className="font-display text-3xl font-black uppercase text-white">
+            <h2 className="break-words font-display text-2xl font-black uppercase text-white sm:text-3xl">
               {isOperationalWorkspace ? "Decorari, neutralizari si implementare" : "Rezervari si HOLD-uri"}
             </h2>
           </div>
@@ -1451,6 +1455,7 @@ export function AdminReservationsPanel({
                 Un HOLD blocheaza temporar locatia timp de 5 zile. O rezervare confirmata cere client si campanie reale, ca facturarea si operatiunile sa fie legate corect.
               </p>
               <SellerAssignmentField
+                requiresExplicitSeller={requiresExplicitSeller}
                 canAssignOtherSeller={canAssignOtherSeller}
                 checked={assignOtherSeller}
                 onCheckedChange={(checked) => {
@@ -1617,7 +1622,7 @@ export function AdminReservationsPanel({
             />
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button className="focus-button" type="button" onClick={createReservation} disabled={saving || Boolean(reservationFormPeriodError) || (form.status === "BOOKED" && (!form.clientId || !form.campaignId))}>
+              <button className="focus-button" type="button" onClick={createReservation} disabled={saving || Boolean(reservationFormPeriodError) || ((requiresExplicitSeller || assignOtherSeller) && !form.sellerUserId) || (form.status === "BOOKED" && (!form.clientId || !form.campaignId))}>
                 <Save size={18} />
                 {saving ? "Se salveaza..." : selectedLocations.length > 1 ? "Salveaza contract grupat" : "Salveaza rezervarea"}
               </button>
@@ -3696,6 +3701,7 @@ function MiniStat({
 }
 
 function SellerAssignmentField({
+  requiresExplicitSeller,
   canAssignOtherSeller,
   checked,
   onCheckedChange,
@@ -3704,6 +3710,7 @@ function SellerAssignmentField({
   value,
   onChange
 }: {
+  requiresExplicitSeller: boolean;
   canAssignOtherSeller: boolean;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
@@ -3718,11 +3725,11 @@ function SellerAssignmentField({
         <div className="grid gap-2">
           <span className="text-sm font-bold">Vanzator</span>
           <div className="focus-input bg-focus-navy/60">
-            {checked ? value || "Alege vanzatorul" : sellerName}
+            {checked ? sellers.find((seller) => seller.id === value)?.name || "Alege vanzatorul" : sellerName}
           </div>
-          <p className="text-xs font-bold text-slate-400">Se seteaza automat din contul autentificat.</p>
+          <p className="text-xs font-bold text-slate-400">{requiresExplicitSeller ? "Alege explicit responsabilul comercial." : "Se seteaza automat din contul autentificat."}</p>
         </div>
-        {canAssignOtherSeller ? (
+        {canAssignOtherSeller && !requiresExplicitSeller ? (
           <label className="flex items-center justify-between gap-3 rounded-lg border border-focus-line bg-focus-navy/35 px-3 py-2 text-sm font-bold text-slate-200">
             Atribuie catre alt vanzator
             <input type="checkbox" checked={checked} onChange={(event) => onCheckedChange(event.target.checked)} />

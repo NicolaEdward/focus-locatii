@@ -66,10 +66,10 @@ let checkpoint = "browser startup";
     await page.unroute("**/api/admin/contract-control?*");
     await page.getByRole("button", { name: "Actualizează", exact: true }).click();
     await page.getByRole("heading", { name: sourceHeading, exact: true }).waitFor();
-    assert.equal(await page.getByRole("alert").count(), 0);
+    assert.equal(await page.getByRole("alert").filter({ hasText: "Raport indisponibil pentru verificarea sintetică." }).count(), 0, "The injected source error disappears after a successful reload; Next route announcements remain allowed.");
     assert.deepEqual(runtimeErrors, []);
     console.log(JSON.stringify({ ok: true, checks: 5, screenshots: 3, portfolio: "own", sourceState: report.source.state,
       covered: ["authentic role login", "read-only source status", "empty search honesty", "network failure without zero KPIs", "recovery and mobile layout"],
       externalMessages: 0, productionWrites: 0 }));
   } finally { await browser?.close(); }
-})().catch(() => { console.error("Workspace states browser verification failed at: " + checkpoint); process.exitCode = 1; });
+})().catch((error) => { console.error("Workspace states browser verification failed at: " + checkpoint + " · " + String(error?.message || "Unknown failure").slice(0, 1000)); process.exitCode = 1; });

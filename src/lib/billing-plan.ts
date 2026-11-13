@@ -4,8 +4,8 @@ import type { AuthSession } from "@/lib/auth";
 import {
   billingFrequencies,
   billingRules,
-  calculateBillingItems,
 } from "@/lib/billing";
+import { amountForPriceIntervals, calculateSegmentedBillingItems, combinePriceIntervals, getValidatedPriceIntervals } from "@/lib/segmented-billing";
 import { companyCodeForEntity } from "@/lib/company-entities";
 import { prisma } from "@/lib/prisma";
 import { hasAnyPermission } from "@/lib/rbac";
@@ -142,6 +142,7 @@ export async function generateBillingPlan(input: {
       });
       const reservations = await tx.reservation.findMany({
         where: { campaignId: input.campaignId, status: "BOOKED" },
+        include: { priceSegments: { orderBy: [{ effectiveFrom: "asc" }, { id: "asc" }] } },
         orderBy: { id: "asc" },
         take: 501,
       });
@@ -158,10 +159,10 @@ export async function generateBillingPlan(input: {
       const draftsByReservation = new Map(
         reservations.map((row) => [
           row.id,
-          calculateBillingItems({
+          calculateSegmentedBillingItems({
             ...row,
             monthlyAmount: row.monthlyRentShare ?? row.amount ?? 0,
-          }),
+          }, row.priceSegments),
         ]),
       );
       const groups = new Map<string, typeof reservations>();
@@ -171,14 +172,12 @@ export async function generateBillingPlan(input: {
       }
       for (const group of groups.values()) {
         if (group.length < 2) continue;
-        const totalRent = group.reduce(
-          (sum, row) => sum.plus(row.monthlyRentShare ?? row.amount ?? 0),
-          new Prisma.Decimal(0),
-        );
-        const targetDrafts = calculateBillingItems({
-          ...group[0],
-          monthlyAmount: totalRent.toNumber(),
-        });
+        const groupIntervals = combinePriceIntervals(group.map((row) => {
+          const schedule = getValidatedPriceIntervals({ ...row, monthlyAmount: row.monthlyRentShare ?? row.amount ?? 0 }, row.priceSegments);
+          if (!schedule.valid) throw new Error("Istoricul prețurilor grupului necesită reconciliere înainte de facturare.");
+          return schedule.intervals;
+        }));
+        const targetDrafts = draftsByReservation.get(group[0].id) || [];
         for (let index = 0; index < targetDrafts.length; index++) {
           const actual = group.reduce(
             (sum, row) =>
@@ -186,7 +185,7 @@ export async function generateBillingPlan(input: {
             new Prisma.Decimal(0),
           );
           const remainder = new Prisma.Decimal(
-            targetDrafts[index].amount,
+            amountForPriceIntervals(groupIntervals, targetDrafts[index].billingPeriodStart, targetDrafts[index].billingPeriodEnd),
           ).minus(actual);
           const firstDraft = draftsByReservation.get(group[0].id)?.[index];
           if (firstDraft)
@@ -243,6 +242,9 @@ export async function generateBillingPlan(input: {
         }
         const drafts = draftsByReservation.get(reservation.id) || [];
         for (const draft of drafts) {
+          // Retain zero-rounded calendars until shared contractual rounding has
+          // been distributed; zero-value rows themselves are not invoices.
+          if (draft.amount <= 0) continue;
           const key = `${reservation.id}|${draft.billingPeriodStart.toISOString()}|${draft.billingPeriodEnd.toISOString()}`;
           const id = `billing-${createHash("sha256").update(key).digest("hex").slice(0, 32)}`;
           retained.add(id);

@@ -16,3 +16,7 @@ if (process.env.RUN_INVENTORY_AVAILABILITY_DIAGNOSTICS === 'true') {
   const inventory = spawnSync(process.execPath,[require.resolve('tsx/cli'),'scripts/release/snapshot-inventory-availability.ts'],{stdio:'inherit',env:process.env,timeout:60000});
   if (inventory.status !== 0) process.exitCode = inventory.status || 1;
 }
+// Off by default; the child approves its target and recipient before any SELECT.
+require('./run-reconciliation-export.cjs');
+
+require('./run-evidence-reconciliation.cjs');

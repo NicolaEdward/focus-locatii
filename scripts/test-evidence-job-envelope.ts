@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import { decryptEvidenceJob, encryptEvidenceJob, evidenceJobHash } from "./release/evidence-job-envelope";
+const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, syntheticOnly: true }));
+const key = crypto.randomBytes(32);
+const envelope = encryptEvidenceJob(bytes, key);
+assert.deepEqual(decryptEvidenceJob(envelope, key.toString("base64"), evidenceJobHash(bytes)), JSON.parse(bytes.toString()));
+assert.throws(() => decryptEvidenceJob(envelope, crypto.randomBytes(32).toString("base64"), evidenceJobHash(bytes)));
+assert.throws(() => decryptEvidenceJob(envelope, key.toString("base64"), "0".repeat(64)), /HASH_MISMATCH/);
+assert.throws(() => decryptEvidenceJob({ ...envelope, tag: crypto.randomBytes(16).toString("base64") }, key.toString("base64"), evidenceJobHash(bytes)));
+assert.throws(() => decryptEvidenceJob({ ...envelope, unknown: true }, key.toString("base64"), evidenceJobHash(bytes)), /ENVELOPE_INVALID/);
+assert.throws(() => decryptEvidenceJob(envelope, undefined, evidenceJobHash(bytes)), /KEY_OR_HASH_REQUIRED/);
+assert.throws(() => encryptEvidenceJob(bytes, Buffer.alloc(2)), /LIMIT/);
+console.log(JSON.stringify({ passed: true, checked: ["roundtrip", "wrong recipient key", "wrong manifest hash", "tamper", "unexpected envelope field", "missing approval", "invalid key length"] }));

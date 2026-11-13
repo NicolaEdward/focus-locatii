@@ -11,5 +11,6 @@ __pycache__/
 *.pyc
 artifacts/
 backups/
+.reconciliation-job/
 .pnpm-store/
 coverage/

@@ -22,30 +22,30 @@ Portal operational pentru inventarul OOH Focus Media, disponibilitate, solicitar
 ## Pornire locala
 
 1. Copiaza `.env.local.example` in `.env.local` si completeaza valorile.
-2. Ruleaza `npm install`.
-3. Ruleaza `npm run db:generate`.
-4. Ruleaza migrarile aditive: `npm run db:migrate-reservation-workflow`, `npm run db:migrate-reservation-timeline`, `npm run db:migrate-rbac`.
-5. Ruleaza `npm run dev`.
+2. Ruleaza `corepack pnpm install --frozen-lockfile`.
+3. Ruleaza `pnpm run db:generate`.
+4. Ruleaza migrarile aditive: `pnpm run db:migrate-reservation-workflow`, `pnpm run db:migrate-reservation-timeline`, `pnpm run db:migrate-rbac`.
+5. Ruleaza `pnpm run dev`.
 
 Nu folosi `prisma db push` pe baza existenta. Aplicatia foloseste tabelele `portfolio_*`, iar migrarile incluse sunt aditive.
 
 ## Verificari
 
 ```bash
-npm run typecheck
-npm run test:availability
-npm run test:prorata
-npm run test:rbac
-npm run build
-npm run smoke
-npm run smoke:visual
+pnpm run typecheck
+pnpm run test:availability
+pnpm run test:prorata
+pnpm run test:rbac
+pnpm run build
+pnpm run smoke
+pnpm run smoke:visual
 ```
 
 Proiectul nu are inca ESLint configurat separat. `next build` ruleaza validarea de tipuri si verificarile de build; introducerea ESLint este recomandata in etapa urmatoare.
 
 ## Cont initial
 
-`npm run db:migrate-rbac` creeaza primul `SUPER_ADMIN` numai daca tabela de utilizatori este goala. Citeste `BOOTSTRAP_ADMIN_EMAIL` si `BOOTSTRAP_ADMIN_PASSWORD`, cu fallback temporar la `ADMIN_EMAIL` si `ADMIN_PASSWORD`. Dupa prima autentificare, conturile se gestioneaza din `/admin/utilizatori`.
+`pnpm run db:migrate-rbac` creeaza primul `SUPER_ADMIN` numai daca tabela de utilizatori este goala. Citeste `BOOTSTRAP_ADMIN_EMAIL` si `BOOTSTRAP_ADMIN_PASSWORD`, cu fallback temporar la `ADMIN_EMAIL` si `ADMIN_PASSWORD`. Dupa prima autentificare, conturile se gestioneaza din `/admin/utilizatori`.
 
 Nu salva parole reale in repository. Dupa bootstrap, elimina variabilele de parola initiala din Vercel si roteste orice credential transmis anterior in clar.
 

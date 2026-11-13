@@ -494,11 +494,11 @@ function defaultCampaignDetails(location: { installationRemoval?: string | null 
   return [location.installationRemoval || "Montare/neutralizare disponibile", "Productie la cerere"];
 }
 
-export async function getOrCreateCategory(name: string, sortOrder = 0) {
+export async function getOrCreateCategory(name: string, sortOrder = 0, db: Pick<typeof prisma, "category"> = prisma) {
   const cleanName = name.trim() || "General";
   const slug = makeSlug(cleanName);
 
-  return prisma.category.upsert({
+  return db.category.upsert({
     where: { slug },
     update: { name: cleanName, sortOrder },
     create: { name: cleanName, slug, sortOrder }

@@ -102,5 +102,18 @@ export const locationInputSchema = z.object({
 });
 
 export const locationPatchSchema = locationInputSchema.partial().extend({
-  categoryName: z.string().min(1).optional()
+  categoryName: z.string().min(1).optional(),
+  // Zod 4 applies defaults even within optional fields. PATCH omission must
+  // preserve stored values instead of reapplying CREATE defaults.
+  status: locationStatusSchema.optional(),
+  lifecycleStatus: locationLifecycleStatusSchema.optional(),
+  showPricePublic: z.boolean().optional(),
+  showInstallationCostPublic: z.boolean().optional(),
+  showInPublic: z.boolean().optional(),
+  isPremium: z.boolean().optional(),
+  isFeatured: z.boolean().optional(),
+  gpsAuditStatus: gpsAuditStatusSchema.optional(),
+  benefits: z.array(z.string()).optional(),
+  mediaDetails: z.array(z.string()).optional(),
+  campaignDetails: z.array(z.string()).optional()
 });

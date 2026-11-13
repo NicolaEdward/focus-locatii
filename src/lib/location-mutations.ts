@@ -6,47 +6,51 @@ import { getOrCreateCategory, listAdminLocations } from "@/lib/locations";
 import { locationInputSchema, locationPatchSchema } from "@/lib/validation";
 
 export async function createLocation(input: unknown) {
+  return prisma.$transaction((tx) => createLocationInTransaction(tx, input));
+}
+
+export async function createLocationInTransaction(tx: PrismaTransaction, input: unknown) {
   const parsed = locationInputSchema.parse(input);
-  const category = await getOrCreateCategory(parsed.categoryName);
+  const category = await getOrCreateCategory(parsed.categoryName, 0, tx);
   const { imageUrls, productionSketchUrl, data } = withoutCategoryNameAndImages(parsed);
   const normalizedData = normalizeLocationData(withoutLegacyAvailabilityState(data));
 
-  return prisma.$transaction(async (tx) => {
-    const location = await tx.location.create({
-      data: {
-        ...normalizedData,
-        categoryId: category.id,
-        latDisplay: parsed.latDisplay ?? parsed.latReal,
-        lngDisplay: parsed.lngDisplay ?? parsed.lngReal
-      }
-    });
-
-    await syncLocationImages(tx, location.id, imageUrls, parsed.mainPhotoUrl, productionSketchUrl);
-    return location;
+  const location = await tx.location.create({
+    data: {
+      ...normalizedData,
+      categoryId: category.id,
+      latDisplay: parsed.latDisplay ?? parsed.latReal,
+      lngDisplay: parsed.lngDisplay ?? parsed.lngReal
+    }
   });
+
+  await syncLocationImages(tx, location.id, imageUrls, parsed.mainPhotoUrl, productionSketchUrl);
+  return location;
 }
 
 export async function updateLocation(id: string, input: unknown) {
+  return prisma.$transaction((tx) => updateLocationInTransaction(tx, id, input));
+}
+
+export async function updateLocationInTransaction(tx: PrismaTransaction, id: string, input: unknown) {
   const parsed = locationPatchSchema.parse(input);
-  const category = parsed.categoryName ? await getOrCreateCategory(parsed.categoryName) : null;
+  const category = parsed.categoryName ? await getOrCreateCategory(parsed.categoryName, 0, tx) : null;
   const { imageUrls, productionSketchUrl, data } = withoutCategoryNameAndImages(parsed);
   const normalizedData = normalizeLocationData(withoutLegacyAvailabilityState(data));
 
-  return prisma.$transaction(async (tx) => {
-    const location = await tx.location.update({
-      where: { id },
-      data: {
-        ...normalizedData,
-        ...(category ? { categoryId: category.id } : {})
-      }
-    });
-
-    if (imageUrls || productionSketchUrl !== undefined) {
-      await syncLocationImages(tx, id, imageUrls, parsed.mainPhotoUrl, productionSketchUrl);
+  const location = await tx.location.update({
+    where: { id },
+    data: {
+      ...normalizedData,
+      ...(category ? { categoryId: category.id } : {})
     }
-
-    return location;
   });
+
+  if (imageUrls || productionSketchUrl !== undefined) {
+    await syncLocationImages(tx, id, imageUrls, parsed.mainPhotoUrl, productionSketchUrl);
+  }
+
+  return location;
 }
 
 export async function duplicateLocation(id: string) {
@@ -322,7 +326,7 @@ function withoutCategoryNameAndImages<T extends { categoryName?: string; imageUr
   return { imageUrls, productionSketchUrl, data };
 }
 
-function withoutLegacyAvailabilityState<T extends {
+export function withoutLegacyAvailabilityState<T extends {
   status?: unknown;
   availableFrom?: unknown;
   availableUntil?: unknown;
@@ -350,7 +354,7 @@ function withoutLegacyAvailabilityState<T extends {
   return canonicalData;
 }
 
-function normalizeLocationData<T extends { type?: string | null; categoryName?: string; address?: string | null; code?: string }>(data: T) {
+export function normalizeLocationData<T extends { type?: string | null; categoryName?: string; address?: string | null; code?: string }>(data: T) {
   if (!("type" in data)) return data;
   return {
     ...data,

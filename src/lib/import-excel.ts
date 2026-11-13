@@ -1,11 +1,9 @@
-import { prisma } from "@/lib/prisma";
 import { makeCode, normalizeMediaType, normalizeText, parseNumber, toBool } from "@/lib/format";
 import { auditCoordinates, extractCoordinatesFromMapsUrl } from "@/lib/gps";
-import { getOrCreateCategory } from "@/lib/locations";
 import { googleDriveToViewUrl } from "@/lib/photos";
 import { parseSecureSpreadsheet, type SafeSpreadsheetSheet } from "@/lib/secure-spreadsheet";
 import { locationInputSchema } from "@/lib/validation";
-import type { ImportSummary } from "@/types/location";
+import { confirmInventoryImport, inventoryPayloadHash, previewInventoryImport, InventoryImportError, type InventoryImportActor, type InventoryImportOptions } from "@/lib/inventory-import";
 
 type RowMap = Record<string, unknown>;
 
@@ -174,60 +172,24 @@ function buildInventoryPlan(sheets: SafeSpreadsheetSheet[]) {
   return plan;
 }
 
-export async function importExcel(
-  buffer: Buffer,
-  fileName: string,
-  importedBy?: string | null,
-  mimeType?: string | null,
-  signal?: AbortSignal
-): Promise<ImportSummary> {
-  const plan = await parseInventoryWorkbook({ buffer, fileName, mimeType, signal });
-  const existingLocations = await prisma.location.findMany({
-    where: { code: { in: plan.map((row) => row.code) } },
-    select: { id: true, code: true }
-  });
-  const existingByCode = new Map(existingLocations.map((location) => [location.code, location]));
-  const categories = new Map<string, Awaited<ReturnType<typeof getOrCreateCategory>>>();
+export async function previewExcelImport(input: {
+  buffer: Buffer; fileName: string; mimeType?: string | null; signal?: AbortSignal;
+  actor: InventoryImportActor; options: InventoryImportOptions;
+}) {
+  const plan = await parseInventoryWorkbook(input);
+  return previewInventoryImport({ rows: inventoryRows(plan), payloadHash: inventoryPayloadHash(input.buffer), actor: input.actor, options: input.options });
+}
 
-  const batch = await prisma.importBatch.create({ data: { fileName, importedBy: importedBy || null } });
-  let createdCount = 0;
-  let updatedCount = 0;
-  let missingGpsCount = 0;
-  let suspectGpsCount = 0;
-  let okGpsCount = 0;
+export async function confirmExcelImport(input: {
+  buffer: Buffer; fileName: string; mimeType?: string | null; signal?: AbortSignal;
+  actor: InventoryImportActor; options: InventoryImportOptions; previewToken: string;
+}) {
+  const plan = await parseInventoryWorkbook(input);
+  return confirmInventoryImport({ rows: inventoryRows(plan), payloadHash: inventoryPayloadHash(input.buffer), fileName: input.fileName, actor: input.actor, options: input.options, previewToken: input.previewToken });
+}
 
-  for (const row of plan) {
-    let category = categories.get(row.sheetName);
-    if (!category) {
-      category = await getOrCreateCategory(row.sheetName, row.sheetIndex);
-      categories.set(row.sheetName, category);
-    }
-    const existing = existingByCode.get(row.code);
-    const data = { ...row.data, categoryId: category.id };
-    const location = existing
-      ? await prisma.location.update({ where: { id: existing.id }, data })
-      : await prisma.location.create({ data });
-    if (existing) updatedCount += 1;
-    else createdCount += 1;
-
-    if (row.data.gpsAuditStatus === "MISSING") missingGpsCount += 1;
-    else if (row.data.gpsAuditStatus === "SUSPECT") suspectGpsCount += 1;
-    else okGpsCount += 1;
-
-    if (row.data.mainPhotoUrl) {
-      await prisma.image.upsert({
-        where: { id: `${location.id}-main` },
-        update: { url: row.data.mainPhotoUrl, alt: `${row.code} photo`, isMain: true },
-        create: { id: `${location.id}-main`, locationId: location.id, url: row.data.mainPhotoUrl, alt: `${row.code} photo`, isMain: true, sortOrder: 0 }
-      });
-    }
-  }
-
-  await prisma.importBatch.update({
-    where: { id: batch.id },
-    data: { totalRows: plan.length, createdCount, updatedCount, missingGpsCount, suspectGpsCount, okGpsCount }
-  });
-  return { batchId: batch.id, totalRows: plan.length, createdCount, updatedCount, missingGpsCount, suspectGpsCount, okGpsCount };
+function inventoryRows(plan: InventoryPlanRow[]) {
+  return plan.map((row) => ({ code: row.code, categoryName: row.sheetName, data: row.data, mainImage: row.data.mainPhotoUrl }));
 }
 
 export async function parseInventoryWorkbook(input: { buffer: Buffer; fileName: string; mimeType?: string | null; signal?: AbortSignal }) {
@@ -241,5 +203,9 @@ export async function parseInventoryWorkbook(input: { buffer: Buffer; fileName: 
     blankRows: true,
     signal: input.signal
   });
-  return buildInventoryPlan(workbook.sheets);
+  try { return buildInventoryPlan(workbook.sheets); }
+  catch (error) {
+    // The parser/planner only emits validation errors here, before any DB access.
+    throw new InventoryImportError(error instanceof Error ? error.message : "Fișierul nu conține inventar valid.");
+  }
 }

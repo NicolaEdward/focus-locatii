@@ -7,7 +7,14 @@ import { approvedSourcePath, canonicalDocumentValue, canonicalSourcePath, docume
 
 export const documentAuditHeaders = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 const options = { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 5000, timeout: 30000 };
+const scanLeaseMilliseconds = 15 * 60 * 1000;
+const clearedScanLease = { activeScanId: null, activeScanStartedAt: null, activeScanObservedAt: null, activeScanLeaseUntil: null };
 type Tx = Prisma.TransactionClient;
+export type DocumentIngestReceipt = {
+  sourceId: string; scanId: string; observedAt: string; payloadHash: string; batchAccepted: boolean; ignoredReason?: string;
+  newDocuments: number; newVersions: number; unchanged: number; staleIgnored: number; missingFiles: number;
+  scanCompletionAccepted: boolean; binariesStored: false; verifiedFactsImported: 0; replayed: boolean;
+};
 
 export async function assertDocumentAuditReader(actor: AuthSession) {
   if (!actor || !mayReadDocumentAudit(actor.role)) throw new DocumentAuditError("Dosarele NAS nealocate sunt vizibile numai conducerii autorizate.", 403, "DOCUMENT_AUDIT_FORBIDDEN");
@@ -53,7 +60,7 @@ export async function updateDocumentSource(raw: unknown, actor: AuthSession) {
     await tx.$queryRaw`SELECT id FROM portfolio_document_audit_sources WHERE id = ${input.id} FOR UPDATE`;
     const source = await tx.documentAuditSource.findUnique({ where: { id: input.id } });
     if (!source || source.version !== input.expectedVersion) throw new DocumentAuditError("Configurația s-a schimbat. Reîncarcă înainte de salvare.", 409, "DOCUMENT_SOURCE_VERSION_CONFLICT");
-    await tx.documentAuditSource.update({ where: { id: source.id }, data: { ...input.configuration, baseReference, allowedPathPrefixes: prefixes, state: input.state, ingestTokenHash: null, tokenIssuedAt: null, lastCompletedScanAt: null, lastCompletedScanId: null, version: { increment: 1 } } });
+    await tx.documentAuditSource.update({ where: { id: source.id }, data: { ...input.configuration, ...clearedScanLease, baseReference, allowedPathPrefixes: prefixes, state: input.state, ingestTokenHash: null, tokenIssuedAt: null, lastCompletedScanAt: null, lastCompletedScanId: null, version: { increment: 1 } } });
     await recordTransactionalAudit(tx, { actor: current, action: "document_source.configuration_changed", entityType: "document_source", entityId: source.id, metadata: { version: source.version + 1, state: input.state, textIndexConsent: input.configuration.indexTextEnabled, previousDelegationRevoked: true } });
     return { id: source.id, newBridgeKeyRequired: true };
   }, options);
@@ -68,7 +75,7 @@ export async function issueDocumentIngestKey(raw: unknown, actor: AuthSession) {
     await tx.$queryRaw`SELECT id FROM portfolio_document_audit_sources WHERE id = ${input.sourceId} FOR UPDATE`;
     const source = await tx.documentAuditSource.findUnique({ where: { id: input.sourceId } });
     if (!source || source.state !== "active" || source.version !== input.expectedVersion) throw new DocumentAuditError("Sursa trebuie să fie activă și configurația actuală.", 409, "DOCUMENT_SOURCE_VERSION_CONFLICT");
-    await tx.documentAuditSource.update({ where: { id: source.id }, data: { ingestTokenHash: documentHash(value), tokenIssuedAt: new Date(), ownerUserId: current.id, ownerTokenVersion: current.tokenVersion, version: { increment: 1 } } });
+    await tx.documentAuditSource.update({ where: { id: source.id }, data: { ...clearedScanLease, ingestTokenHash: documentHash(value), tokenIssuedAt: new Date(), ownerUserId: current.id, ownerTokenVersion: current.tokenVersion, version: { increment: 1 } } });
     await recordTransactionalAudit(tx, { actor: current, action: "document_source.delegation_issued", entityType: "document_source", entityId: source.id, metadata: { ownerUserId: current.id, previousDelegationRevoked: true } });
     return { sourceId: source.id, version: source.version + 1 };
   }, options);
@@ -81,13 +88,13 @@ export async function revokeDocumentIngestKey(sourceId: string, actor: AuthSessi
     await tx.$queryRaw`SELECT id FROM portfolio_document_audit_sources WHERE id = ${sourceId} FOR UPDATE`;
     const source = await tx.documentAuditSource.findUnique({ where: { id: sourceId } });
     if (!source) throw new DocumentAuditError("Sursa nu există.", 404);
-    await tx.documentAuditSource.update({ where: { id: sourceId }, data: { ingestTokenHash: null, tokenIssuedAt: null, version: { increment: 1 } } });
+    await tx.documentAuditSource.update({ where: { id: sourceId }, data: { ...clearedScanLease, ingestTokenHash: null, tokenIssuedAt: null, version: { increment: 1 } } });
     await recordTransactionalAudit(tx, { actor: current, action: "document_source.delegation_revoked", entityType: "document_source", entityId: sourceId });
     return { id: sourceId };
   }, options);
 }
 
-export async function ingestDocumentSource(sourceId: string, authorization: string | null, raw: unknown) {
+export async function ingestDocumentSource(sourceId: string, authorization: string | null, raw: unknown): Promise<DocumentIngestReceipt> {
   const key = authorization?.match(/^Bearer (fm_nas_[A-Za-z0-9_-]{43})$/)?.[1];
   if (!key) throw new DocumentAuditError("Autentificarea bridge-ului este necesară.", 401, "DOCUMENT_SOURCE_UNAUTHORIZED");
   const input = ingestSchema.parse(raw);
@@ -113,7 +120,28 @@ export async function ingestDocumentSource(sourceId: string, authorization: stri
     const prior = await tx.documentIngestBatch.findUnique({ where: { sourceId_requestKey: { sourceId, requestKey: input.requestKey } } });
     if (prior) {
       if (prior.payloadHash !== payloadHash) throw new DocumentAuditError("Aceeași cheie a fost folosită pentru alt lot.", 409, "DOCUMENT_INGEST_REPLAY_MISMATCH");
-      return { ...(prior.result as Record<string, unknown>), replayed: true };
+      const receipt = prior.result as unknown as Omit<DocumentIngestReceipt, "replayed">;
+      if (!receipt || receipt.payloadHash !== prior.payloadHash || typeof receipt.batchAccepted !== "boolean") throw new DocumentAuditError("Receipt-ul vechi nu este compatibil cu protocolul de scanare; verifică starea înainte de reluare.", 409, "DOCUMENT_INGEST_RECEIPT_INVALID");
+      return { ...receipt, replayed: true };
+    }
+    const persistReceipt = async (result: Omit<DocumentIngestReceipt, "replayed">) => {
+      await tx.documentIngestBatch.create({ data: { sourceId, requestKey: input.requestKey, payloadHash, scanId: input.scanId, observedAt, scanComplete: input.scanComplete, documentCount: input.documents.length, result: result as Prisma.InputJsonValue } });
+      await recordTransactionalAudit(tx, { actor: owner, action: "document_source.ingest_committed", entityType: "document_source", entityId: sourceId, metadata: { scanId: input.scanId, documentCount: input.documents.length, payloadHash, batchAccepted: result.batchAccepted, newDocuments: result.newDocuments, newVersions: result.newVersions, staleIgnored: result.staleIgnored, missingFiles: result.missingFiles, scanCompletionAccepted: result.scanCompletionAccepted, textIndexConsent: source.indexTextEnabled } });
+      return { ...result, replayed: false };
+    };
+    // Receipts are checked before watermarks: retries can acknowledge a closed
+    // scan, but cannot move any document or renew an expired lease.
+    const olderThanCompletion = source.lastCompletedScanAt && observedAt <= source.lastCompletedScanAt;
+    const olderThanActive = source.activeScanObservedAt && observedAt < source.activeScanObservedAt;
+    if (olderThanCompletion || olderThanActive) return persistReceipt({ sourceId, scanId: input.scanId, observedAt: input.observedAt, payloadHash, batchAccepted: false, ignoredReason: "SCAN_OBSERVATION_NOT_CURRENT", newDocuments: 0, newVersions: 0, unchanged: 0, staleIgnored: input.documents.length, missingFiles: 0, scanCompletionAccepted: false, binariesStored: false, verifiedFactsImported: 0 });
+    const leaseCurrent = source.activeScanId && source.activeScanLeaseUntil && source.activeScanLeaseUntil > new Date();
+    if (source.activeScanId === input.scanId) {
+      if (!leaseCurrent) throw new DocumentAuditError("Lease-ul scanării a expirat; păstrează intenția veche și pornește o scanare nouă după verificarea stării.", 409, "DOCUMENT_SCAN_LEASE_EXPIRED");
+    } else {
+      if (leaseCurrent) throw new DocumentAuditError("O altă scanare a acestei surse este în curs. Nu porni cititori concurenți.", 409, "DOCUMENT_SCAN_BUSY");
+      const seenScan = await tx.documentIngestBatch.findFirst({ where: { sourceId, scanId: input.scanId }, select: { id: true } });
+      if (seenScan || source.lastCompletedScanId === input.scanId || source.activeScanId === input.scanId) throw new DocumentAuditError("Scanarea a fost închisă sau înlocuită și nu poate fi redeschisă.", 409, "DOCUMENT_SCAN_RETIRED");
+      if (input.documents.length || input.scanComplete) throw new DocumentAuditError("Începe scanarea printr-un lot gol, nefinal, înainte de citirea arhivei.", 409, "DOCUMENT_SCAN_BEGIN_REQUIRED");
     }
     const prefixes = source.allowedPathPrefixes as string[];
     let newDocuments = 0, newVersions = 0, unchanged = 0, staleIgnored = 0;
@@ -122,7 +150,7 @@ export async function ingestDocumentSource(sourceId: string, authorization: stri
       if (!approvedSourcePath(relativePath, prefixes)) throw new DocumentAuditError("Un document este în afara folderelor aprobate.", 403, "DOCUMENT_SOURCE_PATH_FORBIDDEN");
       const pathHash = documentHash(relativePath);
       let document = await tx.sourceDocument.findUnique({ where: { sourceId_pathHash: { sourceId, pathHash } } });
-      if (document && (document.relativePath !== relativePath || observedAt < document.lastSeenAt)) { staleIgnored++; continue; }
+      if (document && (document.relativePath !== relativePath || observedAt < document.lastSeenAt)) throw new DocumentAuditError("Documentul are deja o observație mai nouă; întregul lot trebuie reobservat.", 409, "DOCUMENT_SCAN_DOCUMENT_NOT_CURRENT");
       if (!document) {
         document = await tx.sourceDocument.create({ data: { sourceId, pathHash, relativePath, displayName: item.displayName, documentType: item.documentType, lastScanId: input.scanId, lastSeenAt: observedAt } });
         newDocuments++;
@@ -130,6 +158,10 @@ export async function ingestDocumentSource(sourceId: string, authorization: stri
       const pages = source.indexTextEnabled ? item.pages : [];
       const extractionStatus = source.indexTextEnabled ? item.extractionStatus : "metadata_only";
       const extractionHash = documentHash(canonicalDocumentValue({ pages, extractionStatus, textTruncated: item.textTruncated, baseReference: source.baseReference }));
+      if (document.currentVersionId && observedAt.getTime() === document.lastSeenAt.getTime()) {
+        const currentVersion = await tx.sourceDocumentVersion.findUnique({ where: { id: document.currentVersionId }, select: { sha256: true, extractionHash: true } });
+        if (currentVersion && (currentVersion.sha256 !== item.sha256 || currentVersion.extractionHash !== extractionHash)) throw new DocumentAuditError("Aceeași observație temporală conține versiuni contradictorii ale documentului.", 409, "DOCUMENT_SCAN_OBSERVATION_CONFLICT");
+      }
       let version = await tx.sourceDocumentVersion.findUnique({ where: { documentId_sha256_extractionHash: { documentId: document.id, sha256: item.sha256, extractionHash } } });
       if (!version) {
         version = await tx.sourceDocumentVersion.create({ data: { documentId: document.id, sha256: item.sha256, extractionHash, extractionStatus, textTruncated: item.textTruncated, textPages: pages,
@@ -145,11 +177,10 @@ export async function ingestDocumentSource(sourceId: string, authorization: stri
       missingFiles = missing.count; scanCompletionAccepted = true;
     }
     await tx.documentAuditSource.update({ where: { id: sourceId }, data: { lastIngestAt: new Date(),
+      ...(scanCompletionAccepted ? clearedScanLease : { activeScanId: input.scanId, activeScanStartedAt: source.activeScanId === input.scanId ? source.activeScanStartedAt : observedAt, activeScanObservedAt: observedAt, activeScanLeaseUntil: new Date(Date.now() + scanLeaseMilliseconds) }),
       ...(scanCompletionAccepted ? { lastCompletedScanAt: observedAt, lastCompletedScanId: input.scanId } : {}) } });
-    const result = { sourceId, scanId: input.scanId, observedAt: input.observedAt, newDocuments, newVersions, unchanged, staleIgnored, missingFiles, scanCompletionAccepted, binariesStored: false, verifiedFactsImported: 0 };
-    await tx.documentIngestBatch.create({ data: { sourceId, requestKey: input.requestKey, payloadHash, scanId: input.scanId, observedAt, scanComplete: input.scanComplete, documentCount: input.documents.length, result } });
-    await recordTransactionalAudit(tx, { actor: owner, action: "document_source.ingest_committed", entityType: "document_source", entityId: sourceId, metadata: { scanId: input.scanId, documentCount: input.documents.length, newDocuments, newVersions, staleIgnored, missingFiles, scanCompletionAccepted, textIndexConsent: source.indexTextEnabled } });
-    return { ...result, replayed: false };
+    const result: Omit<DocumentIngestReceipt, "replayed"> = { sourceId, scanId: input.scanId, observedAt: input.observedAt, payloadHash, batchAccepted: true, newDocuments, newVersions, unchanged, staleIgnored, missingFiles, scanCompletionAccepted, binariesStored: false, verifiedFactsImported: 0 };
+    return persistReceipt(result);
   }, options);
 }
 

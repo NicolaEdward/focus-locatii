@@ -2305,6 +2305,10 @@ model DocumentAuditSource {
   lastIngestAt          DateTime?
   lastCompletedScanAt   DateTime?
   lastCompletedScanId   String?  @db.VarChar(128)
+  activeScanId          String?  @db.VarChar(128)
+  activeScanStartedAt   DateTime?
+  activeScanObservedAt  DateTime?
+  activeScanLeaseUntil  DateTime?
   version               Int      @default(0)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt

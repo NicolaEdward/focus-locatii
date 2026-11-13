@@ -11,6 +11,7 @@ import contextlib
 import datetime as dt
 import fcntl
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
@@ -35,6 +36,7 @@ MAX_BODY_BYTES = 2 * 1024 * 1024
 MAX_BATCH_DOCS = 50
 MAX_FILES = 20_000
 MAX_STATE_BYTES = 32 * 1024 * 1024
+HEARTBEAT_SECONDS = 120
 OTHER_DOCUMENT_SUFFIXES = {".doc", ".docx", ".xls", ".xlsx", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
 
@@ -118,6 +120,42 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON member")
+        result[key] = value
+    return result
+
+
+def validate_receipt(endpoint, payload, receipt):
+    """A generic 2xx page is not proof that this exact batch was committed."""
+    path = urllib.parse.urlsplit(endpoint).path
+    matched = re.fullmatch(r"/api/document-sources/([A-Za-z0-9_-]{1,191})/ingest", path)
+    if not matched:
+        raise BridgeError("INGEST_ENDPOINT_INVALID")
+    expected_hash = hashlib.sha256(canonical(payload)).hexdigest()
+    if (not isinstance(receipt, dict) or receipt.get("sourceId") != matched.group(1)
+            or receipt.get("scanId") != payload["scanId"] or receipt.get("observedAt") != payload["observedAt"]
+            or receipt.get("payloadHash") != expected_hash):
+        raise BridgeError("INGEST_RECEIPT_INVALID_RETRY_SAME_STATE")
+    counters = ("newDocuments", "newVersions", "unchanged", "staleIgnored", "missingFiles", "verifiedFactsImported")
+    if (any(type(receipt.get(key)) is not int or not 0 <= receipt[key] <= 9_007_199_254_740_991 for key in counters)
+            or type(receipt.get("replayed")) is not bool or type(receipt.get("batchAccepted")) is not bool
+            or type(receipt.get("scanCompletionAccepted")) is not bool
+            or receipt.get("binariesStored") is not False or receipt["verifiedFactsImported"] != 0
+            or receipt["newDocuments"] > receipt["newVersions"]
+            or receipt["newVersions"] + receipt["unchanged"] + receipt["staleIgnored"] != len(payload["documents"])
+            or (not payload["scanComplete"] and receipt["missingFiles"] != 0)):
+        raise BridgeError("INGEST_RECEIPT_INVALID_RETRY_SAME_STATE")
+    if not receipt["batchAccepted"] or receipt["staleIgnored"]:
+        raise BridgeError("INGEST_BATCH_NOT_ACCEPTED_VERIFY_STATE")
+    if receipt["scanCompletionAccepted"] is not payload["scanComplete"]:
+        raise BridgeError("INGEST_SCAN_COMPLETION_NOT_ACCEPTED_VERIFY_STATE")
+    return receipt
+
+
 def post_payload(endpoint, payload, token, attempts=3, opener=None, sleeper=time.sleep):
     body = canonical(payload)
     if len(body) > MAX_BODY_BYTES:
@@ -133,8 +171,18 @@ def post_payload(endpoint, payload, token, attempts=3, opener=None, sleeper=time
             with opener.open(request, timeout=30) as response:
                 if not 200 <= response.status < 300:
                     raise BridgeError("INGEST_HTTP_" + str(response.status))
-                if len(response.read(65537)) > 65536:
+                raw = response.read(65537)
+                if len(raw) > 65536:
                     raise BridgeError("INGEST_RESPONSE_TOO_LARGE_VERIFY_BEFORE_RETRY")
+                if response.headers.get_content_type() != "application/json":
+                    raise BridgeError("INGEST_RECEIPT_INVALID_RETRY_SAME_STATE")
+                try:
+                    def invalid_constant(_value):
+                        raise ValueError("Non-JSON constant")
+                    receipt = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_json_object, parse_constant=invalid_constant)
+                except (UnicodeError, ValueError, RecursionError):
+                    raise BridgeError("INGEST_RECEIPT_INVALID_RETRY_SAME_STATE") from None
+                validate_receipt(endpoint, payload, receipt)
                 return response.status
         except urllib.error.HTTPError as error:
             code = error.code
@@ -149,7 +197,7 @@ def post_payload(endpoint, payload, token, attempts=3, opener=None, sleeper=time
             error.close()
             if not retryable or attempt + 1 == attempts:
                 raise BridgeError("INGEST_HTTP_" + str(code)) from None
-        except (urllib.error.URLError, TimeoutError, OSError):
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException):
             if attempt + 1 == attempts:
                 raise BridgeError("INGEST_TRANSPORT_FAILED_RETRY_SAME_STATE") from None
         sleeper(delay)
@@ -182,7 +230,8 @@ def extract_preview(data, include_text=False):
         try:
             process = subprocess.Popen([binary, "-enc", "UTF-8", "-layout", str(file), "-"],
                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                       stdin=subprocess.DEVNULL, close_fds=True, preexec_fn=_parser_limits)
+                                       stdin=subprocess.DEVNULL, close_fds=True, preexec_fn=_parser_limits,
+                                       env={"PATH": os.defpath, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"})
         except OSError:
             return "extraction_unavailable", [], False
         output = bytearray()
@@ -347,11 +396,15 @@ def run_scan(app_url, source_id, roots, state_file, token, include_text=False, a
                 state = json.loads(data)
             if state.get("version") != 1 or state.get("configuration") != configuration:
                 raise BridgeError("STATE_CONFIGURATION_CHANGED_USE_ANOTHER_STATE_FILE")
+        resuming_unfinished = bool(state and not state.get("completed"))
         if not state or state.get("completed"):
-            state = {"version": 1, "configuration": configuration, "scanId": str(uuid.uuid4()), "completed": False, "sent": {}, "pending": None}
+            state = {"version": 1, "configuration": configuration, "scanId": str(uuid.uuid4()), "scanBegun": False, "completed": False, "sent": {}, "pending": None}
             save_state(state_path, state)
 
+        last_ack = None
+
         def send_pending():
+            nonlocal last_ack
             pending = state.get("pending")
             if not pending:
                 return
@@ -362,6 +415,9 @@ def run_scan(app_url, source_id, roots, state_file, token, include_text=False, a
             # must enforce requestKey/payload equality before acknowledging.
             endpoint_for(app_url, source_id, allow_local_test)
             sender(endpoint, pending, token)
+            last_ack = time.monotonic()
+            if not state.get("scanBegun") and not pending["documents"] and not pending["scanComplete"]:
+                state["scanBegun"] = True
             for document in pending["documents"]:
                 state["sent"][document["path"]] = document["sha256"]
             if pending["scanComplete"]:
@@ -369,6 +425,13 @@ def run_scan(app_url, source_id, roots, state_file, token, include_text=False, a
             state["pending"] = None
             save_state(state_path, state)
 
+        if not state.get("scanBegun"):
+            pending = state.get("pending")
+            if state.get("sent") or pending and (pending["documents"] or pending["scanComplete"]):
+                raise BridgeError("LEGACY_STATE_REQUIRES_OPERATOR_RECOVERY")
+            if not pending:
+                state["pending"] = payload_for(source_id, state["scanId"], [], False)
+                save_state(state_path, state)
         send_pending()
         if state["completed"]:
             return {"ok": True, "scanComplete": True, "resumedAcknowledgement": True, "indexedDocuments": len(state["sent"])}
@@ -383,12 +446,22 @@ def run_scan(app_url, source_id, roots, state_file, token, include_text=False, a
             send_pending()
             batch = []
 
+        # A recovered receipt can be an old idempotent replay, which does not
+        # renew the server lease. Verify it with a fresh intention before reads.
+        if last_ack is None or resuming_unfinished:
+            flush()
+
+        def heartbeat_if_due():
+            if time.monotonic() - last_ack >= HEARTBEAT_SECONDS:
+                flush()
+
         for root in roots:
             root_fd = os.open(root["directory"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             try:
                 def walk_error(_error):
                     counts["skippedUnreadableOrChanged"] += 1
                 for relative_dir, directories, files, directory_fd in os.fwalk(".", topdown=True, follow_symlinks=False, dir_fd=root_fd, onerror=walk_error):
+                    heartbeat_if_due()
                     allowed = []
                     for directory in sorted(directories):
                         try:
@@ -401,6 +474,7 @@ def run_scan(app_url, source_id, roots, state_file, token, include_text=False, a
                             counts["skippedUnreadableOrChanged"] += 1
                     directories[:] = allowed
                     for filename in sorted(files):
+                        heartbeat_if_due()
                         if len(batch) == MAX_BATCH_DOCS:
                             flush()
                         if filename.startswith("."):

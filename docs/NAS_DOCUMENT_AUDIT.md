@@ -49,11 +49,15 @@ The implementation supplies this handler but does **not** install a production s
 
 All source/key changes, ingest batches, reviews and report snapshots include a transactional audit event. Audit failure rolls back that command. Each batch uses a unique request key bound to canonical payload SHA-256: the same intention replays its result; a changed payload with the same key is refused. Forbidden paths or invalid members roll back the entire batch. Older observations cannot move a document pointer or completed-scan marker backwards. Only an accepted complete scan marks previously indexed, unseen files missing.
 
+Every scan must first acquire its source lease with an empty nonfinal batch, before the bridge reads the archive. A source accepts one scan ID at a time, with a 15-minute lease renewed by accepted batches; the bridge flushes/heartbeats within 120 seconds. Exact receipt replay does not renew a lease or change documents. A completed, abandoned or superseded scan ID cannot be reopened; after lease expiry or key/configuration changes, an operator starts a fresh scan ID/state after retaining uncertain old intentions for review. A delayed partial batch at or before a later completed-scan watermark is recorded as not accepted and cannot resurrect missing evidence. Equal timestamps are allowed inside the same active scan only when a repeated document has identical file/extraction hashes. The same timestamp cannot begin a different scan after completion.
+
+The bridge validates the bounded JSON receipt against source ID, scan ID, observation time, canonical payload hash, accepted counters and final-completion state. A bare HTTP200, HTML/login page, wrong receipt, ignored/stale observation or conflict is not an acknowledgement: the exact pending intention stays on disk. This prevents an interrupted reader or unexpected proxy response from claiming a completed archive.
+
 Old file versions/reviews/reports are intentionally retained; this module offers no destructive cleanup. Set a retention/legal policy before adding deletion or source disposal. Source configuration and delegation are new tables without foreign keys to legacy production tables, avoiding changes to existing data/FK collations. The migration creates only the six new tables and their mutual foreign keys.
 
 ## Local verification
 
-Use a new local synthetic database. The TypeScript suite refuses any host except loopback and any database except `focus_preview_nas_document_audit`:
+Use a new local synthetic database. The TypeScript suite refuses any host except loopback and checks the explicit expected database (`focus_preview_nas_document_audit` by default; `DOCUMENT_AUDIT_TEST_DATABASE` can name another freshly isolated synthetic database). The standard synthetic environment guards remain mandatory:
 
 ```sh
 node --env-file=.env.implementation.local --import tsx scripts/test-document-source-audit.ts

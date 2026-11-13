@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 import type { AuthSession } from "../src/lib/auth";
 import { prisma } from "../src/lib/prisma";
 import { assertSyntheticEnvironment, loadEnvFile } from "./release/env-utils";
-import { DocumentAuditError, documentHash, safeBaseReference, type DocumentFact } from "../src/lib/document-source-domain";
+import { canonicalDocumentValue, DocumentAuditError, documentHash, safeBaseReference, type DocumentFact } from "../src/lib/document-source-domain";
 import { createDocumentSource, getDocumentAuditSummary, getDocumentAuditWorkspace, ingestDocumentSource, issueDocumentIngestKey, reviewDocumentFacts, revokeDocumentIngestKey, updateDocumentSource } from "../src/lib/document-source-service";
 import { runDocumentReconciliation, runScheduledDocumentAudit } from "../src/lib/document-reconciliation";
 import { GET as scheduledAuditRoute } from "../src/app/api/cron/document-audit/route";
@@ -14,7 +14,7 @@ loadEnvFile();
 assertSyntheticEnvironment();
 const database = new URL(process.env.DATABASE_URL!);
 assert.ok(["127.0.0.1", "localhost"].includes(database.hostname), "Local synthetic database required");
-assert.equal(decodeURIComponent(database.pathname.slice(1)), "focus_preview_nas_document_audit");
+assert.equal(decodeURIComponent(database.pathname.slice(1)), process.env.DOCUMENT_AUDIT_TEST_DATABASE || "focus_preview_nas_document_audit");
 assert.notEqual(process.env.NODE_ENV, "production");
 const tag = `nas-audit-${randomUUID()}`;
 const users: string[] = [], sources: string[] = [], locations: string[] = [];
@@ -23,6 +23,7 @@ const checks: string[] = [];
 const previousCronSecret = process.env.CRON_SECRET;
 const cronSecret = `synthetic-cron-${randomUUID()}`;
 const now = Date.now() - 120_000;
+const suiteScanId = randomUUID();
 let tick = 0;
 const instant = () => new Date(now + ++tick * 1000).toISOString();
 const config = (indexTextEnabled = false) => ({ label: tag, baseReference: "smb://synthetic.invalid/contracts", allowedPathPrefixes: ["contracts", "invoices"], indexTextEnabled, maxStaleHours: 24 });
@@ -30,7 +31,7 @@ const evidence = { page: 1, quote: "Synthetic contract explicitly states the loc
 const reservationFact = (locationCode: string, extra: Record<string, unknown> = {}) => ({ kind: "reservation", locationCode, periodStart: "2090-01-01", periodEnd: "2090-01-31", ...extra, evidence }) as DocumentFact;
 const pdf = (path: string, contents = path, extractionStatus = "metadata_only", pages: { page: number; text: string }[] = []) => ({ path, displayName: path.split("/").at(-1)!, documentType: path.startsWith("invoices/") ? "invoice" : "contract", sha256: documentHash(contents), sizeBytes: 123, modifiedAt: new Date(now - 86400000).toISOString(), extractionStatus, textTruncated: false, pages, facts: [], verification: "unverified" });
 type InputDocument = ReturnType<typeof pdf>;
-function batch(documents: InputDocument[], scanComplete = false, scanId = randomUUID()) {
+function batch(documents: InputDocument[], scanComplete = false, scanId: string = suiteScanId) {
   return { requestKey: `test:${randomUUID()}`, scanId, scanComplete, observedAt: instant(), documents };
 }
 async function denied(work: () => Promise<unknown>, code: string, status?: number) {
@@ -59,6 +60,93 @@ async function report(owner: AuthSession) { const run = await runDocumentReconci
 async function businessSnapshot() {
   const where = { id: { in: locations } };
   return JSON.stringify({ locations: await prisma.location.findMany({ where, orderBy: { id: "asc" } }), reservations: await prisma.reservation.findMany({ where: { locationId: { in: locations } }, orderBy: { id: "asc" } }), clients: await prisma.clientAccount.findMany({ where: { id: { in: clients } }, orderBy: { id: "asc" } }), receivables: await prisma.financialReceivable.findMany({ where: { uploadId: { in: uploads } }, orderBy: { id: "asc" } }) });
+}
+
+async function scanOrderingRegressions(owner: AuthSession) {
+  const feed = await source(owner), auth = `Bearer ${feed.key}`;
+  const doc = pdf("contracts/ordered.pdf", "reviewed-ordering-fixture");
+  const initialScan = randomUUID(), laterScan = randomUUID();
+  const begin = (scanId: string, observedAt = instant()) => ({ ...batch([], false, scanId), observedAt });
+  await denied(() => ingestDocumentSource(feed.id, auth, batch([doc], true, initialScan)), "DOCUMENT_SCAN_BEGIN_REQUIRED", 409);
+  await ingestDocumentSource(feed.id, auth, begin(initialScan));
+  const initialDoc = batch([doc], false, initialScan);
+  await ingestDocumentSource(feed.id, auth, initialDoc);
+  await verify(feed.id, doc.path, [reservationFact(`${tag}-ordering-missing-location`)], owner);
+  await ingestDocumentSource(feed.id, auth, batch([], true, initialScan));
+  await ingestDocumentSource(feed.id, auth, begin(laterScan));
+  const completed = batch([], true, laterScan);
+  await ingestDocumentSource(feed.id, auth, completed);
+  const absent = await current(feed.id, doc.path);
+  assert.equal(absent.document.state, "missing"); assert.equal(absent.version.reviewVersion, 1);
+  const sourceBefore = await prisma.documentAuditSource.findUniqueOrThrow({ where: { id: feed.id } });
+  const delayed = { ...initialDoc, requestKey: `test:${randomUUID()}`, observedAt: new Date(new Date(initialDoc.observedAt).getTime() + 1).toISOString(), documents: [pdf(doc.path, "stale-replacement")] };
+  const ignored = await ingestDocumentSource(feed.id, auth, delayed);
+  assert.equal(ignored.batchAccepted, false); assert.equal(ignored.scanCompletionAccepted, false);
+  assert.equal(ignored.payloadHash, documentHash(canonicalDocumentValue(delayed)));
+  const stillAbsent = await current(feed.id, doc.path);
+  assert.equal(stillAbsent.document.state, "missing"); assert.equal(stillAbsent.version.id, absent.version.id); assert.equal(stillAbsent.version.reviewVersion, 1);
+  assert.equal((await prisma.documentAuditSource.findUniqueOrThrow({ where: { id: feed.id } })).lastIngestAt?.getTime(), sourceBefore.lastIngestAt?.getTime());
+  const replayed = await ingestDocumentSource(feed.id, auth, initialDoc);
+  assert.equal(replayed.replayed, true); assert.equal(replayed.batchAccepted, true);
+  assert.equal((await current(feed.id, doc.path)).document.state, "missing");
+  const equal = await ingestDocumentSource(feed.id, auth, begin(randomUUID(), completed.observedAt));
+  assert.equal(equal.batchAccepted, false, "A distinct scan at the completed timestamp cannot become authoritative");
+  await denied(() => ingestDocumentSource(feed.id, auth, begin(initialScan)), "DOCUMENT_SCAN_RETIRED", 409);
+  checks.push("empty begin required; delayed partial/equal watermark cannot resurrect missing reviewed evidence; old exact receipt replays without state change");
+
+  const contenders = [randomUUID(), randomUUID()];
+  const concurrentAt = instant();
+  const outcomes = await Promise.allSettled(contenders.map((scanId) => ingestDocumentSource(feed.id, auth, begin(scanId, concurrentAt))));
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  const winner = contenders[outcomes.findIndex((outcome) => outcome.status === "fulfilled")], loser = contenders.find((scanId) => scanId !== winner)!;
+  const failure = outcomes.find((outcome) => outcome.status === "rejected");
+  assert.ok(failure?.status === "rejected" && failure.reason instanceof DocumentAuditError && failure.reason.code === "DOCUMENT_SCAN_BUSY");
+  const winnerEnvelope = batch([doc, pdf("contracts/winner.pdf")], false, winner);
+  const accepted = await ingestDocumentSource(feed.id, auth, winnerEnvelope);
+  assert.equal(accepted.batchAccepted, true);
+  assert.equal(accepted.payloadHash, documentHash(canonicalDocumentValue(winnerEnvelope)));
+  await denied(() => ingestDocumentSource(feed.id, auth, batch([pdf("contracts/loser.pdf")], true, loser)), "DOCUMENT_SCAN_BUSY", 409);
+  await ingestDocumentSource(feed.id, auth, batch([], true, winner));
+  assert.equal((await current(feed.id, doc.path)).document.state, "present");
+  assert.equal((await current(feed.id, "contracts/winner.pdf")).document.state, "present");
+  assert.equal(await prisma.sourceDocument.count({ where: { sourceId: feed.id, relativePath: "contracts/loser.pdf" } }), 0);
+  checks.push("simultaneous scan begin has one winner; losing scan cannot overwrite membership or falsely mark winner files missing");
+
+  const abandoned = randomUUID(), replacement = randomUUID();
+  await ingestDocumentSource(feed.id, auth, begin(abandoned));
+  await ingestDocumentSource(feed.id, auth, batch([pdf("contracts/abandoned.pdf")], false, abandoned));
+  // Expire only our synthetic source's lease, as if its bridge had crashed.
+  await prisma.documentAuditSource.update({ where: { id: feed.id }, data: { activeScanLeaseUntil: new Date(Date.now() - 1000) } });
+  await denied(() => ingestDocumentSource(feed.id, auth, batch([], false, abandoned)), "DOCUMENT_SCAN_LEASE_EXPIRED", 409);
+  await ingestDocumentSource(feed.id, auth, begin(replacement));
+  await denied(() => ingestDocumentSource(feed.id, auth, batch([doc], true, abandoned)), "DOCUMENT_SCAN_BUSY", 409);
+  const replacementEnvelope = batch([doc, pdf("contracts/winner.pdf")], false, replacement);
+  await ingestDocumentSource(feed.id, auth, replacementEnvelope);
+  const reordered = await ingestDocumentSource(feed.id, auth, { ...batch([pdf(doc.path, "out-of-order")], false, replacement), observedAt: new Date(new Date(replacementEnvelope.observedAt).getTime() - 1).toISOString() });
+  assert.equal(reordered.batchAccepted, false);
+  // Equal milliseconds are legal within the same leased scan, including final ACK.
+  const equalWithin = { ...batch([doc], false, replacement), observedAt: replacementEnvelope.observedAt };
+  assert.equal((await ingestDocumentSource(feed.id, auth, equalWithin)).batchAccepted, true);
+  await denied(() => ingestDocumentSource(feed.id, auth, { ...equalWithin, requestKey: `test:${randomUUID()}`, documents: [pdf(doc.path, "equivocated-same-millisecond")] }), "DOCUMENT_SCAN_OBSERVATION_CONFLICT", 409);
+  const endReplacement = { ...batch([], true, replacement), observedAt: replacementEnvelope.observedAt };
+  assert.equal((await ingestDocumentSource(feed.id, auth, endReplacement)).scanCompletionAccepted, true);
+  await denied(() => ingestDocumentSource(feed.id, auth, begin(abandoned)), "DOCUMENT_SCAN_RETIRED", 409);
+  assert.equal((await current(feed.id, doc.path)).version.sha256, doc.sha256);
+  assert.equal((await current(feed.id, "contracts/winner.pdf")).document.state, "present");
+  assert.equal((await current(feed.id, "contracts/abandoned.pdf")).document.state, "missing");
+  checks.push("expired lease requires a new scan ID; superseded scan cannot return; out-of-order batch ignored; equal milliseconds allowed only within the active scan");
+
+  const revokedScan = randomUUID();
+  await ingestDocumentSource(feed.id, auth, begin(revokedScan));
+  const beforeRotation = await prisma.documentAuditSource.findUniqueOrThrow({ where: { id: feed.id } });
+  const replacementKey = await issueDocumentIngestKey({ sourceId: feed.id, expectedVersion: beforeRotation.version }, owner);
+  assert.equal((await prisma.documentAuditSource.findUniqueOrThrow({ where: { id: feed.id } })).activeScanId, null);
+  await denied(() => ingestDocumentSource(feed.id, auth, batch([doc], true, revokedScan)), "DOCUMENT_SOURCE_UNAUTHORIZED", 401);
+  await denied(() => ingestDocumentSource(feed.id, `Bearer ${replacementKey.ingestKey}`, begin(revokedScan)), "DOCUMENT_SCAN_RETIRED", 409);
+  const renewedScan = randomUUID();
+  await ingestDocumentSource(feed.id, `Bearer ${replacementKey.ingestKey}`, begin(renewedScan));
+  await ingestDocumentSource(feed.id, `Bearer ${replacementKey.ingestKey}`, batch([doc, pdf("contracts/winner.pdf")], true, renewedScan));
+  checks.push("key rotation invalidates the active lease; neither old key nor a fresh key can resume its retired scan ID");
 }
 
 async function main() {
@@ -102,6 +190,7 @@ async function main() {
   checks.push("hash-only delegation; rotate and revoke reject old keys immediately");
 
   const privateText = "SYNTHETIC-TEXT-REQUIRING-EXPLICIT-CONSENT";
+  await ingestDocumentSource(metadata.id, `Bearer ${metadata.key}`, batch([]));
   const envelope = batch([pdf("contracts/metadata.pdf", "immutable-v1", "text_available", [{ page: 1, text: privateText }])]);
   const inserted = await ingestDocumentSource(metadata.id, `Bearer ${metadata.key}`, envelope);
   assert.ok("newVersions" in inserted && "binariesStored" in inserted && "verifiedFactsImported" in inserted);
@@ -114,7 +203,7 @@ async function main() {
   const beforeAtomic = await prisma.sourceDocument.count({ where: { sourceId: metadata.id } });
   await denied(() => ingestDocumentSource(metadata.id, `Bearer ${metadata.key}`, batch([pdf("contracts/atomic-valid.pdf"), pdf("private/atomic-forbidden.pdf")])), "DOCUMENT_SOURCE_PATH_FORBIDDEN", 403);
   assert.equal(await prisma.sourceDocument.count({ where: { sourceId: metadata.id } }), beforeAtomic);
-  assert.equal(await prisma.documentIngestBatch.count({ where: { sourceId: metadata.id } }), 1);
+  assert.equal(await prisma.documentIngestBatch.count({ where: { sourceId: metadata.id } }), 2);
   checks.push("no text without consent; idempotent replay and payload mismatch; forbidden path rolls back entire batch");
 
   const fact = reservationFact(`${tag}-not-present`);
@@ -136,7 +225,10 @@ async function main() {
   checks.push("human review hash/version/current-version gates; immutable old version and review retained; unchanged hash preserves review");
 
   // A completion reports missing references without deleting old evidence.
-  const missingScan = batch([], true);
+  await ingestDocumentSource(metadata.id, `Bearer ${metadata.key}`, batch([], true));
+  const missingScanId = randomUUID();
+  await ingestDocumentSource(metadata.id, `Bearer ${metadata.key}`, batch([], false, missingScanId));
+  const missingScan = batch([], true, missingScanId);
   const missing = await ingestDocumentSource(metadata.id, `Bearer ${metadata.key}`, missingScan);
   assert.ok("missingFiles" in missing && "scanCompletionAccepted" in missing);
   assert.equal(missing.missingFiles, 1); assert.equal(missing.scanCompletionAccepted, true);
@@ -151,6 +243,7 @@ async function main() {
   checks.push("complete scan marks missing, older completion ignored, evidence history retained");
 
   const indexed = await source(coo, true);
+  await ingestDocumentSource(indexed.id, `Bearer ${indexed.key}`, batch([]));
   await ingestDocumentSource(indexed.id, `Bearer ${indexed.key}`, batch([pdf("contracts/scanned.pdf", "image-only", "needs_ocr")]));
   const unknown = await report(coo);
   assert.equal(unknown.scopeComplete, false); assert.ok(unknown.findings.some((finding) => finding.code === "OCR_REVIEW_REQUIRED"));
@@ -163,11 +256,15 @@ async function main() {
   async function location(suffix: string) {
     const row = await prisma.location.create({ data: { code: `${tag}-${suffix}`, categoryId: category.id, type: "Panou", showInPublic: false } }); locations.push(row.id); return row;
   }
-  const a = await location("period-rent"), b = await location("currency"), c = await location("unbooked"), d = await location("overlap");
+  const a = await location("period-rent"), b = await location("currency"), c = await location("unbooked"), d = await location("overlap"), e = await location("last-day-noon"), f = await location("truncated-conflicts");
   const booked = await prisma.reservation.create({ data: { locationId: a.id, clientId: client.id, clientName: tag, status: "BOOKED", periodStart: new Date("2090-01-02"), periodEnd: new Date("2090-01-30"), monthlyRentShare: 100, amount: 100, currency: "EUR", contractNumber: "SYN-1", ownerId: sales.id } });
   const wrongCurrency = await prisma.reservation.create({ data: { locationId: b.id, clientName: tag, status: "BOOKED", periodStart: new Date("2090-01-01"), periodEnd: new Date("2090-01-31"), monthlyRentShare: 100, currency: "RON", ownerId: sales.id } });
   await prisma.reservation.createMany({ data: [1, 2].map(() => ({ locationId: d.id, clientName: tag, status: "BOOKED" as const, periodStart: new Date("2090-01-01"), periodEnd: new Date("2090-01-31"), currency: "EUR", ownerId: sales.id })) });
   const overlapBooked = await prisma.reservation.findFirstOrThrow({ where: { locationId: d.id }, orderBy: { id: "asc" } });
+  const noonBooked = await prisma.reservation.create({ data: { locationId: e.id, clientName: tag, status: "BOOKED", periodStart: new Date("2090-01-01"), periodEnd: new Date("2090-01-31"), currency: "EUR", ownerId: sales.id } });
+  await prisma.reservation.create({ data: { locationId: e.id, clientName: tag, status: "BOOKED", periodStart: new Date("2090-01-31T12:00:00Z"), periodEnd: new Date("2090-02-02"), currency: "EUR", ownerId: sales.id } });
+  const truncatedBooked = await prisma.reservation.create({ data: { locationId: f.id, clientName: tag, status: "BOOKED", periodStart: new Date("2090-01-01"), periodEnd: new Date("2090-01-31"), currency: "EUR", ownerId: sales.id } });
+  await prisma.reservation.createMany({ data: Array.from({ length: 201 }, () => ({ locationId: f.id, clientName: tag, status: "HOLD" as const, periodStart: new Date("2090-01-01"), periodEnd: new Date("2090-01-31"), holdExpiresAt: new Date("2000-01-01"), currency: "EUR", ownerId: sales.id })) });
   const upload = await prisma.financialReportUpload.create({ data: { originalFileName: "synthetic.csv", fileHash: documentHash(tag), uploadedByUserId: coo.id } }); uploads.push(upload.id);
   const invoiceNumber = `${tag}-INV-1`;
   await prisma.financialReceivable.create({ data: { uploadId: upload.id, clientId: client.id, companyName: "Focus Media", companyCode: "FOCUS_MEDIA", invoiceNumber, normalizedInvoiceNumber: invoiceNumber.toUpperCase(), canonicalKey: tag, invoicedAmount: 1000, collectedAmount: 200, remainingAmount: 800, currency: "EUR", invoiceDate: new Date("2090-01-01"), includedInReport: true } });
@@ -179,6 +276,8 @@ async function main() {
     reservationFact(b.code, { reservationId: wrongCurrency.id, monthlyRent: "125.00", currency: "EUR" }),
     reservationFact(c.code), reservationFact(`${tag}-missing-location`), reservationFact(d.code),
     reservationFact(d.code, { reservationId: overlapBooked.id }),
+    reservationFact(e.code, { reservationId: noonBooked.id }),
+    reservationFact(f.code, { reservationId: truncatedBooked.id }),
   ];
   await verify(indexed.id, "contracts/terms.pdf", termsFacts, coo);
   await verify(indexed.id, "contracts/terms-amendment.pdf", [reservationFact(a.code, { reservationId: booked.id, monthlyRent: "130.00", currency: "EUR", contractNumber: "SYN-2", clientTaxId: "RO12345678" })], coo);
@@ -191,13 +290,17 @@ async function main() {
   for (const code of ["BOOKING_PERIOD_DIFFERS", "BOOKING_MONTHLY_RENT_DIFFERS", "BOOKING_CURRENCY_DIFFERS", "BOOKING_NOT_FOUND", "LOCATION_NOT_FOUND", "RESERVATION_MATCH_AMBIGUOUS", "APP_BOOKING_OVERLAP", "DOCUMENT_CONTRACTS_OVERLAP", "INVOICE_GROSS_DIFFERS", "INVOICE_DATE_DIFFERS", "INVOICE_CLIENT_IDENTITY_DIFFERS", "INVOICE_NOT_FOUND"]) assert.ok(codes.has(code), `Expected deterministic finding: ${code}`);
   assert.ok(reconciled.findings.some((finding) => finding.code === "APP_BOOKING_OVERLAP" && finding.targetId === overlapBooked.id));
   assert.ok(reconciled.findings.some((finding) => finding.code === "DOCUMENT_CONTRACTS_OVERLAP" && finding.locationCode === a.code));
+  assert.ok(reconciled.findings.some((finding) => finding.code === "APP_BOOKING_OVERLAP" && finding.targetId === noonBooked.id), "Legacy noon on inclusive final day overlaps");
+  assert.ok(reconciled.findings.some((finding) => finding.code === "BOOKING_CONFLICT_SCOPE_TOO_LARGE" && finding.targetId === truncatedBooked.id), "Truncated conflicting candidate query cannot imply no overlap");
   assert.equal(reconciled.businessRowsModified, 0); assert.equal(await businessSnapshot(), businessBefore);
   const persisted = await prisma.documentAuditRun.findUniqueOrThrow({ where: { id: reconciled.id } });
   assert.equal(persisted.sourceSnapshotHash, reconciled.sourceSnapshotHash);
   assert.ok(reconciled.findings.filter((finding) => finding.severity === "difference" && finding.evidence).every((finding) => finding.sourceSha256.length === 64 && finding.evidence!.page === 1));
   checks.push("verified explicit period/rent/currency, missing inventory/booking/invoice, overlap ambiguity, fiscal amount/date/client differences with immutable report and evidence");
   checks.push("contradictory overlapping contracts and a second effective booking are reported even for an explicit reservation ID");
+  checks.push("inclusive final-day noon overlap detected; candidate truncation emits mandatory review instead of a clean conclusion");
   checks.push("commercial location, reservation, client and invoice rows unchanged byte-for-byte");
+  await scanOrderingRegressions(coo);
 
   const workspace = await getDocumentAuditWorkspace(director);
   const workspaceText = JSON.stringify(workspace);

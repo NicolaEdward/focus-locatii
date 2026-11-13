@@ -36,7 +36,7 @@ export async function runDocumentReconciliation(actor: AuthSession, context: { t
       const recent = await tx.documentAuditRun.findFirst({ where: { createdAt: { gte: new Date(asOf.getTime() - 300000) } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
       if (recent && Array.isArray(recent.findings) && Array.isArray(recent.limitations)) return { id: recent.id, asOf: recent.asOf.toISOString(), scopeComplete: recent.scopeComplete, counts: recent.counts, findings: recent.findings as DocumentAuditFinding[], limitations: recent.limitations as string[], sourceSnapshotHash: recent.sourceSnapshotHash, businessRowsModified: 0, reusedRecentSnapshot: true };
     }
-    const sources = await tx.documentAuditSource.findMany({ where: { state: "active" }, orderBy: { id: "asc" }, select: { id: true, lastCompletedScanAt: true, lastIngestAt: true, maxStaleHours: true, version: true } });
+    const sources = await tx.documentAuditSource.findMany({ where: { state: "active" }, orderBy: { id: "asc" }, select: { id: true, lastCompletedScanAt: true, lastIngestAt: true, maxStaleHours: true, version: true, activeScanId: true } });
     const sourceIds = sources.map((source) => source.id);
     const counts = { sources: sources.length, documents: 0, missingFiles: 0, pendingReview: 0, rejectedReviews: 0, verifiedDocuments: 0, factsCompared: 0, reservationsCompared: 0, invoicesCompared: 0, differences: 0, needsReview: 0, findingsStored: 0 };
     const findings: DocumentAuditFinding[] = [], evidenceKeys: string[] = [];
@@ -52,6 +52,7 @@ export async function runDocumentReconciliation(actor: AuthSession, context: { t
     if (!sources.length) limitations.push("Nicio sursă NAS activă configurată: datele reale nu au putut fi auditate.");
     for (const source of sources) {
       evidenceKeys.push(canonicalDocumentValue(source));
+      if (source.activeScanId) { scopeComplete = false; limitations.push("Există o scanare în curs sau abandonată; indexul parțial nu dovedește o arhivă completă. Așteaptă o nouă finalizare acceptată."); }
       if (!source.lastCompletedScanAt || asOf.getTime() - source.lastCompletedScanAt.getTime() > source.maxStaleHours * 3600000) { scopeComplete = false; limitations.push("Există o sursă fără scanare completă recentă; raportul trebuie actualizat după sincronizare."); }
     }
     let cursor: string | undefined, factLimitReached = false;
@@ -148,7 +149,9 @@ async function compareReservationFact(tx: Tx, fact: Extract<DocumentFact, { kind
   }
   if (candidates.length !== 1) return { compared: false, findings: [{ code: candidates.length ? "RESERVATION_MATCH_AMBIGUOUS" : "BOOKING_NOT_FOUND", severity: candidates.length ? "review" : "difference", title: candidates.length ? "Mai multe rezervări pot corespunde documentului; asocierea trebuie aleasă explicit." : "Nu există o rezervare asociabilă sigur acestui cod și contract.", href: "/admin/locatii" }] as FindingContent[] };
   const row = candidates[0], base = { targetType: "reservation" as const, targetId: row.id, href: `/admin/locatii?reservationId=${encodeURIComponent(row.id)}&reservationAction=edit` };
-  const conflictingRows = await tx.reservation.findMany({ where: { locationId: location.id, id: { not: row.id }, status: { in: ["BOOKED", "HOLD", "RESERVED"] }, periodStart: { lte: new Date(fact.periodEnd + "T00:00:00.000Z") }, periodEnd: { gte: new Date(fact.periodStart + "T00:00:00.000Z") } }, take: 201, select: { status: true, holdExpiresAt: true, createdAt: true } });
+  const exclusiveEnd = new Date(fact.periodEnd + "T00:00:00.000Z"); exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
+  const conflictingRows = await tx.reservation.findMany({ where: { locationId: location.id, id: { not: row.id }, status: { in: ["BOOKED", "HOLD", "RESERVED"] }, periodStart: { lt: exclusiveEnd }, periodEnd: { gte: new Date(fact.periodStart + "T00:00:00.000Z") } }, take: 201, select: { status: true, holdExpiresAt: true, createdAt: true } });
+  if (conflictingRows.length > 200) findings.push({ ...base, code: "BOOKING_CONFLICT_SCOPE_TOO_LARGE", severity: "review", title: "Lista posibililor concurenți depășește limita de200; este necesară o verificare completă înaintea concluziei." });
   if (conflictingRows.some((other) => isEffectiveBlockingReservation(other))) findings.push({ ...base, code: "APP_BOOKING_OVERLAP", severity: "review", title: "Aplicația conține alte blocări efective pe cod în perioada confirmată; verifică suprapunerea înaintea oricărei corecții." });
   if (row.status !== "BOOKED") findings.push({ ...base, code: "BOOKING_STATUS_DIFFERS", severity: "difference", title: "Contractul verificat nu este înregistrat ca rezervare confirmată.", current: { status: row.status }, proposed: { status: "BOOKED" } });
   if (day(row.periodStart) !== fact.periodStart || day(row.periodEnd) !== fact.periodEnd) findings.push({ ...base, code: "BOOKING_PERIOD_DIFFERS", severity: "difference", title: "Perioada din aplicație diferă de faptele confirmate din contract.", current: { periodStart: day(row.periodStart), periodEnd: day(row.periodEnd) }, proposed: { periodStart: fact.periodStart, periodEnd: fact.periodEnd } });

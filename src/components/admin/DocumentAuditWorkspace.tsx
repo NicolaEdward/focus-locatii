@@ -8,7 +8,7 @@ type Workspace = Awaited<ReturnType<typeof getDocumentAuditWorkspace>>;
 type Source = Workspace["sources"][number];
 type Document = Workspace["documents"][number];
 const date = (value: string | null | undefined) => value ? new Date(value).toLocaleString("ro-RO") : "Nicio scanare";
-const statusNames: Record<string, string> = { unconfigured: "Sursă NAS neconfigurată", paused: "Sincronizare oprită", sync_required: "Este necesară prima scanare completă", stale: "Scanarea este prea veche", audit_required: "Raportul trebuie recalculat", within_reviewed_scope: "Fără diferențe în domeniul verificat", review_required: "Există documente sau diferențe de verificat" };
+const statusNames: Record<string, string> = { unconfigured: "Sursă NAS neconfigurată", paused: "Sincronizare oprită", sync_required: "Este necesară o scanare completă acceptată", stale: "Scanarea este prea veche", audit_required: "Raportul trebuie recalculat", within_reviewed_scope: "Fără diferențe în domeniul verificat", review_required: "Există documente sau diferențe de verificat" };
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const exampleFacts = JSON.stringify([{ kind: "reservation", locationCode: "COD-DIN-CONTRACT", periodStart: "2026-01-01", periodEnd: "2026-01-31", contractNumber: "NUMAR-CONTRACT", monthlyRent: "100.00", currency: "EUR", evidence: { page: 1, quote: "Citatul exact din original, care susține aceste valori." } }], null, 2);
 

@@ -16,7 +16,7 @@ const suites = [
   'test-media-boundaries.ts','test-data-import-hardening.ts','test-secure-spreadsheet-imports.ts',
   'test-finance-remediation.ts','test-finance-plan-and-alerts.ts','test-financial-bank-reconciliation.ts',
   'test-receivables-reconciliation.ts','test-billing.cjs','test-finance-consistency.cjs',
-  'test-commercial-workbench.ts','test-operations-controls.ts','test-backup-restore.cjs','test-backup-hardening.cjs',
+  'test-commercial-workbench.ts','test-dooh-static-capacity.ts','test-operations-controls.ts','test-backup-restore.cjs','test-backup-hardening.cjs',
   'test-remediation-schema.cjs','test-database-connection-policy.ts','test-remediation-history.ts','test-database-read-retry.ts','test-release-governance.cjs','test-observability.ts',
   'test-admin-route-links.cjs','test-notifications.cjs','test-operations-rbac.cjs','test-dependency-policy.cjs'
 ];

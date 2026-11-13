@@ -1,0 +1,413 @@
+{
+  "schema_version": "1.0",
+  "audit_commit": "ba83e0dbed5d50575e51ec735505dce54e9b20fc",
+  "analysis_only": false,
+  "branch": "implementation/full-remediation",
+  "tasks": [
+    {
+      "id": "T00",
+      "title": "Înghețarea regulilor și pregătirea reproducerilor",
+      "finding_ids": [],
+      "depends_on": [],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-remediation-schema.cjs",
+        "scripts/test-remediation-history.ts"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T01",
+      "title": "Închiderea accesului între portofolii",
+      "finding_ids": [
+        "SEC-AUTH-001",
+        "SEC-AUTH-007"
+      ],
+      "depends_on": [
+        "T00"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-reservation-remediation.cjs",
+        "scripts/test-location-private-read.ts",
+        "scripts/test-client-atomic-mutations.ts"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T02",
+      "title": "Restabilirea invariantelor rezervării",
+      "finding_ids": [
+        "OPS-002",
+        "OPS-003",
+        "OPS-008"
+      ],
+      "depends_on": [
+        "T00"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-reservation-remediation.cjs",
+        "scripts/test-reservation-integrity.cjs",
+        "scripts/test-dooh-static-capacity.ts"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T03",
+      "title": "Unificarea aprobării și termenilor BOOKED",
+      "finding_ids": [
+        "OPS-001",
+        "OPS-004",
+        "FIN-008",
+        "FIN-009"
+      ],
+      "depends_on": [
+        "T01",
+        "T02"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-reservation-remediation.cjs",
+        "scripts/test-campaign-commercial-summary.ts"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T04",
+      "title": "Securizarea ciclului MFA și a autorizării administrative",
+      "finding_ids": [
+        "SEC-AUTH-002",
+        "SEC-AUTH-003",
+        "SEC-AUTH-004",
+        "SEC-AUTH-005",
+        "SEC-AUTH-006"
+      ],
+      "depends_on": [
+        "T00"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-auth-remediation.ts",
+        "scripts/test-auth-hardening.ts"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T05",
+      "title": "Limitarea conținutului activ și patch-uri de securitate",
+      "finding_ids": [
+        "SEC-DATA-001",
+        "SEC-DATA-002",
+        "SEC-DATA-004",
+        "SEC-DATA-005",
+        "REL-004"
+      ],
+      "depends_on": [
+        "T00"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-media-boundaries.ts",
+        "scripts/test-data-import-hardening.ts",
+        "scripts/test-dependency-policy.cjs",
+        "scripts/test-database-connection-policy.ts"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T06",
+      "title": "Un singur calcul pentru creanță și alocări",
+      "finding_ids": [
+        "FIN-001",
+        "FIN-002",
+        "FIN-004",
+        "FIN-007"
+      ],
+      "depends_on": [
+        "T00"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-finance-remediation.ts",
+        "scripts/test-financial-bank-reconciliation.ts"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T07",
+      "title": "Idempotență și recuperare după erori",
+      "finding_ids": [
+        "FIN-003",
+        "AI-004",
+        "OPS-005"
+      ],
+      "depends_on": [
+        "T01",
+        "T02",
+        "T06"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-finance-remediation.ts",
+        "scripts/test-crm-command-outcomes.ts",
+        "scripts/test-commercial-workbench.ts"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T08",
+      "title": "Alerte care reflectă datoria și sarcina reală",
+      "finding_ids": [
+        "FIN-006",
+        "OPS-006",
+        "OPS-007"
+      ],
+      "depends_on": [
+        "T06"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-finance-plan-and-alerts.ts",
+        "scripts/test-notifications.cjs",
+        "scripts/test-reservation-remediation.cjs"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T09",
+      "title": "Importuri previzibile și reversibile",
+      "finding_ids": [
+        "SEC-DATA-003",
+        "REL-001"
+      ],
+      "depends_on": [
+        "T00"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-data-import-hardening.ts"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T10",
+      "title": "Repararea navigării și semnalelor vizuale",
+      "finding_ids": [
+        "UX-001",
+        "UX-002",
+        "UX-003",
+        "UX-004",
+        "UX-005",
+        "UX-006",
+        "UX-007",
+        "UX-008"
+      ],
+      "depends_on": [
+        "T00"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/release/smoke-ui-regressions.cjs",
+        "scripts/release/capture-role-pages.cjs"
+      ],
+      "activation_gates": [],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T11",
+      "title": "Control operațional și observabilitate",
+      "finding_ids": [
+        "REL-002",
+        "REL-003",
+        "SEC-DATA-006",
+        "AI-005"
+      ],
+      "depends_on": [
+        "T00"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-transactional-audit.ts",
+        "scripts/test-operations-controls.ts",
+        "scripts/test-backup-restore.cjs",
+        "scripts/test-backup-hardening.cjs"
+      ],
+      "activation_gates": [
+        "Choose RPO/RTO and retention in operations control.",
+        "Configure an off-site destination and escrow a dedicated backup key.",
+        "Register a real production backup and isolated restore receipt; synthetic proofs do not certify production recovery.",
+        "Verify external monitoring delivery with the infrastructure provider."
+      ],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T12",
+      "title": "Clarificarea produsului comercial și a facturării",
+      "finding_ids": [
+        "FIN-005",
+        "FIN-007",
+        "OPS-011",
+        "AI-002"
+      ],
+      "depends_on": [
+        "T03",
+        "T06"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-finance-plan-and-alerts.ts",
+        "scripts/test-commercial-workbench.ts"
+      ],
+      "activation_gates": [
+        "Choose and authorize the fiscal issuer/ERP before connecting real issuance.",
+        "Approve financial/commercial policies and manually reconcile historical inconsistencies."
+      ],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T13",
+      "title": "Model DOOH separat când intră în domeniul pilotului",
+      "finding_ids": [
+        "OPS-009",
+        "OPS-010",
+        "AI-006"
+      ],
+      "depends_on": [
+        "T02",
+        "T03"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-commercial-workbench.ts",
+        "scripts/test-dooh-static-capacity.ts"
+      ],
+      "activation_gates": [
+        "Verify actual digital inventory and playback sources.",
+        "An ad-server connector needs its real API contract and credentials; current playback evidence is explicitly human-verified."
+      ],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T14",
+      "title": "Gateway de instrumente și aprobări AI",
+      "finding_ids": [
+        "AI-001",
+        "AI-003",
+        "AI-004",
+        "AI-005",
+        "AI-007",
+        "AI-008"
+      ],
+      "depends_on": [
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T11",
+        "T12"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/test-commercial-workbench.ts",
+        "scripts/test-crm-command-outcomes.ts"
+      ],
+      "activation_gates": [
+        "Approve model/provider, region, retention, budget, scopes and contact channels before enabling optional adapters.",
+        "Generation and outbound are disabled by default; no actual customer contact or provider spend has occurred."
+      ],
+      "historical_data_policy": "no_automatic_corrections"
+    },
+    {
+      "id": "T15",
+      "title": "Pilot și decizie pe dovezi",
+      "finding_ids": [
+        "AI-001",
+        "AI-003",
+        "AI-004",
+        "AI-005",
+        "AI-007",
+        "AI-008"
+      ],
+      "depends_on": [
+        "T14"
+      ],
+      "code_status": "implemented",
+      "release_status": "awaiting_final_release_verification",
+      "verification_scripts": [
+        "scripts/evaluate-sales-pilot.ts",
+        "scripts/test-commercial-workbench.ts"
+      ],
+      "activation_gates": [
+        "Preregister cohort/thresholds and collect real observations over the commercial maturity period.",
+        "Seller replacement is NOT_ESTABLISHED; synthetic evaluator fixtures are not performance evidence."
+      ],
+      "historical_data_policy": "no_automatic_corrections"
+    }
+  ],
+  "new_findings_addressed": [
+    {
+      "id": "SEC-INFRA-001",
+      "status": "confirmed_fixed_in_code_pending_production_verification",
+      "description": "Remote database certificate verification was disabled. All remote application and release connections now validate the provider CA supplied by the owner.",
+      "test": "scripts/test-database-connection-policy.ts"
+    },
+    {
+      "id": "OPS-INTEGRATION-001",
+      "status": "confirmed_fixed_and_synthetic_tested",
+      "description": "Static full-location and DOOH capacity allocation now share location-first locks and an explicit capacity-only policy.",
+      "test": "scripts/test-dooh-static-capacity.ts"
+    },
+    {
+      "id": "REL-INTEGRATION-001",
+      "status": "confirmed_fixed_and_synthetic_tested",
+      "description": "CRM preserves committed/unknown outcomes and prevents actor-crossing or mismatched intent replay.",
+      "test": "scripts/test-crm-command-outcomes.ts"
+    }
+  ],
+  "verification_evidence": {
+    "consolidated_regression": "artifacts/remediation/results.json",
+    "interactive_ui": "artifacts/ui-final-interactive/manifest.json",
+    "new_routes_visual": "artifacts/ui-final-new-routes/manifest.json",
+    "existing_routes_visual": "/workspace/work/implementation/ui/artifacts/ui-capture-full/manifest.json",
+    "unique_visual_combinations": 292,
+    "interactive_checks_passed": 50,
+    "synthetic_backup_fidelity_rows": 17006,
+    "dependency_advisories": 0,
+    "final_release": "artifacts/release/final-evidence.json"
+  },
+  "production_mutation_boundaries": [
+    "Additive reviewed CREATE TABLE/new-table FK migrations only.",
+    "No historical client/reservation/financial fixes.",
+    "No customer communications, real AI calls, fiscal issuance or bank operations.",
+    "No claim that production backup/restore or seller replacement is proven."
+  ]
+}

@@ -9,6 +9,7 @@ import { displayPhotoUrl, samplePhotoForCode } from "@/lib/photos";
 import { effectiveBlockingReservationWhere, isEffectiveBlockingReservation } from "@/lib/reservation-lifecycle";
 import { sortOperationalLocations } from "@/lib/location-order";
 import { canReadReservationDetails, reservationDetailsWhere, type ReservationReader } from "@/lib/reservation-read-access";
+import { isDigitalLocationType } from "@/lib/location-medium";
 import type {
   AdminLocationListItemDTO,
   AdminLocationPageDTO,
@@ -290,9 +291,9 @@ export function serializeLocation(location: LocationWithRelations, options: Seri
     bookedUntil: toIso(location.bookedUntil),
     status: normalizedStatus,
     lifecycleStatus: location.lifecycleStatus,
-    publicStatus: availability.publicStatus,
-    availabilityLabel: availability.label,
-    availabilityDetail: availability.detail,
+    publicStatus: isDigitalLocationType(type) && availability.publicStatus === "AVAILABLE" ? "UNKNOWN" : availability.publicStatus,
+    availabilityLabel: isDigitalLocationType(type) && availability.publicStatus === "AVAILABLE" ? "Capacitate DOOH de verificat" : availability.label,
+    availabilityDetail: isDigitalLocationType(type) && availability.publicStatus === "AVAILABLE" ? "Disponibilitatea digitală depinde de perioadă, slot și frecvență. Verifică alocările DOOH înainte de confirmare." : availability.detail,
     latReal: exposePrivateFields ? latReal : null,
     lngReal: exposePrivateFields ? lngReal : null,
     latDisplay,
@@ -638,6 +639,8 @@ function adminLocationListWhere(filters: AdminLocationListFilters): Prisma.Locat
 
 function serializeAdminLocationListItem(row: AdminLocationSummaryRow, now: Date): AdminLocationListItemDTO {
   const availability = publicAvailability(row, now);
+  const type = normalizeMediaType(row.type, row.category.name, row.address, row.code);
+  const digitalCapacity = isDigitalLocationType(type) && availability.publicStatus === "AVAILABLE";
   return {
     id: row.id,
     code: row.code,
@@ -647,7 +650,7 @@ function serializeAdminLocationListItem(row: AdminLocationSummaryRow, now: Date)
     city: row.city,
     county: row.county,
     address: row.address,
-    type: normalizeMediaType(row.type, row.category.name, row.address, row.code),
+    type,
     size: row.size,
     sqm: row.sqm,
     rateCard: row.rateCard,
@@ -656,10 +659,10 @@ function serializeAdminLocationListItem(row: AdminLocationSummaryRow, now: Date)
     installationRemovalValue: row.installationRemovalValue,
     status: row.status,
     lifecycleStatus: row.lifecycleStatus as LocationLifecycleStatus,
-    publicStatus: availability.publicStatus,
+    publicStatus: digitalCapacity ? "UNKNOWN" : availability.publicStatus,
     availabilityText: row.availabilityText,
-    availabilityLabel: availability.label,
-    availabilityDetail: availability.detail,
+    availabilityLabel: digitalCapacity ? "Capacitate DOOH de verificat" : availability.label,
+    availabilityDetail: digitalCapacity ? "Disponibilitatea digitală depinde de perioadă, slot și frecvență. Verifică alocările DOOH înainte de confirmare." : availability.detail,
     latDisplay: row.latDisplay,
     lngDisplay: row.lngDisplay,
     mapsUrl: row.mapsUrl,

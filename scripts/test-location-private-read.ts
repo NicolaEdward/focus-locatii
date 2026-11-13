@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../src/lib/prisma";
 import { getAdminLocation } from "../src/lib/locations";
+import { updateLocation } from "../src/lib/location-mutations";
 import { assertSyntheticEnvironment } from "./release/env-utils";
 
 assertSyntheticEnvironment();
@@ -25,10 +26,19 @@ async function main() {
     const noActor = await getAdminLocation(location.id);
     assert.deepEqual(noActor?.reservations, []);
     assert.equal(noActor?.publicStatus, agent.publicStatus, "Redaction must not change occupied status");
+    await prisma.reservation.deleteMany({ where: { locationId: location.id } });
+    const operator = await prisma.user.create({ data: { name: tag + "coo", email: `${tag}-coo@example.invalid`, role: "COO", passwordHash: "unused-synthetic" } });
+    owners.push(operator);
+    const updated = await updateLocation(location.id, { type: "LED Digital" }, operator);
+    assert.equal(updated.type, "Digital", "Inventory edits must preserve the digital medium instead of flattening it to Panou");
+    const digital = await getAdminLocation(location.id, owners[0]);
+    assert.equal(digital?.publicStatus, "UNKNOWN", "Empty static schedule does not prove available digital capacity");
+    assert.ok(digital?.availabilityLabel.includes("DOOH"));
     console.log("Location private-read real DB regression passed: own details, foreign blocker, manager scope, fail-closed");
   } finally {
     await prisma.reservation.deleteMany({ where: { locationId: location.id } });
     await prisma.location.delete({ where: { id: location.id } });
+    await prisma.auditLog.deleteMany({ where: { userId: { in: owners.map((u) => u.id) } } });
     await prisma.user.deleteMany({ where: { id: { in: owners.map((u) => u.id) } } });
     await prisma.category.delete({ where: { id: category.id } });
   }

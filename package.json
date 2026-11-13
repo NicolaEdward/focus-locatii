@@ -189,7 +189,10 @@
     "test:contract-control": "tsx scripts/test-contract-control.ts",
     "test:sales-workspace": "tsx scripts/test-sales-work-queue.ts && tsx scripts/test-sales-workspace.ts",
     "smoke:ooh-commercial": "node scripts/release/smoke-ooh-commercial-flow.cjs",
-    "smoke:onboarding": "tsx scripts/test-onboarding-browser.ts"
+    "smoke:onboarding": "tsx scripts/test-onboarding-browser.ts",
+    "test:public-business-errors": "tsx scripts/test-public-business-errors.ts",
+    "test:commercial-quote-print": "tsx scripts/test-commercial-quote-print.ts",
+    "smoke:ooh-workspace-states": "node scripts/release/smoke-ooh-workspace-states.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

@@ -111,6 +111,8 @@ jobs:
       - name: OOH company workflow regressions
         run: |
           pnpm run test:ooh-commercial-flow
+          pnpm run test:commercial-quote-print
+          pnpm run test:public-business-errors
           pnpm run test:quote-selection-bridge
           pnpm run test:reservation-amendments
           pnpm run test:segmented-billing
@@ -148,9 +150,11 @@ jobs:
         run: |
           pnpm run smoke:onboarding
           pnpm run smoke:ooh-commercial
+          pnpm run smoke:ooh-workspace-states
         env:
           ONBOARDING_BROWSER_BASE_URL: http://localhost:3000
           OOH_SMOKE_BASE_URL: http://localhost:3000
+          OOH_WORKSPACE_BASE_URL: http://localhost:3000
       - run: pnpm run smoke:roles
       - name: Interactive UI regressions
         run: node scripts/release/smoke-ui-regressions.cjs

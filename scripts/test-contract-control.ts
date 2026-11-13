@@ -82,13 +82,34 @@ try {
   const all = await getContractControlReport({ q: tag, scope: "all" }, manager, now);
   assert.equal(all.rows.length, 5);
   assert.equal(all.rows.find((row) => row.id === own.reservation.id)?.evidence.documents[0]?.documentId, proof.document.id);
+  await prisma.rentalPriceSegment.createMany({ data: [
+    { rentalId: own.reservation.id, effectiveFrom: new Date("2090-01-01"), effectiveTo: new Date("2090-01-14"), monthlyRent: 100, currency: "EUR" },
+    { rentalId: own.reservation.id, effectiveFrom: new Date("2090-01-16"), effectiveTo: new Date("2090-01-31"), monthlyRent: 100, currency: "EUR" },
+  ] });
+  const gapReport = await getContractControlReport({ q: tag }, seller, now);
+  const gap = gapReport.rows.find((row) => row.id === own.reservation.id)!;
+  assert.equal(gap.monthlyRent, null, "A price-history gap cannot fall back to a positive header");
+  assert.equal(gap.evidence.state, "partial", "Complete document facts do not certify an invalid price history");
+  assert.equal(gap.issues.includes("price_history_invalid"), true);
+  assert.deepEqual(gap.priceSchedule.reasons, ["PRICE_SEGMENT_GAP"]);
+  await prisma.rentalPriceSegment.deleteMany({ where: { rentalId: own.reservation.id } });
+  await prisma.rentalPriceSegment.createMany({ data: [
+    { rentalId: own.reservation.id, effectiveFrom: new Date("2090-01-01"), effectiveTo: new Date("2090-01-20"), monthlyRent: 100, currency: "EUR" },
+    { rentalId: own.reservation.id, effectiveFrom: new Date("2090-01-20"), effectiveTo: new Date("2090-01-31"), monthlyRent: 100, currency: "EUR" },
+  ] });
+  const overlapReport = await getContractControlReport({ q: tag }, seller, now);
+  const overlap = overlapReport.rows.find((row) => row.id === own.reservation.id)!;
+  assert.equal(overlap.monthlyRent, null, "A future overlap also invalidates the complete contractual history");
+  assert.equal(overlap.evidence.state, "partial");
+  assert.equal(overlap.issues.includes("price_history_conflict"), true);
+  assert.deepEqual(overlap.priceSchedule.reasons, ["PRICE_SEGMENT_OVERLAP"]);
   await prisma.documentAuditSource.update({ where: { id: source.id }, data: { activeScanId: "new-unfinished-scan" } });
   const partialScan = await getContractControlReport({ q: tag }, seller, now);
   assert.equal(partialScan.rows.find((row) => row.id === own.reservation.id)?.evidence.state, "stale", "An unfinished scan cannot certify current evidence");
   await assert.rejects(() => getContractControlReport({}, field, now), (error: unknown) => error instanceof ContractControlError && error.status === 403);
   await assert.rejects(() => getContractControlReport({}, { ...seller, tokenVersion: seller.tokenVersion + 1 }, now), (error: unknown) => error instanceof ContractControlError && error.status === 401);
   assert.deepEqual(await prisma.reservation.findMany({ where: { id: { in: ids.reservations } }, orderBy: { id: "asc" } }), before, "Reports never mutate rentals");
-  console.log(JSON.stringify({ passed: true, assertions: 37, coverage: ["inclusive current/upcoming/history", "effective-date price comparison", "exact evidence identity", "verified/partial/stale/conflict/difference", "cross-portfolio privacy", "entity/pricing/reference defects", "read-only business records", "live role/tokenVersion", "CSV formula isolation"] }));
+  console.log(JSON.stringify({ passed: true, assertions: 45, coverage: ["inclusive current/upcoming/history", "effective-date price comparison", "gap and future overlap fail closed", "exact evidence identity", "verified/partial/stale/conflict/difference", "cross-portfolio privacy", "entity/pricing/reference defects", "read-only business records", "live role/tokenVersion", "CSV formula isolation"] }));
 } finally {
   await prisma.documentFactReview.deleteMany({ where: { reviewedByUserId: { in: ids.users } } });
   await prisma.sourceDocumentVersion.deleteMany({ where: { document: { sourceId: { in: ids.sources } } } });

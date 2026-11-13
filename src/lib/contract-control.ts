@@ -5,6 +5,7 @@ import { bucharestDateKey } from "@/lib/campaigns/campaign-effective-status";
 import { reservationDetailsWhere } from "@/lib/reservation-read-access";
 import { documentFactSchema, mayReadDocumentAudit } from "@/lib/document-source-domain";
 import { normalizeCompanyEntity } from "@/lib/company-entities";
+import { getValidatedPriceIntervals } from "@/lib/segmented-billing";
 import { CONTRACT_CONTROL_ROLES, compareContractEvidence, contractControlQuerySchema, contractIssueLabels, contractRecordScope, type ContractEvidence, type ContractIssue } from "@/lib/contract-control-domain";
 
 export class ContractControlError extends Error {
@@ -69,13 +70,17 @@ export async function getContractControlReport(raw: unknown, actor: AuthSession,
       // The current or first contracted day determines the displayed monthly
       // rent. Historical segments remain visible and are never flattened.
       const priceDate = scope === "current" ? today : scope === "upcoming" ? periodStart : periodEnd;
-      const segments = row.priceSegments.filter((segment) => day(segment.effectiveFrom) <= priceDate && (!segment.effectiveTo || day(segment.effectiveTo) >= priceDate));
-      const monthlyRent = segments.length === 1 ? money(segments[0].monthlyRent) : money(row.monthlyRentShare ?? row.amount ?? row.monthlyRentTotal);
-      const currency = segments.length === 1 ? segments[0].currency : row.currency;
+      const headerRent = row.monthlyRentShare ?? row.amount ?? row.monthlyRentTotal;
+      const schedule = getValidatedPriceIntervals({ periodStart: row.periodStart, periodEnd: row.periodEnd, monthlyAmount: headerRent ?? 0, currency: row.currency }, row.priceSegments);
+      const applicable = schedule.valid ? schedule.intervals.find((interval) => day(interval.periodStart) <= priceDate && day(interval.periodEnd) >= priceDate) : null;
+      // Once a segmented history exists, a gap/overlap must never fall back to
+      // the denormalized header and certify a price that billing cannot use.
+      const monthlyRent = applicable ? money(applicable.monthlyRent) : null;
+      const currency = applicable ? applicable.currency : row.currency;
       const candidates = [...(evidenceByReservation.get(row.id) || []), ...(evidenceByCode.get(row.location.code.trim().toLocaleUpperCase("ro-RO")) || [])];
-      const comparison = compareContractEvidence({ id: row.id, locationCode: row.location.code, periodStart, periodEnd, contractNumber: row.contractNumber, contractCompany: row.contractCompany, clientTaxId: row.client?.taxId || null, monthlyRent, currency, priceDate }, candidates);
+      const comparison = compareContractEvidence({ id: row.id, locationCode: row.location.code, periodStart, periodEnd, contractNumber: row.contractNumber, contractCompany: row.contractCompany, clientTaxId: row.client?.taxId || null, monthlyRent, currency, priceDate, priceScheduleValid: schedule.valid }, candidates);
       const issues: ContractIssue[] = [];
-      if (!monthlyRent || Number(monthlyRent) <= 0) issues.push("missing_price");
+      if (!(headerRent != null && headerRent > 0) && !row.priceSegments.some((segment) => segment.monthlyRent.gt(0))) issues.push("missing_price");
       if (!["EUR", "RON"].includes(currency || "")) issues.push("missing_currency");
       if (!row.contractNumber?.trim()) issues.push("missing_contract");
       const entity = normalizeCompanyEntity(row.contractCompany), campaignEntity = normalizeCompanyEntity(row.campaign?.companyEntity);
@@ -84,12 +89,14 @@ export async function getContractControlReport(raw: unknown, actor: AuthSession,
       if (!row.clientId || !row.campaignId) issues.push("missing_client_campaign");
       const responsible = row.sellerUser?.active ? row.sellerUser : row.owner?.active ? row.owner : null;
       if (!responsible) issues.push("missing_owner");
-      if (segments.length > 1) issues.push("price_history_conflict");
+      if (!schedule.valid) issues.push("price_history_invalid");
+      if (schedule.reasons.includes("PRICE_SEGMENT_OVERLAP")) issues.push("price_history_conflict");
       if (new Set(row.priceSegments.map((segment) => `${money(segment.monthlyRent)}:${segment.currency}`)).size > 1) issues.push("price_history_review");
       const evidenceIssue = { unverified: "evidence_missing", stale: "evidence_stale", partial: "evidence_partial", conflicting: "evidence_conflict", difference: "contract_difference", matched: null } as const;
       if (evidenceIssue[comparison.state]) issues.push(evidenceIssue[comparison.state]!);
       const nextAction = issues.includes("entity_mismatch") ? "Verifică firma din contract și emitentul facturii înaintea corecției."
         : issues.includes("missing_price") ? "Confirmă chiria pe amplasament din contract sau actul adițional valabil."
+          : issues.includes("price_history_invalid") ? "Reconciliază intervalele chiriei cu actele adiționale; nu folosi prețul din antet ca înlocuitor al istoricului."
           : comparison.state === "difference" || comparison.state === "conflicting" ? "Verifică originalul și actele adiționale; pregătește o corecție cu data efectivă."
             : issues.includes("missing_client_campaign") ? "Asociază clientul și campania, păstrând istoricul închirierii."
               : issues.includes("missing_owner") ? "Directorul comercial trebuie să atribuie un responsabil."
@@ -99,7 +106,7 @@ export async function getContractControlReport(raw: unknown, actor: AuthSession,
         id: row.id, locationId: row.locationId, locationCode: row.location.code, city: row.location.city, address: row.location.address,
         clientId: row.clientId, clientName: row.client?.companyName || row.clientName, campaignId: row.campaignId, campaignName: row.campaign?.campaignName || row.campaignName,
         periodStart, periodEnd, scope, contractNumber: row.contractNumber, contractCompany: row.contractCompany, campaignEntity: row.campaign?.companyEntity || null,
-        monthlyRent, currency, priceDate, priceSegments: row.priceSegments.map((segment) => ({ effectiveFrom: day(segment.effectiveFrom), effectiveTo: segment.effectiveTo ? day(segment.effectiveTo) : null, monthlyRent: money(segment.monthlyRent), currency: segment.currency })),
+        monthlyRent, currency, priceDate, priceSchedule: { valid: schedule.valid, reasons: schedule.reasons }, priceSegments: row.priceSegments.map((segment) => ({ effectiveFrom: day(segment.effectiveFrom), effectiveTo: segment.effectiveTo ? day(segment.effectiveTo) : null, monthlyRent: money(segment.monthlyRent), currency: segment.currency })),
         responsible: responsible ? { id: responsible.id, name: responsible.name } : null, updatedAt: row.updatedAt.toISOString(), issues, nextAction,
         evidence: { state: comparison.state, differences: comparison.differences,
           documents: comparison.documents.map((document) => mayReadDocumentAudit(actor.role) ? { documentId: document.documentId, documentVersionId: document.documentVersionId, displayName: document.displayName, sha256: document.sha256, reviewVersion: document.reviewVersion, reviewedAt: document.reviewedAt, fresh: document.fresh, evidence: document.fact.evidence } : { reviewedAt: document.reviewedAt, fresh: document.fresh }) },

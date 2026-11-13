@@ -19,6 +19,7 @@ export const contractIssueLabels = {
   contract_difference: "Datele diferă de contractul verificat",
   price_history_conflict: "Segmente de preț suprapuse",
   price_history_review: "Acte adiționale și tarife pe intervale de verificat",
+  price_history_invalid: "Istoricul chiriei necesită reconciliere",
 } as const;
 export type ContractIssue = keyof typeof contractIssueLabels;
 const issueKeys = Object.keys(contractIssueLabels) as [ContractIssue, ...ContractIssue[]];
@@ -54,6 +55,7 @@ export type ContractReservation = {
   currency: string | null;
   monthlyRent: string | null;
   priceDate?: string;
+  priceScheduleValid?: boolean;
 };
 export type ContractDifference = { field: string; label: string; current: string | null; contractual: string | null };
 const key = (v: string | null | undefined) => String(v || "").trim().toLocaleUpperCase("ro-RO").replace(/\s+/g, " ");
@@ -89,11 +91,11 @@ export function compareContractEvidence(row: ContractReservation, values: Contra
     compare("periodEnd", "Ultima zi inclusă", row.periodEnd, fact.periodEnd);
     if (fact.contractNumber) compare("contractNumber", "Număr contract", key(row.contractNumber) || null, key(fact.contractNumber));
     if (fact.clientTaxId) compare("clientTaxId", "CUI client", canonicalTaxId(row.clientTaxId) || null, canonicalTaxId(fact.clientTaxId) || null);
-    if (fact.currency && coversPriceDate(fact)) compare("currency", "Monedă", row.currency, fact.currency);
+    if (row.priceScheduleValid !== false && fact.currency && coversPriceDate(fact)) compare("currency", "Monedă", row.currency, fact.currency);
     if (fact.companyEntity) compare("contractCompany", "Firma contractantă", normalizeCompanyEntity(row.contractCompany), normalizeCompanyEntity(fact.companyEntity));
-    if (coversPriceDate(fact) && fact.monthlyRent !== undefined && fact.currency && fact.currency === row.currency) compare("monthlyRent", "Chirie lunară", positive(row.monthlyRent) ? Number(row.monthlyRent).toFixed(2) : null, Number(fact.monthlyRent).toFixed(2));
+    if (row.priceScheduleValid !== false && coversPriceDate(fact) && fact.monthlyRent !== undefined && fact.currency && fact.currency === row.currency) compare("monthlyRent", "Chirie lunară", positive(row.monthlyRent) ? Number(row.monthlyRent).toFixed(2) : null, Number(fact.monthlyRent).toFixed(2));
   }
-  const complete = fresh.some(({ fact }) => coversPriceDate(fact) && Boolean(fact.contractNumber && fact.clientTaxId && fact.currency && fact.companyEntity && positive(fact.monthlyRent)));
+  const complete = row.priceScheduleValid !== false && fresh.some(({ fact }) => coversPriceDate(fact) && Boolean(fact.contractNumber && fact.clientTaxId && fact.currency && fact.companyEntity && positive(fact.monthlyRent)));
   const state = !matching.length ? "unverified" as const
     : !fresh.length ? "stale" as const
       : contradictory ? "conflicting" as const

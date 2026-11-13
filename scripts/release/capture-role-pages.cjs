@@ -57,7 +57,7 @@ const pages = [
   { name: "operational", route: "/admin/operational", role: "COO", expected: "Workspace operational" },
   { name: "suppliers", route: "/admin/furnizori", role: "COO", expected: "Furnizori" },
   { name: "finance-suppliers", route: "/admin/furnizori", role: "FINANCE_OPERATOR", expected: "Furnizori" },
-  { name: "location-import", route: "/admin/locatii/import", role: "COO", expected: "Import locatii" },
+  { name: "location-import", route: "/admin/locatii/import", role: "COO", expected: "Import loca" },
   { name: "gps-audit", route: "/admin/locatii/gps", role: "COO", expected: "GPS AUDIT" },
   { name: "users", route: "/admin/utilizatori", role: "COO", expected: "Utilizatori" },
   { name: "ownership-integrity", route: "/admin/integritate-date", role: "COO", expected: "Integritate ownership" },

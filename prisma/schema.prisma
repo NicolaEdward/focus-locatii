@@ -2214,3 +2214,75 @@ model CommercialDeliveryEvent {
   @@index([dispatchId, createdAt])
   @@map("portfolio_commercial_delivery_events")
 }
+
+// Delegated read-only ChatGPT access. No new foreign keys modify legacy tables.
+model AssistantOAuthClient {
+  id String @id @default(cuid())
+  name String @db.VarChar(160)
+  secretHash String? @db.VarChar(64)
+  redirectUris Json
+  allowedScopes Json
+  createdByUserId String
+  disabledAt DateTime?
+  createdAt DateTime @default(now())
+  @@map("portfolio_assistant_oauth_clients")
+}
+
+model AssistantOAuthConsent {
+  id String @id @default(cuid())
+  nonceHash String @unique @db.VarChar(64)
+  clientId String
+  userId String
+  sessionId String?
+  tokenVersion Int
+  request Json
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId, expiresAt])
+  @@map("portfolio_assistant_oauth_consents")
+}
+
+model AssistantOAuthGrant {
+  id String @id @default(cuid())
+  clientId String
+  userId String
+  sessionId String?
+  roleAtConsent String @db.VarChar(40)
+  tokenVersion Int
+  scopes Json
+  resource String @db.VarChar(1000)
+  offline Boolean @default(false)
+  mfaVerifiedAt DateTime?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId, revokedAt])
+  @@map("portfolio_assistant_oauth_grants")
+}
+
+model AssistantOAuthCode {
+  id String @id @default(cuid())
+  codeHash String @unique @db.VarChar(64)
+  grantId String
+  clientId String
+  redirectUri String @db.VarChar(1000)
+  challenge String @db.VarChar(43)
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([grantId])
+  @@map("portfolio_assistant_oauth_codes")
+}
+
+model AssistantOAuthToken {
+  id String @id @default(cuid())
+  tokenHash String @unique @db.VarChar(64)
+  grantId String
+  kind String @db.VarChar(12)
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([grantId, kind])
+  @@map("portfolio_assistant_oauth_tokens")
+}

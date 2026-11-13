@@ -171,9 +171,12 @@
     "test:inventory-availability-summary": "tsx scripts/test-inventory-availability-summary.ts",
     "test:occupancy-summary-ui": "node scripts/test-occupancy-summary-ui.cjs",
     "smoke:occupancy-summary": "node scripts/release/smoke-occupancy-summary.cjs",
-    "audit:inventory-availability": "tsx scripts/release/snapshot-inventory-availability.ts"
+    "audit:inventory-availability": "tsx scripts/release/snapshot-inventory-availability.ts",
+    "test:assistant-mcp": "tsx scripts/test-assistant-mcp.ts",
+    "test:assistant-ui": "tsx scripts/test-assistant-ui.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@prisma/client": "^6.0.0",
     "ai": "7.0.172",
     "clsx": "^2.1.1",

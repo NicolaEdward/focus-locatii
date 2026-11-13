@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "node scripts/release/run-historical-inventory.cjs && node scripts/release/write-evidence-job-output.cjs",
+  "outputDirectory": ".evidence-job-output",
+  "regions": ["fra1"],
+  "crons": []
+}

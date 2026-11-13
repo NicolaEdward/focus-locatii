@@ -32,7 +32,7 @@ assert.ok(
   ["127.0.0.1", "localhost"].includes(database.hostname),
   "Document tools tests require an isolated local MySQL",
 );
-assert.equal(database.pathname.slice(1), "focus_preview_mcp_evidence_tools");
+assert.equal(database.pathname.slice(1), process.env.ASSISTANT_DOCUMENT_TEST_DATABASE || "focus_preview_mcp_evidence_tools");
 const base = process.env.ASSISTANT_MCP_BASE_URL!;
 assert.equal(new URL(base).hostname, "127.0.0.1");
 const tag = `document-tools-${randomUUID()}`;

@@ -111,6 +111,7 @@ jobs:
       - name: Assistant MCP and NAS document audit regressions
         run: |
           node node_modules/tsx/dist/cli.mjs scripts/test-assistant-mcp.ts
+          ASSISTANT_DOCUMENT_TEST_DATABASE=focus_preview_ci node node_modules/tsx/dist/cli.mjs scripts/test-assistant-document-tools.ts
           node node_modules/tsx/dist/cli.mjs scripts/test-document-source-audit.ts
           python3 scripts/test_nas_document_bridge.py
         env:

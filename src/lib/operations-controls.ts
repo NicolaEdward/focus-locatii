@@ -45,10 +45,13 @@ export async function getOperationsControls() {
   const backupAgeHours = backupCreatedAt ? (Date.now() - Date.parse(backupCreatedAt)) / 3600000 : null;
   const environment = process.env.VERCEL_ENV === "production" ? "production" : "test";
   const environmentMatches = receipt?.environment === environment && backupReceipt?.environment === environment;
-  const status = !receipt || !backupReceipt || !environmentMatches ? "unverified" : backupAgeHours == null || backupAgeHours > policy.rpoHours ? "stale_backup" : ageDays == null || ageDays > policy.restoreDrillDays ? "expired_drill" : Number(receipt.durationMs) > policy.rtoMinutes * 60000 ? "rto_exceeded" : "verified";
+  const fingerprint = databaseFingerprint();
+  const sourceMatches = Boolean(fingerprint && receipt?.sourceFingerprint === fingerprint && backupReceipt?.sourceFingerprint === fingerprint);
+  const validTimes = backupAgeHours != null && Number.isFinite(backupAgeHours) && backupAgeHours >= -5 / 60 && ageDays != null && Number.isFinite(ageDays) && ageDays >= -5 / 1440 && typeof receipt?.durationMs === "number" && Number.isFinite(receipt.durationMs) && receipt.durationMs >= 0;
+  const status = !receipt || !backupReceipt || !environmentMatches || !sourceMatches || !validTimes ? "unverified" : backupAgeHours > policy.rpoHours ? "stale_backup" : ageDays > policy.restoreDrillDays ? "expired_drill" : Number(receipt.durationMs) > policy.rtoMinutes * 60000 ? "rto_exceeded" : "verified";
   return {
     policy, environment,
-    backup: { keyConfigured: Buffer.from(process.env.BACKUP_ENCRYPTION_KEY || "", "base64").length === 32, sourceFingerprint: databaseFingerprint(),
+    backup: { keyConfigured: Buffer.from(process.env.BACKUP_ENCRYPTION_KEY || "", "base64").length === 32, sourceFingerprint: fingerprint,
       status, backupCreatedAt, backupAgeHours,
       verifiedAt, durationMs: receipt?.durationMs ?? null, tableCount: receipt?.tableCount ?? null,
       environment: receipt?.environment ?? null, encryptedSha256: receipt?.encryptedSha256 ?? null,

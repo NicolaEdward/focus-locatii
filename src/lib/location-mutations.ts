@@ -221,10 +221,14 @@ export async function deleteLocation(id: string, actor: LocationMutationActor) {
     // counts only after that lock under READ COMMITTED, never an old snapshot.
     const existing = await tx.location.findUniqueOrThrow({ where: { id }, select: {
       id: true, code: true, _count: { select: { reservations: true, operationTasks: true,
-        financialImportRows: true, availabilityOverrides: true, audits: true, images: true } }
+        financialImportRows: true, financialAllocations: true, financialCosts: true,
+        availabilityOverrides: true, audits: true, images: true } }
     } });
     const { images: imageCount, ...history } = existing._count;
     if (Object.values(history).some((count) => count > 0)) throw new LocationMutationError("Locația are istoric comercial sau operațional și nu poate fi ștearsă. Ascunde-o din portalul public.", 409);
+    const digitalProfile = await tx.doohProfile.count({ where: { locationId: id } });
+    const quoted = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM portfolio_quote_revisions WHERE JSON_CONTAINS(JSON_EXTRACT(payload, '$.lines[*].locationId'), ${JSON.stringify(id)}) = 1 LIMIT 1`;
+    if (digitalProfile || quoted.length) throw new LocationMutationError("Locația are istoric de ofertă sau capacitate DOOH și nu poate fi ștearsă. Ascunde-o din portalul public.", 409);
     await tx.location.delete({ where: { id } });
     await recordTransactionalAudit(tx, { actor: current, action: "location.delete", entityType: "location", entityId: id,
       metadata: { code: existing.code, imageCount } });

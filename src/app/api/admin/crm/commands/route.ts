@@ -119,14 +119,14 @@ const createInboundSchema = z.object({
 });
 const qualifySchema = z.object({
   action: z.literal("qualify_and_create_opportunity"), prospectId: z.string().min(1), version: z.number().int().nonnegative(),
-  qualificationSummary: z.record(z.unknown()), opportunityName: z.string().trim().min(2).max(191), needSummary: z.string().trim().min(3).max(5000),
+  qualificationSummary: z.record(z.string(), z.unknown()), opportunityName: z.string().trim().min(2).max(191), needSummary: z.string().trim().min(3).max(5000),
   desiredPeriodStart: optionalDate, desiredPeriodEnd: optionalDate, geography: optionalText, formats: optionalText, budgetStatus: optionalText,
   budgetMin: z.number().nonnegative().nullable().optional(), budgetMax: z.number().nonnegative().nullable().optional(), currency: z.enum(["EUR", "RON"]).nullable().optional(),
   nextActionType: z.string().min(1), nextActionDescription: optionalText, nextActionDueAt: z.string().min(1), idempotencyKey: idempotency
 });
 const qualifyOnlySchema = z.object({
   action: z.literal("qualify_prospect"), prospectId: z.string().min(1), version: z.number().int().nonnegative(),
-  qualificationSummary: z.record(z.unknown()), nextActionDueAt: z.string().min(1), idempotencyKey: idempotency
+  qualificationSummary: z.record(z.string(), z.unknown()), nextActionDueAt: z.string().min(1), idempotencyKey: idempotency
 });
 const transitionProspectSchema = z.object({
   action: z.literal("transition_prospect"), prospectId: z.string().min(1), version: z.number().int().nonnegative(), toStatus: z.string().min(1),

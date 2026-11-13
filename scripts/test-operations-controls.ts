@@ -27,6 +27,11 @@ async function main() {
     assert.throws(() => verifyBackupReceipt({ ...backup, sourceFingerprint: "000000000000" }), /Semnatura/);
     await registerBackupEvidence(backup, actor); await registerRestoreEvidence(restore, actor);
     assert.equal((await getOperationsControls()).backup.status, "verified");
+    const originalDatabase = process.env.DATABASE_URL!;
+    const clonedDatabase = new URL(originalDatabase); clonedDatabase.pathname += "_cloned";
+    process.env.DATABASE_URL = clonedDatabase.toString();
+    assert.equal((await getOperationsControls()).backup.status, "unverified", "Copied audit receipts must not attest another database identity");
+    process.env.DATABASE_URL = originalDatabase;
     const oldEnv = process.env.VERCEL_ENV; process.env.VERCEL_ENV = "production";
     assert.equal((await getOperationsControls()).backup.status, "unverified", "Test receipts must not attest production"); process.env.VERCEL_ENV = oldEnv;
     await prisma.authSessionRecord.createMany({ data: [{ id: sessionOld, userId: actor.id, expiresAt: old }, { id: sessionActive, userId: actor.id, expiresAt: new Date(Date.now() + 86400000) }] });

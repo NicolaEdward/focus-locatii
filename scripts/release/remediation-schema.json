@@ -1,0 +1,3245 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "path": "prisma/migrations/202611130001_finance_commands/migration.sql",
+      "sha256": "465eacfe1312dd832126defac63ef93eb8b5619741090ed08998477d63750c8e"
+    },
+    {
+      "path": "prisma/migrations/20261113160000_commercial_workbench/migration.sql",
+      "sha256": "37f0314a949c851a9ad6746423a945e933afdb572103a54c8eb3d1db26dd1529"
+    }
+  ],
+  "tables": {
+    "portfolio_financial_invoice_allocations": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "receivableId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "campaignId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "reservationId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "locationId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "billingItemId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestKey",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestFingerprint",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "netAmount",
+          "type": "decimal(14,2)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "vatAmount",
+          "type": "decimal(14,2)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "grossAmount",
+          "type": "decimal(14,2)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "currency",
+          "type": "varchar(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "status",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": "active",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "reversedByUserId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "reversedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "reversalReason",
+          "type": "text",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_financial_invoice_allocations_billingItemId_fkey",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "billingItemId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_campaignId_currency__idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "campaignId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_campaignId_currency__idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "currency",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_campaignId_currency__idx",
+          "nonUnique": 1,
+          "sequence": 3,
+          "columnName": "status",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_createdByUserId_fkey",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "createdByUserId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_locationId_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "locationId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_receivableId_status_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "receivableId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_receivableId_status_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "status",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_requestKey_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "requestKey",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_reservationId_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "reservationId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_reversedByUserId_fkey",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "reversedByUserId",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": [
+        {
+          "name": "portfolio_financial_invoice_allocations_billingItemId_fkey",
+          "columnName": "billingItemId",
+          "sequence": 1,
+          "targetTable": "portfolio_billing_items",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_campaignId_fkey",
+          "columnName": "campaignId",
+          "sequence": 1,
+          "targetTable": "portfolio_campaigns",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_createdByUserId_fkey",
+          "columnName": "createdByUserId",
+          "sequence": 1,
+          "targetTable": "portfolio_users",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_locationId_fkey",
+          "columnName": "locationId",
+          "sequence": 1,
+          "targetTable": "portfolio_locations",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_receivableId_fkey",
+          "columnName": "receivableId",
+          "sequence": 1,
+          "targetTable": "portfolio_financial_receivables",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_reservationId_fkey",
+          "columnName": "reservationId",
+          "sequence": 1,
+          "targetTable": "portfolio_reservations",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_invoice_allocations_reversedByUserId_fkey",
+          "columnName": "reversedByUserId",
+          "sequence": 1,
+          "targetTable": "portfolio_users",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        }
+      ]
+    },
+    "portfolio_financial_campaign_costs": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "campaignId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "reservationId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "locationId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "legalEntityId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sourceDocumentId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sourceReference",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "costType",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "netAmount",
+          "type": "decimal(14,2)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "vatAmount",
+          "type": "decimal(14,2)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "grossAmount",
+          "type": "decimal(14,2)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "currency",
+          "type": "varchar(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "status",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": "draft",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestKey",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestFingerprint",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "version",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "approvedByUserId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "approvedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_financial_campaign_costs_approvedByUserId_fkey",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "approvedByUserId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_campaignId_currency_statu_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "campaignId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_campaignId_currency_statu_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "currency",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_campaignId_currency_statu_idx",
+          "nonUnique": 1,
+          "sequence": 3,
+          "columnName": "status",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_createdByUserId_fkey",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "createdByUserId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_legalEntityId_currency_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "legalEntityId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_legalEntityId_currency_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "currency",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_locationId_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "locationId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_requestKey_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "requestKey",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_reservationId_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "reservationId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_sourceDocumentId_fkey",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "sourceDocumentId",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": [
+        {
+          "name": "portfolio_financial_campaign_costs_approvedByUserId_fkey",
+          "columnName": "approvedByUserId",
+          "sequence": 1,
+          "targetTable": "portfolio_users",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_campaignId_fkey",
+          "columnName": "campaignId",
+          "sequence": 1,
+          "targetTable": "portfolio_campaigns",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_createdByUserId_fkey",
+          "columnName": "createdByUserId",
+          "sequence": 1,
+          "targetTable": "portfolio_users",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_legalEntityId_fkey",
+          "columnName": "legalEntityId",
+          "sequence": 1,
+          "targetTable": "portfolio_financial_legal_entities",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_locationId_fkey",
+          "columnName": "locationId",
+          "sequence": 1,
+          "targetTable": "portfolio_locations",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_reservationId_fkey",
+          "columnName": "reservationId",
+          "sequence": 1,
+          "targetTable": "portfolio_reservations",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_campaign_costs_sourceDocumentId_fkey",
+          "columnName": "sourceDocumentId",
+          "sequence": 1,
+          "targetTable": "portfolio_client_documents",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        }
+      ]
+    },
+    "portfolio_financial_campaign_finance_reviews": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "campaignId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "currency",
+          "type": "varchar(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "coverageFrom",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "coverageTo",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "costsComplete",
+          "type": "tinyint(1)",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "sourceFingerprint",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "approvedByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "approvedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_financial_campaign_finance_reviews_approvedByUser_fkey",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "approvedByUserId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_finance_reviews_campaignId_curr_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "campaignId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_financial_campaign_finance_reviews_campaignId_curr_key",
+          "nonUnique": 0,
+          "sequence": 2,
+          "columnName": "currency",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": [
+        {
+          "name": "portfolio_financial_campaign_finance_reviews_approvedByUser_fkey",
+          "columnName": "approvedByUserId",
+          "sequence": 1,
+          "targetTable": "portfolio_users",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        },
+        {
+          "name": "portfolio_financial_campaign_finance_reviews_campaignId_fkey",
+          "columnName": "campaignId",
+          "sequence": 1,
+          "targetTable": "portfolio_campaigns",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        }
+      ]
+    },
+    "portfolio_commercial_policies": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": "default",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "version",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "1",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "vatRateBps",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "vatTreatment",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "rateCardCurrency",
+          "type": "varchar(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "quoteValidityDays",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "7",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "approvalHours",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "24",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "agentToolsEnabled",
+          "type": "tinyint(1)",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "generationEnabled",
+          "type": "tinyint(1)",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "outboundEnabled",
+          "type": "tinyint(1)",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "maxDailyModelCalls",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "20",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "approvedByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_agent_principals": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "name",
+          "type": "varchar(120)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "ownerUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "tokenHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "scopes",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "mode",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "shadow",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "maxDailyCommands",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "100",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "revokedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_agent_principals_ownerUserId_revokedAt_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "ownerUserId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_agent_principals_ownerUserId_revokedAt_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "revokedAt",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_agent_principals_tokenHash_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "tokenHash",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_agent_usage_days": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "principalId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "day",
+          "type": "varchar(10)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "commands",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "modelCalls",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "modelTokens",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_agent_usage_days_principalId_day_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "principalId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_agent_usage_days_principalId_day_key",
+          "nonUnique": 0,
+          "sequence": 2,
+          "columnName": "day",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_agent_commands": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "principalId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "delegatorUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestKey",
+          "type": "varchar(120)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "tool",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "policyVersion",
+          "type": "varchar(80)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestId",
+          "type": "varchar(100)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sourceReferences",
+          "type": "json",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "model",
+          "type": "varchar(120)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "tokenCount",
+          "type": "int",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "inputHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "outputHash",
+          "type": "varchar(64)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "status",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "pending",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "result",
+          "type": "json",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "errorCode",
+          "type": "varchar(64)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "approvalId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "completedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_agent_commands_principalId_createdAt_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "principalId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_agent_commands_principalId_createdAt_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "createdAt",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_agent_commands_principalId_requestKey_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "principalId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_agent_commands_principalId_requestKey_key",
+          "nonUnique": 0,
+          "sequence": 2,
+          "columnName": "requestKey",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_commercial_quotes": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "ownerUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "clientId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "campaignId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "opportunityId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "latestRevision",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "1",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "state",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "draft",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_commercial_quotes_clientId_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "clientId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_commercial_quotes_ownerUserId_state_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "ownerUserId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_commercial_quotes_ownerUserId_state_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "state",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_quote_revisions": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "quoteId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "revision",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "principalId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "payload",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "payloadHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestKey",
+          "type": "varchar(80)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "intentHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "totalNet",
+          "type": "decimal(14,2)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "totalTax",
+          "type": "decimal(14,2)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "totalGross",
+          "type": "decimal(14,2)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "currency",
+          "type": "varchar(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "availabilityHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_quote_revisions_payloadHash_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "payloadHash",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_quote_revisions_quoteId_revision_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "quoteId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_quote_revisions_quoteId_revision_key",
+          "nonUnique": 0,
+          "sequence": 2,
+          "columnName": "revision",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_quote_revisions_requestKey_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "requestKey",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": [
+        {
+          "name": "portfolio_quote_revisions_quoteId_fkey",
+          "columnName": "quoteId",
+          "sequence": 1,
+          "targetTable": "portfolio_commercial_quotes",
+          "targetColumn": "id",
+          "updateRule": "CASCADE",
+          "deleteRule": "RESTRICT"
+        }
+      ]
+    },
+    "portfolio_commercial_approvals": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "revisionId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "principalId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "action",
+          "type": "varchar(40)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "payloadHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "recipientHash",
+          "type": "varchar(64)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "holdExpiresAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "state",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "pending",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestedByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "approvedByUserId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "decidedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "consumedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "reason",
+          "type": "text",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_commercial_approvals_revisionId_state_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "revisionId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_commercial_approvals_revisionId_state_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "state",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_commercial_acceptances": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "revisionId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "actorUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "decision",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "evidenceReference",
+          "type": "varchar(500)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "documentId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestKey",
+          "type": "varchar(80)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "intentHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_commercial_acceptances_requestKey_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "requestKey",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_commercial_acceptances_revisionId_createdAt_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "revisionId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_commercial_acceptances_revisionId_createdAt_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "createdAt",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_commercial_dispatches": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "revisionId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "approvalId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "principalId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "recipient",
+          "type": "varchar(254)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "payloadHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "state",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "queued",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "providerReceipt",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "errorCode",
+          "type": "varchar(80)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestedByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "sentAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_commercial_dispatches_approvalId_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "approvalId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_commercial_dispatches_state_createdAt_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "state",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_commercial_dispatches_state_createdAt_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "createdAt",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_commercial_suppressions": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "recipientHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "reason",
+          "type": "varchar(240)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "recipientHash",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_dooh_profiles": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "locationId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "timezone",
+          "type": "varchar(80)",
+          "nullable": "NO",
+          "defaultValue": "Europe/Bucharest",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "loopSeconds",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "slotSeconds",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "state",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "draft",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "sourceReference",
+          "type": "varchar(500)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "verifiedByUserId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_dooh_profiles_locationId_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "locationId",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_dooh_capacity_bookings": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "profileId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "campaignId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "ownerUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "shareBps",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "periodStart",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "periodEnd",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "daypartStartMinute",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "0",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "daypartEndMinute",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": "1440",
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "state",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "confirmed",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "approvalReference",
+          "type": "varchar(500)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "requestKey",
+          "type": "varchar(120)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "payloadHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "profileSnapshot",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_dooh_capacity_bookings_profileId_periodStart_perio_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "profileId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_dooh_capacity_bookings_profileId_periodStart_perio_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "periodStart",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_dooh_capacity_bookings_profileId_periodStart_perio_idx",
+          "nonUnique": 1,
+          "sequence": 3,
+          "columnName": "periodEnd",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_dooh_capacity_bookings_profileId_periodStart_perio_idx",
+          "nonUnique": 1,
+          "sequence": 4,
+          "columnName": "state",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_dooh_capacity_bookings_requestKey_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "requestKey",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_dooh_playback_proofs": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "bookingId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "periodStart",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "periodEnd",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "actualPlays",
+          "type": "int",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "expectedPlays",
+          "type": "int",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "sourceReference",
+          "type": "varchar(500)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "evidenceHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "verifiedByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_dooh_playback_proofs_bookingId_evidenceHash_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "bookingId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_dooh_playback_proofs_bookingId_evidenceHash_key",
+          "nonUnique": 0,
+          "sequence": 2,
+          "columnName": "evidenceHash",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_sales_pilots": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "name",
+          "type": "varchar(160)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "mode",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "offline",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "state",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": "draft",
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "protocol",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "protocolHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdByUserId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "approvedByUserId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "approvedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "stoppedAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "stopReason",
+          "type": "text",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_sales_pilot_cases": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "id",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "pilotId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "companyKeyHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "arm",
+          "type": "varchar(24)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "opportunityId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "enrolledAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "metrics",
+          "type": "json",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "matureAt",
+          "type": "datetime(3)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        },
+        {
+          "name": "reviewedByUserId",
+          "type": "varchar(191)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "reviewEvidence",
+          "type": "varchar(500)",
+          "nullable": "YES",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_sales_pilot_cases_pilotId_arm_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "pilotId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_sales_pilot_cases_pilotId_arm_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "arm",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_sales_pilot_cases_pilotId_companyKeyHash_key",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "pilotId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_sales_pilot_cases_pilotId_companyKeyHash_key",
+          "nonUnique": 0,
+          "sequence": 2,
+          "columnName": "companyKeyHash",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "id",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    },
+    "portfolio_commercial_delivery_events": {
+      "storage": {
+        "engine": "InnoDB",
+        "collationName": "utf8mb4_unicode_ci"
+      },
+      "columns": [
+        {
+          "name": "eventId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "dispatchId",
+          "type": "varchar(191)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "eventType",
+          "type": "varchar(80)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "payloadHash",
+          "type": "varchar(64)",
+          "nullable": "NO",
+          "defaultValue": null,
+          "extra": "",
+          "charsetName": "utf8mb4",
+          "collationName": "utf8mb4_unicode_ci",
+          "generation": ""
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "nullable": "NO",
+          "defaultValue": "CURRENT_TIMESTAMP(3)",
+          "extra": "DEFAULT_GENERATED",
+          "charsetName": null,
+          "collationName": null,
+          "generation": ""
+        }
+      ],
+      "indexes": [
+        {
+          "name": "portfolio_commercial_delivery_events_dispatchId_createdAt_idx",
+          "nonUnique": 1,
+          "sequence": 1,
+          "columnName": "dispatchId",
+          "prefixLength": null
+        },
+        {
+          "name": "portfolio_commercial_delivery_events_dispatchId_createdAt_idx",
+          "nonUnique": 1,
+          "sequence": 2,
+          "columnName": "createdAt",
+          "prefixLength": null
+        },
+        {
+          "name": "PRIMARY",
+          "nonUnique": 0,
+          "sequence": 1,
+          "columnName": "eventId",
+          "prefixLength": null
+        }
+      ],
+      "foreignKeys": []
+    }
+  }
+}

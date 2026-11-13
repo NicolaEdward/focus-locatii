@@ -148,7 +148,20 @@
     "test:dependency-policy": "node scripts/test-dependency-policy.cjs",
     "test:location-mutation-transactions": "tsx scripts/test-location-mutation-transactions.ts",
     "test:commercial-workbench": "tsx scripts/test-commercial-workbench.ts",
-    "evaluate:sales-pilot": "tsx scripts/evaluate-sales-pilot.ts"
+    "evaluate:sales-pilot": "tsx scripts/evaluate-sales-pilot.ts",
+    "test:remediation": "node scripts/test-remediation-suite.cjs",
+    "test:finance-remediation": "tsx scripts/test-finance-remediation.ts",
+    "test:finance-plan": "tsx scripts/test-finance-plan-and-alerts.ts",
+    "test:client-atomic": "tsx scripts/test-client-atomic-mutations.ts",
+    "test:private-location-read": "tsx scripts/test-location-private-read.ts",
+    "test:operations-controls": "tsx scripts/test-operations-controls.ts",
+    "test:backup-restore": "node scripts/test-backup-restore.cjs",
+    "test:remediation-schema": "node scripts/test-remediation-schema.cjs",
+    "smoke:ui-regressions": "node scripts/release/smoke-ui-regressions.cjs",
+    "db:check-remediation": "node scripts/release/apply-remediation-schema.cjs",
+    "db:apply-remediation": "node scripts/release/apply-remediation-schema.cjs --apply",
+    "backup:encrypted": "node scripts/release/database-backup.cjs backup",
+    "backup:verify-restore": "node scripts/release/database-backup.cjs restore"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",

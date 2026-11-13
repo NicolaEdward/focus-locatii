@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { hasAnyPermission, hasGlobalDataAccess } from "@/lib/rbac";
-import { checkedPeriod, commercialHash, commercialManagerRoles, tokenHash } from "@/lib/commercial-workbench-core";
+import { checkedPeriod, commercialHash, commercialManagerRoles, hasConfirmedCommercialCalendar, matchesCommercialPolicy, tokenHash } from "@/lib/commercial-workbench-core";
 
 const money = z.string().regex(/^\d{1,12}\.\d{2}$/);
 const payloadSchema = z.object({
@@ -11,6 +11,7 @@ const payloadSchema = z.object({
   campaignName: z.string().min(1).max(500), companyEntity: z.string().min(1).max(100),
   recipient: z.string().email().max(254), periodStart: z.string(), periodEnd: z.string(),
   currency: z.enum(["RON", "EUR"]), policyVersion: z.number().int().positive(),
+  commercialPolicyHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   paymentTermType: z.string().nullable().optional(), paymentTermDays: z.number().int().min(0).max(3650).nullable(),
   billingRule: z.string().nullable().optional(), billingFrequency: z.string().nullable().optional(),
   vatRateBps: z.number().int().min(0).max(10000), vatTreatment: z.enum(["inclusive", "exclusive", "exempt"]),
@@ -60,11 +61,11 @@ export async function getCommercialQuotePrint(quoteId: string, revisionId: strin
     const recipientHash = tokenHash(payload.recipient);
     const approvedHash = commercialHash({ revisionHash: revision.payloadHash, action: "send_quote", recipientHash, holdExpiresAt: null });
     const approved = approvals.some((approval) => approval.approvedByUserId && validApprovers.has(approval.approvedByUserId) && approval.payloadHash === approvedHash && approval.recipientHash === recipientHash && approval.holdExpiresAt === null);
-    const currentPolicy = Boolean(policy && payload.policyVersion === policy.version && payload.vatRateBps === policy.vatRateBps && payload.vatTreatment === policy.vatTreatment && payload.currency === policy.rateCardCurrency);
+    const currentPolicy = Boolean(policy && matchesCommercialPolicy(payload, policy) && payload.vatRateBps === policy.vatRateBps && payload.vatTreatment === policy.vatTreatment && payload.currency === policy.rateCardCurrency);
     const currentTerms = Boolean(client && campaign && !["archived", "merged", "cancelled"].includes(client.status) && !campaign.archivedAt && !["archived", "cancelled"].includes(campaign.status)
       && client.accountOwnerUserId === revision.quote.ownerUserId && campaign.sellerUserId === revision.quote.ownerUserId && campaign.clientId === payload.clientId
       && campaign.currency === payload.currency && campaign.companyEntity === payload.companyEntity && payload.paymentTermType && payload.paymentTermDays != null && payload.billingRule && payload.billingFrequency
-      && payload.billingRule !== "fixed_custom_date" && payload.billingFrequency !== "custom"
+      && hasConfirmedCommercialCalendar(payload)
       && campaign.paymentTermType === payload.paymentTermType && campaign.paymentTermDays === payload.paymentTermDays && campaign.billingRule === payload.billingRule && campaign.billingFrequency === payload.billingFrequency);
     const state = revision.revision !== revision.quote.latestRevision ? "historical" as const : revision.quote.state === "rejected" ? "rejected" as const : revision.expiresAt <= now ? "expired" as const : approved && currentPolicy && currentTerms ? "approved" as const : "draft" as const;
     return { quoteId: revision.quoteId, revisionId: revision.id, revision: revision.revision, payloadHash: revision.payloadHash, payload, state, createdAt: revision.createdAt.toISOString(), expiresAt: revision.expiresAt.toISOString(), printedAt: now.toISOString(), currentPolicy, currentTerms };

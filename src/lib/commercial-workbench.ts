@@ -18,6 +18,9 @@ import {
   agentToolScopes,
   canonicalJson,
   commercialHash,
+  commercialPolicyHash,
+  matchesCommercialPolicy,
+  hasConfirmedCommercialCalendar,
   tokenHash,
   normalizeRecipient,
   checkedPeriod,
@@ -885,6 +888,7 @@ async function createQuoteInTransaction(
     vatTreatment: p.vatTreatment,
     vatRateBps: p.vatRateBps,
     policyVersion: p.version,
+    commercialPolicyHash: commercialPolicyHash(p),
     assumptions: input.assumptions,
     assumptionsTrusted: false,
     lines,
@@ -982,6 +986,7 @@ async function ownedRevision(db: Db, revisionId: string, actor: Actor) {
 async function recheckRevision(
   db: Db,
   revision: Awaited<ReturnType<typeof ownedRevision>>,
+  requireConfirmedCalendar = true,
 ) {
   if (
     revision.expiresAt <= new Date() ||
@@ -1004,6 +1009,7 @@ async function recheckRevision(
     );
   const payload = revision.payload as unknown as {
     policyVersion: number;
+    commercialPolicyHash?: string;
     periodStart: string;
     periodEnd: string;
     currency: string;
@@ -1019,12 +1025,14 @@ async function recheckRevision(
     }[];
   };
   const p = await policy(db);
-  if (payload.policyVersion !== p.version)
+  if (!matchesCommercialPolicy(payload, p))
     throw new CommercialError(
       "POLICY_CHANGED",
       "Politica comercială s-a schimbat; creează o versiune nouă.",
       409,
     );
+  if (requireConfirmedCalendar && !hasConfirmedCommercialCalendar(payload))
+    throw new CommercialError("CAMPAIGN_CALENDAR_REQUIRED", "Calendarul de facturare personalizat nu este documentat în ofertă. Ciorna poate fi salvată, dar calendarul trebuie verificat înainte de aprobare, expediere sau rezervare.", 409);
   const campaign = revision.quote.campaignId ? await db.campaign.findUnique({ where: { id: revision.quote.campaignId }, select: { currency: true, companyEntity: true, paymentTermType: true, paymentTermDays: true, billingRule: true, billingFrequency: true } }) : null;
   if (!campaign || campaign.currency !== payload.currency || !campaign.companyEntity || companyEntityOrThrow(campaign.companyEntity) !== payload.companyEntity || campaign.paymentTermType !== payload.paymentTermType || campaign.paymentTermDays !== payload.paymentTermDays || (payload.billingRule !== undefined && campaign.billingRule !== payload.billingRule) || (payload.billingFrequency !== undefined && campaign.billingFrequency !== payload.billingFrequency))
     throw new CommercialError("CAMPAIGN_TERMS_CHANGED", "Moneda, firma contractantă sau termenii de plată ai campaniei s-au schimbat. Creează o versiune nouă a ofertei.", 409);
@@ -2786,7 +2794,7 @@ export async function generateQuoteDraft(raw: unknown, actor: AuthSession) {
         409,
       );
     const revision = await ownedRevision(tx, input.revisionId, actor);
-    await recheckRevision(tx, revision);
+    await recheckRevision(tx, revision, false);
     const principalId = "human:" + actor.id,
       day = new Date().toISOString().slice(0, 10),
       key = "draft:" + tokenHash(input.requestKey),

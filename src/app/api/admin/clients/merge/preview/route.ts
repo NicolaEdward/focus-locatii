@@ -1,3 +1,4 @@
+import { publicBusinessErrorMessage, publicBusinessErrorStatus } from "@/lib/public-business-error";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/auth";
 import { getClientMergePreview } from "@/lib/client-campaign-workspaces";
@@ -15,6 +16,6 @@ export async function GET(request: NextRequest) {
     );
     return NextResponse.json({ preview }, { headers });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Preview-ul nu poate fi generat." }, { status: 400, headers });
+    return NextResponse.json({ error: publicBusinessErrorMessage(error, "Preview-ul nu poate fi generat.", "clients.merge.preview", request) }, { status: publicBusinessErrorStatus(error, 400), headers });
   }
 }

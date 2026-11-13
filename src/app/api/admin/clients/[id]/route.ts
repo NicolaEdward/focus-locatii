@@ -1,3 +1,4 @@
+import { publicBusinessErrorMessage, publicBusinessErrorStatus } from "@/lib/public-business-error";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAnyPermission } from "@/lib/auth";
@@ -36,9 +37,13 @@ export async function GET(request: NextRequest, context: Context) {
   const { session, response } = await requireAnyPermission(request, ["clients.view", "clients.view.own"]);
   if (response || !session) return response;
   const { id } = await context.params;
-  const client = await getClientOverview(session, id);
-  if (!client) return NextResponse.json({ error: "Clientul nu exista." }, { status: 404, headers: noStoreHeaders });
-  return NextResponse.json({ client }, { headers: noStoreHeaders });
+  try {
+    const client = await getClientOverview(session, id);
+    if (!client) return NextResponse.json({ error: "Clientul nu exista." }, { status: 404, headers: noStoreHeaders });
+    return NextResponse.json({ client }, { headers: noStoreHeaders });
+  } catch (error) {
+    return NextResponse.json({ error: publicBusinessErrorMessage(error, "Dosarul clientului nu poate fi încărcat.", "clients.detail", request) }, { status: publicBusinessErrorStatus(error, 403), headers: noStoreHeaders });
+  }
 }
 
 export async function PATCH(request: NextRequest, context: Context) {
@@ -112,8 +117,8 @@ export async function PATCH(request: NextRequest, context: Context) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Clientul nu a putut fi salvat." },
-      { status: error instanceof ClientMutationError ? error.status : 400, headers: noStoreHeaders }
+      { error: publicBusinessErrorMessage(error, "Clientul nu a putut fi salvat.", "clients.detail", request) },
+      { status: publicBusinessErrorStatus(error, 400), headers: noStoreHeaders }
     );
   }
 }

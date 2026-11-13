@@ -4,14 +4,19 @@ import { getAuthSessionFromRequest } from "@/lib/auth";
 import { mutationRequestError } from "@/lib/request-security";
 import { onboardingState, OnboardingError, updateOnboardingProgress } from "@/lib/workplace-onboarding";
 import { JsonRequestError, readBoundedJson } from "@/lib/bounded-json-request";
+import { publicBusinessErrorMessage, publicBusinessErrorStatus } from "@/lib/public-business-error";
 
 export const dynamic = "force-dynamic";
 const noStore = { "Cache-Control": "private, no-store" };
 
 export async function GET(request: NextRequest) {
-  const actor = await getAuthSessionFromRequest(request);
-  if (!actor) return NextResponse.json({ error: "Autentificare necesară." }, { status: 401, headers: noStore });
-  return NextResponse.json({ state: await onboardingState(actor) }, { headers: noStore });
+  try {
+    const actor = await getAuthSessionFromRequest(request);
+    if (!actor) return NextResponse.json({ error: "Autentificare necesară." }, { status: 401, headers: noStore });
+    return NextResponse.json({ state: await onboardingState(actor) }, { headers: noStore });
+  } catch (error) {
+    return NextResponse.json({ error: publicBusinessErrorMessage(error, "Ghidul nu poate fi încărcat momentan. Reîncarcă pentru a verifica progresul salvat.", "account.onboarding.read", request) }, { status: publicBusinessErrorStatus(error, 503), headers: noStore });
+  }
 }
 
 export async function PUT(request: NextRequest) {

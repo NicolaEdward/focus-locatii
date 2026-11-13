@@ -53,19 +53,27 @@ const cases: Array<{ path: string; method: string; body?: object }> = [
   { path: "campaigns/[id]/documents", method: "GET" },
   { path: "campaigns/[id]/finance", method: "GET" },
   { path: "campaigns/[id]/reservations", method: "GET" },
+  { path: "onboarding", method: "GET" },
 ];
 
 let injected: unknown;
 let dependencyCalls = 0;
 let denied = false;
+let authUnavailable = false;
 const fail = async () => { dependencyCalls++; throw injected; };
 const workspace = Object.fromEntries(["getClientsPage", "getClientOverview", "getClientContacts", "getClientDocuments", "getClientFinanceSummary", "getClientPortfolioFinance", "getClientMergePreview", "getCampaignsPage", "getCampaignOverview", "getCampaignDocuments", "getCampaignFinanceSummary", "getCampaignReservations"].map((name) => [name, fail]));
 const routeMocks: Record<string, unknown> = {
   "next/server": { NextRequest, NextResponse }, zod: { z },
   "@/lib/public-business-error": helpers,
-  "@/lib/auth": { requireAnyPermission: async () => denied
-    ? { session: null, response: NextResponse.json({ error: "Interzis" }, { status: 403, headers: { "Cache-Control": "no-store" } }) }
-    : { session: { id: "synthetic-user", role: "COO" } } },
+  "@/lib/auth": {
+    requireAnyPermission: async () => denied
+      ? { session: null, response: NextResponse.json({ error: "Interzis" }, { status: 403, headers: { "Cache-Control": "no-store" } }) }
+      : { session: { id: "synthetic-user", role: "COO" } },
+    getAuthSessionFromRequest: async () => { if (authUnavailable) throw injected; return denied ? null : { id: "synthetic-user", role: "COO" }; },
+  },
+  "@/lib/workplace-onboarding": { onboardingState: fail },
+  "@/lib/request-security": { mutationRequestError: () => null },
+  "@/lib/bounded-json-request": {},
   "@/lib/client-campaign-workspaces": { ...workspace, CAMPAIGN_DATE_FILTERS: [] },
   "@/lib/campaigns/campaign-effective-status": { CAMPAIGN_EFFECTIVE_STATUSES: [] },
   "@/lib/company-entities": { companyEntities: [] },
@@ -148,7 +156,16 @@ async function main() {
   response = await call(cases[1]);
   assert.equal(response.status, 403);
   assert.equal(dependencyCalls, 0, "error normalization does not bypass the original authorization gate");
-  console.log(JSON.stringify({ ok: true, routeFailureCases: cases.length, additionalGroups: 8, databaseAccess: false, scope: "actual API handlers, private diagnostics, typed business rules, constraint statuses, no-store and observability" }));
+  response = await call(cases[cases.length - 1]);
+  assert.equal(response.status, 401, "onboarding still requires an authenticated account");
+  assert.equal(dependencyCalls, 0);
+  denied = false; authUnavailable = true;
+  injected = Object.assign(new Error("private authentication connection detail"), { code: "ECONNREFUSED" });
+  response = await call(cases[cases.length - 1]);
+  assert.equal(response.status, 503, "onboarding auth lookup failure returns JSON, not an unhandled HTML page");
+  assert.ok((await response.json()).error.includes("Ghidul"));
+  assert.equal(dependencyCalls, 0, "a failed authentication lookup never reads progress");
+  console.log(JSON.stringify({ ok: true, routeFailureCases: cases.length, additionalGroups: 9, databaseAccess: false, scope: "actual API handlers, private diagnostics, typed business rules, constraint statuses, no-store and observability" }));
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

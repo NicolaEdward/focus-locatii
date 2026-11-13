@@ -10,6 +10,8 @@ import {
   reservationWriteTransactionOptions,
 } from "@/lib/reservations";
 import { companyEntityOrThrow } from "@/lib/company-entities";
+import { normalizeClientName } from "@/lib/clients";
+import { taxIdsMatch } from "@/lib/tax-id";
 import {
   CommercialError,
   commercialManagerRoles,
@@ -204,6 +206,7 @@ export async function commercialWorkspace(actor: AuthSession, rawQuery: unknown 
   requireSales(actor);
   const query = commercialWorkspaceQuerySchema.parse(rawQuery);
   const global = hasGlobalDataAccess(actor.role);
+  const doohEnabled = process.env.NEXT_PUBLIC_DOOH_ENABLED === "true";
   const scope: Prisma.CommercialQuoteWhereInput = global ? {} : { ownerUserId: actor.id };
   const nameMatches = query.q ? await Promise.all([
     prisma.clientAccount.findMany({ where: { companyName: { contains: query.q }, ...(global ? {} : { accountOwnerUserId: actor.id }) }, select: { id: true } }),
@@ -270,7 +273,7 @@ export async function commercialWorkspace(actor: AuthSession, rawQuery: unknown 
         archivedAt: null,
         ...(global ? {} : { sellerUserId: actor.id }),
       },
-      select: { id: true, clientId: true, campaignName: true, currency: true, companyEntity: true, paymentTermType: true, paymentTermDays: true, startDate: true, endDate: true },
+      select: { id: true, clientId: true, campaignName: true, currency: true, companyEntity: true, paymentTermType: true, paymentTermDays: true, billingRule: true, billingFrequency: true, startDate: true, endDate: true },
       take: 500,
       orderBy: { campaignName: "asc" },
     }),
@@ -297,7 +300,7 @@ export async function commercialWorkspace(actor: AuthSession, rawQuery: unknown 
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
-    prisma.doohProfile.findMany({ orderBy: { updatedAt: "desc" }, take: 100 }),
+    doohEnabled ? prisma.doohProfile.findMany({ orderBy: { updatedAt: "desc" }, take: 100 }) : Promise.resolve([]),
     canManage(actor)
       ? prisma.agentPrincipal.findMany({
           select: {
@@ -365,7 +368,7 @@ export async function commercialWorkspace(actor: AuthSession, rawQuery: unknown 
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
-    prisma.doohPlaybackProof.findMany({
+    doohEnabled ? prisma.doohPlaybackProof.findMany({
       where: {
         bookingId: {
           in: (
@@ -379,7 +382,7 @@ export async function commercialWorkspace(actor: AuthSession, rawQuery: unknown 
       },
       orderBy: { createdAt: "desc" },
       take: 200,
-    }),
+    }) : Promise.resolve([]),
     prisma.clientDocument.findMany({
       where: { status: "active", clientId: { in: clients.map((c) => c.id) } },
       select: { id: true, clientId: true, campaignId: true, fileName: true },
@@ -431,52 +434,64 @@ export async function commercialWorkspace(actor: AuthSession, rawQuery: unknown 
   };
 }
 
-const policySchema = z
-  .object({
-    vatRateBps: z.number().int().min(0).max(10000),
-    vatTreatment: z.enum(["exclusive", "inclusive", "exempt"]),
-    rateCardCurrency: z.enum(["RON", "EUR"]),
-    quoteValidityDays: z.number().int().min(1).max(30),
-    approvalHours: z.number().int().min(1).max(72),
-    agentToolsEnabled: z.boolean(),
-    generationEnabled: z.boolean(),
-    outboundEnabled: z.boolean(),
-    maxDailyModelCalls: z.number().int().min(1).max(100),
-  })
-  .strict();
+const commercialSettingsFields = {
+  vatRateBps: z.number().int().min(0).max(10000),
+  vatTreatment: z.enum(["exclusive", "inclusive", "exempt"]),
+  rateCardCurrency: z.enum(["RON", "EUR"]),
+  quoteValidityDays: z.number().int().min(1).max(30),
+  approvalHours: z.number().int().min(1).max(72),
+};
+const automationSettingsFields = {
+  agentToolsEnabled: z.boolean(),
+  generationEnabled: z.boolean(),
+  outboundEnabled: z.boolean(),
+  maxDailyModelCalls: z.number().int().min(1).max(100),
+};
+const expectedPolicyVersion = z.number().int().positive().nullable().optional();
+const policyFieldsSchema = z.object({ ...commercialSettingsFields, ...automationSettingsFields }).strict();
+const policySchema = policyFieldsSchema.extend({ expectedVersion: expectedPolicyVersion }).strict();
+const commercialSettingsSchema = z.object({ ...commercialSettingsFields, expectedVersion: expectedPolicyVersion }).strict();
+const automationSettingsSchema = z.object({ ...automationSettingsFields, expectedVersion: expectedPolicyVersion }).strict();
+
 export async function saveCommercialPolicy(raw: unknown, actor: AuthSession) {
+  return savePolicyFields(raw, actor, "all");
+}
+export async function saveCommercialSettings(raw: unknown, actor: AuthSession) {
+  return savePolicyFields(raw, actor, "commercial");
+}
+export async function saveCommercialAutomation(raw: unknown, actor: AuthSession) {
+  return savePolicyFields(raw, actor, "automation");
+}
+async function savePolicyFields(raw: unknown, actor: AuthSession, section: "all" | "commercial" | "automation") {
   if (!["COO", "SUPER_ADMIN"].includes(actor.role))
-    throw new CommercialError(
-      "FORBIDDEN",
-      "Numai COO sau administratorul poate aproba politica.",
-      403,
-    );
-  const input = policySchema.parse(raw);
-  if (input.vatTreatment === "exempt" && input.vatRateBps !== 0)
+    throw new CommercialError("FORBIDDEN", "Numai COO sau administratorul poate aproba configurația comercială și automatizările.", 403);
+  const input = section === "commercial" ? commercialSettingsSchema.parse(raw) : section === "automation" ? automationSettingsSchema.parse(raw) : policySchema.parse(raw);
+  const { expectedVersion, ...fields } = input;
+  if ("vatTreatment" in fields && fields.vatTreatment === "exempt" && fields.vatRateBps !== 0)
     throw new CommercialError("INVALID_TAX", "Scutirea de TVA cere cota zero.");
   return prisma.$transaction(async (tx) => {
-    const row = await tx.commercialPolicy.upsert({
-      where: { id: "default" },
-      create: { ...input, approvedByUserId: actor.id },
-      update: {
-        ...input,
-        version: { increment: 1 },
-        approvedByUserId: actor.id,
-      },
+    await assertCurrentCommercialActor(tx, actor);
+    await tx.$queryRaw`SELECT id FROM portfolio_commercial_policies WHERE id = ${"default"} FOR UPDATE`;
+    const current = await tx.commercialPolicy.findUnique({ where: { id: "default" } });
+    if ((current && expectedVersion !== current.version) || (!current && expectedVersion != null))
+      throw new CommercialError("POLICY_VERSION_CONFLICT", "Configurația a fost modificată de alt coleg sau automatizarea a fost oprită. Reîncarcă și verifică valorile înainte de salvare.", 409);
+    if (!current && section === "automation")
+      throw new CommercialError("POLICY_REQUIRED", "Configurează mai întâi politica comercială; automatizările pornesc dezactivate.", 409);
+    const createFields = current ? null : policyFieldsSchema.parse({
+      agentToolsEnabled: false, generationEnabled: false, outboundEnabled: false, maxDailyModelCalls: 1,
+      ...fields,
     });
-    if (!input.agentToolsEnabled)
-      await tx.agentPrincipal.updateMany({
-        where: { revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
+    const row = current
+      ? await tx.commercialPolicy.update({ where: { id: "default" }, data: { ...fields, version: { increment: 1 }, approvedByUserId: actor.id } })
+      : await tx.commercialPolicy.create({ data: { ...createFields!, approvedByUserId: actor.id } });
+    if ("agentToolsEnabled" in fields && !fields.agentToolsEnabled)
+      await tx.agentPrincipal.updateMany({ where: { revokedAt: null }, data: { revokedAt: new Date() } });
     await audit(tx, actor, "policy.approve", row.id, {
-      version: row.version,
-      toolsEnabled: row.agentToolsEnabled,
-      outboundEnabled: row.outboundEnabled,
-      approvedPolicy: input,
+      version: row.version, section, changedFields: Object.keys(fields), approvedPolicy: fields,
+      toolsEnabled: row.agentToolsEnabled, outboundEnabled: row.outboundEnabled,
     });
     return row;
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 const principalSchema = z
@@ -513,6 +528,7 @@ export async function issueAgentPrincipal(raw: unknown, actor: AuthSession) {
     );
   const token = "fm_ai_" + randomBytes(32).toString("base64url");
   const principal = await prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     const row = await tx.agentPrincipal.create({
       data: {
         ...input,
@@ -542,6 +558,7 @@ export async function revokeAgentPrincipal(
 ) {
   requireManager(actor);
   return prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     const row = await tx.agentPrincipal.update({
       where: { id: principalId },
       data: { revokedAt: new Date() },
@@ -774,11 +791,15 @@ async function createQuoteInTransaction(
   if (input.opportunityId) {
     const op = await db.crmOpportunity.findUnique({
       where: { id: input.opportunityId },
+      include: { company: { select: { name: true, taxId: true } } },
     });
-    if (!op || op.ownerId !== campaign.sellerUserId)
+    const sameCompany = op && (client.taxId && op.company.taxId
+      ? taxIdsMatch(client.taxId, op.company.taxId)
+      : normalizeClientName(client.companyName) === normalizeClientName(op.company.name));
+    if (!op || op.ownerId !== campaign.sellerUserId || !sameCompany)
       throw new CommercialError(
         "INVALID_OPPORTUNITY",
-        "Oportunitatea trebuie să aparțină aceluiași seller; conversia CRM rămâne explicită.",
+        "Oportunitatea trebuie să aparțină aceluiași seller și aceleiași firme ca oferta; asocierea CRM rămâne explicită.",
       );
   }
   // Shared row lock protocol with inventory edits/deletion and reservation writes.
@@ -794,10 +815,11 @@ async function createQuoteInTransaction(
     },
     db,
   );
-  if (availability.rows.some((r) => !r.available))
+  const unavailable = availability.rows.filter((row) => !row.available);
+  if (unavailable.length)
     throw new CommercialError(
       "AVAILABILITY_CONFLICT",
-      "Locațiile selectate nu sunt complet disponibile în perioada ofertei. Verifică amplasamentele marcate cu conflict.",
+      `Locații indisponibile în perioada ofertei: ${unavailable.slice(0, 10).map((row) => row.code || row.locationId).join(", ")}${unavailable.length > 10 ? ` și încă ${unavailable.length - 10}` : ""}. Modifică selecția sau perioada.`,
       409,
     );
   const locations = await db.location.findMany({
@@ -858,6 +880,8 @@ async function createQuoteInTransaction(
     currency: campaign.currency,
     paymentTermType: campaign.paymentTermType,
     paymentTermDays: campaign.paymentTermDays,
+    billingRule: campaign.billingRule,
+    billingFrequency: campaign.billingFrequency,
     vatTreatment: p.vatTreatment,
     vatRateBps: p.vatRateBps,
     policyVersion: p.version,
@@ -982,6 +1006,12 @@ async function recheckRevision(
     policyVersion: number;
     periodStart: string;
     periodEnd: string;
+    currency: string;
+    companyEntity: string;
+    paymentTermType: string | null;
+    paymentTermDays: number | null;
+    billingRule?: string | null;
+    billingFrequency?: string | null;
     lines: {
       locationId: string;
       monthlyRate: string;
@@ -995,6 +1025,9 @@ async function recheckRevision(
       "Politica comercială s-a schimbat; creează o versiune nouă.",
       409,
     );
+  const campaign = revision.quote.campaignId ? await db.campaign.findUnique({ where: { id: revision.quote.campaignId }, select: { currency: true, companyEntity: true, paymentTermType: true, paymentTermDays: true, billingRule: true, billingFrequency: true } }) : null;
+  if (!campaign || campaign.currency !== payload.currency || !campaign.companyEntity || companyEntityOrThrow(campaign.companyEntity) !== payload.companyEntity || campaign.paymentTermType !== payload.paymentTermType || campaign.paymentTermDays !== payload.paymentTermDays || (payload.billingRule !== undefined && campaign.billingRule !== payload.billingRule) || (payload.billingFrequency !== undefined && campaign.billingFrequency !== payload.billingFrequency))
+    throw new CommercialError("CAMPAIGN_TERMS_CHANGED", "Moneda, firma contractantă sau termenii de plată ai campaniei s-au schimbat. Creează o versiune nouă a ofertei.", 409);
   const snapshot = await commercialAvailability(
     {
       locationIds: payload.lines.map((l) => l.locationId),
@@ -1041,6 +1074,7 @@ async function requestApprovalInTransaction(
   db: Db,
   forcedPrincipal?: string,
 ) {
+  await assertCurrentCommercialActor(db, actor);
   const input = approvalSchema.parse(raw),
     revision = await ownedRevision(db, input.revisionId, actor),
     p = await policy(db);
@@ -1061,7 +1095,10 @@ async function requestApprovalInTransaction(
       );
   }
   await recheckRevision(db, revision);
-  const payload = revision.payload as unknown as { recipient: string };
+  const payload = revision.payload as unknown as { recipient: string; paymentTermType: string | null; paymentTermDays: number | null; billingRule?: string | null; billingFrequency?: string | null };
+  const campaign = revision.quote.campaignId ? await db.campaign.findUnique({ where: { id: revision.quote.campaignId }, select: { paymentTermType: true, paymentTermDays: true, billingRule: true, billingFrequency: true } }) : null;
+  if (!campaign?.paymentTermType || campaign.paymentTermDays == null || campaign.paymentTermDays < 0 || !campaign.billingRule || !campaign.billingFrequency)
+    throw new CommercialError("CAMPAIGN_TERMS_REQUIRED", "Completează explicit termenul de plată și regula/frecvența facturării în campanie înainte de a cere aprobarea. Ciorna ofertei rămâne salvată.", 409);
   const holdExpiresAt =
     input.action === "create_hold" && input.holdExpiresAt
       ? new Date(input.holdExpiresAt)
@@ -1113,9 +1150,7 @@ export async function requestCommercialApproval(
   actor: AuthSession,
 ) {
   requireWrite(actor);
-  return prisma.$transaction((tx) =>
-    requestApprovalInTransaction(raw, actor, tx),
-  );
+  return prisma.$transaction((tx) => requestApprovalInTransaction(raw, actor, tx), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 20000 });
 }
 export async function decideCommercialApproval(
   raw: unknown,
@@ -1132,6 +1167,7 @@ export async function decideCommercialApproval(
     .parse(raw);
   return prisma.$transaction(
     async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
       await tx.$queryRaw`SELECT id FROM portfolio_commercial_approvals WHERE id = ${input.approvalId} FOR UPDATE`;
       const approval = await tx.commercialApproval.findUnique({
         where: { id: input.approvalId },
@@ -1184,6 +1220,7 @@ export async function recordCommercialAcceptance(
     .parse(raw);
   return prisma.$transaction(
     async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
       const ref = await tx.quoteRevision.findUnique({
         where: { id: input.revisionId },
         select: { quoteId: true },
@@ -1293,6 +1330,7 @@ export async function executeAgentTool(
   try {
     return await prisma.$transaction(
       async (tx) => {
+        await tx.$queryRaw`SELECT id FROM portfolio_users WHERE id = ${principal.ownerUserId} FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM portfolio_agent_principals WHERE id = ${principal.id} FOR UPDATE`;
         const live = await tx.agentPrincipal.findUnique({
             where: { id: principal.id },
@@ -1300,6 +1338,7 @@ export async function executeAgentTool(
           p = await policy(tx);
         if (
           !live ||
+          live.ownerUserId !== principal.ownerUserId ||
           live.revokedAt ||
           live.expiresAt <= new Date() ||
           !p.agentToolsEnabled
@@ -1608,6 +1647,7 @@ export async function executeAgentTool(
     };
     return prisma.$transaction(
       async (tx) => {
+        await tx.$queryRaw`SELECT id FROM portfolio_users WHERE id = ${principal.ownerUserId} FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM portfolio_agent_principals WHERE id = ${principal.id} FOR UPDATE`;
         const previous = await tx.agentCommand.findUnique({
           where: {
@@ -1701,6 +1741,7 @@ export async function saveDoohProfile(raw: unknown, actor: AuthSession) {
       "Spotul nu poate depăși durata buclei.",
     );
   return prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     await tx.$queryRaw`SELECT id FROM portfolio_locations WHERE id = ${input.locationId} FOR UPDATE`;
     const location = await tx.location.findUnique({
       where: { id: input.locationId },
@@ -1900,6 +1941,7 @@ export async function bookDoohCapacity(raw: unknown, actor: AuthSession) {
   const hash = commercialHash(input);
   return prisma.$transaction(
     async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
       const initialProfile = await tx.doohProfile.findUnique({
         where: { id: input.capacity.profileId },
         select: { locationId: true },
@@ -2001,6 +2043,7 @@ export async function cancelDoohCapacity(
 ) {
   requireManager(actor);
   return prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     const existing = await tx.doohCapacityBooking.findUnique({
       where: { id: bookingId },
     });
@@ -2041,6 +2084,7 @@ export async function recordDoohProof(raw: unknown, actor: AuthSession) {
     .strict()
     .parse(raw);
   return prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     const booking = await tx.doohCapacityBooking.findUnique({
       where: { id: input.bookingId },
     });
@@ -2127,6 +2171,7 @@ export async function createSalesPilot(raw: unknown, actor: AuthSession) {
     .strict()
     .parse(raw);
   return prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     const row = await tx.salesPilot.create({
       data: {
         ...input,
@@ -2154,6 +2199,7 @@ export async function decideSalesPilot(raw: unknown, actor: AuthSession) {
     .strict()
     .parse(raw);
   return prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     await tx.$queryRaw`SELECT id FROM portfolio_sales_pilots WHERE id = ${input.pilotId} FOR UPDATE`;
     const pilot = await tx.salesPilot.findUnique({
       where: { id: input.pilotId },
@@ -2219,6 +2265,7 @@ export async function enrollPilotCase(raw: unknown, actor: AuthSession) {
     .strict()
     .parse(raw);
   return prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     await tx.$queryRaw`SELECT id FROM portfolio_sales_pilots WHERE id = ${input.pilotId} FOR UPDATE`;
     const pilot = await tx.salesPilot.findUnique({
       where: { id: input.pilotId },
@@ -2288,6 +2335,7 @@ export async function reviewPilotCase(raw: unknown, actor: AuthSession) {
       "Afirmațiile susținute nu pot depăși totalul.",
     );
   return prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     const entry = await tx.salesPilotCase.findUnique({
       where: { id: input.caseId },
     });
@@ -2424,6 +2472,7 @@ export async function suppressCommercialRecipient(
     .strict()
     .parse(raw);
   return prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     const row = await tx.commercialSuppression.upsert({
       where: { recipientHash: tokenHash(normalizeRecipient(input.recipient)) },
       create: {
@@ -2445,6 +2494,7 @@ export async function queueCommercialDispatch(
   const input = z.object({ approvalId: id }).strict().parse(raw);
   return prisma.$transaction(
     async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
       await tx.$queryRaw`SELECT id FROM portfolio_commercial_approvals WHERE id = ${input.approvalId} FOR UPDATE`;
       const approval = await tx.commercialApproval.findUnique({
         where: { id: input.approvalId },
@@ -2528,6 +2578,7 @@ export function quoteEmailText(payload: {
   totals: { net: string; tax: string; gross: string };
   vatTreatment: string;
   vatRateBps: number;
+  paymentTermDays?: number | null;
 }) {
   return [
     `Ofertă comercială pentru ${payload.clientName}`,
@@ -2543,6 +2594,7 @@ export function quoteEmailText(payload: {
     `Total net: ${payload.totals.net} ${payload.currency}`,
     `TVA: ${payload.totals.tax} ${payload.currency} (${payload.vatRateBps / 100}%; ${payload.vatTreatment})`,
     `Total: ${payload.totals.gross} ${payload.currency}`,
+    ...(payload.paymentTermDays != null ? [`Termen de plată: ${payload.paymentTermDays} zile.`] : []),
     "Disponibilitatea a fost reverificată înainte de expediere. Această ofertă nu reprezintă o rezervare; confirmarea necesită verificarea și aprobarea separată a alocării.",
   ].join("\n");
 }
@@ -2553,6 +2605,7 @@ export async function processCommercialDispatch(
   requireManager(actor);
   const prepared = await prisma.$transaction(
     async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
       await tx.$queryRaw`SELECT id FROM portfolio_commercial_dispatches WHERE id = ${dispatchId} FOR UPDATE`;
       const row = await tx.commercialDispatch.findUnique({
         where: { id: dispatchId },
@@ -2911,6 +2964,7 @@ async function stopAutomationInTransaction(tx: Db) {
 export async function stopCommercialAutomation(actor: AuthSession) {
   requireManager(actor);
   return prisma.$transaction(async (tx) => {
+      await assertCurrentCommercialActor(tx, actor);
     await stopAutomationInTransaction(tx);
     await audit(tx, actor, "automation.stop", "default");
     return { stopped: true, inFlightRequestsCannotBeRecalled: true };
@@ -2922,6 +2976,7 @@ async function executeHoldInTransaction(
   tx: Db,
   principalId: string | null = null,
 ) {
+  await assertCurrentCommercialActor(tx, actor);
   const input = z.object({ approvalId: id }).strict().parse(raw);
   await tx.$queryRaw`SELECT id FROM portfolio_commercial_approvals WHERE id = ${input.approvalId} FOR UPDATE`;
   const approval = await tx.commercialApproval.findUnique({
@@ -2988,7 +3043,9 @@ async function executeHoldInTransaction(
   const payload = revision.payload as unknown as {
     periodStart: string;
     periodEnd: string;
-    lines: { locationId: string }[];
+    currency: "RON" | "EUR";
+    companyEntity: string;
+    lines: { locationId: string; monthlyRate: string }[];
   };
   const interval = checkedPeriod(payload.periodStart, payload.periodEnd);
   // This object represents a database-verified human approver for the domain
@@ -3004,9 +3061,7 @@ async function executeHoldInTransaction(
       "Oferta nu are campanie validată.",
       409,
     );
-  const reservations = await createApprovedAgentHold(
-    tx,
-    {
+  const holdInput = {
       locationIds: payload.lines.map((l) => l.locationId),
       periodStart: interval.from,
       periodEnd: interval.to,
@@ -3015,9 +3070,9 @@ async function executeHoldInTransaction(
       ownerUserId: revision.quote.ownerUserId,
       requestKey: "commercial:" + approval.id,
       holdExpiresAt: approval.holdExpiresAt,
-    },
-    verifiedApprover,
-  );
+      quotedTerms: { currency: payload.currency, companyEntity: payload.companyEntity, quoteRevisionId: revision.id, lines: payload.lines.map(({ locationId, monthlyRate }) => ({ locationId, monthlyRate })) },
+  };
+  const reservations = await createApprovedAgentHold(tx, holdInput, verifiedApprover);
   const result = {
     reservationIds: reservations.map((r) => r.id),
     state: "HOLD",

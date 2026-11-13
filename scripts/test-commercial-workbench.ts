@@ -138,6 +138,8 @@ async function main() {
         companyEntity: "Focus Media",
         paymentTermDays: 7,
         paymentTermType: "7_days",
+        billingRule: "manual_per_contract",
+        billingFrequency: "monthly",
         status: "active",
       },
     });

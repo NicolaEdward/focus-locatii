@@ -72,7 +72,7 @@ export async function getCrmHandoffProposal(opportunityId: string, actor: AuthSe
     ...(opportunity.stage !== "won" ? ["Poți pregăti oferta fără a câștiga oportunitatea. Confirmarea predării finale rămâne disponibilă după câștigare."] : []),
     ...(!opportunity.company.taxId ? ["Firma CRM nu are CUI; verifica manual deduplicarea clientului."] : []),
     ...(!contact ? ["Firma CRM nu are persoana de contact."] : []),
-    ...(!hasGlobalCrmAccess(actor) && existingClient?.accountOwnerUserId !== actor.id
+    ...(existingClient && !hasGlobalCrmAccess(actor) && existingClient.accountOwnerUserId !== actor.id
       ? ["Clientul existent nu iti este alocat. Un manager trebuie sa confirme predarea fara a crea un duplicat."]
       : [])
   ];
@@ -186,7 +186,7 @@ export async function prepareCrmCommercialDraft(raw: unknown, actor: AuthSession
         clientId: client.id, campaignName: opportunity.name, status: "draft", currency: input.currency,
         companyEntity, sellerUserId: seller.id, accountOwnerUserId: seller.id, createdByUserId: actor.id,
         startDate: opportunity.desiredPeriodStart, endDate: opportunity.desiredPeriodEnd,
-        totalContractValue: null, paymentTermType: "30_days", paymentTermDays: 30, billingRule: "manual_per_contract", billingFrequency: "monthly",
+        totalContractValue: null, paymentTermType: null, paymentTermDays: null, billingRule: null, billingFrequency: null,
       } });
       await recordTransactionalAudit(tx, { actor, action: "campaign.create.from_crm_draft", entityType: "campaign", entityId: campaign.id, metadata: { opportunityId: opportunity.id, contractualValue: null } });
     }

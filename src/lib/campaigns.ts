@@ -5,7 +5,7 @@ import { bucharestDateKey } from "@/lib/campaigns/campaign-effective-status";
 import { prisma } from "@/lib/prisma";
 import { withAuthorizedClientMutation } from "@/lib/clients";
 import type { AuthSession } from "@/lib/auth";
-import { paymentTermDays } from "@/lib/billing";
+import { paymentTermDays, paymentTermOptions, billingRules, billingFrequencies } from "@/lib/billing";
 import {
   CAMPAIGN_STATUSES,
   assertCampaignStatusForCreate,
@@ -25,9 +25,8 @@ const optionalText = z.preprocess((value) => {
 
 const optionalInt = z.preprocess((value) => {
   if (value == null || value === "") return null;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) ? parsed : null;
-}, z.number().int().nullable().optional());
+  return Number(value);
+}, z.number().int().min(0).max(3650).nullable().optional());
 
 export const campaignInputSchema = z.object({
   clientId: z.string().trim().min(1),
@@ -41,11 +40,11 @@ export const campaignInputSchema = z.object({
   sellerUserId: optionalText,
   accountOwnerUserId: optionalText,
   companyEntity: optionalText,
-  paymentTermType: optionalText,
+  paymentTermType: z.preprocess((value) => value === "" ? null : value, z.enum(paymentTermOptions).nullable().optional()),
   paymentTermDays: optionalInt,
   customPaymentTermNote: optionalText,
-  billingRule: optionalText,
-  billingFrequency: optionalText,
+  billingRule: z.preprocess((value) => value === "" ? null : value, z.enum(billingRules).nullable().optional()),
+  billingFrequency: z.preprocess((value) => value === "" ? null : value, z.enum(billingFrequencies).nullable().optional()),
   billingNotes: optionalText,
   notes: optionalText
 });
@@ -141,16 +140,17 @@ function assertCanMutateCampaign(
 }
 
 function normalizeCampaignForCreate(input: z.infer<typeof campaignInputSchema>, actor: AuthSession) {
-  const paymentDays = paymentTermDays(input.paymentTermType || "30_days", input.paymentTermDays ?? null);
+  if (input.paymentTermType === "custom" && input.paymentTermDays == null) throw new Error("Completează numărul de zile pentru termenul de plată personalizat.");
+  const paymentDays = input.paymentTermDays != null ? input.paymentTermDays : input.paymentTermType ? paymentTermDays(input.paymentTermType, null) : null;
   return {
     ...input,
     status: parseCampaignStatus(input.status || "draft"),
     campaignType: input.campaignType || "direct_client",
     companyEntity: companyEntityOrDefault(input.companyEntity),
-    paymentTermType: input.paymentTermType || "30_days",
+    paymentTermType: input.paymentTermType || (input.paymentTermDays != null ? "custom" : null),
     paymentTermDays: paymentDays,
-    billingRule: input.billingRule || "manual_per_contract",
-    billingFrequency: input.billingFrequency || "monthly",
+    billingRule: input.billingRule || null,
+    billingFrequency: input.billingFrequency || null,
     sellerUserId: input.sellerUserId || (canDefaultSalesOwnerToActor(actor.role) ? actor.id : null),
     accountOwnerUserId: input.accountOwnerUserId || input.sellerUserId || (canDefaultSalesOwnerToActor(actor.role) ? actor.id : null)
   };
@@ -159,8 +159,7 @@ function normalizeCampaignForCreate(input: z.infer<typeof campaignInputSchema>, 
 function normalizeCampaignForUpdate(input: Partial<z.infer<typeof campaignInputSchema>>) {
   const next = { ...input };
   if (input.companyEntity !== undefined) next.companyEntity = companyEntityOrThrow(input.companyEntity);
-  if (input.paymentTermType !== undefined || input.paymentTermDays !== undefined) {
-    next.paymentTermDays = paymentTermDays(input.paymentTermType || "30_days", input.paymentTermDays ?? null);
-  }
+  if (input.paymentTermDays !== undefined && input.paymentTermType === undefined) next.paymentTermType = input.paymentTermDays == null ? null : "custom";
+  if (input.paymentTermType && input.paymentTermType !== "custom" && input.paymentTermDays === undefined) next.paymentTermDays = paymentTermDays(input.paymentTermType, null);
   return next;
 }

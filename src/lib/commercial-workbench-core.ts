@@ -278,7 +278,10 @@ export function summarizePilot(
           (typeof x.metrics[key] === "number" ? (x.metrics[key] as number) : 0),
         0,
       );
-    const incidents = sum("unauthorizedEffects") + sum("availabilityErrors"),
+    const incidents =
+        sum("unauthorizedEffects") +
+        sum("availabilityErrors") +
+        sum("calculationErrors"),
       reviewed = all.filter((x) => x.reviewed).length;
     return {
       arm,

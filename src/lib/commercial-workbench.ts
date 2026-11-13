@@ -31,7 +31,8 @@ import {
 } from "@/lib/commercial-workbench-core";
 
 type Db = Prisma.TransactionClient;
-type Actor = Pick<AuthSession, "id" | "role">;
+type Actor = Pick<AuthSession, "id" | "role" | "tokenVersion"> &
+  Partial<Pick<AuthSession, "sessionId" | "exp">>;
 const id = z.string().trim().min(1).max(191);
 const requestKey = z.string().trim().min(8).max(120);
 const period = {
@@ -82,13 +83,14 @@ function requireWrite(actor: Actor) {
 function json(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
-function audit(
+async function audit(
   db: Db,
   actor: Actor,
   action: string,
   entityId: string,
   metadata: Record<string, unknown> = {},
 ) {
+  await assertCurrentCommercialActor(db, actor);
   return db.auditLog.create({
     data: {
       userId: actor.id,
@@ -99,6 +101,73 @@ function audit(
     },
   });
 }
+/** Durable continuation of an already authorized external request. It must
+ * record the provider outcome even if the initiator logs out while in flight. */
+function continuationAudit(
+  db: Db,
+  requestorUserId: string,
+  action: string,
+  entityId: string,
+  metadata: Record<string, unknown> = {},
+) {
+  return db.auditLog.create({
+    data: {
+      userId: null,
+      action: "commercial." + action,
+      entityType: "commercial_workbench",
+      entityId,
+      metadata: json({
+        ...metadata,
+        requestorUserId,
+        actorKind: "authorized-request-continuation",
+        durability: "business-transaction",
+      }),
+    },
+  });
+}
+
+/** Current locking reads avoid a stale MySQL transaction snapshot. */
+async function assertCurrentCommercialActor(db: Db, actor: Actor) {
+  const rows = await db.$queryRaw<
+    Array<{
+      id: string;
+      role: AuthSession["role"];
+      active: number;
+      tokenVersion: number;
+    }>
+  >`SELECT id, role, active, tokenVersion FROM portfolio_users WHERE id = ${actor.id} FOR UPDATE`;
+  const current = rows[0];
+  if (
+    !current ||
+    !current.active ||
+    current.role !== actor.role ||
+    current.tokenVersion !== actor.tokenVersion ||
+    (actor.exp !== undefined && actor.exp * 1000 <= Date.now())
+  )
+    throw new CommercialError(
+      "ACTOR_STALE",
+      "Sesiunea sau drepturile s-au schimbat; autentifică-te din nou.",
+      403,
+    );
+  if (actor.sessionId) {
+    const sessions = await db.$queryRaw<
+      Array<{ userId: string; revokedAt: Date | null; expiresAt: Date }>
+    >`SELECT userId, revokedAt, expiresAt FROM portfolio_auth_sessions WHERE id = ${actor.sessionId} FOR UPDATE`;
+    const registered = sessions[0];
+    if (
+      !registered ||
+      registered.userId !== actor.id ||
+      registered.revokedAt ||
+      registered.expiresAt <= new Date()
+    )
+      throw new CommercialError(
+        "ACTOR_STALE",
+        "Sesiunea a fost revocată sau a expirat.",
+        403,
+      );
+  }
+}
+
 function active(row: { status: string }) {
   return !["archived", "merged", "cancelled"].includes(row.status);
 }
@@ -357,6 +426,7 @@ export async function saveCommercialPolicy(raw: unknown, actor: AuthSession) {
       version: row.version,
       toolsEnabled: row.agentToolsEnabled,
       outboundEnabled: row.outboundEnabled,
+      approvedPolicy: input,
     });
     return row;
   });
@@ -592,6 +662,8 @@ async function createQuoteInTransaction(
   }
   const { from, to } = checkedPeriod(input.periodStart, input.periodEnd);
   const p = await policy(db);
+  await db.$queryRaw`SELECT id FROM portfolio_client_accounts WHERE id = ${input.clientId} FOR UPDATE`;
+  await db.$queryRaw`SELECT id FROM portfolio_campaigns WHERE id = ${input.campaignId} FOR UPDATE`;
   const client = await db.clientAccount.findUnique({
     where: { id: input.clientId },
   });
@@ -649,6 +721,11 @@ async function createQuoteInTransaction(
         "INVALID_OPPORTUNITY",
         "Oportunitatea trebuie să aparțină aceluiași seller; conversia CRM rămâne explicită.",
       );
+  }
+  // Shared row lock protocol with inventory edits/deletion and reservation writes.
+  // The historical JSON source must become visible before deletion can proceed.
+  for (const locationId of [...new Set(input.locationIds)].sort()) {
+    await db.$queryRaw`SELECT id FROM portfolio_locations WHERE id = ${locationId} FOR UPDATE`;
   }
   const availability = await commercialAvailability(
     {
@@ -822,6 +899,15 @@ async function recheckRevision(
     throw new CommercialError(
       "QUOTE_STALE",
       "Oferta a expirat, a fost respinsă sau există o versiune nouă.",
+      409,
+    );
+  const portfolio = await db.$queryRaw<
+    Array<{ id: string }>
+  >`SELECT ca.id FROM portfolio_client_accounts ca JOIN portfolio_campaigns c ON c.id = ${revision.quote.campaignId} AND c.clientId = ca.id WHERE ca.id = ${revision.quote.clientId} AND ca.accountOwnerUserId = ${revision.quote.ownerUserId} AND c.sellerUserId = ${revision.quote.ownerUserId} AND ca.status NOT IN ('archived', 'merged', 'cancelled') AND c.status NOT IN ('archived', 'merged', 'cancelled') AND c.archivedAt IS NULL FOR UPDATE`;
+  if (!portfolio.length)
+    throw new CommercialError(
+      "PORTFOLIO_CHANGED",
+      "Clientul sau campania nu mai aparține portofoliului validat; oferta trebuie refăcută.",
       409,
     );
   const payload = revision.payload as unknown as {
@@ -1161,7 +1247,7 @@ export async function executeAgentTool(
             active: true,
             role: { in: ["SALES_AGENT", "SALES_DIRECTOR"] },
           },
-          select: { id: true },
+          select: { id: true, role: true, tokenVersion: true },
         });
         if (!owner || !(live.scopes as string[]).includes(input.tool))
           throw new CommercialError(
@@ -1240,7 +1326,11 @@ export async function executeAgentTool(
             inputHash,
           },
         });
-        const actor: Actor = { id: live.ownerUserId, role: "SALES_AGENT" };
+        const actor: Actor = {
+          id: owner.id,
+          role: owner.role,
+          tokenVersion: owner.tokenVersion,
+        };
         attempted = true;
         let result: unknown;
         if (input.tool === "inventory.search") {
@@ -1506,18 +1596,16 @@ export async function executeAgentTool(
             completedAt: new Date(),
           },
         });
-        await audit(
-          tx,
-          { id: principal.ownerUserId, role: "SALES_AGENT" },
-          "agent.failed",
-          row.id,
-          {
-            principalId: principal.id,
-            tool: input.tool,
-            inputHash,
-            errorCode: failure,
-          },
-        );
+        const failedOwner = await tx.user.findUniqueOrThrow({
+          where: { id: principal.ownerUserId },
+          select: { id: true, role: true, tokenVersion: true },
+        });
+        await audit(tx, failedOwner, "agent.failed", row.id, {
+          principalId: principal.id,
+          tool: input.tool,
+          inputHash,
+          errorCode: failure,
+        });
         return { receiptId: row.id, replayed: false, failed: true, result };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
@@ -1544,20 +1632,21 @@ export async function saveDoohProfile(raw: unknown, actor: AuthSession) {
       "INVALID_CAPACITY",
       "Spotul nu poate depăși durata buclei.",
     );
-  const location = await prisma.location.findUnique({
-    where: { id: input.locationId },
-    select: { type: true, lifecycleStatus: true },
-  });
-  if (
-    !location ||
-    !isDigitalFormat(location.type) ||
-    location.lifecycleStatus !== "ACTIVE"
-  )
-    throw new CommercialError(
-      "INVALID_DIGITAL_LOCATION",
-      "Selectează un amplasament digital activ.",
-    );
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM portfolio_locations WHERE id = ${input.locationId} FOR UPDATE`;
+    const location = await tx.location.findUnique({
+      where: { id: input.locationId },
+      select: { type: true, lifecycleStatus: true },
+    });
+    if (
+      !location ||
+      !isDigitalFormat(location.type) ||
+      location.lifecycleStatus !== "ACTIVE"
+    )
+      throw new CommercialError(
+        "INVALID_DIGITAL_LOCATION",
+        "Selectează un amplasament digital activ.",
+      );
     await tx.$queryRaw`SELECT id FROM portfolio_dooh_profiles WHERE locationId = ${input.locationId} FOR UPDATE`;
     const old = await tx.doohProfile.findUnique({
       where: { locationId: input.locationId },
@@ -1629,9 +1718,13 @@ async function capacitySnapshot(raw: unknown, db: Db = prisma) {
     );
   const location = await db.location.findUnique({
     where: { id: profile.locationId },
-    select: { lifecycleStatus: true },
+    select: { lifecycleStatus: true, type: true },
   });
-  if (!location || location.lifecycleStatus !== "ACTIVE")
+  if (
+    !location ||
+    location.lifecycleStatus !== "ACTIVE" ||
+    !isDigitalFormat(location.type)
+  )
     throw new CommercialError(
       "DOOH_INACTIVE",
       "Amplasamentul nu mai este activ.",
@@ -2006,6 +2099,7 @@ export async function enrollPilotCase(raw: unknown, actor: AuthSession) {
     .strict()
     .parse(raw);
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM portfolio_sales_pilots WHERE id = ${input.pilotId} FOR UPDATE`;
     const pilot = await tx.salesPilot.findUnique({
       where: { id: input.pilotId },
     });
@@ -2127,6 +2221,8 @@ export async function reviewPilotCase(raw: unknown, actor: AuthSession) {
       pilotId: pilot.id,
       stopRequired,
       metricsHash: commercialHash(input.metrics),
+      metrics: input.metrics,
+      evidenceHash: tokenHash(input.evidenceReference),
     });
     return { entry: row, stopRequired };
   });
@@ -2140,6 +2236,7 @@ export async function salesPilotReport(pilotId: string, actor: AuthSession) {
     orderBy: { enrolledAt: "asc" },
     take: 10000,
   });
+  const protocol = protocolSchema.parse(pilot.protocol);
   const arms = summarizePilot(
     rows.map((r) => ({
       arm: r.arm,
@@ -2147,9 +2244,22 @@ export async function salesPilotReport(pilotId: string, actor: AuthSession) {
       matureAt: r.matureAt,
       reviewed: Boolean(r.reviewedByUserId),
     })),
-  );
-  const protocol = protocolSchema.parse(pilot.protocol),
-    enrolled = rows.length;
+  ).map((arm) => ({
+    ...arm,
+    stopRequired:
+      arm.stopRequired ||
+      rows.some((row) => {
+        if (row.arm !== arm.arm || !row.reviewedByUserId) return false;
+        const m = metricsSchema.parse(row.metrics);
+        return (
+          m.calculationErrors > 0 ||
+          m.modelCost > protocol.maximumModelCostPerCase ||
+          (m.totalClaims > 0 &&
+            m.validSources / m.totalClaims < protocol.minimumSourcePrecision)
+        );
+      }),
+  }));
+  const enrolled = rows.length;
   const warnings = [
     arms.some(
       (x) =>
@@ -2454,7 +2564,9 @@ export async function processCommercialDispatch(
         where: { id: prepared.row.id },
         data: { state: "sent", sentAt: new Date(), providerReceipt: body.id },
       });
-      await audit(tx, actor, "dispatch.sent", row.id, { receipt: body.id });
+      await continuationAudit(tx, actor.id, "dispatch.sent", row.id, {
+        receipt: body.id,
+      });
       return {
         id: row.id,
         state: row.state,
@@ -2467,7 +2579,12 @@ export async function processCommercialDispatch(
         where: { id: prepared.row.id },
         data: { state: "unknown", errorCode: "PROVIDER_OUTCOME_UNKNOWN" },
       });
-      await audit(tx, actor, "dispatch.unknown", prepared.row.id);
+      await continuationAudit(
+        tx,
+        actor.id,
+        "dispatch.unknown",
+        prepared.row.id,
+      );
     });
     throw new CommercialError(
       "PROVIDER_OUTCOME_UNKNOWN",
@@ -2481,6 +2598,7 @@ export async function generateQuoteDraft(raw: unknown, actor: AuthSession) {
   requireWrite(actor);
   const input = z.object({ revisionId: id, requestKey }).strict().parse(raw);
   const prepared = await prisma.$transaction(async (tx) => {
+    await assertCurrentCommercialActor(tx, actor);
     const p = await policy(tx);
     if (
       !p.generationEnabled ||
@@ -2640,7 +2758,12 @@ export async function generateQuoteDraft(raw: unknown, actor: AuthSession) {
           completedAt: new Date(),
         },
       });
-      await audit(tx, actor, "draft.failed", prepared.command!.id);
+      await continuationAudit(
+        tx,
+        actor.id,
+        "draft.failed",
+        prepared.command!.id,
+      );
     });
     throw new CommercialError(
       "GENERATION_FAILED",

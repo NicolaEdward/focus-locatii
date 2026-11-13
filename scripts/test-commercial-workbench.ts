@@ -105,13 +105,13 @@ async function main() {
     data: { name: tag, slug: tag },
   });
   categoryId = category.id;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     const l = await prisma.location.create({
       data: {
         categoryId,
         code: tag + i,
         city: "Synthetic",
-        type: i === 3 ? "DOOH LED" : "Billboard",
+        type: i === 3 || i === 4 ? "DOOH LED" : "Billboard",
         rateCardValue: 100,
         lifecycleStatus: "ACTIVE",
         showInPublic: false,
@@ -154,6 +154,53 @@ async function main() {
     maxDailyModelCalls: 2,
   };
   await service.saveCommercialPolicy(policy, coo);
+  const versionBeforeStale = (
+    await prisma.commercialPolicy.findUniqueOrThrow({
+      where: { id: "default" },
+    })
+  ).version;
+  for (const change of [
+    { role: "SALES_AGENT" as const },
+    { tokenVersion: 1 },
+    { active: false },
+  ]) {
+    await prisma.user.update({ where: { id: coo.id }, data: change });
+    await rejects(
+      () => service.saveCommercialPolicy(policy, coo),
+      "ACTOR_STALE",
+    );
+    await prisma.user.update({
+      where: { id: coo.id },
+      data: { role: "COO", tokenVersion: 0, active: true },
+    });
+    assert.equal(
+      (
+        await prisma.commercialPolicy.findUniqueOrThrow({
+          where: { id: "default" },
+        })
+      ).version,
+      versionBeforeStale,
+    );
+  }
+  const revokedSession = await prisma.authSessionRecord.create({
+    data: {
+      id: tag + "-revoked-session",
+      userId: coo.id,
+      expiresAt: new Date(Date.now() + 3600000),
+      revokedAt: new Date(),
+    },
+  });
+  await rejects(
+    () =>
+      service.saveCommercialPolicy(policy, {
+        ...coo,
+        sessionId: revokedSession.id,
+      }),
+    "ACTOR_STALE",
+  );
+  check(
+    "stale active/role/token/session actors cannot commit writes or partial policy changes",
+  );
   const quoteInput = {
     clientId: clients[0],
     campaignId: campaigns[0],
@@ -172,6 +219,82 @@ async function main() {
     () => service.createCommercialQuote(quoteInput, observer),
     "FORBIDDEN",
   );
+  // Actual service contends with the exact inventory deletion row-lock/count
+  // protocol. No timeout guesses: observe the real InnoDB waiter before delete.
+  async function waitForLocationWaiter() {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const rows = await prisma.$queryRaw<
+        Array<{ waiting: bigint }>
+      >`SELECT COUNT(*) AS waiting FROM performance_schema.data_lock_waits w JOIN performance_schema.data_locks l ON w.REQUESTING_ENGINE_LOCK_ID = l.ENGINE_LOCK_ID WHERE l.OBJECT_SCHEMA = ${url.pathname.slice(1)} AND l.OBJECT_NAME = 'portfolio_locations'`;
+      if (Number(rows[0]?.waiting) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error("Service did not enter the location locking protocol.");
+  }
+  async function deleteUnderReferenceGuard(
+    tx: import("@prisma/client").Prisma.TransactionClient,
+    locationId: string,
+  ) {
+    const profiles = await tx.doohProfile.count({ where: { locationId } });
+    const quotes = await tx.$queryRaw<
+      Array<{ referenced: bigint }>
+    >`SELECT COUNT(*) AS referenced FROM portfolio_quote_revisions WHERE JSON_CONTAINS(JSON_EXTRACT(payload, '$.lines[*].locationId'), JSON_QUOTE(${locationId}))`;
+    if (profiles || Number(quotes[0]?.referenced))
+      throw new Error("COMMERCIAL_REFERENCE");
+    await tx.location.delete({ where: { id: locationId } });
+  }
+  for (const [locationId, create] of [
+    [
+      locations[4],
+      () =>
+        service.saveDoohProfile(
+          {
+            locationId: locations[4],
+            timezone: "Europe/Bucharest",
+            loopSeconds: 100,
+            slotSeconds: 10,
+            state: "verified",
+            sourceReference: "synthetic concurrent profile",
+          },
+          coo,
+        ),
+    ],
+    [
+      locations[5],
+      () =>
+        service.createCommercialQuote(
+          {
+            ...quoteInput,
+            locationIds: [locations[5]],
+            requestKey: tag + "-deleted-source",
+          },
+          seller,
+        ),
+    ],
+  ] as const) {
+    let contender: Promise<{ ok: boolean }> | undefined;
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM portfolio_locations WHERE id = ${locationId} FOR UPDATE`;
+        contender = create().then(
+          () => ({ ok: true }),
+          () => ({ ok: false }),
+        );
+        await waitForLocationWaiter();
+        await deleteUnderReferenceGuard(tx, locationId);
+      },
+      { isolationLevel: "ReadCommitted", timeout: 20000 },
+    );
+    assert.equal((await contender!).ok, false);
+    assert.equal(await prisma.doohProfile.count({ where: { locationId } }), 0);
+    const orphanQuotes = await prisma.$queryRaw<
+      Array<{ referenced: bigint }>
+    >`SELECT COUNT(*) AS referenced FROM portfolio_quote_revisions WHERE JSON_CONTAINS(JSON_EXTRACT(payload, '$.lines[*].locationId'), JSON_QUOTE(${locationId}))`;
+    assert.equal(Number(orphanQuotes[0]?.referenced), 0);
+  }
+  check(
+    "real InnoDB delete-vs-profile and delete-vs-quote races leave no orphan source references",
+  );
   const first = await service.createCommercialQuote(quoteInput, seller),
     replay = await service.createCommercialQuote(quoteInput, seller);
   assert.equal(first.revision.id, replay.revision.id);
@@ -186,6 +309,45 @@ async function main() {
   );
   check(
     "quote ownership, read-only role, exact decimal totals and one-intent idempotency",
+  );
+  for (const scope of ["client", "campaign"]) {
+    if (scope === "client")
+      await prisma.clientAccount.update({
+        where: { id: clients[0] },
+        data: { accountOwnerUserId: foreign.id },
+      });
+    else
+      await prisma.campaign.update({
+        where: { id: campaigns[0] },
+        data: { sellerUserId: foreign.id },
+      });
+    await rejects(
+      () =>
+        service.requestCommercialApproval(
+          { revisionId: first.revision.id, action: "send_quote" },
+          seller,
+        ),
+      "PORTFOLIO_CHANGED",
+    );
+    await prisma.clientAccount.update({
+      where: { id: clients[0] },
+      data: { accountOwnerUserId: seller.id },
+    });
+    await prisma.campaign.update({
+      where: { id: campaigns[0] },
+      data: { sellerUserId: seller.id },
+    });
+  }
+  await assert.rejects(
+    () =>
+      prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM portfolio_locations WHERE id = ${locations[0]} FOR UPDATE`;
+        await deleteUnderReferenceGuard(tx, locations[0]);
+      }),
+    /COMMERCIAL_REFERENCE/,
+  );
+  check(
+    "live portfolio reassignment invalidates approvals and frozen quote history blocks inventory deletion",
   );
   const oldApproval = await service.requestCommercialApproval(
     { revisionId: first.revision.id, action: "send_quote" },
@@ -287,6 +449,33 @@ async function main() {
     "Bearer " + delegated.token,
   );
   assert.notEqual(principal.tokenHash, delegated.token);
+  await prisma.user.update({
+    where: { id: seller.id },
+    data: { tokenVersion: 1 },
+  });
+  const currentDelegation = await service.executeAgentTool(principal, {
+    tool: "inventory.search",
+    input: { query: tag },
+    requestKey: tag + "-current-delegator-version",
+  });
+  assert.equal(
+    currentDelegation.failed,
+    false,
+    "service actor must preserve the current DB credential version",
+  );
+  await rejects(
+    () =>
+      service.createCommercialQuote(
+        { ...quoteInput, requestKey: tag + "-stale-seller-token" },
+        seller,
+      ),
+    "ACTOR_STALE",
+  );
+  await prisma.user.update({
+    where: { id: seller.id },
+    data: { tokenVersion: 0 },
+  });
+
   const read = {
     tool: "inventory.search",
     input: { query: tag },
@@ -413,6 +602,14 @@ async function main() {
       sourceReference: "synthetic verified capacity ledger",
     },
     coo,
+  );
+  await assert.rejects(
+    () =>
+      prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM portfolio_locations WHERE id = ${locations[3]} FOR UPDATE`;
+        await deleteUnderReferenceGuard(tx, locations[3]);
+      }),
+    /COMMERCIAL_REFERENCE/,
   );
   const capacity = {
     profileId: profile.id,
@@ -628,6 +825,48 @@ async function main() {
   assert.equal(summarizePilot([])[0].sourcePrecision, null);
   check(
     "company-level stable cohorts, honest immature reports and incident-triggered global kill switch",
+  );
+  for (const [suffix, changed] of [
+    ["calculation", { calculationErrors: 1 }],
+    ["cost", { modelCost: 3 }],
+    ["grounding", { validSources: 0 }],
+  ] as const) {
+    const sample = await service.createSalesPilot(
+      { name: tag + suffix, mode: "offline", protocol },
+      coo,
+    );
+    await service.decideSalesPilot(
+      {
+        pilotId: sample.id,
+        action: "activate",
+        expectedProtocolHash: sample.protocolHash,
+        reason: "synthetic threshold boundary test",
+      },
+      coo,
+    );
+    const sampleCase = await service.enrollPilotCase(
+      { pilotId: sample.id, companyKey: tag + suffix },
+      coo,
+    );
+    const reviewed = await service.reviewPilotCase(
+      {
+        caseId: sampleCase.id,
+        metrics: { ...metrics, ...changed },
+        matured: false,
+        evidenceReference: "synthetic threshold evidence",
+      },
+      coo,
+    );
+    assert.equal(reviewed.stopRequired, true);
+    const sampleReport = await service.salesPilotReport(sample.id, coo);
+    assert.equal(sampleReport.pilot.state, "stopped");
+    assert.equal(
+      sampleReport.arms.some((arm) => arm.stopRequired),
+      true,
+    );
+  }
+  check(
+    "approved calculation, cost and grounding thresholds stop the pilot and remain visible in report flags",
   );
   const workspace = await service.commercialWorkspace(seller);
   assert.equal(workspace.principals.length, 0);

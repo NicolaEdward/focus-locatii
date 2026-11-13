@@ -100,6 +100,7 @@ async function main() {
     console.log(JSON.stringify({
       event: "database_diagnostics", ok: true, capturedAt: new Date().toISOString(),
       databaseFingerprint, poolParameters, diagnosticConnectionLimit: 1,
+      tlsConfiguration: { verification: ["strict", "accept_invalid_certs"].includes(originalUrl.searchParams.get("sslaccept")) ? originalUrl.searchParams.get("sslaccept") : "driver-default", providerCaConfigured: originalUrl.searchParams.has("sslcert") },
       serverVariables, serverStatus, counts,
       readProbe: { candidateFound: Boolean(candidate), clientFound, campaignFound, relationshipMatches }
     }));

@@ -77,13 +77,21 @@ export async function registerBackupEvidence(input: unknown, actor: AuthSession)
 }
 
 async function lockControls(tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) {
-  await tx.$queryRaw`SELECT id FROM portfolio_users WHERE role = 'SUPER_ADMIN' AND active = TRUE ORDER BY id LIMIT 1 FOR UPDATE`;
+  // A stable singleton also serializes COO writes when no active admin exists.
+  await tx.auditLog.createMany({ data: [{ id: "operations-control-lock-v1", action: "control.lock.initialized", entityType: "operations_control" }], skipDuplicates: true });
+  await tx.$queryRaw`SELECT id FROM portfolio_audit_logs WHERE id = 'operations-control-lock-v1' FOR UPDATE`;
 }
 
 async function assertCurrentOperator(tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0], actor: AuthSession, superAdminOnly = false) {
   await tx.$queryRaw`SELECT id FROM portfolio_users WHERE id = ${actor.id} FOR UPDATE`;
   const current = await tx.user.findUnique({ where: { id: actor.id }, select: { active: true, role: true, tokenVersion: true } });
   if (!current?.active || current.tokenVersion !== actor.tokenVersion || current.role !== actor.role || !(superAdminOnly ? current.role === "SUPER_ADMIN" : ["COO", "SUPER_ADMIN"].includes(current.role))) throw new Error("Drepturile s-au schimbat. Autentifica-te din nou.");
+  if (actor.exp <= Math.floor(Date.now() / 1000)) throw new Error("Sesiunea a expirat. Autentifica-te din nou.");
+  if (actor.sessionId) {
+    await tx.$queryRaw`SELECT id FROM portfolio_auth_sessions WHERE id = ${actor.sessionId} FOR UPDATE`;
+    const session = await tx.authSessionRecord.findUnique({ where: { id: actor.sessionId }, select: { userId: true, revokedAt: true, expiresAt: true } });
+    if (!session || session.userId !== actor.id || session.revokedAt || session.expiresAt <= new Date()) throw new Error("Sesiunea a fost revocata. Autentifica-te din nou.");
+  }
 }
 
 export async function updateOperationsPolicy(input: unknown, actor: AuthSession) {

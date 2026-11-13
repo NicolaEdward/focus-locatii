@@ -28,7 +28,7 @@ async function main() {
   const saved = { key: process.env.BACKUP_ENCRYPTION_KEY, confirmation: process.env.RESTORE_DATABASE_CONFIRM, create: process.env.CREATE_ISOLATED_RESTORE_DATABASE, hosts: process.env.RESTORE_ALLOWED_HOSTS, production: process.env.PRODUCTION_DATABASE_URL };
   process.env.BACKUP_ENCRYPTION_KEY = crypto.randomBytes(32).toString("base64"); process.env.CREATE_ISOLATED_RESTORE_DATABASE = "true"; delete process.env.RESTORE_ALLOWED_HOSTS;
   const readFile = fs.readFile, mkdtemp = fs.mkdtemp, createdPrivateDirs = [];
-  let backupConnections = 0, injectConcurrentInsert = false, concurrentInsertProven = false;
+  let backupConnections = 0, injectConcurrentInsert = false, concurrentInsertProven = false, snapshotObservedAfter = 0;
   const createConnection = callbackMysql.createConnection;
   callbackMysql.createConnection = (...args) => {
     backupConnections++; const conn = createConnection(...args), promise = conn.promise.bind(conn);
@@ -36,6 +36,7 @@ async function main() {
       const db = promise(), query = db.query.bind(db);
       db.query = async (...queryArgs) => {
         const result = await query(...queryArgs);
+        if (queryArgs[0] === "START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY") snapshotObservedAfter = Date.now();
         if (injectConcurrentInsert && queryArgs[0] === "SHOW CREATE TABLE `a_concurrent`") {
           injectConcurrentInsert = false;
           await admin.query("INSERT INTO `" + sourceName + "`.a_concurrent(value) VALUES(2)");
@@ -74,6 +75,8 @@ async function main() {
     }
     injectConcurrentInsert = true;
     const before = await backup(sourceUrl.toString(), file), originalHash = await sha(file);
+    assert.ok(Date.parse(before.createdAt) <= snapshotObservedAfter, "RPO freshness starts with the consistent snapshot, not dump completion");
+    assert.ok(Date.parse(before.completedAt) >= Date.parse(before.createdAt));
     assert.equal(concurrentInsertProven, true); assert.equal(before.tables.a_concurrent.count, 1, "snapshot excludes an insert committed after transaction start");
     assert.equal(before.encryptedSha256, originalHash); assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
     await assert.rejects(backup(sourceUrl.toString(), file), (error) => error.code === "EEXIST"); assert.equal(await sha(file), originalHash);

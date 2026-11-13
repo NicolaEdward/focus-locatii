@@ -4,7 +4,7 @@
 
 Use a dedicated 32-byte random base64 `BACKUP_ENCRYPTION_KEY`, held separately from the archive and recoverable by the authorized recovery operator. Existing output/receipt paths are never overwritten or removed. Backup files use mode 0600.
 
-The backup uses an InnoDB read-only consistent snapshot. It rejects views, triggers, routines, events, non-InnoDB tables, generated/invisible columns, spatial values and foreign-schema references. Schema changes detected during export invalidate the backup. These cases require a provider-native backup. The account must have sufficient metadata visibility for all schema objects; a restricted account cannot prove absent objects merely because it cannot see them. Avoid DDL during a backup.
+The backup uses an InnoDB read-only consistent snapshot. Receipt `createdAt` records snapshot start for conservative RPO accounting; `completedAt` separately records dump completion. It rejects views, triggers, routines, events, non-InnoDB tables, generated/invisible columns, spatial values and foreign-schema references. Schema changes detected during export invalidate the backup. These cases require a provider-native backup. The account must have sufficient metadata visibility for all schema objects; a restricted account cannot prove absent objects merely because it cannot see them. Avoid DDL during a backup.
 
 The restore target must:
 

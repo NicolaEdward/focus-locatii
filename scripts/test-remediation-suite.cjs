@@ -16,8 +16,8 @@ const suites = [
   'test-media-boundaries.ts','test-data-import-hardening.ts','test-secure-spreadsheet-imports.ts',
   'test-finance-remediation.ts','test-finance-plan-and-alerts.ts','test-financial-bank-reconciliation.ts',
   'test-receivables-reconciliation.ts','test-billing.cjs','test-finance-consistency.cjs',
-  'test-commercial-workbench.ts','test-operations-controls.ts','test-backup-restore.cjs',
-  'test-remediation-schema.cjs','test-database-read-retry.ts','test-release-governance.cjs','test-observability.ts',
+  'test-commercial-workbench.ts','test-operations-controls.ts','test-backup-restore.cjs','test-backup-hardening.cjs',
+  'test-remediation-schema.cjs','test-remediation-history.ts','test-database-read-retry.ts','test-release-governance.cjs','test-observability.ts',
   'test-admin-route-links.cjs','test-notifications.cjs','test-operations-rbac.cjs','test-dependency-policy.cjs'
 ];
 const selected = process.env.REMEDIATION_TEST_FILTER ? suites.filter((s) => s.includes(process.env.REMEDIATION_TEST_FILTER)) : suites;

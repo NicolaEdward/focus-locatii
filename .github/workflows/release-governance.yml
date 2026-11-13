@@ -79,6 +79,8 @@ jobs:
           node node_modules/tsx/dist/cli.mjs scripts/test-media-boundaries.ts
           node node_modules/tsx/dist/cli.mjs scripts/test-data-import-hardening.ts
           node node_modules/tsx/dist/cli.mjs scripts/test-reservation-read-access.ts
+          node node_modules/tsx/dist/cli.mjs scripts/test-location-private-read.ts
+          node node_modules/tsx/dist/cli.mjs scripts/test-location-mutation-transactions.ts
       - name: Focused operational and financial regressions
         run: |
           node scripts/test-reservation-remediation.cjs
@@ -88,6 +90,8 @@ jobs:
           node node_modules/tsx/dist/cli.mjs scripts/test-transactional-audit.ts
           node node_modules/tsx/dist/cli.mjs scripts/test-operations-controls.ts
           node scripts/test-backup-restore.cjs
+          node scripts/test-backup-hardening.cjs
+          node scripts/test-remediation-schema.cjs
       - run: pnpm prisma validate
       - run: pnpm run build
       - name: Start production server

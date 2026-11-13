@@ -175,6 +175,7 @@ async function backup(value, output) {
     await db.query("SET SESSION time_zone = '+00:00'");
     await db.query("SET SESSION sql_mode = ?", [RESTORE_SQL_MODE]);
     await db.query("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    const snapshotStartedAt = new Date().toISOString();
     await db.query("START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY");
     const objects = await inventory(db, source.name);
     if (!objects.length) throw new Error("BACKUP_REQUIRES_APPLICATION_TABLES");
@@ -185,7 +186,7 @@ async function backup(value, output) {
       if (Buffer.byteLength(line) > MAX_RECORD_BYTES) throw new Error("BACKUP_RECORD_TOO_LARGE_USE_PROVIDER_BACKUP");
       await write(out, cipher.update(line));
     };
-    await record({ type: "manifest", version: 1, createdAt: new Date().toISOString(), sourceFingerprint: source.fingerprint, sourceDatabase: source.name, tableCount: objects.length });
+    await record({ type: "manifest", version: 1, createdAt: snapshotStartedAt, sourceFingerprint: source.fingerprint, sourceDatabase: source.name, tableCount: objects.length });
     const tables = Object.create(null);
     for (const object of objects) {
       const table = object.TABLE_NAME;
@@ -204,7 +205,7 @@ async function backup(value, output) {
     if (canonical(await inventory(db, source.name)) !== canonical(objects)) throw new Error("SCHEMA_CHANGED_DURING_BACKUP");
     await record({ type: "checksums", tables }); await db.query("COMMIT");
     await write(out, cipher.final()); await write(out, cipher.getAuthTag()); out.end(); await once(out, "finish");
-    return { version: 1, action: "backup", ok: true, createdAt: new Date().toISOString(), sourceFingerprint: source.fingerprint, encryptedSha256: await fileDigest(output), tables: Object.fromEntries(Object.entries(tables)) };
+    return { version: 1, action: "backup", ok: true, createdAt: snapshotStartedAt, completedAt: new Date().toISOString(), sourceFingerprint: source.fingerprint, encryptedSha256: await fileDigest(output), tables: Object.fromEntries(Object.entries(tables)) };
   } catch (error) {
     try { if (db) await db.query("ROLLBACK"); } catch {}
     if (out) out.destroy();

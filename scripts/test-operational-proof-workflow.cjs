@@ -179,7 +179,10 @@ function operationalDateDelayWorkflowIsAudited() {
   const route = read("src", "app", "api", "admin", "operational", "tasks", "reschedule", "route.ts");
   const status = read("src", "lib", "operation-status.ts");
   assert(route.includes("Motivul intarzierii este obligatoriu."), "date delay route must require a delay reason");
-  assert(route.includes("Confirma impactul asupra perioadei si pro-rata."), "date delay route must require explicit impact confirmation");
+  assert(route.includes("Confirmă noua dată a lucrării."), "date delay route must require explicit scheduling confirmation");
+  assert(route.includes('{ installationDate: formatDateInput(newDate) }'), "a delayed installation changes physical execution timing");
+  assert(!route.includes('{ periodStart: formatDateInput(newDate)'), "physical delay cannot silently amend the contractual rental period");
+  assert(!route.includes("updateReservationProductionNotes("), "schedule and delay history must commit in one version-checked mutation");
   assert(route.includes("canRescheduleOperationalReservation"), "date delay route must enforce scoped reschedule access");
   assert(route.includes("client: { select:") && route.includes("accountOwnerUserId: true"), "date delay route must load client owner for seller access checks");
   assert(route.includes("updateReservation("), "date delay route should use existing reservation update safety logic");

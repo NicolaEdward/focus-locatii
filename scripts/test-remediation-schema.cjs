@@ -20,6 +20,8 @@ function invoke(args, env) {
 const denied=invoke(['--apply'],{APPLY_REMEDIATION_SCHEMA:'true',REMEDIATION_DATABASE_FINGERPRINT:'wrong-target'});
 assert.notEqual(denied.code,0);assert.equal(denied.result.code,'EXPLICIT_DATABASE_FINGERPRINT_REQUIRED');
 const check=invoke([],{});assert.equal(check.code,0);assert.deepEqual(check.result.pending,[]);
+const recapture=invoke(['--generate-manifest'],{});
+assert.notEqual(recapture.code,0);assert.equal(recapture.result.code,'MANIFEST_CAPTURE_REQUIRES_ABSENT_ADDITIVE_TABLES');
 const replay=invoke(['--apply'],{APPLY_REMEDIATION_SCHEMA:'true',REMEDIATION_DATABASE_FINGERPRINT:source.fingerprint,REMEDIATION_RESOLVED_PLAN_SHA256:check.result.resolvedPlanSha256});
 assert.equal(replay.code,0);assert.deepEqual(replay.result.before,replay.result.after);assert.equal(replay.result.schemaSha256,check.result.schemaSha256);
 console.log('Additive schema gate passed: SQL restrictions, wrong-target denial, exact thirty-table metadata, no-op replay and preserved historical counts');

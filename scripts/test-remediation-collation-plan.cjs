@@ -32,7 +32,7 @@ async function main() {
       await db.query('INSERT INTO '+quote(table)+' (id,preservedPayload) VALUES (?,?)',['synthetic-preserved-row','Synthetic historical payload must remain byte identical']);
     }
     const before=await historicalState();
-    const check=invoke();assert.equal(check.code,0,JSON.stringify(check));assert.equal(check.output.pending.length,19);assert.equal(check.output.adaptations.length,1);assert.deepEqual(check.output.adaptations[0],{table:'portfolio_financial_invoice_allocations',column:'billingItemId',type:'varchar(191)',charset:'utf8mb4',fromCollation:'utf8mb4_unicode_ci',toCollation:'utf8mb4_0900_ai_ci'});
+    const check=invoke();assert.equal(check.code,0,JSON.stringify(check));assert.equal(check.output.pending.length,Object.keys(manifest.tables).length);assert.equal(check.output.adaptations.length,1);assert.deepEqual(check.output.adaptations[0],{table:'portfolio_financial_invoice_allocations',column:'billingItemId',type:'varchar(191)',charset:'utf8mb4',fromCollation:'utf8mb4_unicode_ci',toCollation:'utf8mb4_0900_ai_ci'});
     const [stillAbsent]=await db.query('SHOW TABLES');assert.equal(stillAbsent.length,historical.length,'dry-run must execute no DDL');
     const denied=invoke(['--apply'],{REMEDIATION_RESOLVED_PLAN_SHA256:'wrong-plan'});assert.notEqual(denied.code,0);assert.equal(denied.output.code,'EXACT_RESOLVED_SCHEMA_PLAN_REQUIRED');
     const apply=invoke(['--apply'],{REMEDIATION_RESOLVED_PLAN_SHA256:check.output.resolvedPlanSha256});assert.equal(apply.code,0,JSON.stringify(apply));assert.deepEqual(apply.output.pending,[]);assert.equal(await historicalState(),before,'all existing historical table definitions and rows stay byte identical');

@@ -7,6 +7,7 @@ import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "../src/lib/auth";
 import { commercialHash } from "../src/lib/commercial-workbench-core";
 import { assertSyntheticEnvironment } from "./release/env-utils";
+const { createBrowserRuntime } = require("./release/browser-runtime.cjs");
 
 assertSyntheticEnvironment();
 const connection = new URL(process.env.DATABASE_URL!);
@@ -19,7 +20,7 @@ const ids = { users: [] as string[], client: "", campaign: "", quote: "" };
 const output = resolve(process.env.OOH_PRINT_OUT_DIR || "artifacts/ooh-offer-print");
 
 async function main() {
-  const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || "/usr/bin/chromium", headless: true, args: ["--no-sandbox"] });
+  const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || createBrowserRuntime(9289).findChrome(), headless: true, args: ["--no-sandbox"] });
   try {
     mkdirSync(output, { recursive: true });
     const passwordHash = await hashPassword(password);

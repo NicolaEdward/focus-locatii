@@ -192,7 +192,8 @@
     "smoke:onboarding": "tsx scripts/test-onboarding-browser.ts",
     "test:public-business-errors": "tsx scripts/test-public-business-errors.ts",
     "test:commercial-quote-print": "tsx scripts/test-commercial-quote-print.ts",
-    "smoke:ooh-workspace-states": "node scripts/release/smoke-ooh-workspace-states.cjs"
+    "smoke:ooh-workspace-states": "node scripts/release/smoke-ooh-workspace-states.cjs",
+    "smoke:commercial-quote-print": "tsx scripts/test-commercial-quote-print-browser.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

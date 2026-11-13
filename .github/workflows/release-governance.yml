@@ -150,11 +150,12 @@ jobs:
         run: |
           pnpm run smoke:onboarding
           pnpm run smoke:ooh-commercial
+          pnpm run smoke:commercial-quote-print
           pnpm run smoke:ooh-workspace-states
         env:
           ONBOARDING_BROWSER_BASE_URL: http://localhost:3000
           OOH_SMOKE_BASE_URL: http://localhost:3000
-          OOH_WORKSPACE_BASE_URL: http://localhost:3000
+          OOH_WORKSPACE_BROWSER_BASE_URL: http://localhost:3000
       - run: pnpm run smoke:roles
       - name: Interactive UI regressions
         run: node scripts/release/smoke-ui-regressions.cjs

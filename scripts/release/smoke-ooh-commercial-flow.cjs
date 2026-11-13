@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { chromium } = require("playwright");
 const { PrismaClient } = require("@prisma/client");
+const { createBrowserRuntime } = require("./browser-runtime.cjs");
 
 const dbUrl = new URL(process.env.DATABASE_URL || "invalid:");
 if (!["localhost", "127.0.0.1"].includes(dbUrl.hostname) || !dbUrl.pathname.startsWith("/focus_preview_") || [process.env.APP_ENV, process.env.VERCEL_ENV, process.env.NODE_ENV].includes("production") || process.env.ALLOW_SYNTHETIC_SEED !== "true" || process.env.PREVIEW_DATASET_ID !== "focus-media-synthetic-v1") throw new Error("Commercial browser verification requires an isolated local synthetic database.");
@@ -34,7 +35,7 @@ async function login(role) {
     await prisma.location.create({ data: { id: ids.location, categoryId: ids.category, code: tag, city: "Synthetic City", type: "Billboard", rateCardValue: 100, lifecycleStatus: "ACTIVE", showInPublic: false, mainPhotoUrl: "/samples/location-placeholder.svg" } });
     await prisma.clientAccount.create({ data: { id: ids.client, companyName: tag, normalizedName: tag, accountOwnerUserId: ids.seller, generalEmail: "synthetic-offer@example.invalid", createdByUserId: ids.manager } });
     await prisma.campaign.create({ data: { id: ids.campaign, clientId: ids.client, campaignName: tag + " campaign", sellerUserId: ids.seller, accountOwnerUserId: ids.seller, createdByUserId: ids.manager, companyEntity: "Focus Media", currency: null, status: "draft" } });
-    browser = await chromium.launch({ ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}), headless: true, args: ["--no-sandbox"] });
+    browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || createBrowserRuntime(9288).findChrome(), headless: true, args: ["--no-sandbox"] });
     const manager = await login("manager");
     let policy = await prisma.commercialPolicy.findUnique({ where: { id: "default" } });
     if (!policy) {

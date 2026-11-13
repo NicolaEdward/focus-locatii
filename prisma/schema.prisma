@@ -2286,3 +2286,112 @@ model AssistantOAuthToken {
   @@index([grantId, kind])
   @@map("portfolio_assistant_oauth_tokens")
 }
+
+// NAS documents remain on the source. This additive index stores references,
+// bounded optional text, immutable evidence and audit snapshots, never binaries.
+model DocumentAuditSource {
+  id                    String   @id @default(cuid())
+  label                 String   @db.VarChar(191)
+  sourceType            String   @default("local_bridge") @db.VarChar(32)
+  baseReference         String?  @db.Text
+  allowedPathPrefixes   Json
+  indexTextEnabled      Boolean  @default(false)
+  maxStaleHours         Int      @default(24)
+  state                 String   @default("active") @db.VarChar(24)
+  ownerUserId           String
+  ownerTokenVersion     Int
+  ingestTokenHash       String?  @unique @db.VarChar(64)
+  tokenIssuedAt         DateTime?
+  lastIngestAt          DateTime?
+  lastCompletedScanAt   DateTime?
+  lastCompletedScanId   String?  @db.VarChar(128)
+  version               Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  documents             SourceDocument[]
+  batches               DocumentIngestBatch[]
+  @@index([state, updatedAt])
+  @@map("portfolio_document_audit_sources")
+}
+model SourceDocument {
+  id                    String   @id @default(cuid())
+  sourceId              String
+  pathHash              String   @db.VarChar(64)
+  relativePath          String   @db.Text
+  displayName           String   @db.VarChar(255)
+  documentType          String   @default("unknown") @db.VarChar(24)
+  state                 String   @default("present") @db.VarChar(24)
+  currentVersionId      String?
+  lastScanId            String   @db.VarChar(128)
+  firstSeenAt           DateTime @default(now())
+  lastSeenAt            DateTime
+  source                DocumentAuditSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  versions              SourceDocumentVersion[]
+  @@unique([sourceId, pathHash])
+  @@index([sourceId, state, id])
+  @@map("portfolio_source_documents")
+}
+model SourceDocumentVersion {
+  id                    String   @id @default(cuid())
+  documentId            String
+  sha256                String   @db.VarChar(64)
+  sizeBytes             Int
+  modifiedAt            DateTime
+  observedAt            DateTime
+  extractionStatus      String   @db.VarChar(40)
+  extractionHash        String   @db.VarChar(64)
+  textTruncated         Boolean  @default(false)
+  sourceReferenceSnapshot String? @db.Text
+  sourceConfigVersion   Int
+  textPages             Json
+  reviewVersion         Int      @default(0)
+  createdAt             DateTime @default(now())
+  document              SourceDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  reviews               DocumentFactReview[]
+  @@unique([documentId, sha256, extractionHash])
+  @@index([documentId, observedAt])
+  @@map("portfolio_source_document_versions")
+}
+model DocumentFactReview {
+  id                    String   @id @default(cuid())
+  documentVersionId     String
+  version               Int
+  state                 String   @db.VarChar(24)
+  facts                 Json
+  note                  String   @db.Text
+  reviewedByUserId      String
+  reviewedAt            DateTime @default(now())
+  documentVersion       SourceDocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Restrict)
+  @@unique([documentVersionId, version])
+  @@index([documentVersionId, reviewedAt])
+  @@map("portfolio_document_fact_reviews")
+}
+model DocumentIngestBatch {
+  id                    String   @id @default(cuid())
+  sourceId              String
+  requestKey            String   @db.VarChar(128)
+  payloadHash           String   @db.VarChar(64)
+  scanId                String   @db.VarChar(128)
+  observedAt            DateTime
+  scanComplete          Boolean
+  documentCount         Int
+  result                Json
+  createdAt             DateTime @default(now())
+  source                DocumentAuditSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  @@unique([sourceId, requestKey])
+  @@index([sourceId, scanId])
+  @@map("portfolio_document_ingest_batches")
+}
+model DocumentAuditRun {
+  id                    String   @id @default(cuid())
+  requestedByUserId      String
+  asOf                  DateTime
+  sourceSnapshotHash    String   @db.VarChar(64)
+  scopeComplete         Boolean
+  counts                Json
+  findings              Json
+  limitations           Json
+  createdAt             DateTime @default(now())
+  @@index([createdAt, id])
+  @@map("portfolio_document_audit_runs")
+}

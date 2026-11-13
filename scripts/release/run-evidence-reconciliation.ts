@@ -17,6 +17,8 @@ async function invoiceExecutor() {
   const modulePath = "../../src/lib/invoice-evidence-reconciliation";
   return import(modulePath);
 }
+async function receiptExecutor() { return import("../../src/lib/bank-receipt-evidence-executor"); }
+async function receiptSources() { return import("../../src/lib/bank-receipt-evidence"); }
 
 const sha = z.string().regex(/^[a-f0-9]{64}$/);
 const jobSchema = z.object({
@@ -50,7 +52,12 @@ async function main() {
   const bankSources = new Map<string, ReturnType<typeof verifyBankEvidenceSource>>();
   const invoiceSources = new Map<string, unknown>();
   const contractSources = new Map<string, ReturnType<typeof verifyContractMetadataSource>>();
-  const invoice = job.sources.some(source => /\.xlsx?$/i.test(source.fileName)) ? await invoiceExecutor() : null;
+  const hasReceipts = job.operations.some(item => ["bank.receipt-create", "bank.receipt-link-existing"].includes(String(item.operation.kind)));
+  const receipt = hasReceipts ? await receiptExecutor() : null;
+  const receiptVerification = hasReceipts ? await receiptSources() : null;
+  const receiptBanks = new Map<string, unknown>(), receiptInvoices = new Map<string, unknown>();
+  const hasInvoiceWrites = job.operations.some(item => ["create", "refresh", "negative_unlinked"].includes(String(item.operation.type)));
+  const invoice = hasInvoiceWrites ? await invoiceExecutor() : null;
   for (const source of job.sources) {
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(source.bytesBase64) || /[\\/]/.test(source.fileName)) throw Error("EVIDENCE_JOB_SOURCE_INVALID");
     const bytes = Buffer.from(source.bytesBase64, "base64");
@@ -58,16 +65,25 @@ async function main() {
     const input = { bytes, fileName: source.fileName, expectedHash: source.sha256, companyCode: z.enum(["FOCUS_MEDIA", "EXCELLENCE_MEDIA", "FOCUS_BG"]).parse(source.companyCode) };
     if (/\.csv$/i.test(source.fileName)) bankSources.set(source.sha256, verifyBankEvidenceSource(input));
     else if (/\.xlsx?$/i.test(source.fileName) && invoice) invoiceSources.set(source.sha256, await invoice.verifyInvoiceEvidenceSource(input));
+    else if (/\.xlsx?$/i.test(source.fileName) && receipt) { /* Receipt-only XLS is independently verified below. */ }
     else throw Error("EVIDENCE_JOB_SOURCE_UNSUPPORTED");
+    if(receipt&&receiptVerification&&job.operations.some(item=>item.operation.bankSourceHash===source.sha256||item.operation.invoiceSourceHash===source.sha256)){
+      if(input.companyCode==="FOCUS_BG")throw Error("EVIDENCE_JOB_RECEIPT_COMPANY_UNSUPPORTED");
+      const receiptInput={...input,companyCode:input.companyCode};
+      if(/\.csv$/i.test(source.fileName))receiptBanks.set(source.sha256,receiptVerification.verifyReceiptBankSource(receiptInput));
+      else receiptInvoices.set(source.sha256,await receiptVerification.verifyReceiptInvoiceSource({...receiptInput,issuerBinding:"owner-approved-source-sha256"}));
+    }
   }
   // All operation hashes and source bindings are checked before the first write.
   for (const item of job.operations) {
     const op = item.operation;
     const bank = op.kind === "bank.import-statement";
     const contract = op.kind === "reservation.fill-missing-contract-number";
-    const calculated = bank ? hashBankEvidenceOperation(bankEvidenceOperationSchema.parse(op)) : contract ? hashContractMetadataOperation(op) : invoice?.hashInvoiceEvidenceOperation(op);
+    const cash = ["bank.receipt-create", "bank.receipt-link-existing"].includes(String(op.kind));
+    const calculated = bank ? hashBankEvidenceOperation(bankEvidenceOperationSchema.parse(op)) : contract ? hashContractMetadataOperation(op) : cash ? receipt!.hashBankReceiptOperation(receipt!.bankReceiptOperationSchema.parse(op)) : invoice?.hashInvoiceEvidenceOperation(op);
     if (calculated !== item.approvedOperationHash) throw Error("EVIDENCE_JOB_OPERATION_NOT_APPROVED");
-    if (!(bank ? bankSources.has(String(op.sourceHash)) : contract ? contractSources.has(String(op.source_sha256)) : invoiceSources.has(String(op.sourceSha256)))) throw Error("EVIDENCE_JOB_SOURCE_NOT_APPROVED");
+    const sourceApproved = bank ? bankSources.has(String(op.sourceHash)) : contract ? contractSources.has(String(op.source_sha256)) : cash ? receiptBanks.has(String(op.bankSourceHash)) && receiptInvoices.has(String(op.invoiceSourceHash)) : invoiceSources.has(String(op.sourceSha256));
+    if (!sourceApproved) throw Error("EVIDENCE_JOB_SOURCE_NOT_APPROVED");
   }
   const client = prisma;
   let completed = 0;
@@ -84,6 +100,11 @@ async function main() {
         result = await client.$transaction(tx => applyContractMetadataOperation(tx, contractMetadataOperationSchema.parse(op), {
           mode, manifestHash, approvedOperationHash: item.approvedOperationHash, runId: job.runId, source: contractSources.get(String(op.source_sha256))!,
         }), contractMetadataTransactionOptions);
+      } else if (["bank.receipt-create", "bank.receipt-link-existing"].includes(String(op.kind))) {
+        result = await client.$transaction(tx => receipt!.applyBankReceiptEvidenceOperation(tx, receipt!.bankReceiptOperationSchema.parse(op), {
+          mode, manifestHash, approvedOperationHash: item.approvedOperationHash, runId: job.runId,
+          bankSource: receiptBanks.get(String(op.bankSourceHash)) as never, invoiceSource: receiptInvoices.get(String(op.invoiceSourceHash)) as never,
+        }), receipt!.bankReceiptTransactionOptions);
       } else {
         result = await invoice!.executeInvoiceEvidenceOperation(op, {
           mode, manifestHash, approvedOperationHash: item.approvedOperationHash, runId: job.runId, source: invoiceSources.get(String(op.sourceSha256))!,

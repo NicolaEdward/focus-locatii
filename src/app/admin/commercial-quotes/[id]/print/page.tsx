@@ -17,7 +17,7 @@ export default async function QuotePrintPage({ params, searchParams }: { params:
   const actor = await getAuthSession();
   if (!actor) redirect("/admin/login");
   const [{ id }, query] = await Promise.all([params, searchParams]);
-  let document;
+  let document: Awaited<ReturnType<typeof getCommercialQuotePrint>>;
   try { document = await getCommercialQuotePrint(id, query.revision, actor); }
   catch (error) {
     if (error instanceof QuotePrintError && [403, 404].includes(error.status)) notFound();

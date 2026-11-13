@@ -407,7 +407,7 @@ export async function queryExecutiveOverview(
       stale: false,
       timeZone: scope.timeZone,
       contractVersion: scope.contractVersion,
-      queryBudget: 15,
+      queryBudget: 16,
       source: "CANONICAL_LIVE"
     },
     entities: EXECUTIVE_ENTITIES.map(({ code, label }) => ({ code, label })),

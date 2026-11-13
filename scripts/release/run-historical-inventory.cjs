@@ -11,3 +11,8 @@ if (process.env.RUN_REMEDIATION_HISTORY_AUDIT === 'true') {
     for (const aggregate of inventory.aggregates) console.log(JSON.stringify({event:'remediation_history_aggregate',...aggregate}));
   }
 } else console.log(JSON.stringify({event:'remediation_history_inventory',skipped:true}));
+
+if (process.env.RUN_INVENTORY_AVAILABILITY_DIAGNOSTICS === 'true') {
+  const inventory = spawnSync(process.execPath,[require.resolve('tsx/cli'),'scripts/release/snapshot-inventory-availability.ts'],{stdio:'inherit',env:process.env,timeout:60000});
+  if (inventory.status !== 0) process.exitCode = inventory.status || 1;
+}

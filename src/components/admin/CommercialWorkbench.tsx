@@ -368,9 +368,7 @@ export function CommercialWorkbench({
           >
             Oferte
           </Link>
-          <Link className="focus-button secondary" href="/admin/dooh">
-            DOOH
-          </Link>
+          {process.env.NEXT_PUBLIC_DOOH_ENABLED === "true" ? <Link className="focus-button secondary" href="/admin/dooh">DOOH</Link> : null}
           <Link className="focus-button secondary" href="/admin/ai">
             Copilot și pilot
           </Link>

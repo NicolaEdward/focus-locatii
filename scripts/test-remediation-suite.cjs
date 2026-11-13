@@ -7,7 +7,7 @@ const url = new URL(process.env.DATABASE_URL || 'invalid:');
 if (!['ci','test','preview'].includes(process.env.APP_ENV) || process.env.VERCEL_ENV === 'production' || process.env.ALLOW_SYNTHETIC_SEED !== 'true' || !['127.0.0.1','localhost'].includes(url.hostname) || !/^\/focus_(preview|test)_/.test(url.pathname)) throw new Error('Remediation tests require an isolated local synthetic database');
 const suites = [
   'test-rbac.ts','test-user-management.ts','test-auth-hardening.ts','test-auth-remediation.ts',
-  'test-client-atomic-mutations.ts','test-crm-command-outcomes.ts','test-location-mutation-transactions.ts','test-location-private-read.ts',
+  'test-client-atomic-mutations.ts','test-crm-command-outcomes.ts','test-location-mutation-transactions.ts','test-location-private-read.ts','test-inventory-availability-summary.ts','test-occupancy-summary-ui.cjs',
   'test-transactional-audit.ts','test-reservation-read-access.ts','test-d-ceo-mutation-inventory.ts',
   'test-availability.cjs','test-reservation-remediation.cjs','test-reservation-integrity.cjs',
   'test-reservation-route-safety.cjs','test-reservation-lifecycle.cjs','test-ownership-integrity.ts',

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../src/lib/prisma";
+import { getReservationOccupancySummary } from "../src/lib/reservations";
 import { getInventoryAvailabilitySummary, inventoryAvailabilityBucket } from "../src/lib/inventory-availability-summary";
 import { buildInventoryPartition, queryExecutiveOverview } from "../src/lib/dashboard/executive/overview";
 import { executiveScopeForSession } from "../src/lib/dashboard/executive/scope";
@@ -102,6 +103,13 @@ async function main() {
     assert.equal(executive.summary.inventory.booked, next.occupiedToday);
     assert.equal(executive.summary.inventory.hold, next.heldToday);
     assert.equal(executive.summary.inventory.unknown, next.digitalLocations + next.unknownToday, "Executive unknown excludes capacity-managed digital stock from OOH eligibility");
+
+    const viewer = await prisma.user.create({ data: { name: tag + "empty-portfolio", email: `${tag}-empty@example.invalid`, role: "SALES_AGENT", passwordHash: "unused-synthetic" } });
+    users.push(viewer.id);
+    const scoped = await getReservationOccupancySummary({ ...viewer, iat: 1, exp: 4_000_000_000 }, now);
+    assert.equal(scoped.occupiedNow, 0, "Private reservation counters retain the seller's own portfolio scope");
+    assert.deepEqual(scoped.inventory, next, "A seller's empty portfolio must not make other sellers' locations look free");
+    assert.equal(JSON.stringify(scoped.inventory).includes("PRIVATE-CUSTOMER"), false);
 
     const executiveRows = await prisma.location.findMany({ where: { id: { in: [noonStart.id, future.id, manual.id, profile.id] } }, include: { reservations: true, availabilityOverrides: true } });
     const partition = buildInventoryPartition(executiveRows.map((row) => ({ ...row, hasDoohProfile: row.id === profile.id })), day, now);

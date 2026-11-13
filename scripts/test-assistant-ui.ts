@@ -39,6 +39,11 @@ async function evaluate(expression: string) {
   return r.result?.value;
 }
 async function main() {
+  const entry = await fetch(base + "/admin/login", { redirect: "manual" });
+  assert.equal(entry.status, 200, "Production browser endpoint must be ready");
+  const csp = entry.headers.get("content-security-policy") || "";
+  assert.ok(csp.includes("script-src 'self'") && csp.includes("form-action 'self'"), "Production CSP must protect scripts and form destinations");
+  assert.equal(csp.includes("'unsafe-eval'"), false, "The OAuth browser flow must pass without a development CSP exception");
   fs.mkdirSync(output, { recursive: true });
   await new Promise<void>((resolve) =>
     callbackServer.listen(0, "127.0.0.1", resolve),
@@ -225,6 +230,7 @@ async function main() {
         passed: true,
         flow: "browser login→local OAuth consent→code→connections→revoke",
         runtimeErrors: 0,
+        productionCspVerified: true,
         evidence,
       },
       null,
@@ -232,16 +238,23 @@ async function main() {
     ),
   );
   console.log(
-    JSON.stringify({ passed: true, screenshots: 7, runtimeErrors: 0, output }),
+    JSON.stringify({ passed: true, screenshots: 7, runtimeErrors: 0, productionCspVerified: true, output }),
   );
 }
 main()
   .finally(async () => {
     c?.close();
-    browser?.kill();
+    if (browser && browser.exitCode === null && browser.signalCode === null) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => { browser?.kill("SIGKILL"); resolve(); }, 5000);
+        browser!.once("exit", () => { clearTimeout(timer); resolve(); });
+        browser!.kill();
+      });
+    }
     callbackServer.closeAllConnections();
     await new Promise<void>((resolve) => callbackServer.close(() => resolve()));
-    fs.rmSync(temp, { recursive: true, force: true });
+    try { fs.rmSync(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 }); }
+    catch { console.warn("Temporary Chrome profile cleanup deferred; database fixture cleanup continues."); }
     if (actor) {
       const grants = await prisma.assistantOAuthGrant.findMany({
         where: { userId: actor.id },

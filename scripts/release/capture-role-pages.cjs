@@ -62,6 +62,8 @@ const pages = [
   { name: "users", route: "/admin/utilizatori", role: "COO", expected: "Utilizatori" },
   { name: "ownership-integrity", route: "/admin/integritate-date", role: "COO", expected: "Integritate ownership" },
   { name: "account-security", route: "/admin/securitate", role: "COO", expected: "Securitate si sesiuni" },
+  { name: "assistant-connections", route: "/admin/assistant-connections", role: "COO", expected: "Conexiuni ChatGPT" },
+  { name: "document-audit", route: "/admin/document-audit", role: "COO", expected: "Verificarea documentelor" },
   { name: "operations-control", route: "/admin/operations-control", role: "COO", expected: "Control operațional" },
   { name: "public-locations", route: "/locatii", expected: "loca" }
 ];

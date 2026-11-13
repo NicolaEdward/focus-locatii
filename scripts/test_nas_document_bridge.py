@@ -511,7 +511,8 @@ import http from "node:http";
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 const identity = new URL(process.env.DATABASE_URL || "");
-if (!["127.0.0.1", "localhost"].includes(identity.hostname) || decodeURIComponent(identity.pathname.slice(1)) !== "focus_preview_nas_document_audit" || process.env.APP_ENV !== "ci" || process.env.ALLOW_SYNTHETIC_SEED !== "true" || process.env.PREVIEW_DATASET_ID !== "focus-media-synthetic-v1" || process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production") throw new Error("LOCAL_SYNTHETIC_DATABASE_REQUIRED");
+const expectedDatabase = process.env.DOCUMENT_AUDIT_TEST_DATABASE || "focus_preview_nas_document_audit";
+if (!/(preview|staging|test|ci)/i.test(expectedDatabase) || !["127.0.0.1", "localhost"].includes(identity.hostname) || decodeURIComponent(identity.pathname.slice(1)) !== expectedDatabase || process.env.APP_ENV !== "ci" || process.env.ALLOW_SYNTHETIC_SEED !== "true" || process.env.PREVIEW_DATASET_ID !== "focus-media-synthetic-v1" || process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production") throw new Error("LOCAL_SYNTHETIC_DATABASE_REQUIRED");
 const { prisma } = await import("./src/lib/prisma.ts");
 const service = await import("./src/lib/document-source-service.ts");
 const route = await import("./src/app/api/document-sources/[id]/ingest/route.ts");
@@ -566,7 +567,13 @@ try {
   await prisma.$disconnect();
 }
 '''
-        process = subprocess.Popen(["node", "--env-file=.env.implementation.local", "--import", "tsx", "--input-type=module", "-e", fixture], cwd=Path(__file__).resolve().parent.parent, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        command = ["node"]
+        # CI supplies the complete isolated environment. Load a local fixture
+        # file only when no URL is already supplied; never override a CI URL.
+        if not os.environ.get("DATABASE_URL"):
+            environment_file = os.environ.get("ENV_FILE", ".env.implementation.local")
+            command.append("--env-file=" + environment_file)
+        process = subprocess.Popen([*command, "--import", "tsx", "--input-type=module", "-e", fixture], cwd=Path(__file__).resolve().parent.parent, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         def message(kind):
             import select
             if not select.select([process.stdout], [], [], 30)[0]:

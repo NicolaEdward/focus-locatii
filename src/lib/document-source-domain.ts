@@ -65,6 +65,7 @@ const evidence = z.object({ page: z.number().int().min(1).max(10000), quote: z.s
 export const documentFactSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("reservation"), locationCode: z.string().trim().min(1).max(191), periodStart: calendarDate, periodEnd: calendarDate,
     contractNumber: z.string().trim().max(191).optional(), clientTaxId: z.string().trim().min(2).max(40).optional(),
+    companyEntity: z.enum(["Focus Media", "Excellence Media", "Focus BG / Focus Media LLC EOOD"]).optional(),
     monthlyRent: positiveAmount.optional(), currency: z.enum(["EUR", "RON"]).optional(),
     reservationId: z.string().min(1).max(191).optional(), evidence,
   }).strict().refine((value) => value.periodStart <= value.periodEnd, "Intervalul contractului nu este valid."),

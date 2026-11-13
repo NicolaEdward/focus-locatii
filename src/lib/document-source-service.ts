@@ -253,12 +253,12 @@ async function readDocumentAuditSummarySnapshot() {
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 5000, timeout: 30000 });
 }
 
-export async function getDocumentAuditWorkspace(actor: AuthSession, cursor?: string | null) {
+export async function getDocumentAuditWorkspace(actor: AuthSession, cursor?: string | null, documentId?: string | null) {
   await assertDocumentAuditReader(actor);
   const [summary, sources, documents, latestAudit] = await Promise.all([
     getDocumentAuditSummary(actor),
     prisma.documentAuditSource.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, label: true, sourceType: true, baseReference: true, allowedPathPrefixes: true, indexTextEnabled: true, maxStaleHours: true, state: true, version: true, tokenIssuedAt: true, lastIngestAt: true, lastCompletedScanAt: true } }),
-    prisma.sourceDocument.findMany({ where: cursor ? { id: { gt: cursor } } : {}, orderBy: { id: "asc" }, take: 26, select: { id: true, sourceId: true, relativePath: true, displayName: true, documentType: true, state: true, lastSeenAt: true, currentVersionId: true } }),
+    prisma.sourceDocument.findMany({ where: documentId ? { id: documentId } : cursor ? { id: { gt: cursor } } : {}, orderBy: { id: "asc" }, take: 26, select: { id: true, sourceId: true, relativePath: true, displayName: true, documentType: true, state: true, lastSeenAt: true, currentVersionId: true } }),
     prisma.documentAuditRun.findFirst({ orderBy: [{ createdAt: "desc" }, { id: "desc" }] }),
   ]);
   const page = documents.slice(0, 25), ids = page.map((doc) => doc.currentVersionId).filter((id): id is string => Boolean(id));

@@ -5,9 +5,11 @@ import { DocumentAuditWorkspace } from "@/components/admin/DocumentAuditWorkspac
 import { getDocumentAuditWorkspace } from "@/lib/document-source-service";
 import { mayReadDocumentAudit } from "@/lib/document-source-domain";
 export const dynamic = "force-dynamic";
-export default async function DocumentAuditPage() {
+export default async function DocumentAuditPage({ searchParams }: { searchParams?: Promise<{ documentId?: string }> }) {
   const session = await getAuthSession();
   if (!session) redirect("/admin/login");
   if (!mayReadDocumentAudit(session.role)) redirect("/admin/dashboard");
-  return <><AdminHeader session={session} /><DocumentAuditWorkspace initialState={await getDocumentAuditWorkspace(session)} role={session.role} /></>;
+  const requestedId = (await searchParams)?.documentId;
+  const documentId = typeof requestedId === "string" && requestedId.length <= 191 ? requestedId : null;
+  return <><AdminHeader session={session} /><DocumentAuditWorkspace initialState={await getDocumentAuditWorkspace(session, null, documentId)} initialDocumentId={documentId} role={session.role} /></>;
 }

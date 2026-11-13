@@ -14,6 +14,7 @@ assert.ok(["127.0.0.1", "localhost"].includes(new URL(process.env.DATABASE_URL |
 const tag = `invoice-evidence-test-${randomUUID()}`, sequence = `FIX${Date.now()}`;
 const sha = (v: string | Buffer) => crypto.createHash("sha256").update(v).digest("hex");
 const tax = `8${Date.now().toString().slice(-8)}`, newTax = `7${Date.now().toString().slice(-8)}`;
+const ownerId = `${tag}-owner`;
 const clientId = `${tag}-client`, uploadId = `${tag}-upload`, invoiceId = `${tag}-invoice`, legacyId = `${tag}-legacy`, inactiveId = `${tag}-inactive`;
 let generatedClientId = "";
 const createdIds: string[] = [invoiceId, legacyId, inactiveId];
@@ -22,7 +23,8 @@ function workbook() { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_s
 async function counts() { const [invoices,clients,payments,uploads,audits,credits] = await Promise.all([prisma.financialReceivable.count(),prisma.clientAccount.count(),prisma.financialReceivablePayment.count(),prisma.financialReportUpload.count(),prisma.auditLog.count(),prisma.financialClientCredit.count()]); return {invoices,clients,payments,uploads,audits,credits}; }
 function expected(row: any): NonNullable<InvoiceEvidenceOperation["expectedTarget"]> { return { id:row.id,updatedAt:row.updatedAt.toISOString(),companyCode:row.companyCode,companyName:row.companyName,legalEntityId:row.legalEntityId,invoiceNumberKey:invoiceNumberComparisonKey(row.invoiceNumber),invoiceDate:row.invoiceDate?.toISOString()||null,currency:row.currency,invoicedAmount:row.invoicedAmount?.toFixed(2)||null,collectedAmount:row.collectedAmount?.toFixed(2)||null,remainingAmount:row.remainingAmount?.toFixed(2)||null,clientId:row.clientId,includedInReport:row.includedInReport,status:row.status,sourceFingerprint:row.sourceFingerprint}; }
 async function main() {
- const client=await prisma.clientAccount.create({data:{id:clientId,companyName:"Synthetic Existing Tax Client",normalizedName:tag,taxId:tax}});
+ await prisma.user.create({data:{id:ownerId,email:`${tag}@synthetic.test`,name:"Synthetic Portfolio Owner",role:"SALES_AGENT",passwordHash:"unusable-synthetic"}});
+ const client=await prisma.clientAccount.create({data:{id:clientId,companyName:"Synthetic Existing Tax Client",normalizedName:tag,taxId:tax,accountOwnerUserId:ownerId}});
  const entity=await prisma.financialLegalEntity.findUniqueOrThrow({where:{code:"FOCUS_MEDIA"}});
  await prisma.financialReportUpload.create({data:{id:uploadId,originalFileName:`${tag}.xlsx`,fileHash:tag,status:"confirmed",activeVersion:false}});
  const common={uploadId,companyName:"Focus Media",companyCode:"FOCUS_MEDIA",legalEntityId:entity.id,clientId,clientName:"Synthetic Existing Tax Client",currency:"RON",invoiceDate:new Date("2026-11-01Z"),dueDate:new Date("2026-12-01Z"),includedInReport:true,needsReview:false,status:"in_term"};
@@ -52,7 +54,7 @@ async function main() {
  for(const op of ops)assert.equal((await executeInvoiceEvidenceOperation(op,context(op,"apply"))).replay,true);
  const after=await prisma.financialReceivable.findUniqueOrThrow({where:{id:invoiceId}});assert.equal(receivableNetAmount(after.invoicedAmount,after.rawRowJson).toFixed(2),"800.00");assert.equal(after.collectedAmount?.toFixed(2),"150.00");assert.equal(after.remainingAmount?.toFixed(2),"650.00");assert.equal(after.netAmount?.toFixed(2),"850.00");assert.equal(after.vatAmount?.toFixed(2),"150.00");assert.equal(receivableAdjustmentEntries(after.rawRowJson).length,1);assert.deepEqual((after.rawRowJson as any).ledgerProvenance,raw.ledgerProvenance);assert.equal(after.needsReview,true);
  const legacyAfter=await prisma.financialReceivable.findUniqueOrThrow({where:{id:legacyId}});assert.equal(legacyAfter.collectedAmount?.toFixed(2),"250.00");assert.equal(legacyAfter.remainingAmount?.toFixed(2),"250.00");assert.equal(await prisma.financialReceivablePayment.count({where:{receivableId:legacyId}}),0,"Legacy snapshot collections must not be zeroed or converted into new payments");
- const paid=await prisma.financialReceivable.findFirstOrThrow({where:{invoiceNumber:`${sequence}03`}});assert.equal(paid.collectedAmount?.toFixed(2),"0.00");assert.equal(paid.collectedAt,null);assert.equal(paid.needsReview,true);
+ const paid=await prisma.financialReceivable.findFirstOrThrow({where:{invoiceNumber:`${sequence}03`}});assert.equal(paid.collectedAmount?.toFixed(2),"0.00");assert.equal(paid.collectedAt,null);assert.equal(paid.needsReview,true);assert.equal(paid.accountOwnerUserId,ownerId,"New invoices inherit the verified client portfolio without reassigning it");
  const negative=await prisma.financialReceivable.findFirstOrThrow({where:{invoiceNumber:`${sequence}04`}});assert.equal(negative.includedInReport,false);assert.equal(negative.needsReview,true);assert.equal(negative.remainingAmount?.toFixed(2),"0.00");assert.equal(negative.collectedAt,null);assert.equal((negative.rawRowJson as any).adjustmentReview.automaticallyApplied,false);
  assert.equal(await prisma.financialImportIssue.count({where:{uploadId:negative.uploadId,issueType:"SMARTBILL_UNLINKED_ADJUSTMENT"}}),1);
  assert.equal(await prisma.financialImportIssue.count({where:{uploadId:paid.uploadId,issueType:"SMARTBILL_SOURCE_PAID_UNVERIFIED"}}),2);
@@ -70,5 +72,6 @@ main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=
  await prisma.financialReportUpload.deleteMany({where:{OR:[{id:uploadId},{originalFileName:{startsWith:tag}}]}});
  await prisma.clientAccount.deleteMany({where:{id:{in:[clientId,...(generatedClientId?[generatedClientId]:[])]}}});
  await prisma.auditLog.deleteMany({where:{action:"financial.invoice_source_reconciled",metadata:{path:"$.runId",equals:tag}}});
+ await prisma.user.deleteMany({where:{id:ownerId}});
  await prisma.$disconnect();
 });

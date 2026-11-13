@@ -104,10 +104,11 @@ export async function executeInvoiceEvidenceOperation(input: unknown, context: I
       if ((current.companyCode !== company.companyCode && current.companyName !== company.companyName) || (current.legalEntityId && current.legalEntityId !== entity.id)) throw new Error("Invoice company differs from approved source.");
     } else if (collisions.length) throw new Error("Invoice document already exists, including historical/excluded records.");
     if (context.mode === "apply" && op.client.strategy === "existing") await tx.$queryRaw`SELECT id FROM portfolio_client_accounts WHERE id = ${op.client.id} FOR UPDATE`;
-    const allClients = await tx.clientAccount.findMany({ select: { id: true, taxId: true, updatedAt: true, status: true }, take: 10001 });
+    const allClients = await tx.clientAccount.findMany({ select: { id: true, taxId: true, updatedAt: true, status: true, accountOwnerUserId: true }, take: 10001 });
     assertSmartBillHistoryComplete(allClients);
     const taxMatches = allClients.filter(c => normalizeFiscalCode(c.taxId) === row.normalizedFiscalCode);
     let clientId: string;
+    let clientOwnerUserId: string | null = null;
     let createClient = false;
     if (op.client.strategy === "existing") {
       const clientSpec = op.client;
@@ -115,11 +116,13 @@ export async function executeInvoiceEvidenceOperation(input: unknown, context: I
       if (!client || taxMatches.length !== 1 || taxMatches[0].id !== client.id || client.taxId !== op.client.taxId || iso(client.updatedAt) !== op.client.updatedAt || client.status !== op.client.status || ["merged", "archived"].includes(client.status)) throw new Error("Invoice client identity or version changed.");
       if (current && current.clientId !== client.id) throw new Error("Invoice client reassignment requires a separate reviewed operation.");
       clientId = client.id;
+      clientOwnerUserId = client.accountOwnerUserId;
     } else {
       if (normalizeFiscalCode(op.client.normalizedFiscalCode) !== row.normalizedFiscalCode || !row.normalizedFiscalCode || current) throw new Error("New invoice client is not proven by the source.");
       clientId = `invoice-source-client-${hash(row.normalizedFiscalCode).slice(0,40)}`;
       if (taxMatches.length && (taxMatches.length !== 1 || taxMatches[0].id !== clientId || ["merged", "archived"].includes(taxMatches[0].status))) throw new Error("A client with this tax identity appeared after the plan.");
       createClient = !taxMatches.length;
+      clientOwnerUserId = taxMatches[0]?.accountOwnerUserId || null;
     }
     const payments = current ? await tx.financialReceivablePayment.findMany({ where: { receivableId: current.id, status: "active" }, select: { amount: true } }) : [];
     const collected = payments.length ? payments.reduce((sum,p) => sum.plus(p.amount), amount(0)) : amount(current?.collectedAmount);
@@ -131,7 +134,7 @@ export async function executeInvoiceEvidenceOperation(input: unknown, context: I
     const sourceRows = verifiedSources.get(context.source)!.rows;
     const reportDate = new Date(Math.max(...sourceRows.map(r => r.issueDate?.getTime() || 0)));
     await tx.financialReportUpload.upsert({ where: { id: uploadId }, update: {}, create: { id: uploadId, uploadedByUserId: null, legalEntityId: entity.id, reportDate, originalFileName: context.source.fileName, fileHash: `smartbill-${company.companyCode}-${context.source.sha256}`, status: "confirmed", activeVersion: false, importType: "smartbill_customer_invoices", parserName: "VerifiedInvoiceEvidenceReconciliation", parserVersion: "1", rowsRead: sourceRows.length } });
-    const incoming = { ...smartBillCustomerReceivableData({ row, uploadId, companyContext: company, clientId }), legalEntityId: entity.id, partnerId: current?.partnerId };
+    const incoming = { ...smartBillCustomerReceivableData({ row, uploadId, companyContext: company, clientId, accountOwnerUserId: clientOwnerUserId }), legalEntityId: entity.id, partnerId: current?.partnerId };
     const sourceEvidence = { sourceSha256: context.source.sha256, manifestHash: context.manifestHash, operationHash, runId: context.runId, actorType: "owner_authorized_system" };
     const sourceClaimsPaid = /^(incasata|incasat|platita|achitata)$/i.test(row.sourceStatus || "");
     let unresolvedPaidSnapshot = false;

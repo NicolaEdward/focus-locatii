@@ -10,7 +10,11 @@ const headers = { "Cache-Control": "private, no-store", "X-Content-Type-Options"
 
 export async function GET(request: NextRequest) {
   const { session, response } = await requireAnyPermission(request, ["reservations.view", "reservations.view.own"]);
-  if (response || !session) return response;
+  if (response) {
+    for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
+    return response;
+  }
+  if (!session) return NextResponse.json({ error: "Autentificarea este necesară." }, { status: 401, headers });
   try {
     const params = new URLSearchParams(request.nextUrl.searchParams), format = params.get("format");
     params.delete("format");

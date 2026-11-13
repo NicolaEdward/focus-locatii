@@ -19,6 +19,8 @@ export function CommercialQuoteEditor({ data, quote, run, busy, onSaved }: { dat
   const [clientId, setClientId] = useState(old?.clientId || "");
   const [campaignId, setCampaignId] = useState(old?.campaignId || "");
   const [opportunityId, setOpportunityId] = useState("");
+  const [expectedRevision, setExpectedRevision] = useState(quote?.latestRevision);
+  const [assumptions, setAssumptions] = useState(old?.assumptions || "");
   const [recipient, setRecipient] = useState(old?.recipient || "");
   const [entity, setEntity] = useState(old?.companyEntity || "");
   const [from, setFrom] = useState(old?.periodStart || "");
@@ -34,7 +36,7 @@ export function CommercialQuoteEditor({ data, quote, run, busy, onSaved }: { dat
   const [availabilityError, setAvailabilityError] = useState("");
   const [localError, setLocalError] = useState("");
   const [refresh, setRefresh] = useState(0);
-  const [requestKey] = useState(() => crypto.randomUUID());
+  const [requestKey, setRequestKey] = useState<string>(() => crypto.randomUUID());
   const userId = data.userId;
   const locations = data.locations.filter((row) => !/digital|led|ecran|screen|lcd|display|dooh/i.test(row.type || ""));
   const locationKey = locations.map((row) => row.id).sort().join("|");
@@ -43,19 +45,25 @@ export function CommercialQuoteEditor({ data, quote, run, busy, onSaved }: { dat
   const campaign = data.campaigns.find((row) => row.id === campaignId && row.clientId === clientId);
 
   useEffect(() => {
-    if (old) return;
     const params = new URLSearchParams(window.location.search);
     const seedKey = params.get("selection");
-    const draft = seedKey && userId ? readQuoteSelectionDraft(seedKey, userId) : null;
+    const candidate = seedKey && userId ? readQuoteSelectionDraft(seedKey, userId) : null;
+    const draft = candidate && (candidate.quoteId || undefined) === quote?.id ? candidate : null;
+    if (old && !draft) return;
     if (seedKey && !draft) setSeedNotice("Selecția transferată a expirat sau nu aparține acestui cont. Poți construi o ofertă nouă.");
     if (draft) {
       setSeed(draft); setFrom(draft.periodStart); setTo(draft.periodEnd); setSelected(draft.locationIds); setEntity(draft.companyEntity);
+      if (draft.expectedRevision) setExpectedRevision(draft.expectedRevision);
+      if (draft.requestKey) setRequestKey(draft.requestKey);
+      if (draft.recipient !== undefined) setRecipient(draft.recipient);
+      if (draft.assumptions !== undefined) setAssumptions(draft.assumptions);
+      if (draft.linePrices) { setRates((current) => ({ ...current, ...Object.fromEntries(draft.linePrices!.map((line) => [line.locationId, line.monthlyRate])) })); setReasons((current) => ({ ...current, ...Object.fromEntries(draft.linePrices!.map((line) => [line.locationId, line.reason])) })); }
       setSeedNotice(`${draft.locationIds.length} locații și perioada au fost preluate din selector. Verifică clientul și campania înainte de salvare.`);
     }
     const matchingClients = draft?.clientName ? data.clients.filter((row) => normalized(row.companyName) === normalized(draft.clientName)) : [];
     const proposedClient = params.get("clientId") || draft?.clientId || (matchingClients.length === 1 ? matchingClients[0].id : "");
     const verifiedClient = data.clients.find((row) => row.id === proposedClient);
-    if (verifiedClient) { setClientId(verifiedClient.id); setRecipient(verifiedClient.primaryContact?.email || verifiedClient.generalEmail || ""); }
+    if (verifiedClient) { setClientId(verifiedClient.id); if (draft?.recipient === undefined) setRecipient(verifiedClient.primaryContact?.email || verifiedClient.generalEmail || ""); }
     const matchingCampaigns = draft?.campaignName ? data.campaigns.filter((row) => row.clientId === verifiedClient?.id && normalized(row.campaignName) === normalized(draft.campaignName)) : [];
     const proposedCampaign = params.get("campaignId") || draft?.campaignId || (matchingCampaigns.length === 1 ? matchingCampaigns[0].id : "");
     const verifiedCampaign = data.campaigns.find((row) => row.id === proposedCampaign && row.clientId === verifiedClient?.id);
@@ -117,7 +125,11 @@ export function CommercialQuoteEditor({ data, quote, run, busy, onSaved }: { dat
   function openMap() {
     setLocalError("");
     try {
-      const key = saveQuoteSelectionDraft({ ownerUserId: userId, createdAt: Date.now(), clientId: clientId || undefined, campaignId: campaignId || undefined, opportunityId: opportunityId || undefined, clientName: client?.companyName || "", campaignName: campaign?.campaignName || "", companyEntity: entity, periodStart: from, periodEnd: to, locationIds: selected });
+      const linePrices = selectedRows.flatMap((row) => {
+        const monthlyRate = (rates[row.id] ?? String(row.rateCardValue ?? "")).replace(",", ".");
+        return Number(monthlyRate) !== row.rateCardValue ? [{ locationId: row.id, monthlyRate, reason: reasons[row.id] || "" }] : [];
+      });
+      const key = saveQuoteSelectionDraft({ quoteId: quote?.id, expectedRevision, requestKey, recipient, assumptions, linePrices, ownerUserId: userId, createdAt: Date.now(), clientId: clientId || undefined, campaignId: campaignId || undefined, opportunityId: opportunityId || undefined, clientName: client?.companyName || "", campaignName: campaign?.campaignName || "", companyEntity: entity, periodStart: from, periodEnd: to, locationIds: selected });
       window.location.assign(`/admin/selectie-locatii?selection=${encodeURIComponent(key)}`);
     } catch (cause) { setLocalError(cause instanceof Error ? cause.message : "Completează perioada și selectează cel puțin o locație."); }
   }
@@ -133,7 +145,7 @@ export function CommercialQuoteEditor({ data, quote, run, busy, onSaved }: { dat
     if (linePrices.some((line) => !/^\d+(\.\d{1,2})?$/.test(line.monthlyRate) || Number(line.monthlyRate) <= 0 || line.reason.trim().length < 3)) {
       setLocalError("Fiecare preț negociat trebuie să fie pozitiv, cu maximum două zecimale și o justificare de minimum 3 caractere."); return;
     }
-    const result = await run("quote.create", { ...(quote ? { quoteId: quote.id, expectedRevision: quote.latestRevision } : {}), clientId, campaignId, ...(opportunityId ? { opportunityId } : {}), recipient, companyEntity: entity, periodStart: from, periodEnd: to, locationIds: selected, ...(linePrices.length ? { linePrices } : {}), assumptions: String(new FormData(event.currentTarget).get("assumptions") || ""), requestKey });
+    const result = await run("quote.create", { ...(quote ? { quoteId: quote.id, expectedRevision: expectedRevision || quote.latestRevision } : {}), clientId, campaignId, ...(opportunityId ? { opportunityId } : {}), recipient, companyEntity: entity, periodStart: from, periodEnd: to, locationIds: selected, ...(linePrices.length ? { linePrices } : {}), assumptions, requestKey });
     if (result && typeof result === "object" && "quote" in result) { const saved = result as { quote: { id: string } }; onSaved(saved.quote.id); }
   }}>
     {seedNotice ? <p role="status" className="rounded-lg border border-focus-yellow/35 p-3 text-sm text-slate-200">{seedNotice}</p> : null}
@@ -165,7 +177,7 @@ export function CommercialQuoteEditor({ data, quote, run, busy, onSaved }: { dat
       const value = rates[row.id] ?? String(row.rateCardValue ?? ""); const negotiated = value !== "" && Number(value.replace(",", ".")) !== row.rateCardValue; const discount = row.rateCardValue && value ? (1 - Number(value.replace(",", ".")) / row.rateCardValue) * 100 : null;
       return <div className="grid min-w-0 gap-3 rounded-lg border border-focus-line p-3 md:grid-cols-[minmax(0,1fr)_minmax(160px,220px)]" key={row.id}><div><strong className="text-white">{row.code}</strong><p className="text-xs text-slate-400">Tarif de listă: {row.rateCardValue ?? "lipsă"} {campaign?.currency || data.policy?.rateCardCurrency}/lună{discount !== null && negotiated ? ` · ${discount >= 0 ? "discount" : "majorare"} ${Math.abs(discount).toFixed(2)}%` : ""}</p></div><Field label={`Tarif lunar propus ${row.code}`}><input required inputMode="decimal" className={inputClass} value={value} onChange={(event) => setRates((current) => ({ ...current, [row.id]: event.target.value }))} /></Field>{negotiated ? <div className="md:col-span-2"><Field label={`Justificare negociere ${row.code}`}><input required minLength={3} maxLength={500} className={inputClass} value={reasons[row.id] || ""} onChange={(event) => setReasons((current) => ({ ...current, [row.id]: event.target.value }))} placeholder="Ex.: pachet 6 luni, ofertă supusă aprobării" /></Field><p className="mt-1 text-xs text-amber-200">Prețul negociat păstrează tariful de listă și necesită aprobarea unui responsabil comercial.</p></div> : null}</div>;
     })}<p className="text-sm font-bold text-white">Total lunar propus: {totalMonthly.toLocaleString("ro-RO", { maximumFractionDigits: 2 })} {campaign?.currency || data.policy?.rateCardCurrency}</p><p className="text-xs text-slate-400">Calculul pentru perioada exactă, TVA și totalul final se confirmă pe server după salvarea ciornei.</p></fieldset> : null}
-    <Field label="Condiții și observații pentru revizuire"><textarea maxLength={2000} rows={3} name="assumptions" className={inputClass} defaultValue={old?.assumptions || ""} /></Field>
+    <Field label="Condiții și observații pentru revizuire"><textarea maxLength={2000} rows={3} name="assumptions" className={inputClass} value={assumptions} onChange={(event) => setAssumptions(event.target.value)} /></Field>
     {localError ? <p role="alert" className="text-sm font-bold text-red-200">{localError}</p> : null}
     {unavailable.length > 0 && validPeriod && !checking && !availabilityError ? <p role="alert" className="text-sm text-amber-200">{unavailable.length} locații selectate nu sunt disponibile integral sau nu au fost verificate. Modifică selecția sau perioada.</p> : null}
     <div className="flex flex-wrap items-center gap-3"><button type="submit" className="focus-button" disabled={busy || blocked}>{busy ? "Se salvează…" : quote ? "Salvează versiunea nouă" : "Salvează ciorna ofertei"}</button><p className="text-xs text-slate-400">Ciorna nu rezervă locațiile și nu trimite mesaje clientului.</p></div>

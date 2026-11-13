@@ -6,6 +6,12 @@ export type QuoteSelectionDraft = {
   clientId?: string;
   campaignId?: string;
   opportunityId?: string;
+  quoteId?: string;
+  expectedRevision?: number;
+  requestKey?: string;
+  recipient?: string;
+  assumptions?: string;
+  linePrices?: { locationId: string; monthlyRate: string; reason: string }[];
   clientName: string;
   campaignName: string;
   companyEntity: string;
@@ -27,7 +33,12 @@ export function validateQuoteSelectionDraft(value: unknown, userId: string, now 
   if ([v.periodStart, v.periodEnd].some((value) => { const d = new Date(value as string); return !Number.isFinite(d.getTime()) || d.toISOString().slice(0, 10) !== value; })) return null;
   if (!Array.isArray(v.locationIds) || !v.locationIds.length || v.locationIds.length > 50 || v.locationIds.some((id) => typeof id !== "string" || !safeId.test(id))) return null;
   for (const key of ["clientName", "campaignName", "companyEntity"]) if (typeof v[key] !== "string" || (v[key] as string).length > 191) return null;
-  for (const key of ["clientId", "campaignId", "opportunityId"]) if (v[key] !== undefined && (typeof v[key] !== "string" || !safeId.test(v[key] as string))) return null;
+  for (const key of ["clientId", "campaignId", "opportunityId", "quoteId"]) if (v[key] !== undefined && (typeof v[key] !== "string" || !safeId.test(v[key] as string))) return null;
+  if (v.quoteId !== undefined && (!Number.isInteger(v.expectedRevision) || Number(v.expectedRevision) < 1)) return null;
+  if (v.requestKey !== undefined && (typeof v.requestKey !== "string" || v.requestKey.length < 8 || v.requestKey.length > 120 || !safeId.test(v.requestKey))) return null;
+  if (v.recipient !== undefined && (typeof v.recipient !== "string" || v.recipient.length > 254)) return null;
+  if (v.assumptions !== undefined && (typeof v.assumptions !== "string" || v.assumptions.length > 2000)) return null;
+  if (v.linePrices !== undefined && (!Array.isArray(v.linePrices) || v.linePrices.length > 50 || v.linePrices.some((line) => !line || typeof line !== "object" || typeof line.locationId !== "string" || !(v.locationIds as string[]).includes(line.locationId) || typeof line.monthlyRate !== "string" || !/^\d+(\.\d{1,2})?$/.test(line.monthlyRate) || Number(line.monthlyRate) <= 0 || typeof line.reason !== "string" || line.reason.trim().length < 3 || line.reason.length > 500))) return null;
   return { ...v, locationIds: [...new Set(v.locationIds)] } as QuoteSelectionDraft;
 }
 

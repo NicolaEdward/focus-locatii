@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { readQuoteSelectionDraft } from "@/lib/quote-selection-bridge";
 import { CommercialQuoteEditor } from "@/components/admin/CommercialQuoteEditor";
 import {
   useCallback,
@@ -94,6 +95,8 @@ export type Workspace = {
     companyEntity?: string | null;
     paymentTermType?: string | null;
     paymentTermDays?: number | null;
+    billingRule?: string | null;
+    billingFrequency?: string | null;
     startDate?: string | null;
     endDate?: string | null;
   }[];
@@ -520,6 +523,15 @@ function Quotes({
   const selected = query.quoteId;
   const [search, setSearch] = useState(query.q);
   const [editorOpen, setEditorOpen] = useState(true);
+  const [handoffChecked, setHandoffChecked] = useState(false);
+  useEffect(() => {
+    if (handoffChecked || !data.userId) return;
+    const params = new URLSearchParams(window.location.search);
+    const selectionKey = params.get("selection");
+    const draft = selectionKey ? readQuoteSelectionDraft(selectionKey, data.userId) : null;
+    if (params.get("edit") === "1" && draft?.quoteId) { setRevise(draft.quoteId); setEditorOpen(true); }
+    setHandoffChecked(true);
+  }, [data.userId, handoffChecked]);
   const [revise, setRevise] = useState<string | null>(null),
     [epoch, setEpoch] = useState(0);
   const [versionId, setVersionId] = useState<string | null>(null);
@@ -528,6 +540,8 @@ function Quotes({
   const listedQuotes = data.quotePage?.ids ? data.quotes.filter((quote) => data.quotePage!.ids.includes(quote.id)) : data.quotes;
   const q = data.quotes.find((x) => x.id === selected),
     revision = q?.revisions.find((r) => r.id === versionId) || q?.revisions[0];
+  const quotedCampaign = revision ? data.campaigns.find((campaign) => campaign.id === revision.payload.campaignId) : null;
+  const termsMissing = Boolean(quotedCampaign && (!quotedCampaign.paymentTermType || quotedCampaign.paymentTermDays == null || !quotedCampaign.billingRule || !quotedCampaign.billingFrequency));
   return (
     <>
       {!data.policy && (
@@ -553,14 +567,14 @@ function Quotes({
               Ciornă nouă
             </button>
           </div>
-          <CommercialQuoteEditor
+          {revise && !data.quotes.some((quote) => quote.id === revise) ? <p role="status" className="mt-4 text-slate-300">Se încarcă oferta pentru revizuire…</p> : <CommercialQuoteEditor
             key={revise || epoch}
             data={data}
             quote={data.quotes.find((x) => x.id === revise)}
             run={run}
             busy={busy}
             onSaved={(quoteId) => { setRevise(null); setEditorOpen(false); onBrowse({ quoteId, revisionPage: 1 }); }}
-          />
+          />}
         </section>
       )}
       <section className={panel}>
@@ -698,12 +712,13 @@ function Quotes({
               și invalidează aprobările vechi.
             </p>
           </details>
+          {termsMissing && quotedCampaign ? <p role="status" className="mt-3 rounded-lg border border-amber-300/35 p-3 text-sm text-amber-100">Completează <Link className="underline" href={`/admin/campanii?campaignId=${encodeURIComponent(quotedCampaign.id)}`}>termenii de plată și facturare ai campaniei</Link>, apoi salvează o versiune nouă. Ciorna poate fi păstrată; expedierea și rezervarea cer condiții comerciale verificate.</p> : null}
           {data.permissions.write && (
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
                 className="focus-button"
-                disabled={busy}
+                disabled={busy || termsMissing}
                 onClick={() =>
                   void run("approval.request", {
                     revisionId: revision.id,
@@ -753,7 +768,7 @@ function Quotes({
                 className={inputClass}
               />
             </Field>
-            <Submit busy={busy}>Cere aprobare HOLD</Submit>
+            <Submit busy={busy || termsMissing}>Cere aprobare HOLD</Submit>
           </form>
           <p className="mt-3 text-sm text-slate-300">
             Crearea HOLD și BOOKED nu rezultă automat din acceptarea ofertei.
@@ -1474,7 +1489,7 @@ function Ai({ data, run, busy }: { data: Workspace; run: Run; busy: boolean }) {
         <h2 className="text-lg font-black text-white">Permisiunile integrărilor</h2>
         {!p ? <p className="mt-2 text-slate-300">Configurează mai întâi <Link className="text-focus-yellow underline" href="/admin/commercial-settings">regulile comerciale</Link>.</p> : <form className="mt-3 grid gap-3" key={`integration-${p.version}`} onSubmit={(event) => {
           event.preventDefault(); const f = event.currentTarget;
-          void run("policy.save", { vatRateBps: p.vatRateBps, vatTreatment: p.vatTreatment, rateCardCurrency: p.rateCardCurrency, quoteValidityDays: p.quoteValidityDays, approvalHours: p.approvalHours, maxDailyModelCalls: numberField(f, "modelCalls"), agentToolsEnabled: new FormData(f).has("tools"), generationEnabled: new FormData(f).has("generation"), outboundEnabled: new FormData(f).has("outbound") });
+          void run("policy.automation.save", { expectedVersion: p.version, maxDailyModelCalls: numberField(f, "modelCalls"), agentToolsEnabled: new FormData(f).has("tools"), generationEnabled: new FormData(f).has("generation"), outboundEnabled: new FormData(f).has("outbound") });
         }}>
           <Field label="Apeluri model maxime pe persoană pe zi"><input name="modelCalls" required type="number" min={1} max={100} className={inputClass} defaultValue={p.maxDailyModelCalls} /></Field>
           <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="tools" defaultChecked={p.agentToolsEnabled} />Activez instrumentele pentru delegările aprobate</label>
@@ -2120,7 +2135,7 @@ function CommercialSettings({ data, run, busy }: { data: Workspace; run: Run; bu
     <p className="mt-2 text-sm text-slate-300">Verifică tratamentul fiscal cu responsabilul financiar. O versiune nouă invalidează aprobările bazate pe regulile vechi. Prețurile negociate păstrează tariful de listă și se aprobă pentru fiecare ofertă.</p>
     <form className="mt-4 grid gap-4 md:grid-cols-2" key={p?.version || "new"} onSubmit={(event) => {
       event.preventDefault(); const f = event.currentTarget;
-      void run("policy.save", { vatRateBps: Math.round(numberField(f, "vat") * 100), vatTreatment: field(f, "vatTreatment"), rateCardCurrency: field(f, "currency"), quoteValidityDays: numberField(f, "validity"), approvalHours: numberField(f, "approvalHours"), maxDailyModelCalls: p?.maxDailyModelCalls || 20, agentToolsEnabled: p?.agentToolsEnabled || false, generationEnabled: p?.generationEnabled || false, outboundEnabled: p?.outboundEnabled || false });
+      void run("policy.commercial.save", { expectedVersion: p?.version ?? null, vatRateBps: Math.round(numberField(f, "vat") * 100), vatTreatment: field(f, "vatTreatment"), rateCardCurrency: field(f, "currency"), quoteValidityDays: numberField(f, "validity"), approvalHours: numberField(f, "approvalHours") });
     }}>
       <Field label="Cota TVA verificată (%)"><input required type="number" min="0" max="100" step="0.01" name="vat" defaultValue={p ? p.vatRateBps / 100 : undefined} className={inputClass} /></Field>
       <Field label="Tratament TVA"><select required name="vatTreatment" className={inputClass} defaultValue={p?.vatTreatment || ""}><option value="">Selectează tratamentul</option><option value="exclusive">TVA adăugat la net</option><option value="inclusive">Tariful include TVA</option><option value="exempt">Scutit cu rată zero</option></select></Field>

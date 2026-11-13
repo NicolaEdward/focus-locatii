@@ -46,8 +46,8 @@ export const emptyClientForm: ClientForm = {
 export const emptyCampaignForm: CampaignForm = {
   currency: "",
   clientId: "", campaignName: "", campaignCode: "", status: "draft", companyEntity: "Focus Media",
-  sellerUserId: "", accountOwnerUserId: "", paymentTermType: "30_days", paymentTermDays: "30",
-  billingRule: "manual_per_contract", billingFrequency: "monthly", notes: ""
+  sellerUserId: "", accountOwnerUserId: "", paymentTermType: "", paymentTermDays: "",
+  billingRule: "", billingFrequency: "", notes: ""
 };
 
 export function WorkspaceHeader({ eyebrow, title, description, actions }: { eyebrow: string; title: string; description: string; actions?: React.ReactNode }) {

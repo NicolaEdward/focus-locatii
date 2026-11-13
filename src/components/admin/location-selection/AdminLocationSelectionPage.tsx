@@ -28,6 +28,12 @@ type SelectionState = {
   clientId?: string;
   campaignId?: string;
   opportunityId?: string;
+  quoteId?: string;
+  expectedRevision?: number;
+  requestKey?: string;
+  recipient?: string;
+  assumptions?: string;
+  linePrices?: { locationId: string; monthlyRate: string; reason: string }[];
   clientName: string;
   campaignName: string;
   periodStart: string;
@@ -325,11 +331,14 @@ export function AdminLocationSelectionPage({
       const key = saveQuoteSelectionDraft({
         ownerUserId: session.id, createdAt: Date.now(),
         clientId: selection.clientId, campaignId: selection.campaignId, opportunityId: selection.opportunityId,
+        quoteId: selection.quoteId, expectedRevision: selection.expectedRevision, requestKey: selection.requestKey,
+        recipient: selection.recipient, assumptions: selection.assumptions,
+        linePrices: selection.linePrices?.filter((line) => selection.items.some((item) => item.locationId === line.locationId)),
         clientName: selection.clientName, campaignName: selection.campaignName,
         companyEntity: selection.companyEntity, periodStart: selection.periodStart, periodEnd: selection.periodEnd,
         locationIds: selection.items.map((item) => item.locationId),
       });
-      window.location.assign(`/admin/commercial-quotes?selection=${encodeURIComponent(key)}`);
+      window.location.assign(`/admin/commercial-quotes?selection=${encodeURIComponent(key)}${selection.quoteId ? `&quoteId=${encodeURIComponent(selection.quoteId)}&edit=1` : ""}`);
     } catch (cause) {
       setHandoffError(cause instanceof Error ? cause.message : "Selecția nu a putut fi transferată. Verifică dacă stocarea în browser este permisă.");
     }
@@ -636,6 +645,8 @@ function readSavedSelection(userId: string): SelectionState | null {
     return {
       companyEntity: parsed.companyEntity || "Focus Media",
       clientId: parsed.clientId, campaignId: parsed.campaignId, opportunityId: parsed.opportunityId,
+      quoteId: parsed.quoteId, expectedRevision: parsed.expectedRevision, requestKey: parsed.requestKey,
+      recipient: parsed.recipient, assumptions: parsed.assumptions, linePrices: parsed.linePrices,
       clientName: parsed.clientName || "",
       campaignName: parsed.campaignName || "",
       periodStart: parsed.periodStart || "",

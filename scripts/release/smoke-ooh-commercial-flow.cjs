@@ -90,6 +90,29 @@ async function login(role) {
     assert.equal(payload.pricingApprovalRequired, true);
     assert.equal(await prisma.reservation.count({ where: { locationId: ids.location } }), 0);
     assert.equal((await prisma.location.findUniqueOrThrow({ where: { id: ids.location } })).rateCardValue, 100);
+    await page.getByRole("button", { name: "Pregătește o versiune nouă", exact: true }).click();
+    await page.getByLabel("Tarif lunar propus " + tag, { exact: true }).fill("70,50");
+    await page.getByLabel("Justificare negociere " + tag, { exact: true }).fill("Synthetic revised package after map review");
+    await page.getByLabel("E-mail destinatar", { exact: true }).fill("reviewed-recipient@example.invalid");
+    await page.getByLabel("Condiții și observații pentru revizuire", { exact: true }).fill("Keep these explicit negotiated terms through the map round trip.");
+    await page.getByRole("button", { name: "Deschide selecția pe hartă", exact: true }).click();
+    await page.waitForURL("**/admin/selectie-locatii?selection=*", { timeout: 120000 });
+    const returnToQuote = page.getByRole("button", { name: "Creează oferta cu aceste locații", exact: true });
+    await assertEventually(async () => !(await returnToQuote.isDisabled()), "Revision selection cannot return to its quote.");
+    await returnToQuote.click();
+    await page.waitForURL("**/admin/commercial-quotes?selection=*&quoteId=*&edit=1", { timeout: 120000 });
+    await page.getByLabel("Tarif lunar propus " + tag, { exact: true }).waitFor();
+    assert.equal(await page.getByLabel("Tarif lunar propus " + tag, { exact: true }).inputValue(), "70.50");
+    assert.equal(await page.getByLabel("E-mail destinatar", { exact: true }).inputValue(), "reviewed-recipient@example.invalid");
+    assert.equal(await page.getByLabel("Condiții și observații pentru revizuire", { exact: true }).inputValue(), "Keep these explicit negotiated terms through the map round trip.");
+    const revisedResponse = page.waitForResponse((response) => response.url().includes("/api/admin/commercial-workbench") && response.request().method() === "POST" && response.request().postDataJSON()?.action === "quote.create");
+    await page.getByRole("button", { name: "Salvează versiunea nouă", exact: true }).click();
+    assert.equal((await revisedResponse).status(), 200);
+    await page.getByRole("button", { name: "Pregătește o versiune nouă", exact: true }).waitFor();
+    assert.equal(await prisma.commercialQuote.count({ where: { clientId: ids.client } }), 1, "Map round trip must revise the existing quote, not create a duplicate.");
+    const revised = await prisma.quoteRevision.findUniqueOrThrow({ where: { quoteId_revision: { quoteId, revision: 2 } } });
+    assert.equal(revised.payload.lines[0].monthlyRate, "70.50");
+    assert.equal(revised.payload.recipient, "reviewed-recipient@example.invalid");
     await page.screenshot({ path: path.join(out, "negotiated-offer-desktop.png"), fullPage: true });
     await page.getByLabel("Caută în toate ofertele", { exact: true }).fill(tag);
     await page.getByRole("button", { name: "Caută", exact: true }).click();
@@ -100,7 +123,7 @@ async function login(role) {
     const unauthorized = await seller.request.get(base + "/admin/commercial-settings", { maxRedirects: 0 });
     assert.equal([303, 307, 308].includes(unauthorized.status()), true, "Seller must not manage shared commercial policy.");
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ ok: true, checks: ["real seller login", "campaign currency before booking", "configured commercial policy outside AI", "selector to quote without reentry", "negotiated price provenance", "no inventory allocation from draft", "catalog tariff preserved", "searchable history", "390px layout", "policy role isolation"], screenshots: out }));
+    console.log(JSON.stringify({ ok: true, checks: ["real seller login", "campaign currency before booking", "configured commercial policy outside AI", "selector to quote without reentry", "revision map round trip retains identity/prices/recipient", "negotiated price provenance", "no inventory allocation from draft", "catalog tariff preserved", "searchable history", "390px layout", "policy role isolation"], screenshots: out }));
   } finally {
     if (browser) await browser.close();
     const quotes = await prisma.commercialQuote.findMany({ where: { clientId: ids.client }, select: { id: true } });

@@ -44,7 +44,7 @@ const pages = [
   { name: "sales-campaigns", route: "/admin/campanii", role: "SALES_AGENT", expected: "Campanii" },
   { name: "sales-reservations", route: "/admin/locatii", role: "SALES_AGENT", expected: "Loca" },
   { name: "crm", route: "/admin/crm", role: "SALES_AGENT", expected: "CRM" },
-  { name: "operational", route: "/admin/operational", role: "COO", expected: "Lucrari de atribuit" },
+  { name: "operational", route: "/admin/operational", role: "COO", expected: "Workspace operational" },
   { name: "suppliers", route: "/admin/furnizori", role: "COO", expected: "Furnizori" },
   { name: "finance-suppliers", route: "/admin/furnizori", role: "FINANCE_OPERATOR", expected: "Furnizori" },
   { name: "location-import", route: "/admin/locatii/import", role: "COO", expected: "Import locatii" },

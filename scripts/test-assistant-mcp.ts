@@ -836,9 +836,18 @@ async function main() {
   );
   const documentSdk = await sdk(documentsTokens.access_token);
   check(
-    (await documentSdk.listTools()).tools.map((tool) => tool.name).join(",") ===
-      "document_audit_status",
-    "Document consent exposes only its one typed tool",
+    JSON.stringify(
+      (await documentSdk.listTools()).tools.map((tool) => tool.name).sort(),
+    ) ===
+      JSON.stringify(
+        [
+          "document_audit_status",
+          "document_audit_findings",
+          "search_indexed_documents",
+          "read_indexed_document_page",
+        ].sort(),
+      ),
+    "Document consent exposes only its four typed read-only document tools",
   );
   const documentTool = await documentSdk.callTool({
     name: "document_audit_status",

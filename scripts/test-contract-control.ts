@@ -27,6 +27,7 @@ assert.equal(compareContractEvidence(core, [evidence({ companyEntity: undefined 
 assert.equal(compareContractEvidence(core, [{ ...evidence(), fresh: false }]).state, "stale");
 assert.equal(compareContractEvidence(core, [evidence({ monthlyRent: "125.00" })]).state, "difference");
 assert.equal(compareContractEvidence(core, [evidence(), evidence({ currency: "RON" })]).state, "conflicting");
+assert.ok(!compareContractEvidence({ ...core, priceDate: "2090-01-20" }, [evidence({ periodEnd: "2090-01-14", monthlyRent: "125.00" })]).differences.some((value) => value.field === "monthlyRent"), "A past contractual price must not be compared against today's segment");
 assert.equal(factIdentifiesReservation(core, evidence({ reservationId: undefined, clientTaxId: undefined }).fact), false, "Location/period alone is insufficient identity");
 assert.equal(factIdentifiesReservation(core, evidence({ reservationId: undefined }).fact), true);
 assert.equal(factIdentifiesReservation(core, evidence({ reservationId: "foreign-id" }).fact), false, "Explicit foreign identity cannot fall back to same code");
@@ -87,7 +88,7 @@ try {
   await assert.rejects(() => getContractControlReport({}, field, now), (error: unknown) => error instanceof ContractControlError && error.status === 403);
   await assert.rejects(() => getContractControlReport({}, { ...seller, tokenVersion: seller.tokenVersion + 1 }, now), (error: unknown) => error instanceof ContractControlError && error.status === 401);
   assert.deepEqual(await prisma.reservation.findMany({ where: { id: { in: ids.reservations } }, orderBy: { id: "asc" } }), before, "Reports never mutate rentals");
-  console.log(JSON.stringify({ passed: true, assertions: 36, coverage: ["inclusive current/upcoming/history", "exact evidence identity", "verified/partial/stale/conflict/difference", "cross-portfolio privacy", "entity/pricing/reference defects", "read-only business records", "live role/tokenVersion", "CSV formula isolation"] }));
+  console.log(JSON.stringify({ passed: true, assertions: 37, coverage: ["inclusive current/upcoming/history", "effective-date price comparison", "exact evidence identity", "verified/partial/stale/conflict/difference", "cross-portfolio privacy", "entity/pricing/reference defects", "read-only business records", "live role/tokenVersion", "CSV formula isolation"] }));
 } finally {
   await prisma.documentFactReview.deleteMany({ where: { reviewedByUserId: { in: ids.users } } });
   await prisma.sourceDocumentVersion.deleteMany({ where: { document: { sourceId: { in: ids.sources } } } });

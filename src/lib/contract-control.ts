@@ -73,7 +73,7 @@ export async function getContractControlReport(raw: unknown, actor: AuthSession,
       const monthlyRent = segments.length === 1 ? money(segments[0].monthlyRent) : money(row.monthlyRentShare ?? row.amount ?? row.monthlyRentTotal);
       const currency = segments.length === 1 ? segments[0].currency : row.currency;
       const candidates = [...(evidenceByReservation.get(row.id) || []), ...(evidenceByCode.get(row.location.code.trim().toLocaleUpperCase("ro-RO")) || [])];
-      const comparison = compareContractEvidence({ id: row.id, locationCode: row.location.code, periodStart, periodEnd, contractNumber: row.contractNumber, contractCompany: row.contractCompany, clientTaxId: row.client?.taxId || null, monthlyRent, currency }, candidates);
+      const comparison = compareContractEvidence({ id: row.id, locationCode: row.location.code, periodStart, periodEnd, contractNumber: row.contractNumber, contractCompany: row.contractCompany, clientTaxId: row.client?.taxId || null, monthlyRent, currency, priceDate }, candidates);
       const issues: ContractIssue[] = [];
       if (!monthlyRent || Number(monthlyRent) <= 0) issues.push("missing_price");
       if (!["EUR", "RON"].includes(currency || "")) issues.push("missing_currency");

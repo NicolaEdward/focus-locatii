@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { cloneElement, isValidElement, useEffect, useMemo, useState, type ReactElement } from "react";
 import type { Quote, Workspace, Run } from "@/components/admin/CommercialWorkbench";
 import type { LocationSelectionAvailability, LocationSelectionLocationDTO } from "@/lib/location-selection-dto";
 import { readQuoteSelectionDraft, saveQuoteSelectionDraft, type QuoteSelectionDraft } from "@/lib/quote-selection-bridge";
@@ -9,7 +9,7 @@ import { readQuoteSelectionDraft, saveQuoteSelectionDraft, type QuoteSelectionDr
 const inputClass = "focus-input min-w-0 w-full";
 const normalized = (value: string) => value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="grid min-w-0 gap-1 text-sm font-bold text-slate-300"><span>{label}</span>{children}</label>;
+  return <label className="grid min-w-0 gap-1 text-sm font-bold text-slate-300"><span>{label}</span>{isValidElement(children) && typeof children.type === "string" ? cloneElement(children as ReactElement<{ "aria-label"?: string }>, { "aria-label": label }) : children}</label>;
 }
 
 export function CommercialQuoteEditor({ data, quote, run, busy, onSaved }: { data: Workspace; quote?: Quote; run: Run; busy: boolean; onSaved: (quoteId: string) => void }) {

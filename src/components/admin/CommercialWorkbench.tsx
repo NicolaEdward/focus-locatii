@@ -7,6 +7,9 @@ import {
   useCallback,
   useEffect,
   useState,
+  cloneElement,
+  isValidElement,
+  type ReactElement,
   type ReactNode,
 } from "react";
 
@@ -241,7 +244,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="grid min-w-0 gap-1 text-sm font-bold text-slate-300">
       <span>{label}</span>
-      {children}
+      {isValidElement(children) && typeof children.type === "string" ? cloneElement(children as ReactElement<{ "aria-label"?: string }>, { "aria-label": label }) : children}
     </label>
   );
 }

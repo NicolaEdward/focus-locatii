@@ -87,7 +87,7 @@ export function Field({ label, value, onChange, type = "text", disabled, placeho
 
 export function SelectField({ label, value, onChange, disabled, children }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean; children: React.ReactNode }) {
   return <label className="grid min-w-0 gap-1 text-sm font-bold text-slate-200">{label}
-    <select className="focus-input min-w-0" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{children}</select>
+    <select aria-label={label} className="focus-input min-w-0" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{children}</select>
   </label>;
 }
 

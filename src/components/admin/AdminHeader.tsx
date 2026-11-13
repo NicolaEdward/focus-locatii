@@ -158,7 +158,7 @@ export function AdminHeader({ session }: { session: AuthSession }) {
           {!isFieldOperator ? <AdminNavLink href="/locatii" active={false} quiet><MapPin size={18} />Portal public</AdminNavLink> : null}
           <AdminNavLink href="/admin/onboarding" active={isActiveAdminPath(pathname, "/admin/onboarding")} quiet><GraduationCap size={18} />Ghid de lucru</AdminNavLink>
         </nav>
-        <div className="col-start-3 row-start-1 flex shrink-0 items-center gap-2">
+        <div className="col-start-3 row-start-1 flex shrink-0 items-center gap-2 max-sm:[&_.focus-button]:!h-11 max-sm:[&_.focus-button]:!min-w-11 max-sm:[&_.focus-button]:!w-11 max-sm:[&_.focus-button]:!gap-0 max-sm:[&_.focus-button]:!p-0">
           {!isFieldOperator && !isDceo ? <NotificationBell /> : null}
           <ThemeToggle />
           <Link className="focus-button secondary px-3" href="/admin/securitate" prefetch={false} aria-label="Securitatea contului" title="Securitatea contului"><KeyRound size={18} /></Link>

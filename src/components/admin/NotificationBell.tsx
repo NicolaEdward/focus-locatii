@@ -65,7 +65,7 @@ export function NotificationBell() {
   return (
     <div className="relative">
       <button
-        className="focus-button secondary"
+        className="focus-button secondary relative"
         type="button"
         aria-label="Notificari"
         aria-expanded={open}
@@ -77,7 +77,7 @@ export function NotificationBell() {
       >
         <Bell size={18} />
         <span className="hidden sm:inline">Notificari</span>
-        {activeCount ? <span className="rounded-full bg-focus-yellow px-2 py-0.5 text-xs text-focus-navy">{activeCount > 99 ? "99+" : activeCount}</span> : null}
+        {activeCount ? <span className="absolute -right-1 -top-1 rounded-full bg-focus-yellow px-2 py-0.5 text-xs text-focus-navy sm:static">{activeCount > 99 ? "99+" : activeCount}</span> : null}
       </button>
       {open ? (
         <div className="absolute right-0 top-full z-30 mt-2 w-[min(92vw,420px)] rounded-lg border border-focus-line bg-focus-navy p-3 shadow-2xl">

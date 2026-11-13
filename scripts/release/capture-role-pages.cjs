@@ -154,7 +154,7 @@ async function capturePage(page, viewport, cookie, theme) {
   }
   await client.send("Page.navigate", { url: `${baseUrl}${page.route}` });
   await waitForExpression(client, "document.readyState === 'complete'", 30000);
-  if (page.role) await waitForExpression(client, "!!document.querySelector('nav.admin-nav')?.getClientRects().length", 90000);
+  if (page.role) await waitForExpression(client, "!!document.querySelector('nav.admin-nav') && (innerWidth >= 1280 ? !!document.querySelector('nav.admin-nav').getClientRects().length : !!document.querySelector('[data-admin-mobile-menu-trigger]')?.getClientRects().length)", 90000);
   await wait(1200);
   if (page.expectedPath) {
     const pathResult = await client.send("Runtime.evaluate", { expression: "location.pathname", returnByValue: true });

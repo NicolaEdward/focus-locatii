@@ -105,7 +105,7 @@ async function menuChecks() {
         await press(client, "Enter");
         await waitForExpression(client, "document.querySelector('[data-admin-mobile-menu-trigger]').getAttribute('aria-expanded')==='true' && !!document.querySelector('nav.admin-nav').getClientRects().length");
         const targets = await evaluate(client, "Array.from(document.querySelectorAll('nav.admin-nav > a,nav.admin-nav > div > button')).map(element=>{const r=element.getBoundingClientRect();return{left:r.left,right:r.right,height:r.height}})");
-        assert.ok(targets.length && targets.every((target) => target.left >= 0 && target.right <= width + 1 && target.height >= 44), "Expanded mobile navigation must wrap every 44px action inside the viewport.");
+        assert.ok(targets.length && targets.every((target) => target.left >= 0 && target.right <= width + 1 && target.height >= 44), `Expanded mobile navigation must wrap every 44px action inside the viewport: ${width}px ${JSON.stringify(targets)}`);
       }
       const labels = await evaluate(client, "Array.from(document.querySelectorAll('[data-admin-menu-trigger]')).map(e=>e.dataset.adminMenuTrigger)");
       for (const label of labels) {

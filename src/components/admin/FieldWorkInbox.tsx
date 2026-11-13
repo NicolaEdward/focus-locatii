@@ -158,10 +158,10 @@ export function FieldWorkInbox({ initialTasks }: { initialTasks: OperationalAssi
       {target ? (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="field-completion-title">
           <EscapeCloseHandler onClose={closeCompletion} enabled={busyId !== target.operationTaskId} />
-          <div className="mx-auto max-w-xl rounded-lg border border-focus-line bg-focus-dark p-4 sm:p-6">
+          <div className="mx-auto max-w-xl rounded-lg border border-focus-line bg-focus-ink p-4 shadow-focus sm:p-6">
             <h2 id="field-completion-title" className="text-2xl font-black text-white">Finalizeaza {target.location.code}</h2>
             <p className="mt-2 text-sm text-slate-300">Pozele sunt pastrate 30 de zile si nu apar public.</p>
-            <label className="mt-5 flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-600 p-5 text-center text-sm font-bold text-white">
+            <label className="mt-5 flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-600 p-5 text-center text-sm font-bold text-white focus-within:ring-2 focus-within:ring-focus-yellow">
               <Upload className="mb-2 h-7 w-7 text-focus-yellow" />Adauga poze JPG, PNG sau WebP
               <span className="mb-2 block text-xs font-normal text-slate-300">Maximum 10 MB per original. Fotografiile sunt optimizate automat pentru trimitere, până la 3,5 MB în total.</span>
               <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ""; }} />
@@ -171,7 +171,7 @@ export function FieldWorkInbox({ initialTasks }: { initialTasks: OperationalAssi
                 <div key={`${item.file.name}-${item.file.lastModified}-${index}`} className="relative aspect-square overflow-hidden rounded-md border border-slate-700">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={item.url} alt={`Previzualizare ${item.file.name}`} className="h-full w-full object-cover" />
-                  <button type="button" aria-label={`Elimina ${item.file.name}`} onClick={() => removeFile(index)} className="absolute right-1 top-1 grid h-9 w-9 place-items-center rounded bg-black/80 text-white"><Trash2 size={17} /></button>
+                  <button type="button" aria-label={`Elimina ${item.file.name}`} onClick={() => removeFile(index)} className="absolute right-1 top-1 grid h-11 w-11 place-items-center rounded border border-focus-line bg-focus-navy text-white"><Trash2 size={17} /></button>
                 </div>
               ))}
             </div>
@@ -198,9 +198,9 @@ function kindLabel(kind: OperationalAssignmentTaskDto["kind"]) {
 }
 
 function dateLabel(value: string) {
-  return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value));
+  return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Europe/Bucharest" }).format(new Date(value));
 }
 
 function dateTimeLabel(value: string) {
-  return new Intl.DateTimeFormat("ro-RO", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return new Intl.DateTimeFormat("ro-RO", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Bucharest" }).format(new Date(value));
 }

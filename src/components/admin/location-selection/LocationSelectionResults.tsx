@@ -11,7 +11,9 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
   availabilityById,
   selectedIds,
   onAdd,
-  onRemove
+  onRemove,
+  onApplyWindow,
+  onFindAlternatives
 }: {
   locations: LocationSelectionLocationDTO[];
   title: string;
@@ -19,6 +21,8 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
   selectedIds: Set<string>;
   onAdd: (location: LocationSelectionLocationDTO) => void;
   onRemove: (locationId: string) => void;
+  onApplyWindow: (locationId: string, start: string, end: string) => void;
+  onFindAlternatives: (locationId: string) => void;
 }) {
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border border-focus-line bg-focus-navy/80">
@@ -29,7 +33,23 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
         </div>
         <p className="text-sm font-bold text-slate-300">Selectie rapida pentru oferta OOH</p>
       </header>
-      <div className="max-h-[760px] overflow-auto">
+      <div className="grid gap-3 p-3 md:hidden">
+        {locations.map((location) => {
+          const availability = availabilityById[location.id];
+          const selected = selectedIds.has(location.id);
+          const unavailable = availability?.state === "CONFLICT" || availability?.state === "PARTIAL";
+          return <article key={location.id} className={`min-w-0 rounded-lg border p-3 ${selected ? "border-focus-yellow bg-focus-yellow/5" : "border-focus-line"}`}>
+            <div className="flex min-w-0 gap-3"><img src={location.thumbnail || "/samples/location-placeholder.svg"} alt={location.code} className="h-20 w-24 shrink-0 rounded object-cover" loading="lazy" /><div className="min-w-0"><h3 className="break-words font-black text-white">{location.code}</h3><p className="break-words text-xs text-slate-300">{location.city} · {location.area}</p><p className="break-words text-xs text-slate-400">{[location.mediaType, location.category !== location.mediaType ? location.category : null, location.dimensions || "dimensiuni nesetate"].filter(Boolean).join(" · ")}</p><p className="mt-1 font-bold text-white">{price(location)} / lună</p></div></div>
+            <p className="mt-2 break-words text-xs text-slate-300">{location.name || location.address}</p>
+            <div className="mt-3"><AvailabilityBadge availability={availability} /></div>
+            <AvailabilityDetails locationId={location.id} code={location.code} availability={availability} onApplyWindow={onApplyWindow} onFindAlternatives={onFindAlternatives} />
+            <button className="focus-button mt-3 w-full justify-center" type="button" disabled={!selected && unavailable} onClick={() => selected ? onRemove(location.id) : onAdd(location)}>{selected ? "Scoate" : "Adauga"}</button>
+            {availability?.state === "PARTIAL" ? <p className="mt-2 text-xs text-amber-200">Alege explicit un interval liber din detalii sau caută alternative.</p> : null}
+          </article>;
+        })}
+        {!locations.length ? <p className="p-3 text-sm text-slate-300">Nu exista locatii propunibile pentru filtrele curente.</p> : null}
+      </div>
+      <div className="hidden max-h-[760px] overflow-auto md:block">
         <table className="w-full min-w-[780px] table-fixed text-left text-sm">
           <thead className="sticky top-0 z-10 bg-focus-ink text-xs uppercase text-slate-300">
             <tr>
@@ -45,7 +65,7 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
             {locations.map((location) => {
               const selected = selectedIds.has(location.id);
               const availability = availabilityById[location.id];
-              const unavailable = availability?.state === "CONFLICT";
+              const unavailable = availability?.state === "CONFLICT" || availability?.state === "PARTIAL";
               return (
                 <tr
                   key={location.id}
@@ -88,7 +108,7 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
                     <p className="text-xs text-slate-400">{location.area || "-"}</p>
                   </td>
                   <td className="px-3 py-3">
-                    <p className="font-bold text-white">{location.mediaType || location.category || "OOH"}</p>
+                    <p className="font-bold text-white">{location.mediaType || location.category || "OOH"}</p>{location.category && location.category !== location.mediaType ? <p className="text-xs text-slate-300">{location.category}</p> : null}
                     <p className="text-xs text-slate-400">{[location.dimensions, sqm(location.surface)].filter(Boolean).join(" / ") || "-"}</p>
                   </td>
                   <td className="px-3 py-3">
@@ -96,6 +116,7 @@ export const LocationSelectionResults = memo(function LocationSelectionResults({
                     <p className={`mt-1 max-w-[260px] truncate text-xs ${availability?.state === "CONFLICT" ? "text-red-100" : availability?.tone === "yellow" ? "text-amber-100" : "text-slate-400"}`}>
                       {availability?.explanation || "Alege perioada pentru verificare exacta."}
                     </p>
+                    <AvailabilityDetails locationId={location.id} code={location.code} availability={availability} onApplyWindow={onApplyWindow} onFindAlternatives={onFindAlternatives} />
                     {availability?.blockingIntervals.length ? (
                       <p className="mt-1 max-w-[260px] truncate text-[11px] font-bold text-slate-400">
                         {blockingText(availability)}
@@ -183,4 +204,19 @@ function holdRemainingSuffix(interval: { status: string; holdExpiresAt?: string 
   const days = Math.ceil((new Date(interval.holdExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
   if (days <= 0) return " (expira astazi)";
   return ` (mai are ${days} ${days === 1 ? "zi" : "zile"})`;
+}
+
+function AvailabilityDetails({ locationId, code, availability, onApplyWindow, onFindAlternatives }: {
+  locationId: string; code: string; availability?: LocationSelectionAvailability;
+  onApplyWindow: (id: string, start: string, end: string) => void; onFindAlternatives: (id: string) => void;
+}) {
+  if (!availability || availability.state === "UNKNOWN") return null;
+  return <details className="mt-2 text-xs text-slate-300">
+    <summary className="min-h-11 cursor-pointer py-2 font-bold text-focus-yellow">Vezi intervalele {code}</summary>
+    <p className="break-words leading-relaxed">{availability.explanation}</p>
+    {availability.blockingIntervals.length ? <ul className="mt-2 grid gap-1">{availability.blockingIntervals.map((interval, index) => <li key={`${interval.start}-${index}`} className="break-words">{blockingStatusLabel(interval.status)}: {formatDate(interval.start)}{interval.openEnded ? " – fără termen" : ` – ${formatDate(interval.end)}`}{holdRemainingSuffix(interval)}</li>)}</ul> : null}
+    {availability.availableWindows?.length ? <div className="mt-3 grid gap-2"><strong>Intervale libere în perioada cerută</strong>{availability.availableWindows.map((window) => <div key={`${window.start}-${window.end}`} className="rounded border border-focus-line p-2"><p>{formatDate(window.start)} – {formatDate(window.end)}</p><button type="button" className="mt-1 min-h-11 text-left font-bold text-focus-yellow underline" onClick={() => onApplyWindow(locationId, window.start, window.end)}>Folosește intervalul {code} {formatDate(window.start)}</button></div>)}</div> : null}
+    {availability.state !== "AVAILABLE" ? <button type="button" className="mt-2 min-h-11 text-left font-bold text-focus-yellow underline" onClick={() => onFindAlternatives(locationId)}>Caută același format în oraș pentru {code}</button> : null}
+    {availability.state === "PARTIAL" ? <p className="mt-2 text-amber-200">Intervalul ales schimbă perioada întregii selecții, după confirmarea ta. O singură ofertă folosește o perioadă comună.</p> : null}
+  </details>;
 }

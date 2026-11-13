@@ -35,6 +35,18 @@ export type DocumentAccessDecision = {
 
 type DocumentDb = Pick<typeof prisma, "clientAccount" | "campaign" | "reservation" | "billingItem" | "financialReceivable" | "financialPayable" | "supplier">;
 
+/** Call after locking the supplied document links. A campaign's actual client
+ * is authoritative; a supplied contradiction is an error, never overwritten. */
+export async function canonicalCampaignDocumentLinks(links: DocumentAccessLinks, db: Pick<DocumentDb, "campaign"> = prisma): Promise<DocumentAccessLinks> {
+  if (!links.campaignId) return { ...links };
+  const campaign = await db.campaign.findUnique({ where: { id: links.campaignId }, select: { clientId: true } });
+  if (!campaign) throw Object.assign(new Error("Entitatea legata de document nu exista."), { status: 404 });
+  if (links.clientId && links.clientId !== campaign.clientId) {
+    throw Object.assign(new Error("Legăturile documentului nu aparțin aceluiași dosar comercial."), { status: 422 });
+  }
+  return { ...links, clientId: campaign.clientId };
+}
+
 const documentTables = {
   clientId: "portfolio_client_accounts", campaignId: "portfolio_campaigns",
   reservationId: "portfolio_reservations", billingItemId: "portfolio_billing_items",

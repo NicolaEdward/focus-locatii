@@ -11,6 +11,7 @@ let reservation = baseReservation();
 let tableUnavailable = false;
 let operationUpdateFailure = false;
 let mirrorFailure = false;
+let currentActor = null;
 
 const nextResponse = {
   json: (body, init = {}) => ({ body, status: init.status || 200, headers: init.headers || {} })
@@ -65,6 +66,9 @@ const reservationDelegate = {
 };
 
 const prisma = {
+  $queryRaw: async () => [],
+  user: { findUnique: async () => ({ active: true, role: currentActor?.role, tokenVersion: currentActor?.tokenVersion }) },
+  auditLog: { create: async ({ data }) => { auditCalls.push(data); return data; } },
   reservation: reservationDelegate,
   operationTask: operationTaskDelegate,
   $transaction: async (callback) => {
@@ -72,10 +76,14 @@ const prisma = {
     const reservationSnapshot = { ...reservation };
     const noteLength = noteUpdates.length;
     const taskCallLength = taskCalls.length;
+    const auditLength = auditCalls.length;
     try {
       return await callback({
         reservation: reservationDelegate,
-        operationTask: operationTaskDelegate
+        operationTask: operationTaskDelegate,
+        $queryRaw: prisma.$queryRaw,
+        user: prisma.user,
+        auditLog: prisma.auditLog
       });
     } catch (error) {
       tasks.clear();
@@ -83,6 +91,7 @@ const prisma = {
       reservation = reservationSnapshot;
       noteUpdates.length = noteLength;
       taskCalls.length = taskCallLength;
+      auditCalls.length = auditLength;
       throw error;
     }
   }
@@ -91,6 +100,11 @@ const prisma = {
 const route = loadTsModule(path.join(process.cwd(), "src", "app", "api", "reservations", "[id]", "operations", "route.ts"), {
   "next/server": { NextResponse: nextResponse },
   "@/lib/auth": {
+    requireAnyPermission: async (request, permissions) => {
+      assert(permissions.includes("campaigns.operate") && permissions.includes("reservations.manage.own"));
+      currentActor = request.session;
+      return currentActor ? { session: currentActor, response: null } : { session: null, response: nextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+    },
     requirePermission: async (request, permission) => {
       assert.equal(permission, "campaigns.operate", "operations route must require campaigns.operate");
       const session = request.session;
@@ -103,16 +117,19 @@ const route = loadTsModule(path.join(process.cwd(), "src", "app", "api", "reserv
   "@/lib/prisma": { prisma },
   "@/lib/reservations": {
     updateReservationProductionNotes: async (id, nextNotes, actor) => {
+      if (typeof nextNotes === "function") nextNotes = await nextNotes({ ...reservation });
       noteUpdates.push({ id, nextNotes, actor, legacy: true });
       reservation = { ...reservation, productionNotes: nextNotes };
       return { id, productionNotes: nextNotes };
     },
     updateReservationProductionNotesWithClient: async (_client, id, nextNotes, actor) => {
+      if (typeof nextNotes === "function") nextNotes = await nextNotes({ ...reservation });
       if (mirrorFailure) throw new Error("Simulated productionNotes mirror failure");
       noteUpdates.push({ id, nextNotes, actor, transactional: true });
       reservation = { ...reservation, productionNotes: nextNotes };
       return { id, productionNotes: nextNotes };
-    }
+    },
+    getReservation: async () => ({ ...reservation })
   },
   "@/lib/audit": {
     recordAudit: async (input) => {
@@ -143,6 +160,7 @@ async function main() {
     await repeatedPostWithStableTaskIdDoesNotCreateDuplicate();
     await postCorruptedProductionNotesDoesNotCrash();
     await invalidInputsAndRbacStillHold();
+    await ownedSellerCanRequestButCannotComplete();
   } finally {
     if (previousFlag === undefined) delete process.env.OPERATION_TASKS_ENABLED;
     else process.env.OPERATION_TASKS_ENABLED = previousFlag;
@@ -164,7 +182,7 @@ async function main() {
       "flag off POST uses legacy path",
       "flag on POST creates OperationTask and mirrors",
       "stable POST taskId avoids duplicate relational task",
-      "sales denied",
+      "foreign sales request denied and owned sales request allowed without direct completion permission",
       "COO/SUPER_ADMIN allowed",
       "invalid status/kind rejected",
       "audit written",
@@ -254,7 +272,7 @@ async function tableUnavailableFallsBackToLegacyBeforeWrite() {
   const response = await patch(session("coo-1", "COO"), { kind: "decoration", status: "DONE" });
   assert.equal(response.status, 200);
   assert.equal(noteUpdates.length, 1, "table failure should fall back to legacy mirror");
-  assert(noteUpdates[0].legacy, "fallback should use legacy helper");
+  assert(noteUpdates[0].transactional, "fallback should update freshly read legacy notes transactionally");
   assert(noteUpdates[0].nextNotes.includes('"decorationStatus":"DONE"'));
 }
 
@@ -345,6 +363,16 @@ async function invalidInputsAndRbacStillHold() {
 
   response = await patch(session("coo-1", "COO"), { kind: "decoration", status: "BROKEN" });
   assert.equal(response.status, 400, "invalid status rejected");
+}
+
+async function ownedSellerCanRequestButCannotComplete() {
+  reset();
+  process.env.OPERATION_TASKS_ENABLED = "false";
+  reservation.ownerId = "agent-1";
+  reservation.sellerUserId = "agent-1";
+  const response = await post(session("agent-1", "SALES_AGENT"), postBody({ taskId: "owned-sales-request" }));
+  assert.equal(response.status, 200, "seller can request work for an owned rental");
+  assert.equal((await patch(session("agent-1", "SALES_AGENT"), { kind: "decoration", status: "DONE" })).status, 403, "requesting work does not grant direct status mutation");
 }
 
 function patch(sessionValue, body) {

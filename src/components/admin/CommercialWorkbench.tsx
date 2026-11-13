@@ -37,6 +37,8 @@ type QuotePayload = {
   assumptions: string;
   currency: string;
   paymentTermDays: number | null;
+  paymentTermType?: string | null;
+  campaignParties?: { campaignType: string; agency: { id: string; name: string } | null; endClient: { id: string; name: string } | null };
   vatTreatment: string;
   vatRateBps: number;
   lines: {
@@ -646,8 +648,10 @@ function Quotes({
             {revision.payload.periodStart} – {revision.payload.periodEnd},
             ultima zi inclusă · {revision.payload.companyEntity}
           </p>
+          {revision.payload.campaignParties?.campaignType === "agency" ? <div className="mt-3 grid gap-1 rounded-lg border border-focus-line p-3 text-sm text-slate-300"><p>Client contractual / facturat: <strong>{revision.payload.clientName}</strong></p><p>Agenție intermediară: <strong>{revision.payload.campaignParties.agency?.name || "de completat"}</strong></p><p>Beneficiar final: <strong>{revision.payload.campaignParties.endClient?.name || "de completat"}</strong></p></div> : null}
+          <div className="mt-3 grid gap-3 md:hidden" aria-label="Prețurile ofertei pe mobil">{revision.payload.lines.map((line) => <section key={line.locationId} className="min-w-0 rounded-lg border border-focus-line p-3"><h3 className="break-words font-bold text-white">{line.code}</h3><dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-xs text-slate-400">Tarif lunar</dt><dd className="font-bold text-white">{line.monthlyRate} {revision.payload.currency}</dd></div><div><dt className="text-xs text-slate-400">Net pe perioadă</dt><dd className="font-bold text-white">{line.net} {revision.payload.currency}</dd></div><div><dt className="text-xs text-slate-400">TVA</dt><dd className="text-white">{line.tax} {revision.payload.currency}</dd></div><div><dt className="text-xs text-slate-400">Total pe perioadă</dt><dd className="font-bold text-white">{line.gross} {revision.payload.currency}</dd></div></dl>{line.listMonthlyRate && line.listMonthlyRate !== line.monthlyRate ? <p className="mt-2 break-words text-xs text-slate-400">Listă: {line.listMonthlyRate} {revision.payload.currency}/lună · {line.pricingReason}</p> : null}</section>)}</div>
           <div
-            className="mt-3 max-w-full overflow-x-auto"
+            className="mt-3 hidden max-w-full overflow-x-auto md:block"
             role="region"
             aria-label="Prețurile ofertei"
             tabIndex={0}
@@ -681,9 +685,7 @@ function Quotes({
             {revision.payload.totals.gross} {revision.payload.currency}
           </p>
           <p className="mt-1 text-sm text-slate-300">
-            TVA {revision.payload.vatRateBps / 100}% (
-            {revision.payload.vatTreatment}) · termen de plată{" "}
-            {revision.payload.paymentTermDays ?? "nesetat"} zile.
+            TVA {revision.payload.vatRateBps / 100}% ({revision.payload.vatTreatment === "inclusive" ? "inclus" : revision.payload.vatTreatment === "exempt" ? "scutit" : "adăugat la net"}) · {revision.payload.paymentTermType === "advance" ? "Plată în avans" : revision.payload.paymentTermDays == null ? "Termen de plată de completat" : `Termen de plată ${revision.payload.paymentTermDays} zile`}.
             Disponibilitatea se verifică din nou la aprobare și executare.
           </p>
           {revision.payload.assumptions && (

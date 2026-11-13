@@ -28,8 +28,10 @@ import {
 } from "lucide-react";
 import { CrmCommandRecovery, useCrmCommandFlow } from "@/components/admin/crm/CrmCommandRecovery";
 import { PrepareCommercialOffer } from "@/components/admin/crm/PrepareCommercialOffer";
-import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import {
+  CRM_TIME_ZONE,
+  crmStartOfLocalDay,
   CRM_NEXT_ACTION_CATALOG,
   CRM_NEXT_ACTION_LABELS,
   CRM_OPPORTUNITY_STAGE_OPTIONS,
@@ -37,7 +39,10 @@ import {
 } from "@/lib/crm-domain";
 import { EscapeCloseHandler } from "@/hooks/use-escape-close";
 
-type View = "today" | "prospecting" | "opportunities" | "all";
+import { crmLocalDateTimeInput } from "@/lib/crm-time";
+import type { CrmWorkspaceInitialState, CrmWorkspaceView } from "@/lib/crm-workspace-state";
+
+type View = CrmWorkspaceView;
 type RecordKind = "prospect" | "opportunity";
 type Owner = { id: string; name: string; email: string; role?: string };
 type NextAction = { id: string; type: string; label: string; description?: string | null; dueAt: string; priority: string };
@@ -76,14 +81,16 @@ export function CrmWorkspaceV4({
   canViewTeam,
   canEdit,
   canAssignOwners,
-  sessionUserId
+  sessionUserId,
+  initialState
 }: {
   canViewTeam: boolean;
   canEdit: boolean;
   canAssignOwners: boolean;
   sessionUserId: string;
+  initialState: CrmWorkspaceInitialState;
 }) {
-  const initial = useMemo(readInitialUrlState, []);
+  const initial = initialState;
   const [view, setView] = useState<View>(initial.view);
   const [query, setQuery] = useState(initial.query);
   const [debouncedQuery, setDebouncedQuery] = useState(initial.query);
@@ -104,9 +111,10 @@ export function CrmWorkspaceV4({
   const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    if (query.trim() === debouncedQuery.trim()) return;
     const timer = window.setTimeout(() => { setDebouncedQuery(query.trim()); setPage(1); }, 300);
     return () => window.clearTimeout(timer);
-  }, [query]);
+  }, [query, debouncedQuery]);
 
   const load = useCallback(async (silent = false) => {
     const id = ++requestId.current;
@@ -172,6 +180,7 @@ export function CrmWorkspaceV4({
         <div className="min-w-0">
           <p className="text-xs font-black uppercase text-focus-yellow">Comercial / CRM</p>
           <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">Relații comerciale</h1>
+          <p className="mt-1 text-xs text-slate-400">Programările sunt afișate și introduse în ora Bucureștiului.</p>
           <p className="mt-1 max-w-2xl text-sm text-slate-300">{canViewTeam ? (ownerId ? "Perspectiva agentului selectat" : "Perspectiva echipei") : "Perspectiva personală"}</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -539,22 +548,16 @@ function isCurrencyMap(value: unknown): value is Record<string, number> {
     && Object.values(value).every((amount) => typeof amount === "number" && Number.isFinite(amount)));
 }
 
-function readInitialUrlState() {
-  if (typeof window === "undefined") return { view: "today" as View, query: "", ownerId: "", status: "", stage: "", due: "all", page: 1, selected: null as { kind: RecordKind; id: string } | null };
-  const params = new URLSearchParams(window.location.search); const candidate = params.get("view");
-  const kind = params.get("kind"); const record = params.get("record");
-  return { view: (["today", "prospecting", "opportunities", "all"].includes(candidate || "") ? candidate : "today") as View, query: params.get("q") || "", ownerId: params.get("owner") || "", status: params.get("status") || "", stage: params.get("stage") || "", due: params.get("due") || "all", page: Math.max(1, Number(params.get("page") || 1)), selected: record && (kind === "prospect" || kind === "opportunity") ? { kind: kind as RecordKind, id: record } : null };
-}
 function replaceUrl(params: URLSearchParams) { if (typeof window !== "undefined") window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`); }
 function textValue(form: FormData, key: string) { return String(form.get(key) || "").trim() || null; }
 function numberValue(form: FormData, key: string) { const value = textValue(form, key); if (!value) return null; const number = Number(value); return Number.isFinite(number) ? number : null; }
 function formatCurrencyMap(values?: Record<string, number>) { const rows = Object.entries(values || {}); return rows.length ? rows.map(([currency, value]) => money(value, currency)).join(" · ") : "0"; }
 function money(value?: number | null, currency?: string | null) { if (value == null) return "Nesetată"; return new Intl.NumberFormat("ro-RO", { style: "currency", currency: currency || "EUR", maximumFractionDigits: 2 }).format(value); }
-function date(value?: string | null) { return value ? new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value)) : "-"; }
-function dateTime(value?: string | null) { return value ? new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "-"; }
-function startToday() { const value = new Date(); value.setHours(0, 0, 0, 0); return value; }
+function date(value?: string | null) { return value ? new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: CRM_TIME_ZONE }).format(new Date(value)) : "-"; }
+function dateTime(value?: string | null) { return value ? new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: CRM_TIME_ZONE }).format(new Date(value)) : "-"; }
+function startToday() { return crmStartOfLocalDay(new Date()); }
 function addDays(value: Date, days: number) { return new Date(value.getTime() + days * 86_400_000); }
-function localInputDate(value: Date) { const offset = value.getTimezoneOffset() * 60_000; return new Date(value.getTime() - offset).toISOString().slice(0, 16); }
+function localInputDate(value: Date) { return crmLocalDateTimeInput(value); }
 function dateInput(value?: string | null) { return value ? new Date(value).toISOString().slice(0, 10) : ""; }
 function nextOpportunityStage(stage: string) { return ({ opportunity: "quoted", quoted: "negotiation", negotiation: "contracting", contracting: "won" } as Record<string, string>)[stage] || ""; }
 function opportunityTargets(stage: string) { return ({ opportunity: ["quoted", "lost", "on_hold", "inactive"], quoted: ["negotiation", "lost", "on_hold", "inactive"], negotiation: ["quoted", "contracting", "lost", "on_hold", "inactive"], contracting: ["negotiation", "won", "lost", "on_hold", "inactive"] } as Record<string, string[]>)[stage] || []; }

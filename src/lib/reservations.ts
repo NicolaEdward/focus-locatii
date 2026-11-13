@@ -28,6 +28,8 @@ import { resolveSellerForMutation } from "@/lib/seller-users";
 import { paymentTermOptions, billingRules, billingFrequencies } from "@/lib/billing";
 import { syncCampaignCommercialSummary } from "@/lib/campaigns/campaign-commercial-summary";
 import { companyEntityOrThrow, normalizeCompanyEntity } from "@/lib/company-entities";
+import { assertCampaignParties, resolveCampaignParties } from "@/lib/campaign-parties";
+import { resolveQuoteHoldContext } from "@/lib/quote-hold-context";
 import { DECORATION_LOOKAHEAD_DAYS, NEUTRALIZATION_LOOKAHEAD_DAYS, OPERATION_HISTORY_DAYS } from "@/lib/operation-schedule";
 import { SELLER_CAPABLE_ROLES } from "@/lib/sales-roles";
 import { operationCost, withOperationCost } from "@/lib/operation-status";
@@ -600,9 +602,9 @@ export async function createReservation(input: unknown, actor?: AuthSession | nu
   assertReservationInitialStatus(initial.status, actor?.role);
   if (initial.contractGroupId) throw new ReservationPermissionError("Grupurile sunt generate de server; nu poti adauga o rezervare unui grup furnizat manual.");
   const seller = await resolveCreateSeller(initial, actor);
-  await resolveRentalContext(initial);
+  const preliminaryContext = await resolveRentalContext(initial, actor);
   const parsed = initial;
-  assertHoldHasClientName(parsed.status, parsed.clientName);
+  assertHoldHasClientName(parsed.status, parsed.clientName || preliminaryContext?.client.companyName);
   const locationIds = selectedLocationIds(parsed);
   if (!locationIds.length) {
     throw new Error("Alege cel putin o locatie pentru rezervare.");
@@ -627,7 +629,8 @@ export async function createReservation(input: unknown, actor?: AuthSession | nu
 
   const reservations = await prisma.$transaction(async (tx) => {
     await lockReservationLocationsForWrite(tx, locationIds);
-    const currentContext = parsed.status === "BOOKED" ? await loadAndValidateRentalContext(parsed.clientId!, parsed.campaignId!, tx, actor) : null;
+    const currentContext = parsed.status === "BOOKED" || parsed.clientId || parsed.campaignId
+      ? await loadAndValidateRentalContext(parsed.clientId!, parsed.campaignId!, tx, actor, { requireCompleteAgency: parsed.status === "BOOKED" }) : null;
     const currentInput = withValidatedBookingTerms(parsed, currentContext);
     const currentReservationData = baseReservationData(currentInput, currentContext);
     for (const locationId of locationIds) {
@@ -711,6 +714,7 @@ export async function createApprovedAgentHold(
     clientId: string; campaignId: string; ownerUserId: string;
     requestKey: string; holdExpiresAt: Date;
     quotedTerms?: { currency: "RON" | "EUR"; companyEntity: string; quoteRevisionId: string; lines: Array<{ locationId: string; monthlyRate: string }> };
+    quoteContext?: { quoteId: string; expectedRevision: number; snapshot: string | null };
   },
   actor: AuthSession
 ): Promise<ReservationDTO[]> {
@@ -733,7 +737,7 @@ export async function createApprovedAgentHold(
   const seller = await resolveSellerForMutation({ actor, sellerUserId: input.ownerUserId, db: tx });
   const externalIds = locationIds.map((id) => "agent-hold:" + createHash("sha256").update(input.requestKey + ":" + id).digest("hex"));
   await lockReservationLocationsForWrite(tx, locationIds);
-  const context = await loadAndValidateRentalContext(input.clientId, input.campaignId, tx);
+  const context = await loadAndValidateRentalContext(input.clientId, input.campaignId, tx, actor, { requireCompleteAgency: false });
   if (context.client.accountOwnerUserId !== input.ownerUserId ||
       ![context.campaign.accountOwnerUserId, context.campaign.sellerUserId].includes(input.ownerUserId)) {
     throw new ReservationPermissionError("Clientul si campania nu apartin portofoliului aprobat.");
@@ -750,6 +754,34 @@ export async function createApprovedAgentHold(
   }
   if (quoted) validatedBookingTerms(quoted, context.campaign);
   const quoteProvenance = quoted ? `Ofertă comercială aprobată · versiune ${quoted.quoteRevisionId}` : null;
+  if (input.quoteContext) {
+    const revision = quoted ? await tx.quoteRevision.findUnique({ where: { id: quoted.quoteRevisionId }, select: { quoteId: true, revision: true } }) : null;
+    if (!revision || revision.quoteId !== input.quoteContext.quoteId || revision.revision !== input.quoteContext.expectedRevision) {
+      throw new ReservationConflictError("Versiunea aprobată nu corespunde contextului hold-ului. Reîncarcă oferta înainte de rezervare.");
+    }
+    const held = await resolveQuoteHoldContext({
+      quoteId: input.quoteContext.quoteId, expectedRevision: input.quoteContext.expectedRevision,
+      locationIds, periodStart: input.periodStart.toISOString().slice(0, 10), periodEnd: input.periodEnd.toISOString().slice(0, 10),
+      actor, expectedSnapshot: input.quoteContext.snapshot, lock: true,
+    }, tx);
+    if (held.reservationIds.length) {
+      for (const locationId of locationIds) {
+        await assertCanonicalReservationAvailabilityForWrite(tx, locationId, plan.periodStart, plan.periodEnd, "HOLD", undefined, held.reservationIds);
+      }
+      for (const row of held.rows) await tx.reservation.update({ where: { id: row.id }, data: {
+        status: "HOLD", holdExpiresAt: input.holdExpiresAt, bookedAt: null,
+        amount: quoteRates.get(row.locationId), monthlyRentShare: quoteRates.get(row.locationId), monthlyRentTotal: quoteTotal,
+        currency: quoted!.currency, contractCompany: companyEntityOrThrow(quoted!.companyEntity), notes: quoteProvenance,
+        paymentTermType: context.campaign.paymentTermType, paymentTermDays: context.campaign.paymentTermDays,
+        billingRule: context.campaign.billingRule, billingFrequency: context.campaign.billingFrequency,
+      } });
+      await recordTransactionalAudit(tx, { actor, action: "agent.hold.reuse.committed", entityType: "reservation", entityId: held.reservationIds[0], metadata: {
+        reservationIds: held.reservationIds, quoteId: input.quoteContext.quoteId, quoteRevisionId: quoted!.quoteRevisionId,
+        previousSnapshot: held.snapshot, requestKey: input.requestKey, holdExpiresAt: input.holdExpiresAt.toISOString(),
+      } });
+      return (await tx.reservation.findMany({ where: { id: { in: held.reservationIds } }, include: reservationInclude, orderBy: { id: "asc" } })).map(serializeReservation);
+    }
+  }
   const prior = await tx.reservation.findMany({ where: { externalId: { in: externalIds } }, include: reservationInclude });
   if (prior.length) {
     if (prior.length !== locationIds.length || prior.some((row) =>
@@ -922,6 +954,9 @@ export async function updateReservationGroupStatus(
           if (context) { assertConfirmedContractEntity(reservation, context.campaign); validatedBookingTerms(reservation, context.campaign); }
           contexts.set(reservation.id, context);
         }
+      } else if (["HOLD", "RESERVED"].includes(status)) {
+        // Renewing a linked hold resets its TTL and is a fresh capacity claim.
+        await resolveRentalContextForUpdate({ status }, reservation, tx, rentalContextCache, actor);
       }
       await assertCanonicalReservationAvailabilityForWrite(
         tx,
@@ -1111,18 +1146,20 @@ export async function updateReservationProductionNotes(id: string, productionNot
 export async function updateReservationProductionNotesWithClient(
   client: ReservationDbClient,
   id: string,
-  productionNotes: string,
+  productionNotes: string | ((current: Prisma.ReservationGetPayload<{ include: { client: { select: { accountOwnerUserId: true } } } }>) => string | Promise<string>),
   actor?: AuthSession | null
 ): Promise<ReservationDTO> {
-  if (client === prisma) return updateReservationProductionNotes(id, productionNotes, actor);
+  if (client === prisma) return prisma.$transaction((tx) => updateReservationProductionNotesWithClient(tx, id, productionNotes, actor), reservationUpdateTransactionOptions);
+  await client.$queryRaw`SELECT id FROM portfolio_reservations WHERE id = ${id} FOR UPDATE`;
   const existing = await client.reservation.findUniqueOrThrow({
     where: { id },
     include: { client: { select: { accountOwnerUserId: true } } }
   });
   assertReservationOwnership(existing, actor);
+  const nextNotes = typeof productionNotes === "function" ? await productionNotes(existing) : productionNotes;
   const reservation = await client.reservation.update({
     where: { id },
-    data: { productionNotes },
+    data: { productionNotes: nextNotes },
     include: reservationInclude
   });
   await recordTransactionalAudit(client, { actor, action: "reservation.production_notes.committed", entityType: "reservation", entityId: id });
@@ -1166,7 +1203,9 @@ export async function extendReservationHold(id: string, days: number, actor?: Au
     const reservations = await loadLockedReservationGroupForCommand(tx, id, actor);
     assertAllStatuses(reservations, ["HOLD", "RESERVED"], "Poti prelungi doar holduri active.");
     assertNoPlannedReservationConflicts(reservations);
+    const rentalContextCache = new Map<string, ReturnType<typeof loadAndValidateRentalContext>>();
     for (const reservation of reservations) {
+      await resolveRentalContextForUpdate({ status: "RESERVED" }, reservation, tx, rentalContextCache, actor);
       await assertCanonicalReservationAvailabilityForWrite(tx, reservation.locationId, reservation.periodStart, reservation.periodEnd, "RESERVED", reservation.id, reservations.map((row) => row.id));
     }
     await tx.reservation.updateMany({
@@ -1439,15 +1478,18 @@ function assertHoldHasClientName(status: string, clientName: string | null | und
 
 type RentalContext = Awaited<ReturnType<typeof resolveRentalContext>>;
 
-async function resolveRentalContext(input: ReturnType<typeof reservationInputSchema.parse>) {
-  if (input.status !== "BOOKED") return null;
+async function resolveRentalContext(input: ReturnType<typeof reservationInputSchema.parse>, actor?: AuthSession | null) {
+  if (input.status !== "BOOKED" && !input.clientId && !input.campaignId) return null;
+  if (input.status !== "BOOKED" && (!input.clientId || !input.campaignId)) {
+    throw new Error("Un hold asociat unui dosar cere atât clientul, cât și campania. Completează ambele sau folosește un hold manual fără asociere.");
+  }
   if (!input.clientId) {
     throw new Error("Inchirierea trebuie legata de un client existent. Nu se accepta client scris manual.");
   }
   if (!input.campaignId) {
     throw new Error("Inchirierea trebuie legata de o campanie existenta.");
   }
-  return loadAndValidateRentalContext(input.clientId, input.campaignId);
+  return loadAndValidateRentalContext(input.clientId, input.campaignId, prisma, actor, { requireCompleteAgency: input.status === "BOOKED" });
 }
 
 async function resolveRentalContextForUpdate(
@@ -1456,23 +1498,50 @@ async function resolveRentalContextForUpdate(
     clientId: string | null;
     campaignId: string | null;
     status: string;
+    locationId: string;
+    periodStart: Date;
+    periodEnd: Date;
   },
   client: ReservationDbClient = prisma,
   cache?: Map<string, ReturnType<typeof loadAndValidateRentalContext>>,
   actor?: AuthSession | null
 ) {
   const nextStatus = input.status || existing.status;
-  if (nextStatus !== "BOOKED") return null;
-  if (existing.status === "BOOKED" && !isCommercialReservationPatch(input)) return null;
   const clientId = input.clientId === undefined ? existing.clientId : input.clientId;
   const campaignId = input.campaignId === undefined ? existing.campaignId : input.campaignId;
+  if (nextStatus !== "BOOKED") {
+    if (["HOLD", "RESERVED"].includes(nextStatus)) {
+      const relationChanged = clientId !== existing.clientId || campaignId !== existing.campaignId;
+      const capacityClaim = input.status === "HOLD" || input.status === "RESERVED"
+        || input.locationId !== undefined && input.locationId !== existing.locationId
+        || Boolean(input.periodStart && input.periodStart < existing.periodStart)
+        || Boolean(input.periodEnd && input.periodEnd > existing.periodEnd);
+      if ((relationChanged || capacityClaim) && (clientId || campaignId)) {
+        if (!clientId || !campaignId) throw new Error("Un hold asociat unui dosar cere atât clientul, cât și campania. Completează ambele sau golește explicit ambele asocieri.");
+        const key = `${clientId}:${campaignId}:hold-allocation`;
+        const context = cache?.get(key) || loadAndValidateRentalContext(clientId, campaignId, client, actor, { requireCompleteAgency: false });
+        cache?.set(key, context);
+        await context;
+      }
+    }
+    return null;
+  }
+  if (existing.status === "BOOKED" && !isCommercialReservationPatch(input)) return null;
   if (!clientId || !campaignId) {
     throw new Error("Transformarea in inchiriere cere client si campanie reale.");
   }
-  const cacheKey = `${clientId}:${campaignId}`;
+  // Historical corrections and reductions remain possible without reopening a
+  // terminal campaign. A new face, client, campaign or larger interval is a new
+  // commercial allocation and must use a campaign that can still be sold.
+  const historicalRepair = existing.status === "BOOKED"
+    && clientId === existing.clientId && campaignId === existing.campaignId
+    && (input.locationId === undefined || input.locationId === existing.locationId)
+    && (!input.periodStart || input.periodStart >= existing.periodStart)
+    && (!input.periodEnd || input.periodEnd <= existing.periodEnd);
+  const cacheKey = `${clientId}:${campaignId}:${historicalRepair ? "repair" : "allocation"}`;
   const cached = cache?.get(cacheKey);
   if (cached) return cached;
-  const context = loadAndValidateRentalContext(clientId, campaignId, client, actor);
+  const context = loadAndValidateRentalContext(clientId, campaignId, client, actor, { allowTerminalCampaign: historicalRepair, requireCompleteAgency: !historicalRepair });
   cache?.set(cacheKey, context);
   return context;
 }
@@ -1481,7 +1550,8 @@ async function loadAndValidateRentalContext(
   clientId: string,
   campaignId: string,
   db: ReservationDbClient = prisma,
-  actor?: AuthSession | null
+  actor?: AuthSession | null,
+  options: { allowTerminalCampaign?: boolean; requireCompleteAgency?: boolean } = {},
 ) {
   if (db !== prisma) {
     await db.$queryRaw`SELECT id FROM portfolio_campaigns WHERE id = ${campaignId} FOR UPDATE`;
@@ -1507,9 +1577,13 @@ async function loadAndValidateRentalContext(
   if (!campaign || campaign.archivedAt || campaign.status === "archived") {
     throw new Error("Campania selectata nu exista sau este arhivata.");
   }
+  if (!options.allowTerminalCampaign && ["cancelled", "completed"].includes(campaign.status)) {
+    throw new ReservationConflictError("Campania este anulată sau finalizată. Redeschide explicit dosarul comercial înainte de a confirma, prelungi sau muta o închiriere.");
+  }
   if (campaign.clientId !== clientAccount.id) {
     throw new Error("Campania selectata nu apartine clientului ales.");
   }
+  await assertCampaignParties(db, resolveCampaignParties(campaign), actor, { requireCompleteAgency: options.requireCompleteAgency ?? true });
   return { client: clientAccount, campaign };
 }
 
@@ -1748,7 +1822,7 @@ function baseReservationData(input: ReturnType<typeof reservationInputSchema.par
   }
   return {
     ...reservationData,
-    neutralizationDate: reservationData.neutralizationDate || reservationData.periodEnd,
+    neutralizationDate: reservationData.status === "BOOKED" ? reservationData.neutralizationDate || reservationData.periodEnd : reservationData.neutralizationDate,
     clientName: rentalContext.client.companyName,
     clientCompany: rentalContext.client.companyName,
     clientEmail: rentalContext.client.generalEmail,

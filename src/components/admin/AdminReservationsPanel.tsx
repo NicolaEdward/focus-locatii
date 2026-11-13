@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { AdminSalesMap } from "@/components/admin/AdminSalesMap";
 import { ReservationCommercialContext } from "@/components/admin/ReservationCommercialContext";
+import { OperationalExecutionLedger } from "@/components/admin/OperationalExecutionLedger";
 import { OccupancySummary } from "@/components/admin/inventory/OccupancySummary";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EscapeCloseHandler } from "@/hooks/use-escape-close";
@@ -244,7 +245,7 @@ const emptyForm: ReservationForm = {
   billingNotes: "",
   needsDecoration: false,
   decorationCost: "",
-  decorationCurrency: "EUR",
+  decorationCurrency: "",
   periodStart: "",
   periodEnd: "",
   productionNotes: "",
@@ -779,8 +780,11 @@ export function AdminReservationsPanel({
 
     try {
       const decorationCost = form.needsDecoration ? moneyInputValue(form.decorationCost) : null;
-      if (form.status === "BOOKED" && form.needsDecoration && decorationCost == null) {
-        throw new Error("Completeaza costul de montaj/decorare pentru taskul operational.");
+      if (form.needsDecoration && form.decorationCost.trim() && decorationCost == null) {
+        throw new Error("Costul de montaj trebuie să fie o sumă pozitivă sau zero. Lasă câmpul gol dacă valoarea nu este încă verificată.");
+      }
+      if (form.needsDecoration && decorationCost != null && !["RON", "EUR"].includes(form.decorationCurrency)) {
+        throw new Error("Alege moneda verificată a costului de montaj.");
       }
       const productionNotes = form.status === "BOOKED" && form.needsDecoration
         ? withOperationCost(form.productionNotes, "decoration", decorationCost, form.decorationCurrency)
@@ -906,7 +910,7 @@ export function AdminReservationsPanel({
         decorationCost: numberInputValue(
           decorationCostTotal == null ? null : Math.round(decorationCostTotal * 100) / 100
         ),
-        decorationCurrency: decorationCost.currency || reservation.currency || "EUR",
+        decorationCurrency: decorationCost.currency || "",
         neutralizationDate: dateInputValue(reservation.neutralizationDate),
         productionNotes: reservation.productionNotes || "",
         notes: reservation.notes || "",
@@ -944,6 +948,11 @@ export function AdminReservationsPanel({
           : [editingReservation];
       const initial = editInitialFormRef.current;
       if (!initial) throw new Error("Reîncarcă formularul înainte de salvare.");
+      if (editForm.decorationCost !== initial.decorationCost || editForm.decorationCurrency !== initial.decorationCurrency) {
+        const cost = moneyInputValue(editForm.decorationCost);
+        if (editForm.decorationCost.trim() && cost == null) throw new Error("Costul de montaj nu este valid. Lasă câmpul gol dacă valoarea nu este încă verificată.");
+        if (cost != null && !["RON", "EUR"].includes(editForm.decorationCurrency)) throw new Error("Alege moneda verificată a costului de montaj.");
+      }
 
       const updates: ReservationDTO[] = [];
       const buildBody = (reservation: ReservationDTO) => {
@@ -1612,10 +1621,12 @@ export function AdminReservationsPanel({
                         onChange={(decorationCost) => setForm({ ...form, decorationCost })}
                       />
                       <SelectField label="Moneda" value={form.decorationCurrency} onChange={(decorationCurrency) => setForm({ ...form, decorationCurrency })}>
+                        <option value="">Monedă de verificat</option>
                         <option value="EUR">EUR</option>
                         <option value="RON">RON</option>
                       </SelectField>
                       <p className="text-xs font-bold text-slate-400 md:col-span-2">
+                        Lasă costul necompletat dacă nu este încă verificat. Zero înseamnă cost cunoscut zero.{" "}
                         {form.locationIds.length > 1
                           ? `Costul total se imparte automat pe cele ${form.locationIds.length} locatii si se reconciliaza exact la cent.`
                           : "Daca este bifat, apare ca task de montaj la data de start si intra in sumarul lunar de decorari."}
@@ -2873,6 +2884,7 @@ function ReservationEditDialog({
               onChange={(value) => updateField("decorationCost", value)}
             />
             <SelectField label="Moneda" value={form.decorationCurrency} onChange={(value) => updateField("decorationCurrency", value)}>
+              <option value="">Monedă de verificat</option>
               <option value="EUR">EUR</option>
               <option value="RON">RON</option>
             </SelectField>
@@ -3118,6 +3130,7 @@ function ReservationsTable({
         <tbody>
           {reservations.map((reservation) => {
             const location = locationsById.get(reservation.locationId);
+            const monthlyRent = reservation.monthlyRentShare ?? reservation.amount;
             const canCancelReservation = canDelete && activeReservationStatuses.includes(reservation.status);
             return (
               <tr
@@ -3139,7 +3152,7 @@ function ReservationsTable({
                   {dateLabel(reservation.periodStart)} - {dateLabel(reservation.periodEnd)}
                 </Td>
                 <Td>
-                  <p>{reservation.amount ? `${moneyLabel(reservation.amount)} EUR + TVA / luna` : "-"}</p>
+                  <p>{monthlyRent != null ? `${moneyLabel(monthlyRent)} ${reservation.currency || "monedă neverificată"} / lună` : "Preț de verificat"}</p>
                   {reservation.monthlyRentTotal && reservation.contractGroupId ? (
                     <p className="text-xs text-slate-400">Total grup {moneyLabel(reservation.monthlyRentTotal)} {reservation.currency || "monedă neverificată"}</p>
                   ) : null}
@@ -3248,7 +3261,7 @@ function DecorationBillingSummary({
           <p className="text-xs font-black uppercase text-focus-yellow">Facturare montaj</p>
           <h3 className="font-display text-xl font-black uppercase text-white">Decorari finalizate in luna</h3>
           <p className="mt-1 text-sm font-bold text-slate-300">
-            Lista ajuta la verificarea costurilor de montaj inainte de facturare.
+            Costuri din lista operațională curentă, pentru verificare înainte de facturare. Pentru închirierile anulate sau mai vechi, deschide istoricul execuțiilor.
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-[180px_160px]">
@@ -3258,7 +3271,7 @@ function DecorationBillingSummary({
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-bold text-slate-300">
-          {report.rows.length} montaj(e) finalizate in luna selectata. Doar statusul Finalizata intra in total.
+          {report.rows.length} montaj(e) din lista curentă, în luna selectată. Totalul include numai sume cu monedă verificată și nu aprobă facturarea.
         </p>
         <div className="flex flex-wrap gap-2">
           <button className="focus-button secondary" type="button" onClick={() => setExpanded((value) => !value)}>
@@ -3275,6 +3288,7 @@ function DecorationBillingSummary({
           {report.missingCostRows.length} montaj(e) finalizate nu au cost completat si trebuie verificate inainte de facturare.
         </div>
       ) : null}
+      {report.missingCurrencyRows.length ? <p className="mt-3 rounded-md border border-amber-300/40 p-3 text-sm font-bold text-amber-100">{report.missingCurrencyRows.length} montaj(e) nu au monedă verificată. Sumele lor sunt excluse din totaluri; moneda chiriei nu dovedește moneda costului.</p> : null}
       {expanded ? <div className="mt-3 overflow-auto">
         <table className="w-full min-w-[1120px] border-collapse text-sm">
           <thead className="bg-focus-navy text-left text-xs uppercase text-focus-yellow">
@@ -3298,7 +3312,7 @@ function DecorationBillingSummary({
                   <Td>{row.campaign}</Td>
                   <Td>{operationStatusLabel(row.status)}</Td>
                   <Td>
-                    {row.cost != null ? `${moneyLabel(row.cost)} ${row.currency}` : <span className="text-amber-200">Fara cost</span>}
+                    {row.cost != null ? `${moneyLabel(row.cost)} ${row.currency || "— monedă de verificat"}` : <span className="text-amber-200">Fara cost</span>}
                   </Td>
                 </tr>
               );
@@ -3313,6 +3327,7 @@ function DecorationBillingSummary({
           </tbody>
         </table>
       </div> : null}
+      <div className="mt-3"><OperationalExecutionLedger month={month} /></div>
     </div>
   );
 }
@@ -3904,7 +3919,8 @@ function moneyInputValue(value: string) {
 }
 
 function editFinancialPreview(reservation: ReservationDTO, form: ReservationEditForm, affectedCount: number) {
-  const currency = form.currency || reservation.currency || "EUR";
+  const currency = form.currency || reservation.currency;
+  if (!currency || !["RON", "EUR"].includes(currency) || !reservation.currency || (form.currency && form.currency !== reservation.currency)) return null;
   const previousPerCode =
     reservation.amount ??
     reservation.monthlyRentShare ??

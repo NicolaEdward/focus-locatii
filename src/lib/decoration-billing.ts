@@ -39,17 +39,25 @@ export type DecorationBillingRow = {
   scheduledDate: string | null;
   status: "DONE";
   cost: number | null;
-  currency: string;
+  currency: "RON" | "EUR" | null;
+  sourceCurrency: string | null;
   taskType: string;
   taskId: string | null;
   missingCost: boolean;
+  missingCurrency: boolean;
+  reservationStatus: string;
+  billingReview: "verify_before_billing" | "rental_status_review";
+  completionDateSource: "completed" | "scheduled_fallback";
 };
 
 export type DecorationBillingReport = {
   month: string;
   rows: DecorationBillingRow[];
+  /** Physical work survives cancellation; this is evidence, not an invoice authorization. */
+  executionRows: DecorationBillingRow[];
   totals: Record<string, number>;
   missingCostRows: DecorationBillingRow[];
+  missingCurrencyRows: DecorationBillingRow[];
 };
 
 const EXCLUDED_RESERVATION_STATUSES = new Set(["CANCELLED", "EXPIRED", "ARCHIVED", "LOST"]);
@@ -68,23 +76,26 @@ export function buildDecorationBillingReport(tasks: DecorationBillingTaskLike[],
     }
   }
 
-  const rows = [...deduped.values()].sort((left, right) =>
+  const executionRows = [...deduped.values()].sort((left, right) =>
     new Date(right.finalizationDate).getTime() - new Date(left.finalizationDate).getTime() ||
     new Date(right.scheduledDate || right.finalizationDate).getTime() - new Date(left.scheduledDate || left.finalizationDate).getTime() ||
     left.location.localeCompare(right.location) ||
     left.client.localeCompare(right.client)
   );
+  const rows = executionRows.filter((row) => row.billingReview !== "rental_status_review");
   const totals = rows.reduce<Record<string, number>>((sum, row) => {
-    if (row.cost == null) return sum;
-    sum[row.currency] = (sum[row.currency] || 0) + row.cost;
+    if (row.cost == null || row.currency == null) return sum;
+    sum[row.currency] = (Math.round((sum[row.currency] || 0) * 100) + Math.round(row.cost * 100)) / 100;
     return sum;
   }, {});
 
   return {
     month,
     rows,
+    executionRows,
     totals,
-    missingCostRows: rows.filter((row) => row.missingCost)
+    missingCostRows: rows.filter((row) => row.missingCost),
+    missingCurrencyRows: rows.filter((row) => row.missingCurrency)
   };
 }
 
@@ -99,7 +110,9 @@ export function decorationBillingCsv(report: DecorationBillingReport) {
     "Status",
     "Cost",
     "Moneda",
-    "Atentionare"
+    "Atentionare",
+    "Stare inchiriere",
+    "Verificare facturabilitate"
   ];
   const rows = report.rows.map((row) => [
     report.month,
@@ -110,8 +123,10 @@ export function decorationBillingCsv(report: DecorationBillingReport) {
     taskTypeLabel(row.taskType),
     row.status,
     row.cost == null ? "" : String(row.cost),
-    row.currency,
-    row.missingCost ? "Cost montaj lipsa" : ""
+    row.currency || row.sourceCurrency || "",
+    [row.missingCost ? "Cost montaj lipsa sau invalid" : "", row.missingCurrency ? "Moneda montaj neverificata" : "", row.completionDateSource === "scheduled_fallback" ? "Data executiei neverificata" : ""].filter(Boolean).join("; "),
+    row.reservationStatus,
+    "Necesita verificare inainte de facturare"
   ]);
   const totalRows = Object.entries(report.totals).map(([currency, value]) => [
     report.month,
@@ -124,6 +139,8 @@ export function decorationBillingCsv(report: DecorationBillingReport) {
     "",
     String(value),
     currency,
+    "",
+    "",
     ""
   ]);
 
@@ -136,14 +153,17 @@ export function decorationBillingFileName(month: string) {
 
 function decorationBillingRow(task: DecorationBillingTaskLike, range: { from: Date; to: Date }): DecorationBillingRow | null {
   if (task.operationStatus !== "DONE") return null;
-  if (EXCLUDED_RESERVATION_STATUSES.has(String(task.reservation.status || "").toUpperCase())) return null;
-
-  const finalizationDate = validDate(task.finalizationDate) || validDate(task.taskDate);
+  const actualCompletionDate = validDate(task.finalizationDate);
+  const finalizationDate = actualCompletionDate || validDate(task.taskDate);
   if (!finalizationDate || finalizationDate < range.from || finalizationDate >= range.to) return null;
 
   const scheduledDate = validDate(task.taskDate);
-  const currency = task.currency || task.reservation.currency || "EUR";
+  // Rental income and installation cost can use different currencies. An absent
+  // cost currency is not evidence that it is EUR or the rental's currency.
+  const sourceCurrency = String(task.currency || "").trim().toUpperCase() || null;
+  const currency = sourceCurrency === "RON" || sourceCurrency === "EUR" ? sourceCurrency : null;
   const cost = validCost(task.cost);
+  const reservationStatus = String(task.reservation.status || "").toUpperCase();
 
   return {
     key: task.dedupeKey || decorationBillingDedupeKey(task),
@@ -158,9 +178,14 @@ function decorationBillingRow(task: DecorationBillingTaskLike, range: { from: Da
     status: "DONE",
     cost,
     currency,
+    sourceCurrency,
     taskType: task.taskType || "initial",
     taskId: task.taskId || null,
-    missingCost: cost == null
+    missingCost: cost == null,
+    missingCurrency: currency == null,
+    reservationStatus,
+    billingReview: EXCLUDED_RESERVATION_STATUSES.has(reservationStatus) ? "rental_status_review" : "verify_before_billing",
+    completionDateSource: actualCompletionDate ? "completed" : "scheduled_fallback"
   };
 }
 
@@ -196,7 +221,7 @@ function validDate(value?: string | null) {
 
 function validCost(value?: number | null) {
   if (value == null) return null;
-  return Number.isFinite(value) && value >= 0 ? value : null;
+  return Number.isFinite(value) && value >= 0 && Math.round(value * 100) / 100 === value ? value : null;
 }
 
 function taskTypeLabel(value: string) {

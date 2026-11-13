@@ -4,6 +4,9 @@ import type { AuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { hasAnyPermission, hasGlobalDataAccess } from "@/lib/rbac";
 import { checkedPeriod, commercialHash, commercialManagerRoles, hasConfirmedCommercialCalendar, matchesCommercialPolicy, tokenHash } from "@/lib/commercial-workbench-core";
+import { assertCampaignParties, campaignPartyFingerprint } from "@/lib/campaign-parties";
+import { ClientMutationError } from "@/lib/clients";
+import { isSellerCapableRole } from "@/lib/sales-roles";
 
 const money = z.string().regex(/^\d{1,12}\.\d{2}$/);
 const payloadSchema = z.object({
@@ -12,6 +15,10 @@ const payloadSchema = z.object({
   recipient: z.string().email().max(254), periodStart: z.string(), periodEnd: z.string(),
   currency: z.enum(["RON", "EUR"]), policyVersion: z.number().int().positive(),
   commercialPolicyHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  campaignPartiesFingerprint: z.string().max(1024).optional(),
+  campaignParties: z.object({ campaignType: z.enum(["direct_client", "agency"]),
+    agency: z.object({ id: z.string().min(1), name: z.string().min(1).max(500) }).nullable(),
+    endClient: z.object({ id: z.string().min(1), name: z.string().min(1).max(500) }).nullable() }).optional(),
   paymentTermType: z.string().nullable().optional(), paymentTermDays: z.number().int().min(0).max(3650).nullable(),
   billingRule: z.string().nullable().optional(), billingFrequency: z.string().nullable().optional(),
   vatRateBps: z.number().int().min(0).max(10000), vatTreatment: z.enum(["inclusive", "exclusive", "exempt"]),
@@ -51,7 +58,7 @@ export async function getCommercialQuotePrint(quoteId: string, revisionId: strin
       throw new QuotePrintError("Totalurile versiunii trebuie verificate înainte de export.", 409, "QUOTE_PRINT_INTEGRITY");
     const [client, campaign, policy, approvals] = await Promise.all([
       tx.clientAccount.findUnique({ where: { id: payload.clientId }, select: { accountOwnerUserId: true, status: true } }),
-      tx.campaign.findUnique({ where: { id: payload.campaignId }, select: { clientId: true, sellerUserId: true, archivedAt: true, status: true, currency: true, companyEntity: true, paymentTermType: true, paymentTermDays: true, billingRule: true, billingFrequency: true } }),
+      tx.campaign.findUnique({ where: { id: payload.campaignId }, select: { clientId: true, campaignType: true, agencyClientId: true, endClientId: true, sellerUserId: true, archivedAt: true, status: true, currency: true, companyEntity: true, paymentTermType: true, paymentTermDays: true, billingRule: true, billingFrequency: true } }),
       tx.commercialPolicy.findUnique({ where: { id: "default" } }),
       tx.commercialApproval.findMany({ where: { revisionId: revision.id, action: "send_quote", state: { in: ["approved", "consumed"] }, expiresAt: { gt: now }, approvedByUserId: { not: null } }, select: { approvedByUserId: true, payloadHash: true, recipientHash: true, holdExpiresAt: true } }),
     ]);
@@ -62,7 +69,15 @@ export async function getCommercialQuotePrint(quoteId: string, revisionId: strin
     const approvedHash = commercialHash({ revisionHash: revision.payloadHash, action: "send_quote", recipientHash, holdExpiresAt: null });
     const approved = approvals.some((approval) => approval.approvedByUserId && validApprovers.has(approval.approvedByUserId) && approval.payloadHash === approvedHash && approval.recipientHash === recipientHash && approval.holdExpiresAt === null);
     const currentPolicy = Boolean(policy && matchesCommercialPolicy(payload, policy) && payload.vatRateBps === policy.vatRateBps && payload.vatTreatment === policy.vatTreatment && payload.currency === policy.rateCardCurrency);
-    const currentTerms = Boolean(client && campaign && !["archived", "merged", "cancelled"].includes(client.status) && !campaign.archivedAt && !["archived", "cancelled"].includes(campaign.status)
+    const owner = await tx.user.findUnique({ where: { id: revision.quote.ownerUserId }, select: { id: true, role: true, active: true } });
+    let currentParties = Boolean(owner?.active && isSellerCapableRole(owner.role) && campaign
+      && (payload.campaignPartiesFingerprint ? payload.campaignPartiesFingerprint === campaignPartyFingerprint(campaign) : campaign.campaignType !== "agency")
+      && (campaign.campaignType !== "agency" || payload.campaignParties?.agency?.id === campaign.agencyClientId && payload.campaignParties?.endClient?.id === campaign.endClientId));
+    if (campaign && currentParties) {
+      try { await assertCampaignParties(tx, campaign, owner, { requireCompleteAgency: true }); }
+      catch (error) { if (error instanceof ClientMutationError) currentParties = false; else throw error; }
+    }
+    const currentTerms = Boolean(client && campaign && currentParties && !["archived", "merged", "cancelled"].includes(client.status) && !campaign.archivedAt && !["archived", "cancelled", "completed"].includes(campaign.status)
       && client.accountOwnerUserId === revision.quote.ownerUserId && campaign.sellerUserId === revision.quote.ownerUserId && campaign.clientId === payload.clientId
       && campaign.currency === payload.currency && campaign.companyEntity === payload.companyEntity && payload.paymentTermType && payload.paymentTermDays != null && payload.billingRule && payload.billingFrequency
       && hasConfirmedCommercialCalendar(payload)

@@ -73,7 +73,8 @@ function decorationCostWorkflow() {
   assert(panel.includes("Necesita montaj"), "booking form should use clear decoration label");
   assert(!panel.includes("Urmareste montajul operational"), "unclear montaj label should be removed");
   assert(panel.includes("Cost montaj / decorare"), "decoration cost should be requested when decoration is selected");
-  assert(panel.includes("Completeaza costul de montaj/decorare"), "selected decoration should require a valid cost");
+  assert(panel.includes("Lasă costul necompletat dacă nu este încă verificat"), "unknown decoration cost must be distinguishable from an explicit zero");
+  assert(panel.includes("Alege moneda verificată a costului de montaj"), "a provided decoration cost requires its own verified currency");
   assert(panel.includes("withOperationCost(form.productionNotes"), "create flow should persist decoration cost in operation metadata");
   assert(panel.includes("Decorari finalizate in luna"), "decorations panel should include monthly billing summary");
   assert(panel.includes("Facturare montaj"), "monthly decoration summary should be labeled for billing");

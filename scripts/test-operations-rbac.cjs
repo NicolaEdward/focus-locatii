@@ -33,7 +33,8 @@ const route = loadTsModule(path.join(process.cwd(), "src", "app", "api", "reserv
     }
   },
   "@/lib/reservations": {
-    updateReservationProductionNotes: async (id, nextNotes, actor) => {
+    updateReservationProductionNotesWithClient: async (db, id, transform, actor) => {
+      const nextNotes = typeof transform === "function" ? await transform({ id, productionNotes }, db) : transform;
       updates.push({ id, nextNotes, actor });
       productionNotes = nextNotes;
       return { id, productionNotes: nextNotes };

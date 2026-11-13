@@ -125,6 +125,24 @@ jobs:
           pnpm run test:invitation-onboarding
           pnpm run test:contract-control
           pnpm run test:sales-workspace
+      - name: Practical OOH company regressions
+        run: |
+          pnpm run test:simulation-isolation
+          pnpm run test:simulation-fixture-guard
+          pnpm run test:commercial-options
+          pnpm run test:quote-owned-hold-revision
+          pnpm run test:location-selection-discovery
+          pnpm run test:campaign-parties-lifecycle
+          pnpm run test:campaign-workspace-integrity
+          pnpm run test:campaign-document-handoff
+          pnpm run test:invoice-document-upload
+          pnpm run test:operational-cost-integrity
+          pnpm run test:operational-cost-route
+          pnpm run test:operational-execution-history
+          pnpm run test:operational-task-requests
+          pnpm run test:operational-patch-concurrency
+          pnpm run test:crm-workspace-state
+          pnpm run test:crm-time
       - name: Assistant MCP and NAS document audit regressions
         run: |
           node node_modules/tsx/dist/cli.mjs scripts/test-assistant-mcp.ts

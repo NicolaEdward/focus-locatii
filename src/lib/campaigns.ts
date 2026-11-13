@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { recordTransactionalAudit } from "@/lib/transactional-audit";
 import { bucharestDateKey } from "@/lib/campaigns/campaign-effective-status";
 import { prisma } from "@/lib/prisma";
-import { withAuthorizedClientMutation } from "@/lib/clients";
+import { ClientMutationError, withAuthorizedClientMutation } from "@/lib/clients";
 import type { AuthSession } from "@/lib/auth";
 import { paymentTermDays, paymentTermOptions, billingRules, billingFrequencies } from "@/lib/billing";
 import {
@@ -16,6 +16,7 @@ import { companyEntityOrDefault, companyEntityOrThrow } from "@/lib/company-enti
 import { effectiveBlockingReservationWhere } from "@/lib/reservation-lifecycle";
 import { resolveRequiredSalesOwner } from "@/lib/seller-users";
 import { canDefaultSalesOwnerToActor } from "@/lib/sales-roles";
+import { assertCampaignParties, campaignPartyFingerprint, campaignPartyIds, resolveCampaignParties } from "@/lib/campaign-parties";
 
 const optionalText = z.preprocess((value) => {
   if (value == null || value === "") return null;
@@ -52,8 +53,10 @@ export const campaignInputSchema = z.object({
 export async function createCampaign(input: unknown, actor: AuthSession) {
   const parsed = normalizeCampaignForCreate(campaignInputSchema.parse(input), actor);
   assertCampaignStatusForCreate(parsed.status);
-  return withAuthorizedClientMutation(actor, [parsed.clientId], async (tx, currentActor) => {
+  const parties = resolveCampaignParties(parsed);
+  return withAuthorizedClientMutation(actor, campaignPartyIds(parties), async (tx, currentActor) => {
     assertCampaignActor(currentActor);
+    await assertCampaignParties(tx, parties, currentActor);
     const client = await tx.clientAccount.findUnique({ where: { id: parsed.clientId } });
     if (!client || ["archived", "merged"].includes(client.status)) throw new Error("Campania trebuie legata de un client activ.");
     if (currentActor.role === "SALES_AGENT" && client.accountOwnerUserId !== currentActor.id)
@@ -68,15 +71,31 @@ export async function createCampaign(input: unknown, actor: AuthSession) {
 
 export async function updateCampaign(id: string, input: unknown, actor: AuthSession) {
   const parsed = normalizeCampaignForUpdate(campaignInputSchema.partial().parse(input));
-  return withAuthorizedClientMutation(actor, parsed.clientId ? [parsed.clientId] : [], async (tx, currentActor) => {
+  // Collect every party before locking the campaign, preserving the common
+  // actor -> sorted clients -> campaign lock order. Recheck the snapshot under
+  // the lock so a concurrent reassociation cannot introduce an unlocked party.
+  const snapshot = await prisma.campaign.findUnique({ where: { id }, select: { clientId: true, campaignType: true, agencyClientId: true, endClientId: true } });
+  const nextParties = resolveCampaignParties(parsed, snapshot || undefined);
+  const partyIds = [...campaignPartyIds(nextParties), ...(snapshot ? campaignPartyIds(snapshot) : [])];
+  return withAuthorizedClientMutation(actor, partyIds, async (tx, currentActor) => {
     assertCampaignActor(currentActor);
     await tx.$queryRaw`SELECT id FROM portfolio_campaigns WHERE id = ${id} FOR UPDATE`;
     const existing = await tx.campaign.findUnique({ where: { id }, include: { client: true } });
     if (!existing) throw new Error("Campania nu exista.");
     assertCanMutateCampaign(existing, currentActor);
+    if (!snapshot || campaignPartyFingerprint(snapshot) !== campaignPartyFingerprint(existing)) {
+      throw new ClientMutationError("Părțile campaniei au fost modificate simultan. Reîncarcă dosarul înainte să salvezi.", 409);
+    }
+    const relationshipChanged = campaignPartyFingerprint(nextParties) !== campaignPartyFingerprint(existing);
+    if (relationshipChanged) await assertCampaignParties(tx, nextParties, currentActor);
     if (parsed.status !== undefined) {
       if (parsed.status === "archived") throw new Error("Foloseste actiunea dedicata de arhivare pentru a verifica inchirierile active.");
       parsed.status = assertCampaignStatusTransition(existing.status, parsed.status);
+      if (parsed.status !== existing.status && ["cancelled", "completed"].includes(parsed.status)) {
+        const today = new Date(bucharestDateKey() + "T00:00:00.000Z");
+        const blockers = await tx.reservation.count({ where: { campaignId: id, ...effectiveBlockingReservationWhere(), periodEnd: { gte: today } } });
+        if (blockers) throw new ClientMutationError("Campania are închirieri sau hold-uri curente ori viitoare. Rezolvă explicit anularea sau mutarea lor înainte de a anula ori finaliza campania; istoricul nu se șterge.", 409);
+      }
     }
     if (parsed.clientId && parsed.clientId !== existing.clientId) {
       if (await tx.reservation.count({ where: { campaignId: id, ...effectiveBlockingReservationWhere() } }))
@@ -93,7 +112,7 @@ export async function updateCampaign(id: string, input: unknown, actor: AuthSess
         throw new Error("Moneda trebuie sa corespunda inchirierilor confirmate si istoricului de pret. Pentru conversie este necesar un act aditional verificat.");
     }
     const campaign = await tx.campaign.update({ where: { id }, data: parsed });
-    await recordTransactionalAudit(tx, { actor: currentActor, action: "campaign.update.committed", entityType: "campaign", entityId: id, metadata: { changedFields: Object.keys(parsed), currency: campaign.currency } });
+    await recordTransactionalAudit(tx, { actor: currentActor, action: "campaign.update.committed", entityType: "campaign", entityId: id, metadata: { changedFields: Object.keys(parsed), currency: campaign.currency, ...(relationshipChanged ? { parties: { before: resolveCampaignParties(existing), after: nextParties } } : {}) } });
     return campaign;
   });
 }

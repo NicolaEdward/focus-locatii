@@ -12,6 +12,7 @@ import {
   selectionQualityWarnings,
   toSelectionSnapshot
 } from "@/lib/location-selection-client";
+import { matchesLocationSelectionFilters, sortSelectionLocations } from "@/lib/location-selection-filters";
 import type { AuthSession } from "@/lib/auth";
 import { readQuoteSelectionDraft, saveQuoteSelectionDraft } from "@/lib/quote-selection-bridge";
 import type {
@@ -57,6 +58,10 @@ export function AdminLocationSelectionPage({
   initialData: LocationSelectionResponse;
   session: AuthSession;
 }) {
+  const [inventory, setInventory] = useState(initialData);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
+  const inventoryRequestRef = useRef(0);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [selectionLoaded, setSelectionLoaded] = useState(false);
   const [search, setSearch] = useState("");
@@ -65,6 +70,7 @@ export function AdminLocationSelectionPage({
   const [availabilityById, setAvailabilityById] = useState<Record<string, LocationSelectionAvailability>>({});
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+  const [quoteHeldCount, setQuoteHeldCount] = useState(0);
   const [fitKey, setFitKey] = useState("initial");
   const [showMap, setShowMap] = useState(false);
   const [availabilityRefreshKey, setAvailabilityRefreshKey] = useState(0);
@@ -76,13 +82,16 @@ export function AdminLocationSelectionPage({
   const periodInvalid = Boolean(selection.periodStart && selection.periodEnd && selection.periodStart > selection.periodEnd);
   const periodMode = periodValid ? "range" : selection.periodStart ? "start" : "none";
   const availabilityScopeActive = Boolean(selection.periodStart && !periodInvalid);
+  const previousPeriodModeRef = useRef(periodMode);
 
   useEffect(() => {
     const allowed = periodMode === "range"
       ? new Set(["PROPOSABLE", "AVAILABLE", "PARTIAL", "ALL", "CONFLICT"])
       : new Set(["ALL", "CURRENT_AVAILABLE", "FUTURE_BOOKINGS", "CURRENT_CONFLICT"]);
+    const modeChanged = previousPeriodModeRef.current !== periodMode;
+    previousPeriodModeRef.current = periodMode;
     setFilters((current) => {
-      if (allowed.has(current.availability || "")) return current;
+      if (!modeChanged && allowed.has(current.availability || "")) return current;
       return {
         ...current,
         availability: periodMode === "range" ? "PROPOSABLE" : periodMode === "start" ? "CURRENT_AVAILABLE" : "ALL"
@@ -90,16 +99,52 @@ export function AdminLocationSelectionPage({
     });
   }, [periodMode]);
 
-  const baseFilteredLocations = useMemo(() => {
-    const normalizedSearch = normalizeSearch(deferredSearch);
-    const selectedMediaTypes = filters.mediaTypes?.length ? filters.mediaTypes : filters.mediaType ? [filters.mediaType] : [];
-    return initialData.locations.filter((location) => {
-      if (normalizedSearch && !locationMatchesSearch(location, normalizedSearch)) return false;
-      if (selectedMediaTypes.length && !selectedMediaTypes.includes(location.mediaType || "") && !selectedMediaTypes.includes(location.category || "")) return false;
-      if (filters.status && location.status !== filters.status) return false;
-      return true;
-    });
-  }, [deferredSearch, filters.mediaType, filters.mediaTypes, filters.status, initialData.locations]);
+  const inventoryQuery = useMemo(() => {
+    const params = new URLSearchParams({ pageSize: "100", sort: filters.sort || "code" });
+    if (deferredSearch.trim()) params.set("search", deferredSearch.trim());
+    for (const key of ["city", "area", "status", "minSurface", "maxSurface", "minPrice", "maxPrice", "hasImage"] as const) {
+      const value = filters[key];
+      if (value != null && value !== "") params.set(key, String(value));
+    }
+    const formats = filters.mediaTypes?.length ? filters.mediaTypes : filters.mediaType ? [filters.mediaType] : [];
+    if (formats.length) params.set("mediaTypes", formats.join(","));
+    return params.toString();
+  }, [deferredSearch, filters]);
+
+  useEffect(() => {
+    const requestId = ++inventoryRequestRef.current;
+    const controller = new AbortController();
+    setInventoryLoading(true); setInventoryError(null);
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/admin/location-selection?${inventoryQuery}`, { cache: "no-store", signal: controller.signal });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "Inventarul nu a putut fi încărcat.");
+        if (requestId === inventoryRequestRef.current) setInventory(body);
+      } catch (error) {
+        if (!controller.signal.aborted && requestId === inventoryRequestRef.current) setInventoryError(error instanceof Error ? error.message : "Inventarul nu a putut fi încărcat.");
+      } finally { if (requestId === inventoryRequestRef.current) setInventoryLoading(false); }
+    }, 180);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [inventoryQuery]);
+
+  const loadMoreInventory = useCallback(async () => {
+    if (inventoryLoading || !inventory.page.hasMore) return;
+    const requestId = ++inventoryRequestRef.current;
+    setInventoryLoading(true); setInventoryError(null);
+    try {
+      const response = await fetch(`/api/admin/location-selection?${inventoryQuery}&offset=${inventory.locations.length}`, { cache: "no-store" });
+      const body: LocationSelectionResponse & { error?: string } = await response.json();
+      if (!response.ok) throw new Error(body.error || "Următoarele locații nu au putut fi încărcate.");
+      if (requestId === inventoryRequestRef.current) setInventory((current) => ({ ...body, locations: [...new Map([...current.locations, ...body.locations].map((row) => [row.id, row])).values()] }));
+    } catch (error) {
+      if (requestId === inventoryRequestRef.current) setInventoryError(error instanceof Error ? error.message : "Inventarul nu a putut fi încărcat.");
+    } finally { if (requestId === inventoryRequestRef.current) setInventoryLoading(false); }
+  }, [inventory, inventoryLoading, inventoryQuery]);
+
+  const baseFilteredLocations = useMemo(() => inventory.locations.filter((location) =>
+    matchesLocationSelectionFilters(location, { ...filters, search: deferredSearch })
+  ), [deferredSearch, filters, inventory.locations]);
 
   const filteredLocations = useMemo(() => {
     let rows = baseFilteredLocations.filter((location) => {
@@ -123,18 +168,37 @@ export function AdminLocationSelectionPage({
   const seed = useMemo(() => buildMediaPlanSeedFromSelection(selectionPayload), [selectionPayload]);
 
   useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
     const params = new URLSearchParams(window.location.search);
     const handoffKey = params.get("selection");
     const draft = handoffKey ? readQuoteSelectionDraft(handoffKey, session.id) : null;
     const savedSelection = readSavedSelection(session.id);
-    if (draft) {
-      setSelection({ ...draft, items: draft.locationIds.flatMap((id, sortOrder) => {
-        const location = initialData.locations.find((row) => row.id === id);
-        return location ? [{ locationId: id, sortOrder, snapshot: toSelectionSnapshot(location), availabilityState: "UNKNOWN" as const, availabilityWarnings: [], suggestedBasePrice: location.suggestedBasePrice, currency: location.currency }] : [];
-      }) });
-    } else if (savedSelection) setSelection({ ...savedSelection, quoteId: undefined, expectedRevision: undefined, requestKey: undefined, rateInputs: undefined, recipient: undefined, assumptions: undefined });
-    if (handoffKey && !draft) setHandoffError("Selecția transferată a expirat sau nu aparține acestui cont. Selecția salvată rămâne disponibilă.");
-    setSelectionLoaded(true);
+    async function restore() {
+      try {
+        if (draft) {
+          let locations = initialData.locations;
+          if (draft.locationIds.some((id) => !locations.some((row) => row.id === id))) {
+            const response = await fetch(`/api/admin/location-selection?selectedIds=${encodeURIComponent(draft.locationIds.join(","))}&pageSize=50`, { cache: "no-store", signal: controller.signal });
+            if (!response.ok) throw new Error("Locațiile transferate nu au putut fi reîncărcate. Reîncearcă deschiderea selecției.");
+            const data: LocationSelectionResponse = await response.json();
+            locations = data.locations;
+          }
+          if (cancelled) return;
+          const missing = draft.locationIds.filter((id) => !locations.some((row) => row.id === id));
+          if (missing.length) throw new Error(`${missing.length} locații transferate nu mai sunt ofertabile. Verifică oferta înainte de a schimba selecția.`);
+          setSelection({ ...draft, items: draft.locationIds.flatMap((id, sortOrder) => {
+            const location = locations.find((row) => row.id === id);
+            return location ? [{ locationId: id, sortOrder, snapshot: toSelectionSnapshot(location), availabilityState: "UNKNOWN" as const, availabilityWarnings: [], suggestedBasePrice: location.suggestedBasePrice, currency: location.currency }] : [];
+          }) });
+        } else if (savedSelection && !cancelled) setSelection({ ...savedSelection, quoteId: undefined, expectedRevision: undefined, requestKey: undefined, rateInputs: undefined, recipient: undefined, assumptions: undefined });
+        if (handoffKey && !draft && !cancelled) setHandoffError("Selecția transferată a expirat sau nu aparține acestui cont. Selecția salvată rămâne disponibilă.");
+      } catch (error) {
+        if (!cancelled) setHandoffError(error instanceof Error ? error.message : "Selecția nu a putut fi restaurată.");
+      } finally { if (!cancelled) setSelectionLoaded(true); }
+    }
+    void restore();
+    return () => { cancelled = true; controller.abort(); };
   }, [initialData.locations, session.id]);
 
   useEffect(() => {
@@ -167,8 +231,8 @@ export function AdminLocationSelectionPage({
   }, [availabilityById]);
 
   const allAvailabilityIdsKey = useMemo(
-    () => initialData.locations.map((location) => location.id).sort().join("|"),
-    [initialData.locations]
+    () => inventory.locations.map((location) => location.id).sort().join("|"),
+    [inventory.locations]
   );
   const selectedAvailabilityIdsKey = useMemo(
     () => selection.items.map((item) => item.locationId).sort().join("|"),
@@ -179,27 +243,24 @@ export function AdminLocationSelectionPage({
     const selectedIdsForAvailability = selectedAvailabilityIdsKey ? selectedAvailabilityIdsKey.split("|") : [];
     const allIds = allAvailabilityIdsKey ? allAvailabilityIdsKey.split("|") : [];
     const ids = [...new Set([...allIds, ...selectedIdsForAvailability])];
-    if (!ids.length) return;
     const requestId = ++availabilityRequestRef.current;
+    if (!ids.length) { setAvailabilityById({}); setAvailabilityLoading(false); setAvailabilityError(null); return; }
     const controller = new AbortController();
+    setAvailabilityLoading(true); setAvailabilityError(null); setAvailabilityById({}); setQuoteHeldCount(0);
     const timeout = window.setTimeout(() => {
-      setAvailabilityLoading(true);
-      setAvailabilityError(null);
-      fetch("/api/admin/location-selection/availability", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          locationIds: ids,
-          periodStart: selection.periodStart || null,
-          periodEnd: selection.periodEnd || null
-        })
-      })
-        .then(async (response) => {
-          const payload = await response.json().catch(() => null);
-          if (!response.ok) throw new Error(payload?.error || "Disponibilitatea nu a putut fi verificata.");
-          return payload.availabilityByLocationId as Record<string, LocationSelectionAvailability>;
-        })
+      const pages = Array.from({ length: Math.ceil(ids.length / 500) }, (_, index) => ids.slice(index * 500, (index + 1) * 500));
+      const requests: { locationIds: string[]; quoteId?: string; expectedRevision?: number }[] = pages.map((locationIds) => ({ locationIds }));
+      if (periodValid && selection.quoteId && selection.expectedRevision && selectedIdsForAvailability.length) requests.push({ locationIds: selectedIdsForAvailability, quoteId: selection.quoteId, expectedRevision: selection.expectedRevision });
+      Promise.all(requests.map(async (request) => {
+        const response = await fetch("/api/admin/location-selection/availability", {
+          method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+          body: JSON.stringify({ ...request, periodStart: selection.periodStart || null, periodEnd: selection.periodEnd || null })
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error || "Disponibilitatea nu a putut fi verificata.");
+        if (request.quoteId && requestId === availabilityRequestRef.current && !controller.signal.aborted) setQuoteHeldCount(payload.quoteHoldContext?.count || 0);
+        return payload.availabilityByLocationId as Record<string, LocationSelectionAvailability>;
+      })).then((pages) => Object.assign({}, ...pages) as Record<string, LocationSelectionAvailability>)
         .then((payload) => {
           if (requestId === availabilityRequestRef.current) {
             setAvailabilityById((current) => ({ ...current, ...payload }));
@@ -217,9 +278,30 @@ export function AdminLocationSelectionPage({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [allAvailabilityIdsKey, availabilityRefreshKey, selectedAvailabilityIdsKey, selection.periodEnd, selection.periodStart]);
+  }, [allAvailabilityIdsKey, availabilityRefreshKey, selectedAvailabilityIdsKey, selection.periodEnd, selection.periodStart, selection.quoteId, selection.expectedRevision, periodValid]);
+
+  const applyAvailableWindow = useCallback((locationId: string, start: string, end: string) => {
+    const location = inventory.locations.find((row) => row.id === locationId);
+    if (!location) return;
+    const from = start.slice(0, 10), to = end.slice(0, 10);
+    if (!window.confirm(`Schimbi perioada întregii selecții în ${from} – ${to}? Disponibilitatea tuturor locațiilor va fi verificată din nou.`)) return;
+    setAvailabilityById({}); setAvailabilityLoading(true);
+    setFilters((current) => ({ ...current, availability: "AVAILABLE" }));
+    setSelection((current) => ({ ...current, periodStart: from, periodEnd: to,
+      items: current.items.some((item) => item.locationId === locationId) ? current.items.map((item) => ({ ...item, availabilityState: "UNKNOWN", availabilityWarnings: ["Perioada s-a schimbat; verificăm din nou disponibilitatea."] })) : [...current.items, {
+        locationId, sortOrder: current.items.length, snapshot: toSelectionSnapshot(location), availabilityState: "UNKNOWN", availabilityWarnings: ["Verificăm noua perioadă."], suggestedBasePrice: location.suggestedBasePrice, currency: location.currency
+      }] }));
+  }, [inventory.locations]);
+
+  const showAvailableAlternatives = useCallback((locationId: string) => {
+    const location = inventory.locations.find((row) => row.id === locationId);
+    if (!location) return;
+    setSearch("");
+    setFilters((current) => ({ ...current, city: location.city, area: null, mediaTypes: location.mediaType ? [location.mediaType] : [], mediaType: null, availability: "AVAILABLE" }));
+  }, [inventory.locations]);
 
   const updatePeriod = useCallback((patch: Partial<Pick<SelectionState, "periodStart" | "periodEnd">>) => {
+    setAvailabilityById({}); setAvailabilityLoading(true);
     setSelection((current) => {
       const next = { ...current, ...patch };
       if (patch.periodStart !== undefined && next.periodStart && next.periodEnd && next.periodEnd < next.periodStart) {
@@ -231,7 +313,7 @@ export function AdminLocationSelectionPage({
 
   const addLocation = useCallback((location: LocationSelectionLocationDTO) => {
     const availability = availabilityById[location.id];
-    if (availabilityScopeActive && availability?.state === "CONFLICT") return;
+    if (availabilityScopeActive && (availability?.state === "CONFLICT" || availability?.state === "PARTIAL")) return;
     setSelection((current) => {
       if (current.items.some((item) => item.locationId === location.id)) return current;
       return {
@@ -279,7 +361,7 @@ export function AdminLocationSelectionPage({
   const selectVisible = useCallback(() => {
     const candidates = filteredLocations.filter((location) => {
       if (selectedIds.has(location.id)) return false;
-      return !availabilityScopeActive || availabilityById[location.id]?.state !== "CONFLICT";
+      return !availabilityScopeActive || availabilityById[location.id]?.state === "AVAILABLE";
     });
     if (candidates.length > 25 && !window.confirm(`Vrei sa selectezi ${candidates.length} locatii?`)) return;
     setSelection((current) => {
@@ -384,7 +466,7 @@ export function AdminLocationSelectionPage({
             </div>
             <div className="rounded-lg border border-focus-line bg-focus-ink/60 px-4 py-3">
               <p className="text-xs font-black uppercase text-focus-yellow">Inventar incarcat</p>
-              <p className="text-2xl font-black text-white">{initialData.locations.length} locatii</p>
+              <p className="text-2xl font-black text-white">{inventory.page.total} locații potrivite</p>
             </div>
           </div>
 
@@ -429,6 +511,7 @@ export function AdminLocationSelectionPage({
               </p>
               {periodError ? <p className="mt-1 font-bold text-red-100">{periodError}</p> : null}
               {availabilityError ? <p className="mt-1 font-bold text-red-100">{availabilityError}</p> : null}
+              {quoteHeldCount > 0 ? <p className="mt-1 font-bold text-amber-200">{quoteHeldCount} amplasamente sunt păstrate prin HOLD-ul acestei oferte. Revizuirea prețului nu creează o nouă rezervare; aplicarea necesită o nouă aprobare. Pentru alte locații sau date, rezolvă explicit HOLD-ul existent.</p> : null}
               <p className="mt-1 text-slate-400">
                 {periodValid
                   ? "Statusurile sunt calculate pentru perioada selectata."
@@ -456,9 +539,10 @@ export function AdminLocationSelectionPage({
                   <input className="focus-input pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ex: DN1, Baneasa, FM..." />
                 </span>
               </label>
-              <LocationSelectionFilters filters={filters} onChange={setFilters} options={initialData.options} periodMode={periodMode} />
+              <LocationSelectionFilters filters={filters} onChange={setFilters} options={initialData.options} periodMode={periodMode} priceCurrency={inventory.priceCurrency} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={() => { setSearch(""); setFilters({ sort: "code", availability: periodValid ? "PROPOSABLE" : "ALL" }); }}>Resetează filtrele</button>
               <button className="focus-button secondary !min-h-0 px-3 py-2 text-xs" type="button" onClick={selectVisible}>
                 <ListChecks size={16} />
                 Selecteaza tot
@@ -480,6 +564,11 @@ export function AdminLocationSelectionPage({
             </div>
           </div>
 
+          <div aria-live="polite" className="rounded-lg border border-focus-line bg-focus-navy/80 p-3 text-sm text-slate-300">
+            {inventoryLoading ? <p role="status">Se caută în întreg inventarul…</p> : <p>{inventory.locations.length} din {inventory.page.total} locații potrivite încărcate; {filteredLocations.length} respectă filtrul de disponibilitate dintre cele încărcate.</p>}
+            {inventory.page.hasMore ? <p className="mt-1 text-xs">Mai există rezultate. Căutarea după cod și filtrele sunt aplicate în întreg inventarul, inclusiv dincolo de această pagină.</p> : null}
+            {inventoryError ? <p role="alert" className="mt-2 font-bold text-red-200">{inventoryError}</p> : null}
+          </div>
           <SelectionQualityWarnings warnings={warnings} />
 
           <LocationSelectionResults
@@ -489,7 +578,10 @@ export function AdminLocationSelectionPage({
             selectedIds={selectedIds}
             onAdd={addLocation}
             onRemove={removeLocation}
+            onApplyWindow={applyAvailableWindow}
+            onFindAlternatives={showAvailableAlternatives}
           />
+          {inventory.page.hasMore ? <button type="button" className="focus-button secondary justify-center" disabled={inventoryLoading} onClick={() => void loadMoreInventory()}>Încarcă următoarele locații</button> : null}
           {showMap ? (
             <LocationSelectionMap
               locations={filteredLocations}
@@ -510,7 +602,7 @@ export function AdminLocationSelectionPage({
           periodEnd={selection.periodEnd}
           exportHref={exportHref}
           onCreateQuote={createCommercialQuote}
-          quoteBlockedReason={!selection.items.length ? "Adaugă locații pentru ofertă." : selection.items.length > 50 ? "O ofertă poate conține maximum 50 de locații." : !periodValid ? "Completează perioada ofertei." : availabilityLoading ? "Așteaptă verificarea disponibilității." : availabilityError ? "Reîncearcă verificarea disponibilității." : selection.items.some((item) => availabilityById[item.locationId]?.state !== "AVAILABLE") ? "Pentru ofertă, toate locațiile trebuie să fie disponibile pe întreaga perioadă." : null}
+          quoteBlockedReason={!selectionLoaded ? "Se restaurează selecția…" : !selection.items.length ? "Adaugă locații pentru ofertă." : selection.items.length > 50 ? "O ofertă poate conține maximum 50 de locații." : !periodValid ? "Completează perioada ofertei." : availabilityLoading ? "Așteaptă verificarea disponibilității." : availabilityError ? "Reîncearcă verificarea disponibilității." : selection.items.some((item) => availabilityById[item.locationId]?.state !== "AVAILABLE") ? "Pentru ofertă, toate locațiile trebuie să fie disponibile pe întreaga perioadă." : null}
           handoffError={handoffError}
           onRemove={removeLocation}
           onClear={clearSelection}
@@ -542,24 +634,10 @@ function sortLocations(
   selectedIds: Set<string>,
   availabilityById: Record<string, LocationSelectionAvailability>
 ) {
-  const rows = [...locations];
-  rows.sort((left, right) => {
-    if (sort === "selected") {
-      const bySelected = Number(selectedIds.has(right.id)) - Number(selectedIds.has(left.id));
-      if (bySelected) return bySelected;
-    }
-    if (sort === "availability") {
-      const byAvailability = availabilityRank(availabilityById[left.id]?.state) - availabilityRank(availabilityById[right.id]?.state);
-      if (byAvailability) return byAvailability;
-    }
-    if (sort === "city") return compare(left.city || "", right.city || "") || compare(left.code, right.code);
-    if (sort === "surface_desc") return (right.surface || 0) - (left.surface || 0) || compare(left.code, right.code);
-    if (sort === "price_asc") return (left.suggestedBasePrice || Number.MAX_SAFE_INTEGER) - (right.suggestedBasePrice || Number.MAX_SAFE_INTEGER);
-    if (sort === "price_desc") return (right.suggestedBasePrice || 0) - (left.suggestedBasePrice || 0);
-    if (sort === "updated_desc") return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
-    return compare(left.code, right.code);
-  });
-  return rows;
+  if (sort !== "selected" && sort !== "availability") return sortSelectionLocations(locations, sort);
+  const rank = (location: LocationSelectionLocationDTO) => sort === "selected"
+    ? Number(!selectedIds.has(location.id)) : availabilityRank(availabilityById[location.id]?.state);
+  return [...locations].sort((left, right) => rank(left) - rank(right) || compare(left.code, right.code));
 }
 
 function locationMatchesAvailabilityFilter(
@@ -593,19 +671,6 @@ function availabilityRank(state?: LocationSelectionAvailabilityState) {
   return 3;
 }
 
-function locationMatchesSearch(location: LocationSelectionLocationDTO, search: string) {
-  return [location.code, location.name, location.address, location.city, location.area, location.mediaType, location.category]
-    .map((value) => normalizeSearch(value))
-    .some((value) => value.includes(search));
-}
-
-function normalizeSearch(value?: string | null) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .trim();
-}
 
 function compare(left: string, right: string) {
   return left.localeCompare(right, "ro");

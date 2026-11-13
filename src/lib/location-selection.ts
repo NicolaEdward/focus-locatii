@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { companyEntities } from "@/lib/company-entities";
+import { matchesLocationSelectionFilters, sortSelectionLocations } from "@/lib/location-selection-filters";
 import { normalizeMediaType } from "@/lib/format";
 import { isProductionSketchImage } from "@/lib/location-images";
 import { displayPhotoUrl, samplePhotoForCode } from "@/lib/photos";
@@ -59,21 +60,34 @@ export async function listLocationSelectionLocations(
   session: AuthSession
 ): Promise<LocationSelectionResponse> {
   const where = selectionWhere(filters);
-  const [rows, commercialPolicy] = await Promise.all([
-    prisma.location.findMany({ where, select: selectionLocationSelect, orderBy: selectionOrderBy(filters.sort), take: 500 }),
-    canSeeCommercialPrices(session) ? prisma.commercialPolicy.findUnique({ where: { id: "default" }, select: { rateCardCurrency: true } }) : Promise.resolve(null)
-  ]);
+  const commercialPolicy = canSeeCommercialPrices(session)
+    ? await prisma.commercialPolicy.findUnique({ where: { id: "default" }, select: { rateCardCurrency: true } }) : null;
   const verifiedCurrency = commercialPolicy && ["RON", "EUR"].includes(commercialPolicy.rateCardCurrency) ? commercialPolicy.rateCardCurrency : null;
-  const locations = rows.map((row) => serializeSelectionLocation(row, session, verifiedCurrency));
-  const filtered = applyClientSafeFilters(locations, filters);
-
-  return {
-    locations: filtered,
-    options: optionSets(locations),
-    permissions: {
-      role: session.role,
-      canSeeCommercialPrices: canSeeCommercialPrices(session)
+  // Normalized formats depend on more than the raw type column. Walk bounded
+  // database chunks, then filter before applying the public page boundary. A
+  // matching face after the first 500 must remain discoverable.
+  const matching: LocationSelectionLocationDTO[] = [];
+  let cursor: string | undefined;
+  while (true) {
+    const rows = await prisma.location.findMany({ where, select: selectionLocationSelect,
+      orderBy: { id: "asc" }, take: 250, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+    for (const row of rows) {
+      const location = serializeSelectionLocation(row, session, verifiedCurrency);
+      if (matchesLocationSelectionFilters(location, filters)) matching.push(location);
     }
+    if (rows.length < 250) break;
+    cursor = rows[rows.length - 1].id;
+  }
+  const ordered = sortSelectionLocations(matching, filters.sort);
+  const offset = Math.max(0, Math.trunc(filters.offset || 0));
+  const pageSize = Math.max(1, Math.min(500, Math.trunc(filters.pageSize || 100)));
+  const locations = ordered.slice(offset, offset + pageSize);
+  return {
+    locations,
+    page: { offset, pageSize, total: ordered.length, hasMore: offset + locations.length < ordered.length },
+    priceCurrency: verifiedCurrency,
+    options: optionSets(ordered),
+    permissions: { role: session.role, canSeeCommercialPrices: canSeeCommercialPrices(session) }
   };
 }
 
@@ -125,50 +139,27 @@ function selectionDescription(row: SelectionLocationRow) {
 }
 
 function selectionWhere(filters: LocationSelectionFilters): Prisma.LocationWhereInput {
-  const search = filters.search?.trim();
-  return {
-    lifecycleStatus: "ACTIVE",
-    ...(search
-      ? {
-          OR: [
-            { code: { contains: search } },
-            { address: { contains: search } },
-            { city: { contains: search } },
-            { county: { contains: search } },
-            { type: { contains: search } },
-            { normalizedLocationName: { contains: search } },
-            { reportingGroupName: { contains: search } }
-          ]
-        }
-      : {}),
-    ...(filters.city ? { city: filters.city } : {}),
-    ...(filters.area ? { reportingGroupName: filters.area } : {}),
-    ...(filters.status ? { status: filters.status as never } : {}),
-    ...(filters.hasImage === true ? { OR: [{ mainPhotoUrl: { not: null } }, { images: { some: {} } }] } : {}),
-    ...(filters.hasPublicPrice === true ? { showPricePublic: true } : {})
-  };
-}
-
-function applyClientSafeFilters(locations: LocationSelectionLocationDTO[], filters: LocationSelectionFilters) {
-  const mediaTypes = filters.mediaTypes?.map((value) => value.trim()).filter(Boolean) || [];
-  return locations.filter((location) => {
-    if (filters.mediaType && location.mediaType !== filters.mediaType && location.category !== filters.mediaType) return false;
-    if (mediaTypes.length && !mediaTypes.includes(location.mediaType || "") && !mediaTypes.includes(location.category || "")) return false;
-    if (filters.minSurface != null && (location.surface == null || location.surface < filters.minSurface)) return false;
-    if (filters.maxSurface != null && (location.surface == null || location.surface > filters.maxSurface)) return false;
-    if (filters.minPrice != null && (location.suggestedBasePrice == null || location.suggestedBasePrice < filters.minPrice)) return false;
-    if (filters.maxPrice != null && (location.suggestedBasePrice == null || location.suggestedBasePrice > filters.maxPrice)) return false;
-    return true;
-  });
-}
-
-function selectionOrderBy(sort: LocationSelectionFilters["sort"]): Prisma.LocationOrderByWithRelationInput[] {
-  if (sort === "city") return [{ city: "asc" }, { code: "asc" }];
-  if (sort === "surface_desc") return [{ sqm: "desc" }, { code: "asc" }];
-  if (sort === "price_asc") return [{ rateCardValue: "asc" }, { code: "asc" }];
-  if (sort === "price_desc") return [{ rateCardValue: "desc" }, { code: "asc" }];
-  if (sort === "updated_desc") return [{ updatedAt: "desc" }];
-  return [{ isFeatured: "desc" }, { isPremium: "desc" }, { code: "asc" }];
+  const clauses: Prisma.LocationWhereInput[] = [{ lifecycleStatus: "ACTIVE" }];
+  if (filters.selectedIds?.length) clauses.push({ id: { in: [...new Set(filters.selectedIds)].slice(0, 50) } });
+  // Keep OR clauses inside AND: a photo requirement must not overwrite search.
+  for (const search of (filters.search || "").trim().split(/\s+/).filter(Boolean).slice(0, 12)) clauses.push({ OR: [
+    { code: { contains: search } }, { address: { contains: search } }, { city: { contains: search } },
+    { county: { contains: search } }, { type: { contains: search } },
+    { normalizedLocationName: { contains: search } }, { reportingGroupName: { contains: search } },
+    { category: { name: { contains: search } } }
+  ] });
+  if (filters.city) clauses.push({ city: filters.city });
+  if (filters.area) clauses.push({ OR: [{ reportingGroupName: filters.area }, { county: filters.area }, { city: filters.area }] });
+  if (filters.status) clauses.push({ status: filters.status as never });
+  if (filters.minSurface != null || filters.maxSurface != null) clauses.push({ sqm: {
+    ...(filters.minSurface != null ? { gte: filters.minSurface } : {}), ...(filters.maxSurface != null ? { lte: filters.maxSurface } : {})
+  } });
+  if (filters.minPrice != null || filters.maxPrice != null) clauses.push({ rateCardValue: {
+    ...(filters.minPrice != null ? { gte: filters.minPrice } : {}), ...(filters.maxPrice != null ? { lte: filters.maxPrice } : {})
+  } });
+  if (filters.hasImage === true) clauses.push({ OR: [{ mainPhotoUrl: { not: null } }, { images: { some: {} } }] });
+  if (filters.hasPublicPrice === true) clauses.push({ showPricePublic: true });
+  return { AND: clauses };
 }
 
 function optionSets(locations: LocationSelectionLocationDTO[]): LocationSelectionOptionSets {

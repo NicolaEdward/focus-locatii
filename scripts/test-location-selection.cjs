@@ -102,7 +102,7 @@ assert(files.builder.includes('companyEntity: "Focus Media"'), "selector may kee
 assert(files.builder.includes("locationMatchesAvailabilityFilter"), "selector must use one availability filter model");
 assert(files.builder.includes('periodMode === "range" ? "PROPOSABLE"'), "selected-period default should focus on proposable locations");
 assert(files.builder.includes("state === \"AVAILABLE\" || state === \"PARTIAL\""), "default selected-period filter should hide fully conflicted locations");
-assert(files.builder.includes("availabilityById[location.id]?.state !== \"CONFLICT\""), "bulk select must not select hidden or conflicted locations");
+assert(files.builder.includes("availabilityById[location.id]?.state === \"AVAILABLE\""), "bulk select must include only verified full-period locations when a period is active");
 assert(files.builder.includes("Selecteaza tot"), "bulk select action should be sales-friendly");
 assert(files.builder.includes("Vrei sa selectezi ${candidates.length} locatii?"), "bulk selecting more than 25 should ask for confirmation");
 assert(files.builder.includes("buildAvailabilityExportHref"), "selector should build an availability export URL");
@@ -115,11 +115,11 @@ assert(files.filters.includes("Disponibile / partiale"), "availability filter sh
 assert(files.filters.includes("Disponibile partial"), "availability filter should support partial availability");
 assert(files.filters.includes("Indisponibile / cu conflict"), "availability filter should expose conflicts only explicitly");
 assert(!files.filters.includes('<option value="">Toate</option>'), "availability filter must not render a duplicate generic All option");
-assert(!files.filters.includes("Suprafata min."), "surface min filter should not be primary");
-assert(!files.filters.includes("Suprafata max."), "surface max filter should not be primary");
-assert(!files.filters.includes("Pret min."), "price min filter should not be primary");
-assert(!files.filters.includes("Pret max."), "price max filter should not be primary");
-assert(!files.filters.includes("Select label=\"Zona\""), "zone filter should not be primary");
+assert(files.filters.includes("Suprafață minimă (mp)"), "surface constraints must be available in the additional filters");
+assert(files.filters.includes("Suprafață maximă (mp)"), "surface constraints must preserve explicit units");
+assert(files.filters.includes("Tarif lunar minim"), "minimum price must state its monthly basis");
+assert(files.filters.includes("Tarif lunar maxim"), "budget ceiling must state monthly per-location basis");
+assert(files.filters.includes("label=\"Zonă\""), "zone must be a composable filter");
 assert(files.filters.includes("function MultiSelect"), "format filter should be a compact multi-select");
 assert(files.filters.includes("Selecteaza"), "format multi-select should expose a clear checklist trigger");
 assert(files.filters.includes("overflow-x-hidden overflow-y-auto"), "format checklist must not create a horizontal scrollbar");
